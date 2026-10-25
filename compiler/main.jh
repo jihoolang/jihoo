@@ -12,6 +12,8 @@ import lex
 import load
 import parse
 import target
+import types
+import mir
 
 const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
 
@@ -24,6 +26,7 @@ fn main() {
     var file: Option(str) = None
     var search = Vec(String).new()
     var tgt = target.Target.host()
+    var no_prelude = false
     var i = 2
     while i < args.len() {
         let a = args[i]
@@ -42,6 +45,8 @@ fn main() {
                 Some(t) => tgt = t
                 None => fail("error: unknown target; use x86_64 or aarch64", 2)
             }
+        } else if a == "--no-prelude" {
+            no_prelude = true
         } else if a == "-h" || a == "--help" {
             println(USAGE)
             return
@@ -60,7 +65,7 @@ fn main() {
         emit_syntax(file, cmd == "emit-ast")
     } else if cmd == "emit-program" {
         var sources = diag.Sources.new()
-        match load.load(file, load.default_search(search), tgt.name(), &sources, false) {
+        match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
             Ok(p) => print(astdump.program(p))
             Err(d) => fail(sources.render(d).as_str(), 1)
         }

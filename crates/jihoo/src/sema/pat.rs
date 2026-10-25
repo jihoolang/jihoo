@@ -412,7 +412,7 @@ impl<'a> Sema<'a> {
                 match mode {
                     BindMode::Owned | BindMode::Auto => {
                         let v = Val { vk: VK::Place(place), ty, temp: true };
-                        let o = self.operand(fb, v, span)?;
+                        let o = self.operand_part(fb, v, span)?;
                         let l = fb.declare(n, ty, *var, VarKind::Owned, span);
                         fb.assign(Place::local(l), Rvalue::Use(o), span);
                     }

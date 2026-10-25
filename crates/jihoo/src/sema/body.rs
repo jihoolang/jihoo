@@ -711,6 +711,61 @@ impl<'a> Sema<'a> {
 
     /// The operand for a value used up: a copy of a plain place, or a move.
     pub fn operand(&mut self, fb: &mut Fb, v: Val, span: Span) -> R<Operand> {
+        // A part of a temporary (`pair().1`): it moves out now, and the
+        // temporary's other parts are dropped, so that it is never dropped
+        // whole with a part missing.
+        if let VK::Place(p) = &v.vk {
+            let whole = fb.ty_of(p.local);
+            if v.temp
+                && !p.proj.is_empty()
+                && p.proj.iter().all(|x| matches!(x, Proj::Field(_) | Proj::Variant(_)))
+                && fb.body.locals[p.local as usize].kind == LocalKind::Temp
+                && !self.types.is_plain(v.ty)
+                && self.types.needs_drop(whole)
+            {
+                let p = p.clone();
+                let t = fb.temp(v.ty, span);
+                fb.assign(Place::local(t), Rvalue::Use(Operand::Move(p.clone())), span);
+                self.drop_others(fb, Place::local(p.local), whole, &p.proj, span)?;
+                fb.push(Stmt::Forget(p.local));
+                return Ok(Operand::Move(Place::local(t)));
+            }
+        }
+        self.operand_part(fb, v, span)
+    }
+
+    /// The other parts of a temporary than the one at `path` (below `base`,
+    /// of type `ty`), dropped.
+    fn drop_others(&mut self, fb: &mut Fb, base: Place, ty: TyId, path: &[Proj], span: Span) -> R<()> {
+        if !path.is_empty() && self.types.adt_of(ty).map(|a| a.has_drop).unwrap_or(false) {
+            return ty_err(span, &format!("cannot move a part out of a `{}`: it has a `Drop` impl", self.types.show(ty)));
+        }
+        let (parts, here, rest) = match path {
+            [Proj::Variant(v), Proj::Field(i), rest @ ..] => {
+                let fts = self.types.variants(ty).unwrap()[*v as usize].fields.clone();
+                let ps: Vec<Place> = (0..fts.len()).map(|j| base.with(Proj::Variant(*v)).with(Proj::Field(j as u32))).collect();
+                (ps.into_iter().zip(fts).collect::<Vec<_>>(), *i as usize, rest)
+            }
+            [Proj::Field(i), rest @ ..] => {
+                let fts = self.types.field_tys(ty);
+                let ps: Vec<Place> = (0..fts.len()).map(|j| base.with(Proj::Field(j as u32))).collect();
+                (ps.into_iter().zip(fts).collect::<Vec<_>>(), *i as usize, rest)
+            }
+            _ => return Ok(()),
+        };
+        for (j, (fp, ft)) in parts.into_iter().enumerate() {
+            if j == here {
+                self.drop_others(fb, fp, ft, rest, span)?;
+            } else if self.types.needs_drop(ft) {
+                fb.push(Stmt::Drop(fp, span));
+            }
+        }
+        Ok(())
+    }
+
+    /// An operand for a value; a part of a temporary moves out alone (for
+    /// patterns, which drop the other parts themselves).
+    pub fn operand_part(&mut self, fb: &mut Fb, v: Val, span: Span) -> R<Operand> {
         match v.vk {
             VK::Op(o) => Ok(o),
             VK::Place(p) => {

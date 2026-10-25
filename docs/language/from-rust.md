@@ -81,7 +81,8 @@ parameter (`f(&x)`), and, outside calls, a raw pointer `*T` to a place.
 The `&` is required for `inout` arguments: it shows the reader that `x`
 may change. A method call `x.push(1)` passes `self` without it.
 
-**Moving out of a field is an error.** Only a whole variable can be moved.
+**Moving out of a field is an error.** Only a whole variable can be moved,
+or a part of a new value (`pair().1`, whose other parts are dropped there).
 For a field, an element or anything behind a borrow, use `.clone()`,
 `mem.take(&x.f)` or `mem.replace(&x.f, new)`:
 

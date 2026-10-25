@@ -74,7 +74,9 @@ var mine = person.name.clone() // a copy, which can change
 
 A whole variable can be moved; a field, an element, or anything reached
 through a borrow cannot be moved out, because its owner would be left
-broken. Take it with `mem.replace` or `mem.take`, which leave something in
+broken. (A part of a new value can: in `pair().1` nothing else owns the
+pair, so its other parts are dropped there, unless its type has a `Drop`
+impl.) Take it with `mem.replace` or `mem.take`, which leave something in
 its place, or `.clone()` it:
 
 ```jihoo

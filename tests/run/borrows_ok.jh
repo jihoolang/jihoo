@@ -37,6 +37,40 @@ fn main() {
         Some(x) => println(x)
         None => {}
     }
+    loop_elements_outlive_iteration()
+}
+
+struct Named {
+    name: String
+}
+
+struct Entry {
+    of: ref Named
+}
+
+// Elements of a `for` loop kept after their iteration: in a variable, a
+// `Vec` of views, and a struct field of type `ref T`.
+fn loop_elements_outlive_iteration() {
+    var words = Vec(String).new()
+    words.push("a".to_string())
+    words.push("b".to_string())
+    var last = ""
+    for w in words {
+        last = w.as_str()
+    }
+    println(last)
+    var views = Vec(str).new()
+    for w in words {
+        views.push(w.as_str())
+    }
+    println(views.len())
+    var named = Vec(Named).new()
+    named.push(Named { name: "c".to_string() })
+    var entries = Vec(Entry).new()
+    for n in named {
+        entries.push(Entry { of: n })
+    }
+    println(entries[0].of.name)
 }
 //> 2
 //> hello
@@ -45,3 +79,6 @@ fn main() {
 //> 12
 //> 12
 //> 1
+//> b
+//> 2
+//> c

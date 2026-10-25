@@ -1,0 +1,18 @@
+// Moving a part out of a value with a Drop impl is an error, as in a pattern.
+// error: cannot move a part out of a `F`: it has a `Drop` impl
+
+struct F {
+    v: Vec(i64)
+}
+
+impl Drop for F {
+    fn drop(inout self) {}
+}
+
+fn f() -> F {
+    F { v: Vec(i64).new() }
+}
+
+fn main() {
+    let v = f().v
+}

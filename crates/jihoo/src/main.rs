@@ -48,6 +48,9 @@ fn run() {
     let mut link: Vec<String> = Vec::new();
     let mut prog_args: Vec<String> = Vec::new();
     let mut keep_ll = false;
+    // Without the standard library: for comparing sema with the compiler in
+    // jihoo on small programs (not in the usage).
+    let mut no_prelude = false;
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -78,6 +81,7 @@ fn run() {
             }
             "--release" => checked = false,
             "--keep-ll" => keep_ll = true,
+            "--no-prelude" => no_prelude = true,
             "-O0" | "-O1" | "-O2" | "-O3" => opt = a.clone(),
             "-h" | "--help" => {
                 println!("{}", USAGE);
@@ -100,10 +104,10 @@ fn run() {
         emit_syntax(&file, cmd == "emit-ast");
         return;
     }
-    let opts = Options { search, target, checked, no_prelude: false };
+    let opts = Options { search, target, checked, no_prelude };
     let mut sources = Sources::default();
     if cmd == "emit-program" {
-        match jihoo::load::load(&file, jihoo::load::default_search(&opts.search), target.name(), &mut sources, false) {
+        match jihoo::load::load(&file, jihoo::load::default_search(&opts.search), target.name(), &mut sources, opts.no_prelude) {
             Ok(ast) => print!("{}", jihoo::astdump::program(&ast)),
             Err(d) => {
                 eprintln!("{}", sources.render(&d));

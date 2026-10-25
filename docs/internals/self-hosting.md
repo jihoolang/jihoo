@@ -38,14 +38,23 @@ same way.
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | next |
+| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh` (with the MIR printer) |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
 
-Sema (step 4) is half of the compiler, about 6,000 of its 12,000 lines; it
-will be ported file by file behind the same `emit-mir` comparison, starting
-with the declarations and simple bodies.
+Sema (step 4) is half of the compiler, about 6,000 of its 12,000 lines.
+Every program loads the prelude, which uses nearly the whole language, so
+`emit-mir` on ordinary programs can only agree once almost all of sema is
+ported. Until then the comparison runs on small programs in
+`tests/selfhost/sema/` compiled with `--no-prelude` (an option for this
+only, in both compilers), and grows feature by feature: functions and
+integers, control flow, structs and enums, patterns, generics, traits,
+closures. Then the standard library, then everything.
+
+The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
+In jihoo such a struct is a view, which may live as a local but whose
+fields are `ref T`; the port keeps that shape.
 
 ## How the port is written
 
@@ -68,6 +77,9 @@ better way the port takes it and says so in a comment; so far:
   like Rust's `io::Error`) is in `os.jh`, over libc. The host target comes
   from the loader's own per-target files: `host.x86_64.jh` and
   `host.aarch64.jh`.
+- Types are interned by a short text spelling the kind out
+  (`types.kind_key`), where Rust hashes the `TyKind` with a derived
+  `Hash`; jihoo has no `derive` yet.
 
 While both compilers exist, a language change has to be made in both:
 stage 0 must compile `compiler/`, and stage 1 must agree with stage 0.
@@ -97,7 +109,17 @@ far, each fixed in stage 0 with a test:
   them to what the argument borrows (`&mut v` → `v`, through reborrows).
   The old rule also missed the case it was for: after `v.push(s.as_str())`
   with `v: Vec(str)`, `s` could change while `v` still pointed into it.
-  (`tests/run/loops.jh`, `tests/fail/borrow_view_pushed*.jh`.)
+  (`tests/run/loops.jh`, `tests/fail/borrow_view_pushed*.jh`.) The first
+  version of that fix went too far and rejected keeping a loop's element
+  after its iteration (`last = w.as_str()`, `views.push(w.as_str())`); a
+  local is exempt from its own loans, a value moved out of a local no
+  longer carries that local's loans on itself, and giving a reference a
+  new value no longer conflicts with reborrows through its old one.
+  (`tests/run/borrows_ok.jh`.)
+- Moving a part out of a call's result (`self.struct_layout(ts).1`) was an
+  internal error: the rest of the temporary was dropped whole. Its other
+  parts are now dropped when the part moves out (`tests/run/temp_parts.jh`,
+  `tests/fail/move_part_of_drop.jh`).
 
 And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and

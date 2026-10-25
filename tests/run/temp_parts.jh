@@ -1,0 +1,56 @@
+// A part of a temporary moves out, and its other parts are dropped then:
+// `pair().1`, `nested().0.a`.
+
+struct Noisy {
+    n: i64
+}
+
+impl Drop for Noisy {
+    fn drop(inout self) {
+        println(self.n)
+    }
+}
+
+struct Two {
+    a: Noisy
+    b: Noisy
+}
+
+enum E {
+    One(Noisy, Noisy)
+    Zero
+}
+
+fn two() -> Two {
+    Two { a: Noisy { n: 1 }, b: Noisy { n: 2 } }
+}
+
+fn nested() -> (Two, Noisy) {
+    (Two { a: Noisy { n: 3 }, b: Noisy { n: 4 } }, Noisy { n: 5 })
+}
+
+fn take(sink x: Noisy) {
+    println(100 + x.n)
+}
+
+fn main() {
+    take(two().b)
+    println(0)
+    take(nested().0.a)
+    println(0)
+    let Two { a: x, b: y } = nested().0
+    println(x.n + y.n)
+}
+//> 1
+//> 102
+//> 2
+//> 0
+//> 4
+//> 5
+//> 103
+//> 3
+//> 0
+//> 5
+//> 7
+//> 4
+//> 3

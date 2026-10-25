@@ -106,6 +106,12 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
     }
     let lw = loans.len().div_ceil(64);
     let is_view: Vec<bool> = body.locals.iter().map(|l| types.is_view(l.ty)).collect();
+    // rooted[l] = the loans of `l` itself: a value moved or copied out of
+    // `l` does not borrow `l`.
+    let mut rooted: Vec<Bits> = vec![vec![0; lw]; n];
+    for (i, l) in loans.iter().enumerate() {
+        set(&mut rooted[l.place.local as usize], i);
+    }
     // held[block][local] = loans the local holds at the block's start.
     let mut held_in: Vec<Vec<Bits>> = vec![vec![vec![0; lw]; n]; nb];
     let mut seen = vec![false; nb];
@@ -118,9 +124,9 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
             }
             let mut held = held_in[b].clone();
             for (i, s) in body.blocks[b].stmts.iter().enumerate() {
-                stmt_loans(s, &mut held, &is_view, loan_at.get(&(b, i)).copied(), lw);
+                stmt_loans(s, &mut held, &is_view, &rooted, loan_at.get(&(b, i)).copied(), lw);
             }
-            term_loans(&body.blocks[b].term, &mut held, &is_view, types, body, &loans, lw);
+            term_loans(&body.blocks[b].term, &mut held, &is_view, &rooted, types, body, lw);
             for s in succs(&body.blocks[b].term) {
                 let s = s as usize;
                 if !seen[s] {
@@ -161,7 +167,7 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
         for (i, s) in blk.stmts.iter().enumerate() {
             let active = active_loans(&held, &after[i], n, lw);
             check_stmt(types, body, s, &active, &held, &loans)?;
-            stmt_loans(s, &mut held, &is_view, loan_at.get(&(b, i)).copied(), lw);
+            stmt_loans(s, &mut held, &is_view, &rooted, loan_at.get(&(b, i)).copied(), lw);
         }
         let active = active_loans(&held, &after[blk.stmts.len()], n, lw);
         check_term(types, body, &blk.term, &active, &held, &loans, f)?;
@@ -287,22 +293,24 @@ fn term_live(t: &Term, live: &mut Bits) {
     }
 }
 
-/// The loans an operand carries (those of the local it reads, if a view).
-fn op_loans(o: &Operand, held: &[Bits], is_view: &[bool], lw: usize) -> Bits {
+/// The loans an operand carries: those of the local it reads, if a view,
+/// but not the local's loans on itself.
+fn op_loans(o: &Operand, held: &[Bits], is_view: &[bool], rooted: &[Bits], lw: usize) -> Bits {
     match o {
         Operand::Copy(p) | Operand::Move(p) if is_view[p.local as usize] || p.proj.iter().any(|x| matches!(x, Proj::Deref)) => {
-            held[p.local as usize].clone()
+            let l = p.local as usize;
+            held[l].iter().zip(&rooted[l]).map(|(h, r)| h & !r).collect()
         }
         _ => vec![0; lw],
     }
 }
 
-fn stmt_loans(s: &Stmt, held: &mut [Bits], is_view: &[bool], new: Option<usize>, lw: usize) {
+fn stmt_loans(s: &Stmt, held: &mut [Bits], is_view: &[bool], rooted: &[Bits], new: Option<usize>, lw: usize) {
     match s {
         Stmt::Assign(p, r, _) => {
             let mut gained = vec![0u64; lw];
             for o in rvalue_operands(r) {
-                union(&mut gained, &op_loans(o, held, is_view, lw));
+                union(&mut gained, &op_loans(o, held, is_view, rooted, lw));
             }
             if let Rvalue::Ref(q) | Rvalue::RefMut(q) = r {
                 // A reborrow through a borrow, or a borrow of a view (a
@@ -371,11 +379,11 @@ fn pointees(p: usize, held: &[Bits], body: &Body, out: &mut Vec<usize>) {
     }
 }
 
-fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], types: &Types, body: &Body, loans: &[Loan], lw: usize) {
+fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], rooted: &[Bits], types: &Types, body: &Body, lw: usize) {
     if let Term::Call { args, dest, .. } = t {
         let mut all = vec![0u64; lw];
         for a in args {
-            union(&mut all, &op_loans(a, held, is_view, lw));
+            union(&mut all, &op_loans(a, held, is_view, rooted, lw));
         }
         // What a call is given can end up in its `inout` arguments that
         // are views (`v.push(s.as_str())` with `v: Vec(str)`).
@@ -388,14 +396,7 @@ fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], types: &Types, body
                             let mut targets = Vec::new();
                             pointees(p.local as usize, held, body, &mut targets);
                             for l in targets {
-                                // not the loans of `l` itself (`&mut v` for `v.push(x)`)
-                                let mut add = all.clone();
-                                for (i, ln) in loans.iter().enumerate() {
-                                    if ln.place.local as usize == l {
-                                        clear(&mut add, i);
-                                    }
-                                }
-                                union(&mut held[l], &add);
+                                union(&mut held[l], &all);
                             }
                         }
                     }
@@ -468,9 +469,9 @@ fn conflict(types: &Types, body: &Body, q: &Place, access: Access, span: Span, a
             continue;
         }
         // A borrow through a pointer does not borrow the pointer's own
-        // storage, which may go away (the pointee's loans live on in the
-        // reborrow).
-        if access == Access::Dead && l.place.proj.first() == Some(&Proj::Deref) && q.proj.is_empty() {
+        // storage, which may go away or be given another pointer (the
+        // pointee's loans live on in the reborrow).
+        if access != Access::Read &&l.place.proj.first() == Some(&Proj::Deref) && q.proj.is_empty() {
             continue;
         }
         let bad = l.mutable || access != Access::Read;

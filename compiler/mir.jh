@@ -1,0 +1,743 @@
+// MIR: what sema produces and the checker, the interpreter and the code
+// generator read. A function is a control-flow graph over places; every
+// move, copy, borrow and drop is explicit.
+
+import diag
+import fmt
+import lex
+import target
+import types
+
+type Span = diag.Span
+type Op = lex.Op
+type Sig = types.Sig
+type Types = types.Types
+
+pub const RET: u32 = 0
+
+pub enum Proj {
+    Field(u32)
+    // The payload of a variant, followed by a `Field`.
+    Variant(u32)
+    // An array element; sema checks the bounds before.
+    Index(u32)
+    Deref
+}
+
+impl Clone for Proj {
+    fn clone(self) -> Proj {
+        match self {
+            Field(i) => Proj.Field(i)
+            Variant(v) => Proj.Variant(v)
+            Index(l) => Proj.Index(l)
+            Deref => Proj.Deref
+        }
+    }
+}
+
+impl Eq for Proj {
+    fn eq(self, other: Proj) -> bool {
+        match self {
+            Field(i) => match other {
+                Field(j) => i == j
+                _ => false
+            }
+            Variant(i) => match other {
+                Variant(j) => i == j
+                _ => false
+            }
+            Index(i) => match other {
+                Index(j) => i == j
+                _ => false
+            }
+            Deref => match other {
+                Deref => true
+                _ => false
+            }
+        }
+    }
+}
+
+pub struct Place {
+    pub local: u32
+    pub proj: Vec(Proj)
+}
+
+impl Place {
+    pub fn local(l: u32) -> Place {
+        Place { local: l, proj: Vec(Proj).new() }
+    }
+
+    pub fn with(self, p: Proj) -> Place {
+        var q = self.clone()
+        q.proj.push(p)
+        q
+    }
+
+    pub fn deref(l: u32) -> Place {
+        var p = Place.local(l)
+        p.proj.push(Proj.Deref)
+        p
+    }
+}
+
+impl Clone for Place {
+    fn clone(self) -> Place {
+        Place { local: self.local, proj: self.proj.clone() }
+    }
+}
+
+impl Eq for Place {
+    fn eq(self, other: Place) -> bool {
+        self.local == other.local && self.proj == other.proj
+    }
+}
+
+pub enum Const {
+    // The bits of an integer of the given type, sign-extended.
+    Int(i128, u32)
+    Float(f64, u32)
+    Bool(bool)
+    // A value without bytes: `()`, a struct without fields.
+    Zst(u32)
+    // A `str` of static bytes.
+    Str(String)
+    // A function's address (`fnptr`).
+    Fn(u32)
+    Null(u32)
+    // All bits zero.
+    Zeroed(u32)
+    // Static bytes, laid out as the type says (compile-time results).
+    Bytes(Vec(u8), u32)
+    // The address of a `static`.
+    Static(u32, u32)
+}
+
+impl Clone for Const {
+    fn clone(self) -> Const {
+        match self {
+            Int(v, t) => Const.Int(v, t)
+            Float(v, t) => Const.Float(v, t)
+            Bool(b) => Const.Bool(b)
+            Zst(t) => Const.Zst(t)
+            Str(s) => Const.Str(s.clone())
+            Fn(f) => Const.Fn(f)
+            Null(t) => Const.Null(t)
+            Zeroed(t) => Const.Zeroed(t)
+            Bytes(b, t) => Const.Bytes(b.clone(), t)
+            Static(i, t) => Const.Static(i, t)
+        }
+    }
+}
+
+pub enum Operand {
+    Copy(Place)
+    Move(Place)
+    Const(Const)
+}
+
+impl Clone for Operand {
+    fn clone(self) -> Operand {
+        match self {
+            Copy(p) => Operand.Copy(p.clone())
+            Move(p) => Operand.Move(p.clone())
+            Const(c) => Operand.Const(c.clone())
+        }
+    }
+}
+
+pub enum UnOp {
+    Neg
+    Not
+}
+
+pub enum Agg {
+    // A struct or tuple, its fields in order.
+    Struct(u32)
+    Variant(u32, u32)
+    Array(u32)
+    // A `str` or slice from a pointer and a length.
+    View(u32)
+    // A closure from a function and an environment pointer.
+    Closure(u32)
+}
+
+pub enum CastKind {
+    // Between integers, floats, pointers and integers.
+    Numeric
+    // A pointer to another pointer type, a borrow to a pointer.
+    Ptr
+}
+
+pub enum Rvalue {
+    Use(Operand)
+    // Arithmetic that checks for overflow when `checked`.
+    Bin(Op, Operand, Operand)
+    Un(UnOp, Operand)
+    Cast(Operand, u32, CastKind)
+    Ref(Place)
+    RefMut(Place)
+    // The address of a place, as a raw pointer.
+    Addr(Place)
+    Aggregate(Agg, Vec(Operand))
+    Discriminant(Place)
+    // A pointer moved by a number of elements.
+    Offset(Operand, Operand)
+    // An array of `n` copies of a plain value.
+    Repeat(Operand, u64)
+}
+
+pub enum Stmt {
+    Assign(Place, Rvalue, Span)
+    StorageLive(u32)
+    StorageDead(u32)
+    // Runs the value's destructor; drop elaboration removes the ones whose
+    // value was moved away.
+    Drop(Place, Span)
+    // The local's value is gone: its parts were moved out or dropped one
+    // by one.
+    Forget(u32)
+    Nop
+}
+
+pub enum Callee {
+    Fn(u32)
+    // A `fnptr` value.
+    Ptr(Operand)
+    // A `fn(A) -> R` value: its environment is passed first.
+    Closure(Operand)
+    Intrinsic(Intrinsic)
+}
+
+pub enum Intrinsic {
+    Trap
+    // `syscall(n, args...)`.
+    Syscall
+    // Copies `n` elements from the second pointer to the first (memmove).
+    Copy(u32)
+    // Fills `n` bytes at a pointer with a byte.
+    Fill
+    Sqrt(u32)
+    Floor(u32)
+    Ceil(u32)
+    Trunc(u32)
+    Round(u32)
+    Abs(u32)
+    Copysign(u32)
+    // Inline assembly: template, constraints, result type.
+    Asm(String, String, u32)
+    AtomicLoad(u32)
+    AtomicStore(u32)
+    AtomicRmw(String, u32)
+    AtomicCas(u32)
+    Fence
+    // `args()` support: the C `argc`/`argv` kept by `main`.
+    Argc
+    Argv
+}
+
+pub struct SwitchTarget {
+    pub value: i128
+    pub block: u32
+}
+
+pub enum Term {
+    Goto(u32)
+    // Jumps on an integer, bool or tag value.
+    Switch(Operand, Vec(SwitchTarget), u32)
+    Return
+    Unreachable
+    // The callee, the arguments, where the result goes, the next block.
+    Call(Callee, Vec(Operand), Place, u32, Span)
+    // Continues to the block when the condition holds, else stops the
+    // program with the message.
+    Assert(Operand, String, u32, Span)
+    // Not filled in yet (while building).
+    Pending
+}
+
+pub struct Block {
+    pub stmts: Vec(Stmt)
+    pub term: Term
+}
+
+pub enum LocalKind {
+    Ret
+    Arg
+    Var
+    Temp
+}
+
+impl Eq for LocalKind {
+    fn eq(self, other: LocalKind) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+pub struct LocalDecl {
+    pub ty: u32
+    pub name: Option(String)
+    pub span: Span
+    pub mutable: bool
+    pub kind: LocalKind
+}
+
+pub enum ParamPass {
+    // By value (scalars, and small plain values read only).
+    Value
+    // A pointer to a value the function owns (`sink` aggregates).
+    Owned
+    // A borrow; the local's type is `Ref`/`RefMut`.
+    Borrow
+}
+
+impl Eq for ParamPass {
+    fn eq(self, other: ParamPass) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+pub struct Body {
+    pub locals: Vec(LocalDecl)
+    pub blocks: Vec(Block)
+    pub arg_count: i64
+}
+
+pub enum Linkage {
+    Internal
+    // `export fn` and `main`: visible to the linker under its own name.
+    Export
+    // `extern fn`: defined elsewhere, called with the C convention.
+    Extern
+}
+
+pub struct Function {
+    // The symbol: unique, mangled for instances.
+    pub symbol: String
+    // What error messages and MIR dumps call it.
+    pub name: String
+    pub sig: Sig
+    // Per parameter: how it is passed.
+    pub pass: Vec(ParamPass)
+    pub body: Option(Body)
+    pub linkage: Linkage
+    pub variadic: bool
+    // The function returns a borrow of its first parameter.
+    pub returns_ref: bool
+    pub span: Span
+}
+
+// A global variable: symbol, type, first value.
+pub struct StaticDef {
+    pub symbol: String
+    pub ty: u32
+    pub value: Const
+}
+
+pub struct Program {
+    pub fns: Vec(Function)
+    pub types: Types
+    pub entry: Option(u32)
+    pub freestanding: bool
+    // Integer overflow traps (debug builds).
+    pub checked: bool
+    pub statics: Vec(StaticDef)
+    // The `drop` function of each type with a `Drop` impl.
+    pub drop_impls: Map(u32, u32)
+    pub target: target.Target
+}
+
+
+// ---- printing ----
+
+pub fn show_place(inout s: String, p: Place) {
+    // the projections wrap the local from the inside out
+    var out = String.from("_")
+    p.local.show(&out)
+    for pr in p.proj {
+        match pr {
+            Field(i) => {
+                out.push('.')
+                i.show(&out)
+            }
+            Variant(v) => {
+                var w = String.from("(")
+                w.push_str(out.as_str())
+                w.push_str(" as #")
+                v.show(&w)
+                w.push(')')
+                out = w
+            }
+            Index(l) => {
+                out.push_str("[_")
+                l.show(&out)
+                out.push(']')
+            }
+            Deref => {
+                var w = String.from("(*")
+                w.push_str(out.as_str())
+                w.push(')')
+                out = w
+            }
+        }
+    }
+    s.push_str(out.as_str())
+}
+
+pub fn show_operand(inout s: String, t: Types, o: Operand) {
+    match o {
+        Copy(p) => show_place(&s, p)
+        Move(p) => {
+            s.push_str("move ")
+            show_place(&s, p)
+        }
+        Const(c) => match c {
+            Int(v, ty) => {
+                v.show(&s)
+                s.push('_')
+                s.push_str(t.show(ty).as_str())
+            }
+            Float(v, ty) => {
+                fmt.push_f64(&s, v)
+                s.push('_')
+                s.push_str(t.show(ty).as_str())
+            }
+            Bool(b) => s.push_str(if b { "true" } else { "false" })
+            Zst(_) => s.push_str("()")
+            Str(b) => debug_str(&s, b.as_str())
+            Fn(f) => {
+                s.push_str("fn#")
+                f.show(&s)
+            }
+            Null(_) => s.push_str("null")
+            Zeroed(ty) => {
+                s.push_str("zeroed(")
+                s.push_str(t.show(ty).as_str())
+                s.push(')')
+            }
+            Bytes(b, ty) => {
+                s.push_str("bytes[")
+                b.len().show(&s)
+                s.push_str("](")
+                s.push_str(t.show(ty).as_str())
+                s.push(')')
+            }
+            Static(i, _) => {
+                s.push_str("static#")
+                i.show(&s)
+            }
+        }
+    }
+}
+
+fn show_operands(inout s: String, t: Types, os: Vec(Operand)) {
+    for i, o in os {
+        if i > 0 {
+            s.push_str(", ")
+        }
+        show_operand(&s, t, o)
+    }
+}
+
+pub fn show_rvalue(inout s: String, t: Types, r: Rvalue) {
+    match r {
+        Use(o) => show_operand(&s, t, o)
+        Bin(op, a, b) => {
+            show_operand(&s, t, a)
+            s.push(' ')
+            s.push_str(op.text())
+            s.push(' ')
+            show_operand(&s, t, b)
+        }
+        Un(op, a) => {
+            s.push(match op {
+                Neg => '-'
+                Not => '!'
+            })
+            show_operand(&s, t, a)
+        }
+        Cast(a, ty, _) => {
+            show_operand(&s, t, a)
+            s.push_str(" as ")
+            s.push_str(t.show(ty).as_str())
+        }
+        Ref(p) => {
+            s.push('&')
+            show_place(&s, p)
+        }
+        RefMut(p) => {
+            s.push_str("&mut ")
+            show_place(&s, p)
+        }
+        Addr(p) => {
+            s.push_str("addr ")
+            show_place(&s, p)
+        }
+        Aggregate(a, os) => match a {
+            Struct(ty) => {
+                s.push_str(t.show(ty).as_str())
+                s.push_str(" { ")
+                show_operands(&s, t, os)
+                s.push_str(" }")
+            }
+            Variant(ty, v) => {
+                s.push_str(t.show(ty).as_str())
+                s.push('#')
+                v.show(&s)
+                s.push('(')
+                show_operands(&s, t, os)
+                s.push(')')
+            }
+            Array(_) => {
+                s.push('[')
+                show_operands(&s, t, os)
+                s.push(']')
+            }
+            View(ty) => {
+                s.push_str(t.show(ty).as_str())
+                s.push('(')
+                show_operands(&s, t, os)
+                s.push(')')
+            }
+            Closure(_) => {
+                s.push_str("closure(")
+                show_operands(&s, t, os)
+                s.push(')')
+            }
+        }
+        Discriminant(p) => {
+            s.push_str("discr ")
+            show_place(&s, p)
+        }
+        Offset(a, b) => {
+            s.push_str("offset ")
+            show_operand(&s, t, a)
+            s.push_str(", ")
+            show_operand(&s, t, b)
+        }
+        Repeat(a, n) => {
+            s.push('[')
+            show_operand(&s, t, a)
+            s.push_str("; ")
+            n.show(&s)
+            s.push(']')
+        }
+    }
+}
+
+// Rust's `{:?}` of an intrinsic.
+fn show_intrinsic(inout s: String, i: Intrinsic) {
+    match i {
+        Trap => s.push_str("Trap")
+        Syscall => s.push_str("Syscall")
+        Copy(t) => debug_call1(&s, "Copy", t)
+        Fill => s.push_str("Fill")
+        Sqrt(t) => debug_call1(&s, "Sqrt", t)
+        Floor(t) => debug_call1(&s, "Floor", t)
+        Ceil(t) => debug_call1(&s, "Ceil", t)
+        Trunc(t) => debug_call1(&s, "Trunc", t)
+        Round(t) => debug_call1(&s, "Round", t)
+        Abs(t) => debug_call1(&s, "Abs", t)
+        Copysign(t) => debug_call1(&s, "Copysign", t)
+        Asm(tmpl, cons, t) => {
+            s.push_str("Asm(")
+            debug_str(&s, tmpl.as_str())
+            s.push_str(", ")
+            debug_str(&s, cons.as_str())
+            s.push_str(", ")
+            t.show(&s)
+            s.push(')')
+        }
+        AtomicLoad(t) => debug_call1(&s, "AtomicLoad", t)
+        AtomicStore(t) => debug_call1(&s, "AtomicStore", t)
+        AtomicRmw(op, t) => {
+            s.push_str("AtomicRmw(")
+            debug_str(&s, op.as_str())
+            s.push_str(", ")
+            t.show(&s)
+            s.push(')')
+        }
+        AtomicCas(t) => debug_call1(&s, "AtomicCas", t)
+        Fence => s.push_str("Fence")
+        Argc => s.push_str("Argc")
+        Argv => s.push_str("Argv")
+    }
+}
+
+fn debug_call1(inout s: String, name: str, t: u32) {
+    s.push_str(name)
+    s.push('(')
+    t.show(&s)
+    s.push(')')
+}
+
+// Rust's `{:?}` of a string: quoted, with escapes. The bytes are read as
+// UTF-8 with invalid parts replaced, as `from_utf8_lossy` does.
+pub fn debug_str(inout s: String, text: str) {
+    var t = String.new()
+    diag.push_lossy(&t, text)
+    let b = t.as_str()
+    s.push('"')
+    var i = 0
+    while i < b.len {
+        let c = b[i]
+        if c == '"' {
+            s.push_str("\\\"")
+        } else if c == '\\' {
+            s.push_str("\\\\")
+        } else if c == '\n' {
+            s.push_str("\\n")
+        } else if c == '\t' {
+            s.push_str("\\t")
+        } else if c == '\r' {
+            s.push_str("\\r")
+        } else if c == 0 {
+            s.push_str("\\0")
+        } else if c < 0x20 || c == 0x7f {
+            unicode_escape(&s, c as u32)
+        } else if c == 0xc2 && i + 1 < b.len && b[i + 1] < 0xa0 {
+            // U+0080 to U+009F: control characters
+            unicode_escape(&s, b[i + 1] as u32)
+            i += 1
+        } else {
+            s.push(c)
+        }
+        i += 1
+    }
+    s.push('"')
+}
+
+fn unicode_escape(inout s: String, c: u32) {
+    s.push_str("\\u{")
+    let digits = "0123456789abcdef"
+    if c >= 16 {
+        s.push(digits[(c >> 4) as i64])
+    }
+    s.push(digits[(c & 15) as i64])
+    s.push('}')
+}
+
+pub fn show_function(p: Program, f: Function) -> String {
+    let t = p.types
+    var s = String.from("fn ")
+    s.push_str(f.name.as_str())
+    s.push_str(" [")
+    s.push_str(f.symbol.as_str())
+    s.push(']')
+    match f.body {
+        None => {
+            s.push_str(" (extern)\n")
+            return s
+        }
+        Some(b) => {
+            s.push_str(" {\n")
+            for i, l in b.locals {
+                s.push_str("  let ")
+                if l.mutable {
+                    s.push_str("mut ")
+                }
+                s.push('_')
+                i.show(&s)
+                s.push_str(": ")
+                s.push_str(t.show(l.ty).as_str())
+                match l.name {
+                    Some(n) => {
+                        s.push_str("  // ")
+                        s.push_str(n.as_str())
+                    }
+                    None => {}
+                }
+                s.push('\n')
+            }
+            for i, blk in b.blocks {
+                s.push_str(" bb")
+                i.show(&s)
+                s.push_str(":\n")
+                for st in blk.stmts {
+                    match st {
+                        Assign(pl, r, _) => {
+                            s.push_str("    ")
+                            show_place(&s, pl)
+                            s.push_str(" = ")
+                            show_rvalue(&s, t, r)
+                            s.push('\n')
+                        }
+                        StorageLive(l) => line_local(&s, "live", l)
+                        StorageDead(l) => line_local(&s, "dead", l)
+                        Drop(pl, _) => {
+                            s.push_str("    drop ")
+                            show_place(&s, pl)
+                            s.push('\n')
+                        }
+                        Forget(l) => line_local(&s, "forget", l)
+                        Nop => {}
+                    }
+                }
+                s.push_str("    ")
+                show_term(&s, p, blk.term)
+                s.push('\n')
+            }
+        }
+    }
+    s.push_str("}\n")
+    s
+}
+
+fn line_local(inout s: String, what: str, l: u32) {
+    s.push_str("    ")
+    s.push_str(what)
+    s.push_str(" _")
+    l.show(&s)
+    s.push('\n')
+}
+
+fn show_term(inout s: String, p: Program, term: Term) {
+    let t = p.types
+    match term {
+        Goto(b) => {
+            s.push_str("goto bb")
+            b.show(&s)
+        }
+        Switch(discr, targets, otherwise) => {
+            s.push_str("switch ")
+            show_operand(&s, t, discr)
+            s.push_str(" [")
+            for i, x in targets {
+                if i > 0 {
+                    s.push_str(", ")
+                }
+                x.value.show(&s)
+                s.push_str(" => bb")
+                x.block.show(&s)
+            }
+            s.push_str("; else bb")
+            otherwise.show(&s)
+            s.push(']')
+        }
+        Return => s.push_str("return")
+        Unreachable => s.push_str("unreachable")
+        Call(callee, args, dest, next, _) => {
+            show_place(&s, dest)
+            s.push_str(" = call ")
+            match callee {
+                Fn(f) => s.push_str(p.fns[f as i64].name.as_str())
+                Ptr(o) => show_operand(&s, t, o)
+                Closure(o) => show_operand(&s, t, o)
+                Intrinsic(i) => show_intrinsic(&s, i)
+            }
+            s.push('(')
+            show_operands(&s, t, args)
+            s.push_str(") -> bb")
+            next.show(&s)
+        }
+        Assert(cond, msg, next, _) => {
+            s.push_str("assert ")
+            show_operand(&s, t, cond)
+            s.push_str(", ")
+            debug_str(&s, msg.as_str())
+            s.push_str(" -> bb")
+            next.show(&s)
+        }
+        Pending => s.push_str("<pending>")
+    }
+}
