@@ -759,11 +759,12 @@ impl<'a> Sema<'a> {
         Val { vk: VK::Place(Place::local(t)), ty, temp: true }
     }
 
-    /// A place to change, from `&place` or a projection returning `inout`.
+    /// A place to change, from `&place`: an `inout` argument, or the value
+    /// of `inout x = &place`. The `&` is required, so that the reader sees
+    /// what may change.
     pub fn mut_place(&mut self, fb: &mut Fb, e: &ast::Expr) -> R<(Place, TyId)> {
-        let inner = match &e.kind {
-            E::Unary(ast::UnOp::Addr, inner) => inner,
-            _ => e,
+        let E::Unary(ast::UnOp::Addr, inner) = &e.kind else {
+            return ty_err(e.span, "this is changed through an `inout` parameter, so write `&` before it");
         };
         let v = self.expr_mut(fb, inner)?;
         let VK::Place(p) = v.vk else { return ty_err(e.span, "expected a place (a variable, a field, an element)") };
@@ -2219,6 +2220,11 @@ impl<'a> Sema<'a> {
             E::Field(base, name) => {
                 // `module.f(...)`, `Type.f(...)`, `Enum.Variant(...)`
                 if let Some(p) = expr_path(callee) {
+                    // `T.f(...)`, with `T` a compile-time type parameter.
+                    if p.len() == 2 && fb.lookup(&p[0]).is_none() && matches!(env.get(&p[0]), Some(CVal::Type(_))) {
+                        let t = self.resolve_path_ty_pub(&p[..1], &env, span)?;
+                        return self.type_member(fb, t, name, args, exp, span, true);
+                    }
                     if fb.lookup(&p[0]).is_none() && env.get(&p[0]).is_none() {
                         let (head, _) = p.split_at(p.len() - 1);
                         if let Some((Sym::Fn(f), _)) = self.lookup_path(env.module, &p).filter(|_| p.len() > 1) {

@@ -75,8 +75,8 @@ println(first)
 **`&x` is not a shared borrow.** Shared borrowing happens by itself
 (`f(x)` lends `x`). `&x` means two things: an argument for an `inout`
 parameter (`f(&x)`), and, outside calls, a raw pointer `*T` to a place.
-Write the `&` for `inout` arguments; it shows the reader that `x` may
-change. (The compiler does not yet insist on it.)
+The `&` is required for `inout` arguments: it shows the reader that `x`
+may change. A method call `x.push(1)` passes `self` without it.
 
 **Moving out of a field is an error.** Only a whole variable can be moved.
 For a field, an element or anything behind a borrow, use `.clone()`,

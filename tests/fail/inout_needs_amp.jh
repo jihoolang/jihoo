@@ -1,0 +1,11 @@
+// An argument for an `inout` parameter is written `&x`, to show it changes.
+// error: write `&` before it
+fn bump(inout x: i64) {
+    x += 1
+}
+
+fn main() {
+    var a = 1
+    bump(a)
+    println(a)
+}

@@ -1,0 +1,37 @@
+// Functions of a compile-time type parameter: `T.f(...)`.
+import std.mem
+
+struct Counter {
+    n: i64
+}
+
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for Counter {
+    fn zero() -> Counter {
+        Counter { n: 5 }
+    }
+}
+
+fn make(comptime T: Zero) -> T {
+    T.zero()
+}
+
+fn fresh(comptime T: Default) -> T {
+    T.default()
+}
+
+fn main() {
+    println(make(Counter).n)
+    //> 5
+    let z: i64 = fresh(i64)
+    println(z)
+    //> 0
+    var n = 7
+    println(mem.take(&n))
+    //> 7
+    println(n)
+    //> 0
+}
