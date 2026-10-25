@@ -678,3 +678,21 @@ impl Dump {
         self.s(")");
     }
 }
+
+/// Every module of a loaded program, in the order they were loaded: its
+/// name, file and imports, then its tree.
+pub fn program(p: &crate::load::Ast) -> String {
+    let mut out = format!("(program root {} prelude {})\n", p.root, p.prelude.map(|m| m.to_string()).unwrap_or_else(|| "_".to_string()));
+    for (i, m) in p.modules.iter().enumerate() {
+        out.push_str(&format!("(file {} {} {} [", i, m.name, m.path.display()));
+        for (j, (alias, target, public, span)) in m.imports.iter().enumerate() {
+            if j > 0 {
+                out.push(' ');
+            }
+            out.push_str(&format!("(import {} {} {} {}:{})", alias, target, if *public { "pub" } else { "priv" }, span.lo, span.hi));
+        }
+        out.push_str("])\n");
+        out.push_str(&module(&m.ast));
+    }
+    out
+}

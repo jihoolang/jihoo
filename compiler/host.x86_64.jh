@@ -1,0 +1,3 @@
+// The machine the compiler runs on, when it is built for x86_64.
+
+pub const NAME = "x86_64"

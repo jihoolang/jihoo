@@ -13,6 +13,7 @@ const USAGE: &str = "usage:
   jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
   jihoo emit-tokens <file.jh>                   print the tokens of one file
   jihoo emit-ast <file.jh>                      print the syntax tree of one file
+  jihoo emit-program <file.jh>                  print every module a program loads
 
 options:
   -O0 -O1 -O2 -O3   optimization (default -O2)
@@ -101,6 +102,16 @@ fn run() {
     }
     let opts = Options { search, target, checked, no_prelude: false };
     let mut sources = Sources::default();
+    if cmd == "emit-program" {
+        match jihoo::load::load(&file, jihoo::load::default_search(&opts.search), target.name(), &mut sources, false) {
+            Ok(ast) => print!("{}", jihoo::astdump::program(&ast)),
+            Err(d) => {
+                eprintln!("{}", sources.render(&d));
+                exit(1);
+            }
+        }
+        return;
+    }
     let mut prog = match compile(&file, &opts, &mut sources) {
         Ok(p) => p,
         Err(d) => {

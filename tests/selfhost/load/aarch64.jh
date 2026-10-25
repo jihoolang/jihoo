@@ -1,0 +1,4 @@
+// load-args: --target aarch64
+import plat
+import cpu
+fn main() {}

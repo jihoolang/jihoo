@@ -28,13 +28,16 @@ cargo test --test selfhost
 
 Error messages are part of the comparison, so stage 1 gives the same
 errors, at the same places, as stage 0. Inputs meant to exercise one pass
-live in `tests/selfhost/<pass>/`.
+live in `tests/selfhost/<pass>/`. A `// load-args: ...` line in a file gives
+`emit-program` more options (`-I dir`, `--target aarch64`). Both compilers
+find the standard library through `JIHOO_PATH`, so they name its files the
+same way.
 
 | step | jihoo | Rust | compared by | state |
 |------|-------|------|-------------|-------|
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
-| 3 | `load.jh` | `load.rs` | `emit-ast` of the whole program | |
+| 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
 | 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | needs `i128` (below) |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
@@ -62,6 +65,11 @@ better way the port takes it and says so in a comment; so far:
   until jihoo has `i128`.
 - Rust's `Display` for floats, which messages use, is `fmt.push_f64`
   (the shortest `%e` that reads back exactly, through libc).
+- What `std` does not offer yet (whether a file exists, canonical paths,
+  the running program's path, the system's reason for a failure, worded
+  like Rust's `io::Error`) is in `os.jh`, over libc. The host target comes
+  from the loader's own per-target files: `host.x86_64.jh` and
+  `host.aarch64.jh`.
 
 While both compilers exist, a language change has to be made in both:
 stage 0 must compile `compiler/`, and stage 1 must agree with stage 0.
@@ -84,6 +92,14 @@ far, each fixed in stage 0 with a test:
 - A debug build of the Rust compiler overflowed its stack on deeply nested
   code before the parser's depth limit stopped it; it now runs on a thread
   with a 256 MiB stack.
+- Two nested `for` loops, the inner one over a part of the outer one's
+  element, were rejected (`m` changed while borrowed). The kernel gave the
+  loans of a call with an `inout` view argument to every local sharing any
+  loan with that argument, which included the outer iterator. It now gives
+  them to what the argument borrows (`&mut v` → `v`, through reborrows).
+  The old rule also missed the case it was for: after `v.push(s.as_str())`
+  with `v: Vec(str)`, `s` could change while `v` still pointed into it.
+  (`tests/run/loops.jh`, `tests/fail/borrow_view_pushed*.jh`.)
 
 And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and

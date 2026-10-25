@@ -1,0 +1,39 @@
+// The machines jihoo compiles for.
+
+import host
+
+pub enum Target {
+    X86_64
+    Aarch64
+}
+
+impl Target {
+    // The machine this compiler was built for: `host.<target>.jh` says.
+    pub fn host() -> Target {
+        Target.parse(host.NAME).unwrap()
+    }
+
+    pub fn parse(s: str) -> Option(Target) {
+        if s == "x86_64" || s == "x86_64-linux" {
+            Some(Target.X86_64)
+        } else if s == "aarch64" || s == "aarch64-linux" || s == "arm64" {
+            Some(Target.Aarch64)
+        } else {
+            None
+        }
+    }
+
+    pub fn name(self) -> str {
+        match self {
+            X86_64 => "x86_64"
+            Aarch64 => "aarch64"
+        }
+    }
+
+    pub fn triple(self) -> str {
+        match self {
+            X86_64 => "x86_64-unknown-linux-gnu"
+            Aarch64 => "aarch64-unknown-linux-gnu"
+        }
+    }
+}

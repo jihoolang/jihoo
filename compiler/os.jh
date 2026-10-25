@@ -1,0 +1,120 @@
+// What the compiler asks of the system beyond `std`: whether files exist,
+// canonical paths, where the compiler itself is, and the system's reasons
+// for failing, worded as Rust's `io::Error` words them.
+
+import std.libc
+
+extern fn realpath(path: *u8, resolved: *u8) -> *u8
+extern fn readlink(path: *u8, buf: *u8, n: i64) -> i64
+extern fn strerror(e: i32) -> *u8
+extern fn __errno_location() -> *i32
+
+// `s` as a C string: its bytes and a 0.
+fn c_str(s: str) -> String {
+    var c = String.with_capacity(s.len + 1)
+    c.push_str(s)
+    c.push(0)
+    c
+}
+
+unsafe fn from_c(p: *u8) -> String {
+    String.from(make_str(p, libc.strlen(p)))
+}
+
+// "No such file or directory (os error 2)": the reason the last call
+// failed.
+pub fn last_error() -> String {
+    let e = unsafe { *__errno_location() }
+    var s = unsafe { from_c(strerror(e)) }
+    s.push_str(" (os error ")
+    e.show(&s)
+    s.push_str(")")
+    s
+}
+
+pub fn exists(path: str) -> bool {
+    let c = c_str(path)
+    unsafe { libc.access(c.as_str().ptr, 0) == 0 }
+}
+
+// The absolute path with no `.`, `..` or symbolic links, if the file is there.
+pub fn canonical(path: str) -> Option(String) {
+    let c = c_str(path)
+    var buf = [0 as u8; 4097]
+    let r = unsafe { realpath(c.as_str().ptr, &buf[0]) }
+    if r == null {
+        return None
+    }
+    Some(unsafe { from_c(&buf[0]) })
+}
+
+// The path of the running program.
+pub fn current_exe() -> Option(String) {
+    var buf = [0 as u8; 4096]
+    let n = unsafe { readlink("/proc/self/exe\0".ptr, &buf[0], 4096) }
+    if n < 0 {
+        return None
+    }
+    Some(String.from(unsafe { make_str(&buf[0], n) }))
+}
+
+// A whole file, or the system's reason it cannot be read.
+pub fn read_file(path: str) -> Result(String, String) {
+    let c = c_str(path)
+    let fd = unsafe { libc.open(c.as_str().ptr, 0, 0) }
+    if fd < 0 {
+        return Err(last_error())
+    }
+    var out = String.new()
+    var buf = [0 as u8; 65536]
+    loop {
+        let n = unsafe { libc.read(fd, &buf[0], 65536) }
+        if n < 0 {
+            let e = last_error()
+            unsafe { libc.close(fd) }
+            return Err(e)
+        }
+        if n == 0 {
+            break
+        }
+        out.push_str(unsafe { make_str(&buf[0], n) })
+    }
+    unsafe { libc.close(fd) }
+    Ok(out)
+}
+
+// ---- paths, as Rust's `Path` treats them ----
+
+// The directory part: "" for a bare name, "/" for a file at the root.
+pub fn parent(path: str) -> str {
+    var end = path.len
+    while end > 1 && path[end - 1] == '/' {
+        end -= 1
+    }
+    var i = end
+    while i > 0 && path[i - 1] != '/' {
+        i -= 1
+    }
+    if i == 0 {
+        return path[0..0]
+    }
+    // drop the separators before the name, but keep a lone root
+    var j = i - 1
+    while j > 0 && path[j - 1] == '/' {
+        j -= 1
+    }
+    if j == 0 {
+        return path[0..1]
+    }
+    path[0..j]
+}
+
+// `dir/rel`; just `rel` when `dir` is empty.
+pub fn join(dir: str, rel: str) -> String {
+    var s = String.from(dir)
+    if dir.len > 0 && dir[dir.len - 1] != '/' {
+        s.push('/')
+    }
+    s.push_str(rel)
+    s
+}

@@ -27,6 +27,17 @@ fn main() {
         count += x
     }
     println(count)
+    // a loop over a part of the outer loop's element
+    var rows = Vec(Vec(i64)).new()
+    rows.push(Vec(i64).filled(2, 3))
+    rows.push(Vec(i64).filled(1, 4))
+    var total = 0
+    for row in rows {
+        for x in row {
+            total += x
+        }
+    }
+    println(total)
     var ticks = 0
     for _ in 0..3 {
         ticks += 1
@@ -39,4 +50,5 @@ fn main() {
 //> 2c
 //> 7
 //> 18
+//> 10
 //> 3

@@ -1,0 +1,227 @@
+// Loading a program: the root file and every module it imports, each parsed
+// once. `import a.b` looks for `a/b.<target>.<profile>.jh`,
+// `a/b.<profile>.jh`, `a/b.<target>.jh`, then `a/b.jh`, next to the
+// importing file, then in each search directory. Every module also sees the
+// prelude (`std/prelude.jh`).
+
+import std.env
+import ast
+import diag
+import lex
+import os
+import parse
+
+type Diag = diag.Diag
+type Span = diag.Span
+
+pub struct ModImport {
+    // The name it binds.
+    pub alias: String
+    pub module: u32
+    // `pub import`: the prelude's way of putting a module's names in every
+    // scope.
+    pub public: bool
+    pub span: Span
+}
+
+pub struct ModuleAst {
+    // The dotted name it was imported by (the root is `main`).
+    pub name: String
+    pub path: String
+    pub ast: ast.Module
+    pub imports: Vec(ModImport)
+}
+
+pub struct Ast {
+    pub modules: Vec(ModuleAst)
+    pub root: u32
+    pub prelude: Option(u32)
+}
+
+struct Loader {
+    search: Vec(String)
+    target: String
+    // `native` or `freestanding`.
+    profile: String
+    // By canonical path.
+    by_path: Map(String, u32)
+    modules: Vec(ModuleAst)
+}
+
+// An import a module asks for, before it is loaded.
+struct Wanted {
+    path: Vec(String)
+    alias: Option(String)
+    public: bool
+    span: Span
+}
+
+pub fn default_search(extra: Vec(String)) -> Vec(String) {
+    var s = extra.clone()
+    match env.get("JIHOO_PATH") {
+        Some(p) => {
+            for d in p.split(":") {
+                if d.len > 0 {
+                    s.push(d.to_string())
+                }
+            }
+        }
+        None => {}
+    }
+    // The checkout's (or the installed) standard library, above the
+    // compiler's own file.
+    match os.current_exe() {
+        Some(exe) => {
+            var anc = os.parent(exe.as_str()).to_string()
+            loop {
+                let lib = os.join(anc.as_str(), "lib")
+                if os.exists(os.join(lib.as_str(), "std/prelude.jh").as_str()) {
+                    s.push(lib)
+                    break
+                }
+                let share = os.join(anc.as_str(), "share/jihoo/lib")
+                if os.exists(os.join(share.as_str(), "std/prelude.jh").as_str()) {
+                    s.push(share)
+                    break
+                }
+                let up = os.parent(anc.as_str()).to_string()
+                if up == anc || anc.len() == 0 {
+                    break
+                }
+                anc = up
+            }
+        }
+        None => {}
+    }
+    s
+}
+
+pub fn load(root: str, sink search: Vec(String), target: str, inout sources: diag.Sources, no_prelude: bool) -> Result(Ast, Diag) {
+    // The profile decides which files the standard library's modules come
+    // from, so it is read from the root's attributes first.
+    var profile = "native"
+    match os.read_file(root) {
+        Ok(text) => {
+            if is_freestanding(text.as_str()) {
+                profile = "freestanding"
+            }
+        }
+        Err(_) => {}
+    }
+    var l = Loader { search: search, target: target.to_string(), profile: profile.to_string(), by_path: Map(String, u32).new(), modules: Vec(ModuleAst).new() }
+    let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources)?
+    var prelude: Option(u32) = None
+    if !no_prelude {
+        var p = Vec(String).new()
+        p.push("std".to_string())
+        p.push("prelude".to_string())
+        match l.find(p, root) {
+            Some(f) => prelude = Some(l.load_file(f.as_str(), "std.prelude", Span.new(0, 0, 0), &sources)?)
+            None => return Err(Diag.new(Span.new(0, 0, 0), "cannot find the standard library (std/prelude.jh); set JIHOO_PATH or pass -I"))
+        }
+    }
+    match l {
+        Loader { modules, .. } => Ok(Ast { modules: modules, root: root_idx, prelude: prelude })
+    }
+}
+
+// Whether `#![freestanding]` comes first in the file, after blank lines and
+// comments.
+fn is_freestanding(text: str) -> bool {
+    for line in text.lines() {
+        let t = line.trim()
+        if !(t.len == 0 || t.starts_with("//") || t.starts_with("#!")) {
+            return false
+        }
+        if t == "#![freestanding]" {
+            return true
+        }
+    }
+    false
+}
+
+impl Loader {
+    fn find(self, path: Vec(String), from: str) -> Option(String) {
+        var dirs = Vec(String).new()
+        dirs.push(os.parent(from).to_string())
+        for d in self.search {
+            dirs.push(d.clone())
+        }
+        var rel = String.new()
+        for i, p in path {
+            if i > 0 {
+                rel.push('/')
+            }
+            rel.push_str(p.as_str())
+        }
+        for d in dirs {
+            let base = os.join(d.as_str(), rel.as_str())
+            // `a.x86_64.freestanding.jh`, `a.freestanding.jh`, `a.x86_64.jh`, `a.jh`
+            let both = base.as_str() + "." + self.target.as_str() + "." + self.profile.as_str() + ".jh"
+            let profile = base.as_str() + "." + self.profile.as_str() + ".jh"
+            let target = base.as_str() + "." + self.target.as_str() + ".jh"
+            let plain = base.as_str() + ".jh"
+            for p in [both, profile, target, plain] {
+                if os.exists(p.as_str()) {
+                    return Some(p.clone())
+                }
+            }
+        }
+        None
+    }
+
+    fn load_file(inout self, path: str, name: str, at: Span, inout sources: diag.Sources) -> Result(u32, Diag) {
+        let key = match os.canonical(path) {
+            Some(k) => k
+            None => path.to_string()
+        }
+        match self.by_path.get(key) {
+            Some(i) => return Ok(i)
+            None => {}
+        }
+        let text = match os.read_file(path) {
+            Ok(t) => t
+            Err(e) => return Err(Diag.new(at, ("cannot read " + path + ": " + e.as_str()).as_str()))
+        }
+        let file = sources.add(path.to_string(), text)
+        let toks = lex.lex(file, sources.files[file as i64].text.as_str())?
+        let module = parse.parse_module(file, toks)?
+        let idx = self.modules.len() as u32
+        self.by_path.insert(key, idx)
+        var wanted = Vec(Wanted).new()
+        for it in module.items {
+            match it.kind {
+                Import(imp) => wanted.push(Wanted { path: imp.path.clone(), alias: imp.alias.clone(), public: it.public, span: it.span })
+                _ => {}
+            }
+        }
+        self.modules.push(ModuleAst { name: name.to_string(), path: path.to_string(), ast: module, imports: Vec(ModImport).new() })
+        var imports = Vec(ModImport).new()
+        for w in wanted {
+            let dotted = dots(w.path)
+            let p = match self.find(w.path, path) {
+                Some(p) => p
+                None => return Err(Diag.new(w.span, ("cannot find module `" + dotted.as_str() + "`").as_str()))
+            }
+            let m = self.load_file(p.as_str(), dotted.as_str(), w.span, &sources)?
+            let alias = match w.alias {
+                Some(a) => a.clone()
+                None => w.path[w.path.len() - 1].clone()
+            }
+            imports.push(ModImport { alias: alias, module: m, public: w.public, span: w.span })
+        }
+        self.modules[idx as i64].imports = imports
+        Ok(idx)
+    }
+}
+
+fn dots(path: Vec(String)) -> String {
+    var s = String.new()
+    for i, p in path {
+        if i > 0 {
+            s.push('.')
+        }
+        s.push_str(p.as_str())
+    }
+    s
+}

@@ -1,0 +1,5 @@
+// A freestanding program picks the freestanding files.
+
+#![freestanding]
+import plat
+fn main() {}

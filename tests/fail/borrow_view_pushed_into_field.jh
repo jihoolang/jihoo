@@ -1,0 +1,14 @@
+// A view stored in a Vec through an `inout` borrow keeps its source borrowed.
+// error: `s` is changed here while it is borrowed
+
+struct H {
+    v: Vec(str)
+}
+
+fn main() {
+    var h = H { v: Vec(str).new() }
+    var s = String.from("a")
+    h.v.push(s.as_str())
+    s.push('b')
+    println(h.v.len())
+}

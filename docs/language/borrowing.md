@@ -106,6 +106,9 @@ variables. The compiler follows what each one borrows:
 
 - A function returning a view returns something its arguments point to,
   and the caller counts the result as borrowing those arguments.
+- A function given an `inout` view may store the other arguments' views
+  in it: after `v.push(s.as_str())` with `v: Vec(str)`, `s` is borrowed
+  for as long as `v` is used, as if `v` held the borrow itself.
 - A value cannot go away while a view of it is still used, and a function
   cannot return a view of its own locals.
 

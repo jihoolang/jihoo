@@ -1,0 +1,3 @@
+// The machine the compiler runs on, when it is built for aarch64.
+
+pub const NAME = "aarch64"

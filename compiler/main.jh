@@ -9,19 +9,61 @@ import std.sys
 import astdump
 import diag
 import lex
+import load
 import parse
+import target
 
-const USAGE = "usage:\n  jihoo emit-tokens <file.jh>   print the tokens of one file\n  jihoo emit-ast <file.jh>      print the syntax tree of one file"
+const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
 
 fn main() {
     let args = env.args()
-    if args.len() < 3 {
+    if args.len() < 2 {
         fail(USAGE, 2)
     }
     let cmd = args[1]
-    let file = args[2]
+    var file: Option(str) = None
+    var search = Vec(String).new()
+    var tgt = target.Target.host()
+    var i = 2
+    while i < args.len() {
+        let a = args[i]
+        if a == "-I" {
+            i += 1
+            if i < args.len() {
+                search.push(args[i].to_string())
+            }
+        } else if a == "--target" {
+            i += 1
+            var t: Option(target.Target) = None
+            if i < args.len() {
+                t = target.Target.parse(args[i])
+            }
+            match t {
+                Some(t) => tgt = t
+                None => fail("error: unknown target; use x86_64 or aarch64", 2)
+            }
+        } else if a == "-h" || a == "--help" {
+            println(USAGE)
+            return
+        } else if a.ends_with(".jh") && file.is_none() {
+            file = Some(a)
+        } else {
+            fail("error: unknown option `" + a + "`\n\n" + USAGE, 2)
+        }
+        i += 1
+    }
+    let file = match file {
+        Some(f) => f
+        None => fail("error: no source file\n\n" + USAGE, 2)
+    }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
         emit_syntax(file, cmd == "emit-ast")
+    } else if cmd == "emit-program" {
+        var sources = diag.Sources.new()
+        match load.load(file, load.default_search(search), tgt.name(), &sources, false) {
+            Ok(p) => print(astdump.program(p))
+            Err(d) => fail(sources.render(d).as_str(), 1)
+        }
     } else {
         fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
     }

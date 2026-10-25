@@ -120,7 +120,7 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
             for (i, s) in body.blocks[b].stmts.iter().enumerate() {
                 stmt_loans(s, &mut held, &is_view, loan_at.get(&(b, i)).copied(), lw);
             }
-            term_loans(&body.blocks[b].term, &mut held, &is_view, types, body, lw);
+            term_loans(&body.blocks[b].term, &mut held, &is_view, types, body, &loans, lw);
             for s in succs(&body.blocks[b].term) {
                 let s = s as usize;
                 if !seen[s] {
@@ -337,7 +337,41 @@ fn stmt_loans(s: &Stmt, held: &mut [Bits], is_view: &[bool], new: Option<usize>,
     }
 }
 
-fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], types: &Types, body: &Body, lw: usize) {
+/// The locals a borrow `p` points into: what `p = &mut place` borrows, and
+/// through a reborrow (`&mut (*r).f`), what `r` points into too. Only these
+/// can receive what a call stores through the borrow; a local that merely
+/// shares some loan with `p` (the iterator of an outer loop, whose element
+/// the borrowed one came from) cannot. A borrow not made by a `&mut` in
+/// this body falls back to every local that shares a loan with it.
+fn pointees(p: usize, held: &[Bits], body: &Body, out: &mut Vec<usize>) {
+    let mut found = false;
+    for blk in &body.blocks {
+        for s in &blk.stmts {
+            let Stmt::Assign(d, Rvalue::RefMut(q), _) = s else { continue };
+            if d.local as usize != p || !d.proj.is_empty() {
+                continue;
+            }
+            found = true;
+            let r = q.local as usize;
+            if r == p || out.contains(&r) {
+                continue;
+            }
+            out.push(r);
+            if q.proj.iter().any(|x| matches!(x, Proj::Deref)) {
+                pointees(r, held, body, out);
+            }
+        }
+    }
+    if !found {
+        for l in 0..held.len() {
+            if l != p && !out.contains(&l) && intersects(&held[p], &held[l]) {
+                out.push(l);
+            }
+        }
+    }
+}
+
+fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], types: &Types, body: &Body, loans: &[Loan], lw: usize) {
     if let Term::Call { args, dest, .. } = t {
         let mut all = vec![0u64; lw];
         for a in args {
@@ -351,9 +385,17 @@ fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], types: &Types, body
                     if let TyKind::RefMut(inner) = types.kind(body.locals[p.local as usize].ty) {
                         if types.is_view(*inner) {
                             // The loans go to whatever the borrow points to.
-                            let targets: Vec<usize> = (0..held.len()).filter(|&l| intersects(&held[p.local as usize], &held[l]) && l != p.local as usize).collect();
+                            let mut targets = Vec::new();
+                            pointees(p.local as usize, held, body, &mut targets);
                             for l in targets {
-                                union(&mut held[l], &all);
+                                // not the loans of `l` itself (`&mut v` for `v.push(x)`)
+                                let mut add = all.clone();
+                                for (i, ln) in loans.iter().enumerate() {
+                                    if ln.place.local as usize == l {
+                                        clear(&mut add, i);
+                                    }
+                                }
+                                union(&mut held[l], &add);
                             }
                         }
                     }

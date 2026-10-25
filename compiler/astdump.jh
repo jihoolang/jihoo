@@ -3,6 +3,7 @@
 
 import ast
 import diag
+import load
 
 type Span = diag.Span
 
@@ -722,4 +723,43 @@ impl Dump {
 
 fn hex(d: u8) -> u8 {
     if d < 10 { '0' + d } else { 'a' + d - 10 }
+}
+
+// Every module of a loaded program, in the order they were loaded: its
+// name, file and imports, then its tree.
+pub fn program(p: load.Ast) -> String {
+    var out = String.from("(program root ")
+    p.root.show(&out)
+    out.push_str(" prelude ")
+    match p.prelude {
+        Some(m) => m.show(&out)
+        None => out.push('_')
+    }
+    out.push_str(")\n")
+    for i, m in p.modules {
+        out.push_str("(file ")
+        i.show(&out)
+        out.push(' ')
+        out.push_str(m.name.as_str())
+        out.push(' ')
+        out.push_str(m.path.as_str())
+        out.push_str(" [")
+        for j, im in m.imports {
+            if j > 0 {
+                out.push(' ')
+            }
+            out.push_str("(import ")
+            out.push_str(im.alias.as_str())
+            out.push(' ')
+            im.module.show(&out)
+            out.push_str(if im.public { " pub " } else { " priv " })
+            im.span.lo.show(&out)
+            out.push(':')
+            im.span.hi.show(&out)
+            out.push(')')
+        }
+        out.push_str("])\n")
+        out.push_str(module(m.ast).as_str())
+    }
+    out
 }

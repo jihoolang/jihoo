@@ -1,0 +1,13 @@
+// Imports of every kind: a subdirectory, an alias, a cycle, a file per
+// target and profile, a module found through -I, and a symbolic link to a
+// module already loaded (loaded once).
+// load-args: -I tests/selfhost/load/inc
+pub import sub.a
+import sub.b as bee
+import plat
+import cpu
+import extra
+import same
+import link
+
+fn main() {}
