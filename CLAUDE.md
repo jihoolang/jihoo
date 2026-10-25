@@ -88,6 +88,12 @@ The Rust is written to be ported to jihoo: index-based data (`TyId`,
 `Local`, `FnId`), references only as parameters, enums/match/Vec/HashMap.
 Keep it that way.
 
+`compiler/` is the compiler being ported to jihoo, pass by pass
+(`docs/internals/self-hosting.md`). Each ported pass has a dump command
+(`emit-tokens`, ...) in both compilers with identical output;
+`cargo test --test selfhost` compares them on every `.jh` file in the repo.
+A change to a ported pass, or to the language it uses, must keep both in step.
+
 ## Standard library
 
 `lib/std/*.jh`, in jihoo. `prelude.jh` is seen everywhere, plus modules it

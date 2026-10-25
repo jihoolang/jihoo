@@ -27,6 +27,11 @@ fn main() {
         count += x
     }
     println(count)
+    var ticks = 0
+    for _ in 0..3 {
+        ticks += 1
+    }
+    println(ticks)
 }
 //> 5
 //> 0a
@@ -34,3 +39,4 @@ fn main() {
 //> 2c
 //> 7
 //> 18
+//> 3

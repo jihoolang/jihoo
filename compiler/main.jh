@@ -1,0 +1,91 @@
+// The jihoo compiler, written in jihoo. It is being ported from the Rust
+// compiler (`crates/jihoo`) one pass at a time; each pass has a command that
+// prints what it makes, in the same format as the Rust compiler, so the two
+// can be compared (docs/internals/self-hosting.md).
+
+import std.env
+import std.fs
+import std.sys
+import diag
+import lex
+
+const USAGE = "usage:\n  jihoo emit-tokens <file.jh>   print the tokens of one file"
+
+fn main() {
+    let args = env.args()
+    if args.len() < 3 {
+        fail(USAGE, 2)
+    }
+    let cmd = args[1]
+    let file = args[2]
+    if cmd == "emit-tokens" {
+        emit_tokens(file)
+    } else {
+        fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
+    }
+}
+
+fn fail(msg: str, code: i32) -> never {
+    eprintln(msg)
+    sys.exit(code)
+}
+
+// One line per token: its byte range, whether a newline came before it, and
+// the token.
+fn emit_tokens(file: str) {
+    var sources = diag.Sources.new()
+    let text = match fs.read_file(file) {
+        Ok(t) => t
+        Err(_) => fail("error: cannot read " + file, 1)
+    }
+    let id = sources.add(file.to_string(), text)
+    let toks = match lex.lex(id, sources.files[id as i64].text.as_str()) {
+        Ok(t) => t
+        Err(d) => fail(sources.render(d).as_str(), 1)
+    }
+    var out = String.new()
+    for t in toks {
+        t.span.lo.show(&out)
+        out.push(' ')
+        t.span.hi.show(&out)
+        out.push_str(if t.nl_before { " 1 " } else { " 0 " })
+        match t.tok {
+            Ident => {
+                out.push_str("ident ")
+                out.push_str(t.text.as_str())
+            }
+            Int => {
+                out.push_str("int ")
+                t.int.show(&out)
+            }
+            Float => {
+                out.push_str("float ")
+                var f = t.float
+                unsafe { *(&f as *u64) }.show(&out)
+            }
+            Str => {
+                out.push_str("str ")
+                for b in t.text.as_str() {
+                    out.push(hex(b >> 4))
+                    out.push(hex(b & 15))
+                }
+            }
+            Char => {
+                out.push_str("char ")
+                t.int.show(&out)
+            }
+            OpAssign => {
+                out.push_str(t.op.text())
+                out.push('=')
+            }
+            Eof => out.push_str("eof")
+            k => out.push_str(lex.tok_text(k))
+        }
+        out.push('\n')
+    }
+    print(out)
+}
+
+fn hex(d: u8) -> u8 {
+    if d < 10 { '0' + d } else { 'a' + d - 10 }
+}

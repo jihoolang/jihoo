@@ -5,7 +5,12 @@ jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo emit-mir <file.jh>                      print the compiler's MIR
 jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
+jihoo emit-tokens <file.jh>                   print the tokens of one file
 ```
+
+`emit-tokens` prints one token per line (its byte range, whether a newline
+came before it, the token); it exists to compare the compiler with the one
+written in jihoo ([Self-hosting](../internals/self-hosting.md)).
 
 | option | |
 |--------|---|

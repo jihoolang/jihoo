@@ -11,6 +11,7 @@ const USAGE: &str = "usage:
   jihoo build <file.jh> [-o out] [link inputs]  compile a program
   jihoo emit-mir <file.jh>                      print the compiler's MIR
   jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
+  jihoo emit-tokens <file.jh>                   print the tokens of one file
 
 options:
   -O0 -O1 -O2 -O3   optimization (default -O2)
@@ -83,6 +84,10 @@ fn main() {
         eprintln!("error: no source file\n\n{}", USAGE);
         exit(2);
     };
+    if cmd == "emit-tokens" {
+        emit_tokens(&file);
+        return;
+    }
     let opts = Options { search, target, checked, no_prelude: false };
     let mut sources = Sources::default();
     let mut prog = match compile(&file, &opts, &mut sources) {
@@ -170,4 +175,40 @@ fn link_exe(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool,
         return Err(format!("{} failed:\n{}", cc, lines.join("\n")));
     }
     Ok(())
+}
+
+/// One line per token: its byte range, whether a newline came before it, and
+/// the token. The compiler written in jihoo prints the same, to compare.
+fn emit_tokens(file: &Path) {
+    use jihoo::lex::Tok;
+    let mut sources = Sources::default();
+    let text = match std::fs::read(file) {
+        Ok(t) => t,
+        Err(_) => {
+            eprintln!("error: cannot read {}", file.display());
+            exit(1);
+        }
+    };
+    let id = sources.add(file.display().to_string(), text.clone());
+    let toks = match jihoo::lex::lex(id, &text) {
+        Ok(t) => t,
+        Err(d) => {
+            eprintln!("{}", sources.render(&d));
+            exit(1);
+        }
+    };
+    let mut out = String::new();
+    for t in &toks {
+        let what = match &t.tok {
+            Tok::Ident(s) => format!("ident {}", s),
+            Tok::Int(n) => format!("int {}", n),
+            Tok::Float(f) => format!("float {}", f.to_bits()),
+            Tok::Str(b) => format!("str {}", b.iter().map(|c| format!("{:02x}", c)).collect::<String>()),
+            Tok::Char(c) => format!("char {}", c),
+            Tok::Eof => "eof".to_string(),
+            t => jihoo::parse::tok_text(t),
+        };
+        out.push_str(&format!("{} {} {} {}\n", t.span.lo, t.span.hi, t.nl_before as u8, what));
+    }
+    print!("{}", out);
 }

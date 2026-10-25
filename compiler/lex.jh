@@ -1,0 +1,765 @@
+// The lexer: source bytes to tokens. A token records whether a newline came
+// before it, which is how the parser ends statements without `;`.
+//
+// Unlike the Rust compiler's `Tok`, the kind of a token is a plain enum and
+// its payload lives in the `Token`: the parser compares kinds all the time,
+// and a plain enum compares with `==`.
+
+import std.libc
+import diag
+
+type Diag = diag.Diag
+type Span = diag.Span
+
+pub enum Tok {
+    Ident
+    Int
+    Float
+    Str
+    // `'a'`: a byte.
+    Char
+
+    // keywords
+    Fn
+    Let
+    Var
+    Return
+    If
+    Else
+    While
+    Loop
+    For
+    In
+    Break
+    Continue
+    True
+    False
+    Struct
+    Enum
+    Match
+    Impl
+    Trait
+    Pub
+    Import
+    As
+    Const
+    Comptime
+    Extern
+    Export
+    Unsafe
+    Sink
+    Inout
+    Ref
+    Move
+    Type
+    Static
+
+    // punctuation
+    LParen
+    RParen
+    LBrace
+    RBrace
+    LBracket
+    RBracket
+    Dot
+    DotDot
+    Ellipsis
+    Comma
+    Colon
+    Semi
+    Arrow
+    FatArrow
+    Question
+    Hash
+    HashBang
+    Assign
+    // `+=`, `-=`, ...: the operator is the token's `op`.
+    OpAssign
+    EqEq
+    NotEq
+    Lt
+    Le
+    Gt
+    Ge
+    Plus
+    Minus
+    Star
+    Slash
+    Percent
+    PlusWrap
+    MinusWrap
+    StarWrap
+    Amp
+    Pipe
+    Caret
+    Shl
+    Shr
+    Bang
+    AndAnd
+    OrOr
+
+    Eof
+}
+
+impl Eq for Tok {
+    fn eq(self, other: Tok) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+// Binary operators, as tokens name them; also the operator of `op=`.
+pub enum Op {
+    Add
+    Sub
+    Mul
+    Div
+    Rem
+    AddWrap
+    SubWrap
+    MulWrap
+    And
+    Or
+    Xor
+    Shl
+    Shr
+    Eq
+    Ne
+    Lt
+    Le
+    Gt
+    Ge
+    LogAnd
+    LogOr
+}
+
+impl Eq for Op {
+    fn eq(self, other: Op) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+impl Op {
+    pub fn text(self) -> str {
+        match self {
+            Add => "+"
+            Sub => "-"
+            Mul => "*"
+            Div => "/"
+            Rem => "%"
+            AddWrap => "+%"
+            SubWrap => "-%"
+            MulWrap => "*%"
+            And => "&"
+            Or => "|"
+            Xor => "^"
+            Shl => "<<"
+            Shr => ">>"
+            Eq => "=="
+            Ne => "!="
+            Lt => "<"
+            Le => "<="
+            Gt => ">"
+            Ge => ">="
+            LogAnd => "&&"
+            LogOr => "||"
+        }
+    }
+
+    pub fn is_compare(self) -> bool {
+        match self {
+            Eq | Ne | Lt | Le | Gt | Ge => true
+            _ => false
+        }
+    }
+}
+
+pub struct Token {
+    pub tok: Tok
+    pub span: Span
+    pub nl_before: bool
+    // The name of an `Ident`, the bytes of a `Str`.
+    pub text: String
+    // The value of an `Int` or a `Char`.
+    pub int: u64
+    pub float: f64
+    // The operator of an `OpAssign`.
+    pub op: Op
+}
+
+impl Token {
+    pub fn new(tok: Tok, span: Span, nl_before: bool) -> Token {
+        Token { tok: tok, span: span, nl_before: nl_before, text: String.new(), int: 0, float: 0.0, op: Op.Add }
+    }
+}
+
+impl Clone for Token {
+    fn clone(self) -> Token {
+        Token { tok: self.tok, span: self.span, nl_before: self.nl_before, text: self.text.clone(), int: self.int, float: self.float, op: self.op }
+    }
+}
+
+pub fn keyword(s: str) -> Option(Tok) {
+    if s.len < 2 || s.len > 8 {
+        return None
+    }
+    if s == "fn" { return Some(Tok.Fn) }
+    if s == "let" { return Some(Tok.Let) }
+    if s == "var" { return Some(Tok.Var) }
+    if s == "return" { return Some(Tok.Return) }
+    if s == "if" { return Some(Tok.If) }
+    if s == "else" { return Some(Tok.Else) }
+    if s == "while" { return Some(Tok.While) }
+    if s == "loop" { return Some(Tok.Loop) }
+    if s == "for" { return Some(Tok.For) }
+    if s == "in" { return Some(Tok.In) }
+    if s == "break" { return Some(Tok.Break) }
+    if s == "continue" { return Some(Tok.Continue) }
+    if s == "true" { return Some(Tok.True) }
+    if s == "false" { return Some(Tok.False) }
+    if s == "struct" { return Some(Tok.Struct) }
+    if s == "enum" { return Some(Tok.Enum) }
+    if s == "match" { return Some(Tok.Match) }
+    if s == "impl" { return Some(Tok.Impl) }
+    if s == "trait" { return Some(Tok.Trait) }
+    if s == "pub" { return Some(Tok.Pub) }
+    if s == "import" { return Some(Tok.Import) }
+    if s == "as" { return Some(Tok.As) }
+    if s == "const" { return Some(Tok.Const) }
+    if s == "comptime" { return Some(Tok.Comptime) }
+    if s == "extern" { return Some(Tok.Extern) }
+    if s == "export" { return Some(Tok.Export) }
+    if s == "unsafe" { return Some(Tok.Unsafe) }
+    if s == "sink" { return Some(Tok.Sink) }
+    if s == "inout" { return Some(Tok.Inout) }
+    if s == "ref" { return Some(Tok.Ref) }
+    if s == "move" { return Some(Tok.Move) }
+    if s == "type" { return Some(Tok.Type) }
+    if s == "static" { return Some(Tok.Static) }
+    None
+}
+
+// The text of a token kind, for messages. Names, numbers and strings say
+// what they are.
+pub fn tok_text(t: Tok) -> str {
+    match t {
+        Ident => "name"
+        Int => "integer"
+        Float => "float"
+        Str => "string"
+        Char => "character"
+        Fn => "fn"
+        Let => "let"
+        Var => "var"
+        Return => "return"
+        If => "if"
+        Else => "else"
+        While => "while"
+        Loop => "loop"
+        For => "for"
+        In => "in"
+        Break => "break"
+        Continue => "continue"
+        True => "true"
+        False => "false"
+        Struct => "struct"
+        Enum => "enum"
+        Match => "match"
+        Impl => "impl"
+        Trait => "trait"
+        Pub => "pub"
+        Import => "import"
+        As => "as"
+        Const => "const"
+        Comptime => "comptime"
+        Extern => "extern"
+        Export => "export"
+        Unsafe => "unsafe"
+        Sink => "sink"
+        Inout => "inout"
+        Ref => "ref"
+        Move => "move"
+        Type => "type"
+        Static => "static"
+        LParen => "("
+        RParen => ")"
+        LBrace => "{"
+        RBrace => "}"
+        LBracket => "["
+        RBracket => "]"
+        Dot => "."
+        DotDot => ".."
+        Ellipsis => "..."
+        Comma => ","
+        Colon => ":"
+        Semi => ";"
+        Arrow => "->"
+        FatArrow => "=>"
+        Question => "?"
+        Hash => "#"
+        HashBang => "#!"
+        Assign => "="
+        OpAssign => "op="
+        EqEq => "=="
+        NotEq => "!="
+        Lt => "<"
+        Le => "<="
+        Gt => ">"
+        Ge => ">="
+        Plus => "+"
+        Minus => "-"
+        Star => "*"
+        Slash => "/"
+        Percent => "%"
+        PlusWrap => "+%"
+        MinusWrap => "-%"
+        StarWrap => "*%"
+        Amp => "&"
+        Pipe => "|"
+        Caret => "^"
+        Shl => "<<"
+        Shr => ">>"
+        Bang => "!"
+        AndAnd => "&&"
+        OrOr => "||"
+        Eof => "end of file"
+    }
+}
+
+fn is_alnum(c: u8) -> bool {
+    is_alpha(c) || is_digit(c)
+}
+
+fn at(src: str, i: i64) -> u8 {
+    if i < src.len { src[i] } else { 0 }
+}
+
+pub fn lex(file: u32, src: str) -> Result(Vec(Token), Diag) {
+    var out = Vec(Token).new()
+    var i = 0
+    var nl = true
+    let n = src.len
+    loop {
+        // trivia
+        loop {
+            let c = at(src, i)
+            if c == '\n' {
+                nl = true
+                i += 1
+            } else if c == ' ' || c == '\t' || c == '\r' {
+                i += 1
+            } else if c == '/' && at(src, i + 1) == '/' {
+                while i < n && src[i] != '\n' {
+                    i += 1
+                }
+            } else if c == '/' && at(src, i + 1) == '*' {
+                let start = i
+                var depth = 0
+                loop {
+                    if i >= n {
+                        return Err(Diag.new(Span.new(file, start, start + 2), "unterminated comment"))
+                    }
+                    if src[i] == '/' && at(src, i + 1) == '*' {
+                        depth += 1
+                        i += 2
+                    } else if src[i] == '*' && at(src, i + 1) == '/' {
+                        depth -= 1
+                        i += 2
+                        if depth == 0 {
+                            break
+                        }
+                    } else {
+                        if src[i] == '\n' {
+                            nl = true
+                        }
+                        i += 1
+                    }
+                }
+            } else {
+                break
+            }
+        }
+        let start = i
+        if i >= n {
+            out.push(Token.new(Tok.Eof, Span.new(file, n, n), true))
+            return Ok(out)
+        }
+        let c = src[i]
+        var t = Token.new(Tok.Eof, Span.new(file, start, start), nl)
+        if is_alpha(c) || c == '_' {
+            while is_alnum(at(src, i)) || at(src, i) == '_' {
+                i += 1
+            }
+            let s = src[start..i]
+            match keyword(s) {
+                Some(k) => t.tok = k
+                None => {
+                    t.tok = Tok.Ident
+                    t.text = s.to_string()
+                }
+            }
+        } else if is_digit(c) {
+            var after_dot = false
+            match out.last() {
+                Some(prev) => after_dot = prev.tok == Tok.Dot
+                None => {}
+            }
+            number(file, src, &i, !after_dot, &t)?
+        } else if c == '"' {
+            i += 1
+            t.tok = Tok.Str
+            loop {
+                if i >= n || src[i] == '\n' {
+                    return Err(Diag.new(Span.new(file, start, i), "unterminated string"))
+                }
+                let c = src[i]
+                i += 1
+                if c == '"' {
+                    break
+                }
+                if c == '\\' {
+                    t.text.push(escape(file, src, &i)?)
+                } else {
+                    t.text.push(c)
+                }
+            }
+        } else if c == '\'' {
+            i += 1
+            var b: u8 = 0
+            if at(src, i) == '\\' {
+                i += 1
+                b = escape(file, src, &i)?
+            } else {
+                i += 1
+                b = at(src, i - 1)
+            }
+            if at(src, i) != '\'' {
+                return Err(Diag.new(Span.new(file, start, i), "a character literal is one byte between quotes"))
+            }
+            i += 1
+            t.tok = Tok.Char
+            t.int = b as u64
+        } else {
+            let len = punct(c, at(src, i + 1), at(src, i + 2), &t)
+            if len == 0 {
+                return Err(Diag.new(Span.new(file, i, i + 1), unexpected(src, i).as_str()))
+            }
+            i += len
+        }
+        t.span = Span.new(file, start, i)
+        out.push(t)
+        nl = false
+    }
+}
+
+// The punctuation at `c c1 c2`: sets the token, returns its length (0 for
+// none).
+fn punct(c: u8, c1: u8, c2: u8, inout t: Token) -> i64 {
+    var len = 1
+    var op = Op.Add
+    let tok = match c {
+        '(' => Tok.LParen
+        ')' => Tok.RParen
+        '{' => Tok.LBrace
+        '}' => Tok.RBrace
+        '[' => Tok.LBracket
+        ']' => Tok.RBracket
+        ',' => Tok.Comma
+        ':' => Tok.Colon
+        ';' => Tok.Semi
+        '?' => Tok.Question
+        '.' => {
+            if c1 == '.' && c2 == '.' {
+                len = 3
+                Tok.Ellipsis
+            } else if c1 == '.' {
+                len = 2
+                Tok.DotDot
+            } else {
+                Tok.Dot
+            }
+        }
+        '#' => {
+            if c1 == '!' {
+                len = 2
+                Tok.HashBang
+            } else {
+                Tok.Hash
+            }
+        }
+        '=' => {
+            if c1 == '>' {
+                len = 2
+                Tok.FatArrow
+            } else if c1 == '=' {
+                len = 2
+                Tok.EqEq
+            } else {
+                Tok.Assign
+            }
+        }
+        '!' => {
+            if c1 == '=' {
+                len = 2
+                Tok.NotEq
+            } else {
+                Tok.Bang
+            }
+        }
+        '<' => {
+            if c1 == '<' && c2 == '=' {
+                len = 3
+                op = Op.Shl
+                Tok.OpAssign
+            } else if c1 == '<' {
+                len = 2
+                Tok.Shl
+            } else if c1 == '=' {
+                len = 2
+                Tok.Le
+            } else {
+                Tok.Lt
+            }
+        }
+        '>' => {
+            if c1 == '>' && c2 == '=' {
+                len = 3
+                op = Op.Shr
+                Tok.OpAssign
+            } else if c1 == '>' {
+                len = 2
+                Tok.Shr
+            } else if c1 == '=' {
+                len = 2
+                Tok.Ge
+            } else {
+                Tok.Gt
+            }
+        }
+        '&' => {
+            if c1 == '&' {
+                len = 2
+                Tok.AndAnd
+            } else if c1 == '=' {
+                len = 2
+                op = Op.And
+                Tok.OpAssign
+            } else {
+                Tok.Amp
+            }
+        }
+        '|' => {
+            if c1 == '|' {
+                len = 2
+                Tok.OrOr
+            } else if c1 == '=' {
+                len = 2
+                op = Op.Or
+                Tok.OpAssign
+            } else {
+                Tok.Pipe
+            }
+        }
+        '^' => {
+            if c1 == '=' {
+                len = 2
+                op = Op.Xor
+                Tok.OpAssign
+            } else {
+                Tok.Caret
+            }
+        }
+        '+' => arith(c1, c2, Tok.Plus, Tok.PlusWrap, Op.Add, Op.AddWrap, &len, &op)
+        '-' => {
+            if c1 == '>' {
+                len = 2
+                Tok.Arrow
+            } else {
+                arith(c1, c2, Tok.Minus, Tok.MinusWrap, Op.Sub, Op.SubWrap, &len, &op)
+            }
+        }
+        '*' => arith(c1, c2, Tok.Star, Tok.StarWrap, Op.Mul, Op.MulWrap, &len, &op)
+        '/' => {
+            if c1 == '=' {
+                len = 2
+                op = Op.Div
+                Tok.OpAssign
+            } else {
+                Tok.Slash
+            }
+        }
+        '%' => {
+            if c1 == '=' {
+                len = 2
+                op = Op.Rem
+                Tok.OpAssign
+            } else {
+                Tok.Percent
+            }
+        }
+        _ => return 0
+    }
+    t.tok = tok
+    t.op = op
+    len
+}
+
+// `+`, `+%`, `+=`, `+%=` and the same for `-` and `*`.
+fn arith(c1: u8, c2: u8, plain: Tok, wrap: Tok, plain_op: Op, wrap_op: Op, inout len: i64, inout op: Op) -> Tok {
+    if c1 == '%' && c2 == '=' {
+        len = 3
+        op = wrap_op
+        Tok.OpAssign
+    } else if c1 == '%' {
+        len = 2
+        wrap
+    } else if c1 == '=' {
+        len = 2
+        op = plain_op
+        Tok.OpAssign
+    } else {
+        plain
+    }
+}
+
+// "unexpected character `c`", or the byte in hex when the next four bytes
+// (as many as there are) are not valid UTF-8.
+fn unexpected(src: str, i: i64) -> String {
+    var s = String.from("unexpected character `")
+    let window = src[i..min(i + 4, src.len)]
+    if valid_utf8(window) {
+        s.push_str(window[0..diag.utf8_at(window, 0)])
+    } else {
+        s.push_str("byte 0x")
+        s.push(hex_digit(src[i] >> 4))
+        s.push(hex_digit(src[i] & 15))
+    }
+    s.push_str("`")
+    s
+}
+
+fn valid_utf8(s: str) -> bool {
+    var i = 0
+    while i < s.len {
+        let n = diag.utf8_at(s, i)
+        if n < 0 {
+            return false
+        }
+        i += n
+    }
+    true
+}
+
+fn hex_digit(d: u8) -> u8 {
+    if d < 10 { '0' + d } else { 'a' + d - 10 }
+}
+
+fn hex_value(c: u8) -> i64 {
+    match c {
+        '0'..'9' => (c - '0') as i64
+        'a'..'z' => (c - 'a') as i64 + 10
+        'A'..'Z' => (c - 'A') as i64 + 10
+        _ => 99
+    }
+}
+
+fn escape(file: u32, src: str, inout i: i64) -> Result(u8, Diag) {
+    let start = i - 1
+    let c = at(src, i)
+    i += 1
+    let b: u8 = match c {
+        'n' => '\n'
+        't' => '\t'
+        'r' => '\r'
+        '0' => 0
+        '\\' => '\\'
+        '\'' => '\''
+        '"' => '"'
+        'x' => {
+            let a = hex_value(at(src, i))
+            let b = hex_value(at(src, i + 1))
+            if a >= 16 || b >= 16 {
+                return Err(Diag.new(Span.new(file, start, i), "`\\x` takes two hex digits"))
+            }
+            i += 2
+            (a * 16 + b) as u8
+        }
+        _ => return Err(Diag.new(Span.new(file, start, i), "unknown escape"))
+    }
+    Ok(b)
+}
+
+fn number(file: u32, src: str, inout i: i64, allow_float: bool, inout t: Token) -> Result((), Diag) {
+    let start = i
+    var radix: u64 = 10
+    if at(src, i) == '0' && at(src, i + 1) == 'x' {
+        radix = 16
+    } else if at(src, i) == '0' && at(src, i + 1) == 'b' {
+        radix = 2
+    } else if at(src, i) == '0' && at(src, i + 1) == 'o' {
+        radix = 8
+    }
+    if radix != 10 {
+        i += 2
+    }
+    var digits = String.new()
+    while (if radix == 10 { is_digit(at(src, i)) } else { is_alnum(at(src, i)) }) || at(src, i) == '_' {
+        if at(src, i) != '_' {
+            digits.push(at(src, i))
+        }
+        i += 1
+    }
+    var float = false
+    if allow_float && radix == 10 && at(src, i) == '.' && is_digit(at(src, i + 1)) {
+        float = true
+        digits.push('.')
+        i += 1
+        while is_digit(at(src, i)) || at(src, i) == '_' {
+            if at(src, i) != '_' {
+                digits.push(at(src, i))
+            }
+            i += 1
+        }
+    }
+    if allow_float && radix == 10 && (at(src, i) == 'e' || at(src, i) == 'E') {
+        var j = i + 1
+        if at(src, j) == '+' || at(src, j) == '-' {
+            j += 1
+        }
+        if is_digit(at(src, j)) {
+            float = true
+            digits.push('e')
+            digits.push_str(src[i + 1..j])
+            i = j
+            while is_digit(at(src, i)) {
+                digits.push(at(src, i))
+                i += 1
+            }
+        }
+    }
+    let span = Span.new(file, start, i)
+    if is_alnum(at(src, i)) || at(src, i) == '_' {
+        return Err(Diag.new(span, "malformed number"))
+    }
+    if float {
+        digits.push(0)
+        t.tok = Tok.Float
+        t.float = unsafe { libc.strtod(digits.as_str().ptr, null) }
+        return Ok(())
+    }
+    var v: u64 = 0
+    var ok = digits.len() > 0
+    for c in digits.as_str() {
+        let d = hex_value(c) as u64
+        if d >= radix || v > (0xffffffffffffffff - d) / radix {
+            ok = false
+            break
+        }
+        v = v * radix + d
+    }
+    if !ok {
+        return Err(Diag.new(span, "malformed or too large integer literal"))
+    }
+    t.tok = Tok.Int
+    t.int = v
+    Ok(())
+}

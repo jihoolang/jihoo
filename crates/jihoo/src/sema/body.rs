@@ -2990,9 +2990,14 @@ impl<'a> Sema<'a> {
             fb.term(Term::Switch { discr: Operand::Copy(Place::local(c)), targets: vec![(0, exit)], otherwise: bb });
             fb.switch_to(bb);
             fb.push_scope(false);
-            let ast::PatKind::Name(n, _) = &pat.kind else { return ty_err(pat.span, "a range loop binds one name") };
-            let x = fb.declare(n, t, false, VarKind::Owned, pat.span);
-            fb.assign(Place::local(x), Rvalue::Use(Operand::Copy(Place::local(i))), span);
+            match &pat.kind {
+                ast::PatKind::Name(n, _) => {
+                    let x = fb.declare(n, t, false, VarKind::Owned, pat.span);
+                    fb.assign(Place::local(x), Rvalue::Use(Operand::Copy(Place::local(i))), span);
+                }
+                ast::PatKind::Wild => {}
+                _ => return ty_err(pat.span, "a range loop binds one name"),
+            }
             if index.is_some() {
                 return ty_err(span, "a range loop has no separate index");
             }

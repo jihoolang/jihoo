@@ -31,7 +31,8 @@ Done ([design](redesign.md)):
 ## Next
 
 - **The compiler in jihoo.** The first goal after 0.1: port
-  `crates/jihoo` to jihoo, then build it with itself.
+  `crates/jihoo` to jihoo, then build it with itself
+  ([plan and progress](self-hosting.md)). The lexer is done.
 - **Compile-time evaluation**: an interpreter of MIR with the target's
   memory layout, for `const` items, `comptime` expressions and compile-time
   arguments beyond the arithmetic sema folds today.

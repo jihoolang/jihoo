@@ -28,9 +28,20 @@ fn main() {
     inout last = &v[2]
     last += 10
     println(v[2])
+    // a `ref` returned through `Option`: a reborrow of `index`'s result
+    match v.last() {
+        Some(x) => println(x)
+        None => {}
+    }
+    match v.first() {
+        Some(x) => println(x)
+        None => {}
+    }
 }
 //> 2
 //> hello
 //> abc
 //> 2
 //> 12
+//> 12
+//> 1

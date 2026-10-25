@@ -103,5 +103,6 @@ closures that borrow, and `comptime` closures that inline; `Option`,
 calls and atomics; the standard library, including running other
 programs.
 
-Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo,
+Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo
+([in progress](docs/internals/self-hosting.md): the lexer),
 compile-time evaluation, `derive`, dynamic dispatch, threads.

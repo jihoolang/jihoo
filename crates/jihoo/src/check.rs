@@ -512,7 +512,11 @@ fn check_term(types: &Types, body: &Body, t: &Term, active: &Bits, held: &[Bits]
                 }
                 let root = &body.locals[l.place.local as usize];
                 let through_param = root.kind == LocalKind::Arg && l.place.proj.first() == Some(&Proj::Deref);
-                if !through_param && !root_is_raw(types, body, &l.place) {
+                // A reborrow through a borrow (`&(*r)`, `r` from a call that
+                // returns `ref T`) holds the loans of `r` too, and those are
+                // checked here as well.
+                let reborrow = l.place.proj.first() == Some(&Proj::Deref) && types.is_ref(root.ty);
+                if !through_param && !reborrow && !root_is_raw(types, body, &l.place) {
                     return Err(Diag::new(l.span, &format!("the result borrows {}, which goes away when the function returns", name(body, &l.place))));
                 }
             }

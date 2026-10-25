@@ -1,0 +1,14 @@
+// A `ref` that a call returns, reborrowed into the result, still borrows the
+// local it came from.
+// error: `v` goes away here while it is still borrowed
+
+fn first_of_new(x: Vec(i64)) -> Option(ref i64) {
+    var v = x.clone()
+    v.push(1)
+    Some(v.index(0))
+}
+
+fn main() {
+    let w = Vec(i64).new()
+    let o = first_of_new(w)
+}

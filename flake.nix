@@ -19,6 +19,7 @@
           ./Cargo.toml
           ./Cargo.lock
           ./crates
+          ./compiler
           ./lib
           ./examples
           ./tests
