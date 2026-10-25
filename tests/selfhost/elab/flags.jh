@@ -1,0 +1,25 @@
+// A value moved on some paths: its drop checks a flag.
+fn take(sink s: String) {}
+
+fn make() -> String {
+    "x".to_string()
+}
+
+fn main() {
+    let a = "a".to_string()
+    let b = "b".to_string()
+    let c = make()
+    if a.len() > 0 {
+        take(a)
+    } else {
+        take(c)
+    }
+    var i = 0
+    while i < 2 {
+        if i == 1 {
+            take(b)
+            break
+        }
+        i += 1
+    }
+}

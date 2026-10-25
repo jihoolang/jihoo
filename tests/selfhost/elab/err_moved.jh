@@ -1,0 +1,7 @@
+fn take(sink s: String) {}
+
+fn main() {
+    let a = "a".to_string()
+    take(a)
+    take(a)
+}

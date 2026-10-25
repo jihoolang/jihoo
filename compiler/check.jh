@@ -1,0 +1,815 @@
+// The borrow kernel: exclusivity on MIR. The Rust compiler's `check.rs`.
+//
+// A borrow (`Ref`, `RefMut`) is a loan of a place, held by a local. Locals
+// of view types (borrows, `str`, slices, closures, `#[view]` structs) pass
+// their loans on when copied, moved, put in an aggregate or given to a call
+// that returns a view. A loan lasts while some local holding it is still
+// used later (liveness), so a borrow ends at its last use.
+//
+// While a mutable loan of a place lasts, nothing else may use the place;
+// while a shared loan lasts, nothing may change it. A place may not be
+// dropped or go out of scope while borrowed, and a function may return only
+// borrows of what its parameters point to.
+//
+// This pass trusts nothing sema decided about borrows; sema's own checks
+// give better messages, this one makes sure.
+
+import diag
+import elab
+import mir
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Types = types.Types
+type Place = mir.Place
+type Proj = mir.Proj
+type Operand = mir.Operand
+type Rvalue = mir.Rvalue
+type Stmt = mir.Stmt
+type Term = mir.Term
+type Body = mir.Body
+type LocalKind = mir.LocalKind
+
+struct Loan {
+    place: Place
+    mutable: bool
+    span: Span
+}
+
+// A set of locals or loans, 64 to a word.
+type Bits = Vec(u64)
+
+fn bits(n: i64) -> Bits {
+    var b = Vec(u64).new()
+    for _ in 0..n {
+        b.push(0)
+    }
+    b
+}
+
+fn set(inout b: Bits, i: i64) {
+    b[i / 64] = b[i / 64] | ((1 as u64) << ((i % 64) as u64))
+}
+
+fn clear(inout b: Bits, i: i64) {
+    b[i / 64] = b[i / 64] & !((1 as u64) << ((i % 64) as u64))
+}
+
+fn get(b: Bits, i: i64) -> bool {
+    (b[i / 64] >> ((i % 64) as u64)) & 1 == 1
+}
+
+fn union(inout a: Bits, b: Bits) -> bool {
+    var changed = false
+    for i in 0..a.len() {
+        let n = a[i] | b[i]
+        if n != a[i] {
+            a[i] = n
+            changed = true
+        }
+    }
+    changed
+}
+
+fn intersects(a: Bits, b: Bits) -> bool {
+    for i in 0..a.len() {
+        if a[i] & b[i] != 0 {
+            return true
+        }
+    }
+    false
+}
+
+enum Access {
+    Read
+    Write
+    // Going away: a drop or the end of its scope.
+    Dead
+}
+
+fn is_read(a: Access) -> bool {
+    match a {
+        Read => true
+        _ => false
+    }
+}
+
+fn no_span() -> Span {
+    Span.new(0, 0, 0)
+}
+
+fn starts_deref(p: Place) -> bool {
+    p.proj.len() > 0 && p.proj[0] == Proj.Deref
+}
+
+fn has_deref(p: Place) -> bool {
+    for x in p.proj {
+        if x == Proj.Deref {
+            return true
+        }
+    }
+    false
+}
+
+// What a check sees of the function, besides a statement.
+struct Ctx {
+    loans: Vec(Loan)
+    // The loans of each local at the point being checked.
+    held: Vec(Bits)
+    // The loans held by locals still used later.
+    active: Bits
+}
+
+pub fn run(t: Types, f: mir.Function) -> Result((), Diag) {
+    match f.body {
+        Some(body) => run_body(t, f, body)
+        None => Ok(())
+    }
+}
+
+fn run_body(t: Types, f: mir.Function, body: Body) -> Result((), Diag) {
+    let n = body.locals.len()
+    var w = (n + 63) / 64
+    if w == 0 {
+        w = 1
+    }
+    let nb = body.blocks.len()
+    let reach = reachable(body)
+
+    // ---- liveness: which locals are used later ----
+    var live_in = Vec(Bits).new()
+    for _ in 0..nb {
+        live_in.push(bits(w))
+    }
+    loop {
+        var changed = false
+        var b = nb
+        while b > 0 {
+            b -= 1
+            var live = bits(w)
+            for s in succs(body.blocks[b].term) {
+                union(&live, live_in[s as i64])
+            }
+            term_live(body.blocks[b].term, &live)
+            var i = body.blocks[b].stmts.len()
+            while i > 0 {
+                i -= 1
+                stmt_live(body.blocks[b].stmts[i], &live)
+            }
+            if union(&live_in[b], live) {
+                changed = true
+            }
+        }
+        if !changed {
+            break
+        }
+    }
+
+    // ---- loans: made at each `Ref`/`RefMut`, followed through views ----
+    var loans = Vec(Loan).new()
+    var loan_at = Vec(Vec(i64)).new()
+    for blk in body.blocks {
+        var at = Vec(i64).new()
+        for s in blk.stmts {
+            var made: Option(Loan) = None
+            match s {
+                Assign(_, r, sp) => match r {
+                    Ref(p) => made = Some(Loan { place: p.clone(), mutable: false, span: sp })
+                    RefMut(p) => made = Some(Loan { place: p.clone(), mutable: true, span: sp })
+                    _ => {}
+                }
+                _ => {}
+            }
+            match made {
+                Some(l) => {
+                    if has_deref(l.place) && root_is_raw(t, body, l.place) {
+                        // through a raw pointer: unsafe code's business
+                        at.push(-1)
+                    } else {
+                        at.push(loans.len())
+                        loans.push(l)
+                    }
+                }
+                None => at.push(-1)
+            }
+        }
+        loan_at.push(at)
+    }
+    if loans.len() == 0 {
+        return Ok(())
+    }
+    let lw = (loans.len() + 63) / 64
+    var is_view = Vec(bool).new()
+    for l in body.locals {
+        is_view.push(t.is_view(l.ty))
+    }
+    // rooted[l] = the loans of `l` itself: a value moved or copied out of
+    // `l` does not borrow `l`.
+    var rooted = Vec(Bits).new()
+    for _ in 0..n {
+        rooted.push(bits(lw))
+    }
+    for i, l in loans {
+        set(&rooted[l.place.local as i64], i)
+    }
+    let empty = Vec(Bits).new()
+    var none_held = Vec(Bits).new()
+    for _ in 0..n {
+        none_held.push(bits(lw))
+    }
+    // held_in[block][local] = loans the local holds at the block's start.
+    var held_in = Vec(Vec(Bits)).new()
+    var seen = Vec(bool).new()
+    for _ in 0..nb {
+        held_in.push(none_held.clone())
+        seen.push(false)
+    }
+    seen[0] = true
+    let lc = LoanCtx { is_view: is_view, rooted: rooted, lw: lw }
+    loop {
+        var changed = false
+        for b in 0..nb {
+            if !seen[b] {
+                continue
+            }
+            var held = held_in[b].clone()
+            for i, s in body.blocks[b].stmts {
+                stmt_loans(s, &held, lc, t, body, loan_at[b][i])
+            }
+            term_loans(body.blocks[b].term, &held, lc, t, body)
+            for s in succs(body.blocks[b].term) {
+                let s = s as i64
+                if !seen[s] {
+                    seen[s] = true
+                    changed = true
+                }
+                for l in 0..n {
+                    if union(&held_in[s][l], held[l]) {
+                        changed = true
+                    }
+                }
+            }
+        }
+        if !changed {
+            break
+        }
+    }
+
+    // ---- checking ----
+    var cx = Ctx { loans: loans, held: empty, active: bits(lw) }
+    for b in 0..nb {
+        if !reach[b] {
+            continue
+        }
+        // Liveness after each statement of the block.
+        let blk = body.blocks[b]
+        let ns = blk.stmts.len()
+        var after = Vec(Bits).new()
+        for _ in 0..ns + 1 {
+            after.push(bits(w))
+        }
+        var live = bits(w)
+        for s in succs(blk.term) {
+            union(&live, live_in[s as i64])
+        }
+        after[ns] = live.clone()
+        term_live(blk.term, &live)
+        var i = ns
+        while i > 0 {
+            i -= 1
+            after[i] = live.clone()
+            stmt_live(blk.stmts[i], &live)
+        }
+        cx.held = held_in[b].clone()
+        for i, s in blk.stmts {
+            cx.active = active_loans(cx.held, after[i], n, lw)
+            check_stmt(t, body, s, cx)?
+            stmt_loans(s, &cx.held, lc, t, body, loan_at[b][i])
+        }
+        cx.active = active_loans(cx.held, after[ns], n, lw)
+        check_term(t, body, blk.term, cx, f)?
+    }
+    Ok(())
+}
+
+// What following loans needs besides the held sets.
+struct LoanCtx {
+    is_view: Vec(bool)
+    rooted: Vec(Bits)
+    lw: i64
+}
+
+fn root_is_raw(t: Types, body: Body, p: Place) -> bool {
+    // A place reached through a raw pointer somewhere along its path.
+    var ty = body.locals[p.local as i64].ty
+    var variant: Option(u32) = None
+    for pr in p.proj {
+        match pr {
+            Deref => {
+                if t.is_ptr(ty) {
+                    return true
+                }
+                ty = t.pointee(ty).unwrap()
+            }
+            Variant(v) => variant = Some(v)
+            Field(i) => {
+                match variant {
+                    Some(v) => {
+                        ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]
+                        variant = None
+                    }
+                    None => match t.kind(ty) {
+                        Slice(_) | Str | Closure(_) => return true
+                        _ => ty = t.field_tys(ty)[i as i64]
+                    }
+                }
+            }
+            Index(_) => match t.kind(ty) {
+                Array(e, _) => ty = e
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+fn reachable(body: Body) -> Vec(bool) {
+    var r = Vec(bool).new()
+    for _ in 0..body.blocks.len() {
+        r.push(false)
+    }
+    var stack = Vec(i64).new()
+    stack.push(0)
+    while stack.len() > 0 {
+        let b = stack.pop().unwrap()
+        if r[b] {
+            continue
+        }
+        r[b] = true
+        for s in succs(body.blocks[b].term) {
+            stack.push(s as i64)
+        }
+    }
+    r
+}
+
+pub fn succs(t: Term) -> Vec(u32) {
+    var v = Vec(u32).new()
+    match t {
+        Goto(b) => v.push(b)
+        Switch(_, targets, otherwise) => {
+            for x in targets {
+                v.push(x.block)
+            }
+            v.push(otherwise)
+        }
+        Call(_, _, _, next, _) => v.push(next)
+        Assert(_, _, next, _) => v.push(next)
+        _ => {}
+    }
+    v
+}
+
+fn place_uses(p: Place, inout live: Bits) {
+    set(&live, p.local as i64)
+    for x in p.proj {
+        match x {
+            Index(l) => set(&live, l as i64)
+            _ => {}
+        }
+    }
+}
+
+fn op_uses(o: Operand, inout live: Bits) {
+    match o {
+        Copy(p) => place_uses(p, &live)
+        Move(p) => place_uses(p, &live)
+        Const(_) => {}
+    }
+}
+
+fn stmt_live(s: Stmt, inout live: Bits) {
+    match s {
+        Assign(p, r, _) => {
+            if p.proj.len() == 0 {
+                clear(&live, p.local as i64)
+            } else {
+                place_uses(p, &live)
+            }
+            for o in elab.rvalue_operands(r) {
+                op_uses(o, &live)
+            }
+            match elab.rvalue_place(r) {
+                Some(q) => place_uses(q, &live)
+                None => {}
+            }
+        }
+        Drop(p, _) => place_uses(p, &live)
+        _ => {}
+    }
+}
+
+fn callee_operand(c: mir.Callee) -> Option(Operand) {
+    match c {
+        Ptr(o) => Some(o.clone())
+        Closure(o) => Some(o.clone())
+        _ => None
+    }
+}
+
+fn term_live(t: Term, inout live: Bits) {
+    match t {
+        Switch(discr, _, _) => op_uses(discr, &live)
+        Return => set(&live, mir.RET as i64)
+        Call(callee, args, dest, _, _) => {
+            if dest.proj.len() == 0 {
+                clear(&live, dest.local as i64)
+            } else {
+                place_uses(dest, &live)
+            }
+            for a in args {
+                op_uses(a, &live)
+            }
+            match callee_operand(callee) {
+                Some(o) => op_uses(o, &live)
+                None => {}
+            }
+        }
+        Assert(cond, _, _, _) => op_uses(cond, &live)
+        _ => {}
+    }
+}
+
+// Whether the value at a place is a view. A value that is not (a number,
+// a raw pointer) borrows nothing, even when it is read through a borrow.
+fn place_is_view(t: Types, body: Body, p: Place) -> bool {
+    var ty = body.locals[p.local as i64].ty
+    var variant: Option(u32) = None
+    for pr in p.proj {
+        match pr {
+            Deref => match t.pointee(ty) {
+                Some(x) => ty = x
+                None => return true
+            }
+            Variant(v) => variant = Some(v)
+            Field(i) => {
+                match variant {
+                    Some(v) => {
+                        ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]
+                        variant = None
+                    }
+                    None => match t.kind(ty) {
+                        // a view's pointer and length
+                        Slice(_) | Str | Closure(_) => return false
+                        _ => ty = t.field_tys(ty)[i as i64]
+                    }
+                }
+            }
+            Index(_) => match t.kind(ty) {
+                Array(e, _) => ty = e
+                _ => {}
+            }
+        }
+    }
+    t.is_view(ty)
+}
+
+fn operand_place(o: Operand) -> Option(Place) {
+    match o {
+        Copy(p) => Some(p.clone())
+        Move(p) => Some(p.clone())
+        Const(_) => None
+    }
+}
+
+// The loans an operand carries: those of the local it reads, if a view,
+// but not the local's loans on itself.
+fn op_loans(o: Operand, held: Vec(Bits), lc: LoanCtx, t: Types, body: Body) -> Bits {
+    match operand_place(o) {
+        Some(p) => {
+            let l = p.local as i64
+            if (lc.is_view[l] || has_deref(p)) && place_is_view(t, body, p) {
+                var out = Vec(u64).new()
+                for i in 0..lc.lw {
+                    out.push(held[l][i] & !lc.rooted[l][i])
+                }
+                return out
+            }
+            bits(lc.lw)
+        }
+        None => bits(lc.lw)
+    }
+}
+
+fn stmt_loans(s: Stmt, inout held: Vec(Bits), lc: LoanCtx, t: Types, body: Body, new: i64) {
+    match s {
+        Assign(p, r, _) => {
+            var gained = bits(lc.lw)
+            let ops = elab.rvalue_operands(r)
+            for o in ops {
+                union(&gained, op_loans(o, held, lc, t, body))
+            }
+            var borrowed: Option(Place) = None
+            match r {
+                Ref(q) => borrowed = Some(q.clone())
+                RefMut(q) => borrowed = Some(q.clone())
+                _ => {}
+            }
+            match borrowed {
+                Some(q) => {
+                    // A reborrow through a borrow, or a borrow of a view (a
+                    // closure's environment), keeps the loans it holds too.
+                    if starts_deref(q) || lc.is_view[q.local as i64] {
+                        let h = held[q.local as i64].clone()
+                        union(&gained, h)
+                    }
+                }
+                None => {}
+            }
+            if new >= 0 {
+                set(&gained, new)
+            }
+            for o in ops {
+                match o {
+                    Move(m) => {
+                        if m.proj.len() == 0 {
+                            held[m.local as i64] = bits(lc.lw)
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let d = p.local as i64
+            if !lc.is_view[d] && !starts_deref(p) {
+                return
+            }
+            if p.proj.len() == 0 {
+                held[d] = gained
+            } else {
+                union(&held[d], gained)
+            }
+        }
+        StorageDead(l) => held[l as i64] = bits(lc.lw)
+        Forget(l) => held[l as i64] = bits(lc.lw)
+        _ => {}
+    }
+}
+
+// The locals a borrow `p` points into: what `p = &mut place` borrows, and
+// through a reborrow (`&mut (*r).f`), what `r` points into too. Only these
+// can receive what a call stores through the borrow; a local that merely
+// shares some loan with `p` (the iterator of an outer loop, whose element
+// the borrowed one came from) cannot. A borrow not made by a `&mut` in
+// this body falls back to every local that shares a loan with it.
+fn pointees(p: i64, held: Vec(Bits), body: Body, inout out: Vec(i64)) {
+    var found = false
+    for blk in body.blocks {
+        for s in blk.stmts {
+            match s {
+                Assign(d, r, _) => match r {
+                    RefMut(q) => {
+                        if d.local as i64 == p && d.proj.len() == 0 {
+                            found = true
+                            let r = q.local as i64
+                            if r != p && !contains(out, r) {
+                                out.push(r)
+                                if has_deref(q) {
+                                    pointees(r, held, body, &out)
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+    }
+    if !found {
+        for l in 0..held.len() {
+            if l != p && !contains(out, l) && intersects(held[p], held[l]) {
+                out.push(l)
+            }
+        }
+    }
+}
+
+fn contains(xs: Vec(i64), x: i64) -> bool {
+    for y in xs {
+        if y == x {
+            return true
+        }
+    }
+    false
+}
+
+fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body) {
+    match t {
+        Call(_, args, dest, _, _) => {
+            var all = bits(lc.lw)
+            for a in args {
+                union(&all, op_loans(a, held, lc, ts, body))
+            }
+            // What a call is given can end up in its `inout` arguments that
+            // are views (`v.push(s.as_str())` with `v: Vec(str)`).
+            for a in args {
+                match operand_place(a) {
+                    Some(p) => {
+                        if p.proj.len() == 0 {
+                            match ts.kind(body.locals[p.local as i64].ty) {
+                                RefMut(inner) => {
+                                    if ts.is_view(inner) {
+                                        // The loans go to whatever the borrow points to.
+                                        var targets = Vec(i64).new()
+                                        pointees(p.local as i64, held, body, &targets)
+                                        for l in targets {
+                                            union(&held[l], all)
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    None => {}
+                }
+            }
+            for a in args {
+                match a {
+                    Move(m) => {
+                        if m.proj.len() == 0 {
+                            held[m.local as i64] = bits(lc.lw)
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let d = dest.local as i64
+            if lc.is_view[d] {
+                if dest.proj.len() == 0 {
+                    held[d] = all
+                } else {
+                    union(&held[d], all)
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// Loans held by some local that is still used later.
+fn active_loans(held: Vec(Bits), live_after: Bits, n: i64, lw: i64) -> Bits {
+    var a = bits(lw)
+    for l in 0..n {
+        if get(live_after, l) {
+            union(&a, held[l])
+        }
+    }
+    a
+}
+
+// Whether two places may share memory.
+fn overlap(a: Place, b: Place) -> bool {
+    if a.local != b.local {
+        return false
+    }
+    var k = a.proj.len()
+    if b.proj.len() < k {
+        k = b.proj.len()
+    }
+    for i in 0..k {
+        match a.proj[i] {
+            Field(x) => match b.proj[i] {
+                Field(y) => {
+                    if x != y {
+                        return false
+                    }
+                }
+                _ => {}
+            }
+            Variant(x) => match b.proj[i] {
+                Variant(y) => {
+                    if x != y {
+                        return false
+                    }
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+fn name(body: Body, p: Place) -> String {
+    match body.locals[p.local as i64].name {
+        Some(n) => "`" + n.as_str() + "`"
+        None => String.from("a value")
+    }
+}
+
+fn conflict(body: Body, q: Place, access: Access, span: Span, cx: Ctx) -> Result((), Diag) {
+    let own = cx.held[q.local as i64]
+    for i, l in cx.loans {
+        if !get(cx.active, i) || get(own, i) {
+            continue
+        }
+        if !overlap(l.place, q) {
+            continue
+        }
+        // A borrow through a pointer does not borrow the pointer's own
+        // storage, which may go away or be given another pointer (the
+        // pointee's loans live on in the reborrow).
+        if !is_read(access) && starts_deref(l.place) && q.proj.len() == 0 {
+            continue
+        }
+        if !l.mutable && is_read(access) {
+            continue
+        }
+        let what = name(body, q)
+        let msg = match access {
+            Dead => what + " goes away here while it is still borrowed"
+            _ => if l.mutable { what + " is used here while it is borrowed mutably" } else { what + " is changed here while it is borrowed" }
+        }
+        return Err(Diag.new(span, msg.as_str()).note(Some(l.span), "the borrow starts here, and is used later"))
+    }
+    Ok(())
+}
+
+fn op_access(t: Types, body: Body, o: Operand, span: Span, cx: Ctx) -> Result((), Diag) {
+    match o {
+        Copy(p) => conflict(body, p, Access.Read, span, cx)
+        Move(p) => {
+            if p.proj.len() == 0 && t.is_ref(body.locals[p.local as i64].ty) {
+                return Ok(())
+            }
+            conflict(body, p, Access.Write, span, cx)
+        }
+        Const(_) => Ok(())
+    }
+}
+
+fn check_stmt(t: Types, body: Body, s: Stmt, cx: Ctx) -> Result((), Diag) {
+    match s {
+        Assign(p, r, span) => {
+            for o in elab.rvalue_operands(r) {
+                op_access(t, body, o, span, cx)?
+            }
+            match r {
+                Ref(q) => conflict(body, q, Access.Read, span, cx)?
+                Discriminant(q) => conflict(body, q, Access.Read, span, cx)?
+                RefMut(q) => conflict(body, q, Access.Write, span, cx)?
+                _ => {}
+            }
+            // Writing a place: not through the loans the written local holds.
+            let l = body.locals[p.local as i64]
+            if !(p.proj.len() == 0 && t.is_view(l.ty) && l.kind == LocalKind.Temp) {
+                conflict(body, p, Access.Write, span, cx)?
+            }
+        }
+        Drop(p, span) => conflict(body, p, Access.Dead, span, cx)?
+        StorageDead(l) => {
+            let span = body.locals[l as i64].span
+            conflict(body, Place.local(l), Access.Dead, span, cx)?
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn check_term(t: Types, body: Body, term: Term, cx: Ctx, f: mir.Function) -> Result((), Diag) {
+    match term {
+        Call(callee, args, _, _, span) => {
+            for a in args {
+                op_access(t, body, a, span, cx)?
+            }
+            match callee_operand(callee) {
+                Some(o) => op_access(t, body, o, span, cx)?
+                None => {}
+            }
+        }
+        Switch(discr, _, _) => op_access(t, body, discr, f.span, cx)?
+        Assert(cond, _, _, span) => op_access(t, body, cond, span, cx)?
+        Return => {
+            // What the result borrows must outlive the call: it is reached
+            // through a parameter.
+            for i, l in cx.loans {
+                if !get(cx.held[mir.RET as i64], i) {
+                    continue
+                }
+                let root = body.locals[l.place.local as i64]
+                let through_param = root.kind == LocalKind.Arg && starts_deref(l.place)
+                // A reborrow through a borrow (`&(*r)`, `r` from a call that
+                // returns `ref T`) holds the loans of `r` too, and those are
+                // checked here as well.
+                let reborrow = starts_deref(l.place) && t.is_ref(root.ty)
+                if !through_param && !reborrow && !root_is_raw(t, body, l.place) {
+                    return Err(Diag.new(l.span, ("the result borrows " + name(body, l.place).as_str() + ", which goes away when the function returns").as_str()))
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}

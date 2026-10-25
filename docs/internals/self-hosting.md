@@ -39,7 +39,7 @@ same way.
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
 | 4 | `types.jh`, `mir.jh`, `sema.jh`, `body.jh`, `pat.jh`, `builtins.jh` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | done |
-| 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
+| 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | done |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
 
@@ -52,8 +52,13 @@ the comparison ran on small programs in `tests/selfhost/sema/` compiled
 with `--no-prelude` (an option for this only, in both compilers), grown
 feature by feature; they stay, as tests of single features and of sema's
 errors. Now `emit-mir` agrees on every file in the repository, the
-standard library and `compiler/` included. Until elaboration is ported
-too, the comparison is of MIR before it (`JIHOO_NO_ELAB=1`).
+standard library and `compiler/` included.
+
+Elaboration and the borrow kernel (step 5) followed: `emit-mir` is now
+compared twice, before elaboration (`JIHOO_NO_ELAB=1`, which shows a
+difference in sema alone) and after it, with borrows checked, so the
+errors of `tests/fail` agree too. Inputs for drop flags and moved values
+are in `tests/selfhost/elab/`.
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
@@ -164,6 +169,14 @@ also found that a shift ignored the type its context expected:
 `let b: u8 = 1 << 3` was an error (`tests/run/int128.jh`).
 
 ## Known issues
+
+- A function returning `ref` whose last expression borrows one of its
+  locals (`fn first() -> ref i64 { let p = P { x: 1 }; p.x }`) gets
+  "`p` is used here after it was moved away" from elaboration: the
+  block's scope ends before the result is written. With `return p.x` the
+  borrow kernel says "`p` goes away here while it is still borrowed"
+  (`tests/fail/borrow_return_local_ref.jh`). Both compilers agree; the first
+  message should be the second.
 
 - Built at `-O0`, stage 1 needs more than 16 MiB of stack to reach the
   parser's depth limit (500 levels of nesting), since every temporary has

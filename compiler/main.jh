@@ -17,9 +17,11 @@ import mir
 import sema
 import body
 import builtins
+import check
+import elab
 import pat
 
-const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n  jihoo emit-mir <file.jh>       print MIR before elaboration\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
+const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n  jihoo emit-mir <file.jh>       print MIR\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
 
 fn main() {
     let args = env.args()
@@ -74,16 +76,28 @@ fn main() {
             Err(d) => fail(sources.render(d).as_str(), 1)
         }
     } else if cmd == "emit-mir" {
-        // MIR before elaboration: what `JIHOO_NO_ELAB=1` shows in the Rust
-        // compiler (elaboration and the borrow kernel are not ported yet).
+        // MIR checked and with drops elaborated; before elaboration with
+        // `JIHOO_NO_ELAB` set.
         var sources = diag.Sources.new()
         let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
             Ok(a) => a
             Err(d) => fail(sources.render(d).as_str(), 1)
         }
-        let prog = match sema.compile(a, tgt, true) {
+        var prog = match sema.compile(a, tgt, true) {
             Ok(p) => p
             Err(d) => fail(sources.render(d).as_str(), 1)
+        }
+        if env.get("JIHOO_NO_ELAB").is_none() {
+            for i in 0..prog.fns.len() {
+                match elab.run(&prog.fns[i]) {
+                    Ok(_) => {}
+                    Err(d) => fail(sources.render(d).as_str(), 1)
+                }
+                match check.run(prog.types, prog.fns[i]) {
+                    Ok(_) => {}
+                    Err(d) => fail(sources.render(d).as_str(), 1)
+                }
+            }
         }
         var out = String.new()
         for f in prog.fns {

@@ -8,8 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The commands both compilers have, which print what a pass makes. Each
-/// pass ported to jihoo adds its own.
-const COMMANDS: &[&[&str]] = &[&["emit-tokens"], &["emit-ast"], &["emit-program"], &["emit-mir"]];
+/// pass ported to jihoo adds its own. `emit-mir` runs twice: before
+/// elaboration (`JIHOO_NO_ELAB`), which shows sema's differences alone, and
+/// with drops elaborated and borrows checked.
+type Cmd = (&'static [&'static str], bool);
+const COMMANDS: &[Cmd] = &[(&["emit-tokens"], false), (&["emit-ast"], false), (&["emit-program"], false), (&["emit-mir"], true), (&["emit-mir"], false)];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -28,11 +31,15 @@ fn jihoo_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// What a command prints, both streams, and how it exits. Both compilers
 /// find the standard library through `JIHOO_PATH`, so they name its files
-/// the same way. `JIHOO_NO_ELAB` makes the Rust compiler print MIR before
-/// elaboration, which is as far as the compiler in jihoo goes yet.
-fn run(exe: &Path, args: &[String], file: &Path) -> String {
+/// the same way. `no_elab` sets `JIHOO_NO_ELAB`.
+fn run(exe: &Path, args: &[String], file: &Path, no_elab: bool) -> String {
     let lib = root().join("lib").canonicalize().unwrap();
-    let o = Command::new(exe).args(args).arg(file).env("JIHOO_PATH", lib).env("JIHOO_NO_ELAB", "1").current_dir(root()).output().unwrap();
+    let mut c = Command::new(exe);
+    c.args(args).arg(file).env("JIHOO_PATH", lib).env_remove("JIHOO_NO_ELAB").current_dir(root());
+    if no_elab {
+        c.env("JIHOO_NO_ELAB", "1");
+    }
+    let o = c.output().unwrap();
     format!("{}{}exit {:?}\n", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr), o.status.code())
 }
 
@@ -59,15 +66,16 @@ fn self_hosted_compiler_agrees() {
             .ok()
             .and_then(|s| s.lines().find_map(|l| l.trim_start().strip_prefix("// load-args:").map(|a| a.split_whitespace().map(String::from).collect())))
             .unwrap_or_default();
-        for cmd in COMMANDS {
+        for &(cmd, no_elab) in COMMANDS {
             let mut args: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
             if cmd[0] == "emit-program" || cmd[0] == "emit-mir" {
                 args.extend(load_args.iter().cloned());
             }
-            let want = run(&stage0, &args, rel);
-            let got = run(&stage1, &args, rel);
+            let want = run(&stage0, &args, rel, no_elab);
+            let got = run(&stage1, &args, rel, no_elab);
             if want != got {
-                failed.push(format!("{} {}:\n--- stage 0\n{}--- stage 1\n{}", cmd.join(" "), rel.display(), want, got));
+                let env = if no_elab { "JIHOO_NO_ELAB=1 " } else { "" };
+                failed.push(format!("{}{} {}:\n--- stage 0\n{}--- stage 1\n{}", env, cmd.join(" "), rel.display(), want, got));
             }
         }
     }

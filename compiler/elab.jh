@@ -1,0 +1,514 @@
+// Initialization: which locals hold a value at each point. Uses of a moved
+// value are errors; drops of moved values are removed; a value moved on
+// only some paths gets a flag, and its drop checks the flag. The Rust
+// compiler's `elab.rs`.
+
+import std.mem
+import diag
+import mir
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Place = mir.Place
+type Proj = mir.Proj
+type Operand = mir.Operand
+type Rvalue = mir.Rvalue
+type Const = mir.Const
+type Stmt = mir.Stmt
+type Term = mir.Term
+type Body = mir.Body
+
+enum St {
+    Uninit
+    Init
+    // Init on some paths, not on others.
+    Maybe
+    // Some parts moved out (only temporaries, which are then forgotten).
+    Partial
+    // Not reached yet.
+    Bottom
+}
+
+impl Eq for St {
+    fn eq(self, other: St) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+impl Clone for St {
+    fn clone(self) -> St {
+        self
+    }
+}
+
+fn join(a: St, b: St) -> St {
+    if a == St.Bottom {
+        return b
+    }
+    if b == St.Bottom || a == b {
+        return a
+    }
+    if a == St.Partial || b == St.Partial {
+        return St.Partial
+    }
+    St.Maybe
+}
+
+// A drop of a whole local, and the state of the local there.
+struct Edit {
+    block: i64
+    stmt: i64
+    st: St
+}
+
+// What a block passes to a successor.
+struct Out {
+    block: i64
+    st: Vec(St)
+}
+
+fn no_span() -> Span {
+    Span.new(0, 0, 0)
+}
+
+pub fn run(inout f: mir.Function) -> Result((), Diag) {
+    match &f.body {
+        Some(body) => run_body(&body)
+        None => Ok(())
+    }
+}
+
+fn run_body(inout body: Body) -> Result((), Diag) {
+    let n = body.locals.len()
+    let nb = body.blocks.len()
+    var entry = Vec(Vec(St)).new()
+    for _ in 0..nb {
+        entry.push(states(n, St.Bottom))
+    }
+    var init = states(n, St.Uninit)
+    for i, l in body.locals {
+        if l.kind == mir.LocalKind.Arg {
+            init[i] = St.Init
+        }
+    }
+    entry[0] = init
+    // Fixpoint over blocks.
+    var work = Vec(i64).new()
+    work.push(0)
+    var on = Vec(bool).new()
+    for _ in 0..nb {
+        on.push(false)
+    }
+    on[0] = true
+    while work.len() > 0 {
+        let b = work.pop().unwrap()
+        on[b] = false
+        var st = entry[b].clone()
+        for s in body.blocks[b].stmts {
+            transfer(&st, s, false, body)?
+        }
+        let out = term_transfer(&st, body.blocks[b].term, body, false)?
+        for o in out {
+            let succ = o.block
+            var changed = false
+            for i in 0..n {
+                let j = join(entry[succ][i], o.st[i])
+                if j != entry[succ][i] {
+                    entry[succ][i] = j
+                    changed = true
+                }
+            }
+            if changed && !on[succ] {
+                on[succ] = true
+                work.push(succ)
+            }
+        }
+    }
+    // Check uses, and find drops to remove or guard.
+    var flags = Vec(Option(u32)).new()
+    for _ in 0..n {
+        flags.push(None)
+    }
+    var edits = Vec(Edit).new()
+    for b in 0..nb {
+        var reached = b == 0
+        for s in entry[b] {
+            if s != St.Bottom {
+                reached = true
+            }
+        }
+        if !reached {
+            continue
+        }
+        var st = entry[b].clone()
+        for si, s in body.blocks[b].stmts {
+            match s {
+                Drop(p, _) => {
+                    if p.proj.len() == 0 {
+                        edits.push(Edit { block: b, stmt: si, st: st[p.local as i64] })
+                    }
+                }
+                _ => {}
+            }
+            transfer(&st, s, true, body)?
+        }
+        term_transfer(&st, body.blocks[b].term, body, true)?
+    }
+    for e in edits {
+        if e.st == St.Maybe {
+            let l = drop_local(body, e.block, e.stmt) as i64
+            if flags[l].is_none() {
+                let sp = body.locals[l].span
+                body.locals.push(mir.LocalDecl { ty: types.BOOL, name: None, span: sp, mutable: true, kind: mir.LocalKind.Temp })
+                flags[l] = Some((body.locals.len() - 1) as u32)
+            }
+        }
+    }
+    // Remove drops of values that are gone; guard the maybe ones.
+    var guarded = Vec(Edit).new()
+    for e in edits {
+        match e.st {
+            Uninit | Bottom => body.blocks[e.block].stmts[e.stmt] = Stmt.Nop
+            Maybe => guarded.push(Edit { block: e.block, stmt: e.stmt, st: e.st })
+            Partial => {
+                let span = match body.blocks[e.block].stmts[e.stmt] {
+                    Drop(_, sp) => sp
+                    _ => no_span()
+                }
+                return Err(Diag.new(span, "internal error: a value with parts moved out is dropped whole"))
+            }
+            Init => {}
+        }
+    }
+    var any = false
+    for f in flags {
+        if f.is_some() {
+            any = true
+        }
+    }
+    if any {
+        insert_flags(&body, flags)
+        // Split blocks at guarded drops, last first so indices stay valid.
+        // (Rust sorts the drops by block and statement; they were found in
+        // that order.)
+        var k = guarded.len()
+        while k > 0 {
+            k -= 1
+            let b = guarded[k].block
+            let si = guarded[k].stmt
+            let (p, sp) = match body.blocks[b].stmts[si] {
+                Drop(p, sp) => (p.clone(), sp)
+                _ => continue
+            }
+            let flag = flags[p.local as i64].unwrap()
+            var keep = Vec(Stmt).new()
+            var rest = Vec(Stmt).new()
+            var i = 0
+            for s in mem.replace(&body.blocks[b].stmts, Vec(Stmt).new()).into_iter() {
+                if i < si {
+                    keep.push(s)
+                } else if i > si {
+                    rest.push(s)
+                }
+                i += 1
+            }
+            body.blocks[b].stmts = keep
+            let term = mem.replace(&body.blocks[b].term, Term.Pending)
+            let cont = body.blocks.len() as u32
+            body.blocks.push(mir.Block { stmts: rest, term: term })
+            let drop_b = body.blocks.len() as u32
+            var ds = Vec(Stmt).new()
+            ds.push(Stmt.Drop(p.clone(), sp))
+            ds.push(Stmt.Assign(Place.local(flag), Rvalue.Use(Operand.Const(Const.Bool(false))), sp))
+            body.blocks.push(mir.Block { stmts: ds, term: Term.Goto(cont) })
+            var ts = Vec(mir.SwitchTarget).new()
+            ts.push(mir.SwitchTarget { value: 0, block: cont })
+            body.blocks[b].term = Term.Switch(Operand.Copy(Place.local(flag)), ts, drop_b)
+        }
+    }
+    Ok(())
+}
+
+fn states(n: i64, s: St) -> Vec(St) {
+    var v = Vec(St).new()
+    for _ in 0..n {
+        v.push(s)
+    }
+    v
+}
+
+fn drop_local(body: Body, b: i64, si: i64) -> u32 {
+    match body.blocks[b].stmts[si] {
+        Drop(p, _) => p.local
+        _ => panic("not a drop")
+    }
+}
+
+fn set_flag(f: u32, v: bool) -> Stmt {
+    Stmt.Assign(Place.local(f), Rvalue.Use(Operand.Const(Const.Bool(v))), no_span())
+}
+
+// A flag set at the start of a block, after a call.
+struct CallInit {
+    block: u32
+    flag: u32
+}
+
+// Sets each flag where its local gets or loses its value.
+fn insert_flags(inout body: Body, flags: Vec(Option(u32))) {
+    var call_inits = Vec(CallInit).new()
+    for b in 0..body.blocks.len() {
+        let old = mem.replace(&body.blocks[b].stmts, Vec(Stmt).new())
+        var new = Vec(Stmt).new()
+        for s in old.into_iter() {
+            let after = flag_updates(s, flags)
+            new.push(s)
+            for a in after.into_iter() {
+                new.push(a)
+            }
+        }
+        var pre = Vec(Stmt).new()
+        match body.blocks[b].term {
+            Call(_, args, dest, next, _) => {
+                for o in args {
+                    match o {
+                        Move(mp) => match flags[mp.local as i64] {
+                            Some(f) => pre.push(set_flag(f, false))
+                            None => {}
+                        }
+                        _ => {}
+                    }
+                }
+                if dest.proj.len() == 0 {
+                    match flags[dest.local as i64] {
+                        Some(f) => call_inits.push(CallInit { block: next, flag: f })
+                        None => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        // A moved argument's flag clears before the call.
+        for s in pre.into_iter() {
+            new.push(s)
+        }
+        body.blocks[b].stmts = new
+    }
+    for c in call_inits {
+        let b = c.block as i64
+        var stmts = Vec(Stmt).new()
+        stmts.push(set_flag(c.flag, true))
+        for s in mem.replace(&body.blocks[b].stmts, Vec(Stmt).new()).into_iter() {
+            stmts.push(s)
+        }
+        body.blocks[b].stmts = stmts
+    }
+    // Every flag starts false.
+    var pre = Vec(Stmt).new()
+    for f in flags {
+        match f {
+            Some(f) => pre.push(set_flag(f, false))
+            None => {}
+        }
+    }
+    for s in mem.replace(&body.blocks[0].stmts, Vec(Stmt).new()).into_iter() {
+        pre.push(s)
+    }
+    body.blocks[0].stmts = pre
+}
+
+// The flag changes a statement makes.
+fn flag_updates(s: Stmt, flags: Vec(Option(u32))) -> Vec(Stmt) {
+    var after = Vec(Stmt).new()
+    match s {
+        Assign(p, r, _) => {
+            for o in rvalue_operands(r) {
+                match o {
+                    Move(mp) => match flags[mp.local as i64] {
+                        Some(f) => after.push(set_flag(f, false))
+                        None => {}
+                    }
+                    _ => {}
+                }
+            }
+            if p.proj.len() == 0 {
+                match flags[p.local as i64] {
+                    Some(f) => after.push(set_flag(f, true))
+                    None => {}
+                }
+            }
+        }
+        Forget(l) => match flags[l as i64] {
+            Some(f) => after.push(set_flag(f, false))
+            None => {}
+        }
+        _ => {}
+    }
+    after
+}
+
+pub fn rvalue_operands(r: Rvalue) -> Vec(Operand) {
+    var v = Vec(Operand).new()
+    match r {
+        Use(o) => v.push(o.clone())
+        Un(_, o) => v.push(o.clone())
+        Cast(o, _, _) => v.push(o.clone())
+        Repeat(o, _) => v.push(o.clone())
+        Bin(_, a, b) => {
+            v.push(a.clone())
+            v.push(b.clone())
+        }
+        Offset(a, b) => {
+            v.push(a.clone())
+            v.push(b.clone())
+        }
+        Aggregate(_, os) => {
+            for o in os {
+                v.push(o.clone())
+            }
+        }
+        _ => {}
+    }
+    v
+}
+
+// The place `Ref`, `RefMut`, `Addr` or `Discriminant` reads, if any.
+pub fn rvalue_place(r: Rvalue) -> Option(Place) {
+    match r {
+        Ref(q) => Some(q.clone())
+        RefMut(q) => Some(q.clone())
+        Addr(q) => Some(q.clone())
+        Discriminant(q) => Some(q.clone())
+        _ => None
+    }
+}
+
+fn local_name(body: Body, l: u32) -> String {
+    match body.locals[l as i64].name {
+        Some(n) => "`" + n.as_str() + "`"
+        None => String.from("a value")
+    }
+}
+
+fn starts_deref(p: Place) -> bool {
+    p.proj.len() > 0 && p.proj[0] == Proj.Deref
+}
+
+// Checks that a place's root holds a value.
+fn use_place(st: Vec(St), p: Place, body: Body, span: Span, check: bool) -> Result((), Diag) {
+    if !check {
+        return Ok(())
+    }
+    match st[p.local as i64] {
+        Init | Bottom => Ok(())
+        Partial => {
+            if p.proj.len() > 0 && !starts_deref(p) {
+                return Ok(())
+            }
+            Err(moved_err(p, body, span))
+        }
+        Maybe => Err(Diag.new(span, (local_name(body, p.local) + " is used here, but it may have been moved away before").as_str()))
+        Uninit => Err(moved_err(p, body, span))
+    }
+}
+
+fn moved_err(p: Place, body: Body, span: Span) -> Diag {
+    var note = String.from("local _")
+    p.local.show(&note)
+    Diag.new(span, (local_name(body, p.local) + " is used here after it was moved away").as_str()).note(None, note.as_str())
+}
+
+fn op_transfer(inout st: Vec(St), o: Operand, body: Body, span: Span, check: bool) -> Result((), Diag) {
+    match o {
+        Copy(p) => {
+            use_place(st, p, body, span, check)?
+            for x in p.proj {
+                match x {
+                    Index(l) => use_place(st, Place.local(l), body, span, check)?
+                    _ => {}
+                }
+            }
+        }
+        Move(p) => {
+            use_place(st, p, body, span, check)?
+            if p.proj.len() == 0 {
+                st[p.local as i64] = St.Uninit
+            } else if !starts_deref(p) {
+                st[p.local as i64] = St.Partial
+            }
+        }
+        Const(_) => {}
+    }
+    Ok(())
+}
+
+fn transfer(inout st: Vec(St), s: Stmt, check: bool, body: Body) -> Result((), Diag) {
+    match s {
+        Assign(p, r, span) => {
+            for o in rvalue_operands(r) {
+                op_transfer(&st, o, body, span, check)?
+            }
+            match rvalue_place(r) {
+                Some(q) => use_place(st, q, body, span, check)?
+                None => {}
+            }
+            if p.proj.len() == 0 {
+                st[p.local as i64] = St.Init
+            } else {
+                // Writing a part: the whole must hold a value (or the write
+                // goes through a borrow).
+                let d = starts_deref(p)
+                let c = check && !d && st[p.local as i64] != St.Partial
+                use_place(st, Place.local(p.local), body, span, c)?
+                if d {
+                    use_place(st, Place.local(p.local), body, span, check)?
+                }
+            }
+        }
+        Drop(p, span) => {
+            if p.proj.len() > 0 {
+                use_place(st, p, body, span, check && st[p.local as i64] != St.Partial)?
+            }
+        }
+        Forget(l) => st[l as i64] = St.Uninit
+        StorageDead(l) => st[l as i64] = St.Uninit
+        StorageLive(l) => st[l as i64] = St.Uninit
+        Nop => {}
+    }
+    Ok(())
+}
+
+fn term_transfer(inout st: Vec(St), t: Term, body: Body, c: bool) -> Result(Vec(Out), Diag) {
+    var out = Vec(Out).new()
+    match t {
+        Goto(b) => out.push(Out { block: b as i64, st: st.clone() })
+        Switch(discr, targets, otherwise) => {
+            op_transfer(&st, discr, body, no_span(), c)?
+            for x in targets {
+                out.push(Out { block: x.block as i64, st: st.clone() })
+            }
+            out.push(Out { block: otherwise as i64, st: st.clone() })
+        }
+        Call(callee, args, dest, next, span) => {
+            for o in args {
+                op_transfer(&st, o, body, span, c)?
+            }
+            match callee {
+                Closure(o) => op_transfer(&st, o, body, span, c)?
+                Ptr(o) => op_transfer(&st, o, body, span, c)?
+                _ => {}
+            }
+            if dest.proj.len() == 0 {
+                st[dest.local as i64] = St.Init
+            }
+            out.push(Out { block: next as i64, st: st.clone() })
+        }
+        Assert(cond, _, next, span) => {
+            op_transfer(&st, cond, body, span, c)?
+            out.push(Out { block: next as i64, st: st.clone() })
+        }
+        _ => {}
+    }
+    Ok(out)
+}
