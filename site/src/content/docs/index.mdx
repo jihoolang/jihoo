@@ -1,9 +1,9 @@
 ---
 title: jihoo
-description: An easy programming language compiled through LLVM, with a garbage-collected VM, freestanding builds, compile-time evaluation and macros.
+description: A systems language as fast as C, memory-safe without lifetimes or a garbage collector.
 template: splash
 hero:
-  tagline: An easy language that goes all the way down. Everyday code compiles into a native program that frees its own memory and calls C; run it on a garbage-collected VM instead, or drop libc too and build a tiny static binary that talks to the kernel itself.
+  tagline: As fast as C, memory-safe without lifetimes. Every value has one owner, functions borrow their arguments, and a small checker makes sure nothing changes what is borrowed. No garbage collector, no reference counting, no annotations.
   actions:
     - text: Get started
       link: start/getting-started/
@@ -16,60 +16,61 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-```jihoo title="hello.jh — native by default: jihoo run hello.jh"
-fn greet(name: str) -> str {
-    return "Hello, " + name + "!"
+```jihoo title="hello.jh — jihoo run hello.jh"
+fn greet(name: str) -> String {
+    "Hello, " + name + "!"
 }
 
 fn main() {
-    print(greet("jihoo"))
+    println(greet("jihoo"))
 }
 ```
 
-```jihoo title="args.jh — calling C"
-import libc
+```jihoo title="borrowing: lend, lend to change, give away"
+fn total(xs: Vec(i64)) -> i64 { ... }          // reads, no copy
+fn add_one(inout xs: Vec(i64)) { ... }         // changes in place: add_one(&v)
+fn keep(sink xs: Vec(i64)) { ... }             // takes it
 
-fn main(argc: i32, argv: **u8) -> i64 {
-    libc.printf("%s got %d arguments\n", argv[0], argc - 1)
-    return 0
+for x in v {
+    v.push(x)      // error: `v` is changed here while it is borrowed
 }
 ```
 
-```jihoo title="tiny.jh — no libc, no GC: a 3 KB static binary"
+```jihoo title="tiny.jh — no libc: a static binary that talks to the kernel"
 #![freestanding]
 
-fn _start() -> i64 {
-    syscall(1, 1, "hi\n", 3)   // write(1, "hi\n", 3) on x86_64 Linux
-    return 0                   // exit(0)
+fn main() {
+    var v = Vec(i64).new()
+    v.push(42)
+    println(v[0])
 }
 ```
 
 <CardGrid>
-  <Card title="Three profiles, one IR" icon="seti:pipeline">
-    Programs are native: no GC, compiled by LLVM and linked with libc.
-    `#![hosted]` ones run on a VM with a garbage collector; `#![freestanding]`
-    ones have no libc either. All share one typed IR, and the test suite checks
-    that they agree.
+  <Card title="As fast as C" icon="rocket">
+    LLVM compiles every program, with no runtime and no hidden copies; on
+    the benchmarks jihoo matches C compiled by clang, with bounds checks on.
+    `inout` parameters cannot alias, so the compiler marks them `noalias`.
   </Card>
-  <Card title="Compile-time everything" icon="rocket">
-    `const`, `comptime` and array lengths run ordinary functions on the VM while
-    compiling, even for freestanding programs, and bake the results in.
+  <Card title="Safe without lifetimes" icon="approve-check">
+    Borrows are scoped to a function, so the compiler sees every one of them
+    and needs no annotations. A small checker, separate from the type
+    checker, enforces the rules on the compiler's IR.
   </Card>
-  <Card title="Macros are just functions" icon="puzzle">
-    A macro is a function that runs at compile time and returns code: an
-    expression, statements, or whole functions and types.
+  <Card title="Generics at compile time" icon="puzzle">
+    `comptime T: type` parameters, inferred at calls; traits with default
+    methods and generic impls; one copy of the code per instance.
   </Card>
-  <Card title="Generics and modules" icon="seti:folder">
-    `comptime T: type` parameters, generic structs like `Vec(T)`, and modules with
-    `import` and `pub`, including a small standard library.
+  <Card title="A library in the language" icon="seti:folder">
+    `Vec`, `String`, `Map`, `Box`, sorting and files are jihoo code over
+    `unsafe` pointers, and work with or without libc.
   </Card>
   <Card title="Down to the metal" icon="setting">
-    Raw pointers, arrays, inline asm and `syscall` for compiled code, C functions
-    through `extern fn` for native code, and an
-    arena allocator and `Vec(T)` written in jihoo itself.
+    Raw pointers, `static` globals, C functions, system calls and atomics in
+    `unsafe` code; x86_64 and aarch64 Linux.
   </Card>
   <Card title="Built with Nix" icon="seti:nix">
-    `nix run github:jihoo12/jihoo` gives you the whole toolchain: the VM, the LLVM
-    backend, the linkers and the standard library.
+    `nix run github:jihoo12/jihoo` gives you the compiler, clang, lld and the
+    standard library.
   </Card>
 </CardGrid>

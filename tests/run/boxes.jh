@@ -1,0 +1,46 @@
+enum Expr {
+    Num(i64)
+    Add(Box(Expr), Box(Expr))
+    Mul(Box(Expr), Box(Expr))
+}
+
+fn eval(e: Expr) -> i64 {
+    match e {
+        Num(n) => n
+        Add(a, b) => eval(a) + eval(b)
+        Mul(a, b) => eval(a) * eval(b)
+    }
+}
+
+fn num(n: i64) -> Box(Expr) {
+    Box.new(Expr.Num(n))
+}
+
+struct Node {
+    value: i64
+    next: Option(Box(Node))
+}
+
+fn length(n: Node) -> i64 {
+    match n.next {
+        Some(rest) => 1 + length(rest)
+        None => 1
+    }
+}
+
+fn main() {
+    let e = Expr.Add(num(2), Box.new(Expr.Mul(num(3), num(4))))
+    println(eval(e))
+    var list = Node { value: 1, next: None }
+    for i in 2..6 {
+        list = Node { value: i, next: Some(Box.new(list)) }
+    }
+    println(length(list))
+    println(list.value)
+    let b = Box.new(41)
+    println(*b + 1)
+}
+//> 14
+//> 5
+//> 5
+//> 42

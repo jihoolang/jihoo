@@ -1,0 +1,8 @@
+fn call(f: fn(), inout x: i64) {
+    f()
+}
+fn main() {
+    var n = 0
+    call(fn() { n += 1 }, &n)
+}
+// error: borrowed mutably

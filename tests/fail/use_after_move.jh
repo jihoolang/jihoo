@@ -1,0 +1,8 @@
+fn take(sink s: String) {}
+
+fn main() {
+    let s = String.from("x")
+    take(s)
+    println(s)
+}
+// error: after it was moved

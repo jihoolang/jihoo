@@ -1,0 +1,56 @@
+// Memory: allocation, and moving values in and out of places.
+
+import std.sys
+
+// Room for n values of type T, not initialized. Never null.
+pub unsafe fn alloc(comptime T: type, n: i64) -> *T {
+    if size_of(T) == 0 || n == 0 {
+        return align_of(T) as *T
+    }
+    sys.alloc_bytes(n * size_of(T)) as *T
+}
+
+pub unsafe fn realloc(comptime T: type, p: *T, old: i64, n: i64) -> *T {
+    if size_of(T) == 0 {
+        return p
+    }
+    if old == 0 {
+        return alloc(T, n)
+    }
+    sys.realloc_bytes(p as *u8, n * size_of(T)) as *T
+}
+
+pub unsafe fn dealloc(comptime T: type, p: *T, n: i64) {
+    if size_of(T) != 0 && n != 0 {
+        sys.free_bytes(p as *u8)
+    }
+}
+
+// Puts v in the place and returns what was there.
+pub fn replace(comptime T: type, inout place: T, sink v: T) -> T {
+    unsafe {
+        let old = read(&place)
+        write(&place, v)
+        old
+    }
+}
+
+pub fn swap(comptime T: type, inout a: T, inout b: T) {
+    unsafe {
+        let t = read(&a)
+        write(&a, read(&b))
+        write(&b, t)
+    }
+}
+
+// Takes the value out of a place, leaving the type's default.
+pub fn take(comptime T: Default, inout place: T) -> T {
+    replace(&place, T.default())
+}
+
+// Runs the destructor of the value at p.
+pub unsafe fn drop_at(comptime T: type, p: *T) {
+    if needs_drop(T) {
+        drop(read(p))
+    }
+}

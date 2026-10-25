@@ -1,0 +1,78 @@
+// The operating system, through libc.
+
+import std.libc
+
+pub fn write_fd(fd: i32, s: str) -> i64 {
+    var done = 0
+    while done < s.len {
+        let n = unsafe { libc.write(fd, s.ptr + done, s.len - done) }
+        if n <= 0 {
+            return -1
+        }
+        done += n
+    }
+    done
+}
+
+pub fn write_err(s: str) {
+    write_fd(2, s)
+}
+
+pub unsafe fn read_fd(fd: i32, buf: *u8, n: i64) -> i64 {
+    libc.read(fd, buf, n)
+}
+
+pub unsafe fn alloc_bytes(n: i64) -> *u8 {
+    let p = libc.malloc(n)
+    if p == null {
+        write_err("out of memory\n")
+        libc.abort()
+    }
+    p
+}
+
+pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
+    let q = libc.realloc(p, n)
+    if q == null {
+        write_err("out of memory\n")
+        libc.abort()
+    }
+    q
+}
+
+pub unsafe fn free_bytes(p: *u8) {
+    libc.free(p)
+}
+
+pub fn abort() -> never {
+    unsafe { libc.abort() }
+}
+
+pub fn exit(code: i32) -> never {
+    unsafe { libc.exit(code) }
+}
+
+// A path as a C string, for the system.
+fn c_path(path: str) -> Vec(u8) {
+    var v = Vec(u8).with_capacity(path.len + 1)
+    for b in path {
+        v.push(b)
+    }
+    v.push(0)
+    v
+}
+
+pub fn open_read(path: str) -> i32 {
+    let p = c_path(path)
+    unsafe { libc.open(p.ptr, 0, 0) }
+}
+
+pub fn open_write(path: str) -> i32 {
+    let p = c_path(path)
+    // O_WRONLY | O_CREAT | O_TRUNC
+    unsafe { libc.open(p.ptr, 0x241, 0o644) }
+}
+
+pub fn close(fd: i32) {
+    unsafe { libc.close(fd) }
+}

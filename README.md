@@ -1,159 +1,106 @@
 # jihoo
 
-An easy programming language with three profiles:
+A systems programming language that is as fast as C and memory-safe without
+lifetime annotations or a garbage collector.
 
-- **native** (default): no GC; compiled through LLVM into a normal program for
-  the operating system, linked with libc. Lists, strings and closures are freed
-  by the compiler; calls C directly (`extern fn`).
-- **hosted** (`#![hosted]`): runs on a VM with a garbage collector.
-- **freestanding** (`#![freestanding]`): no GC, no libc, raw syscalls. Compiled
-  through LLVM into tiny static binaries.
+- **Ownership without lifetimes.** Every value has one owner. Functions
+  borrow their arguments (`x: T`), borrow them to change them (`inout x: T`)
+  or take them (`sink x: T`). Borrows are scoped to a function body, so the
+  compiler sees all of them and needs no annotations.
+- **No hidden costs.** No GC, no reference counting, no implicit copies of
+  anything that owns memory: those move, and `.clone()` copies them.
+- **As fast as C.** Programs compile through LLVM; on the benchmarks they
+  match C compiled by clang, with bounds checks on.
+- **Generics at compile time**, as in Zig: `comptime T: type` parameters,
+  inferred at calls, with traits as bounds.
+- **A standard library written in jihoo** (`Vec`, `String`, `Map`, `Box`,
+  sorting, files), with or without libc.
 
-All three share one intermediate representation, JIR. Documentation lives at
-**<https://jihoo12.github.io/jihoo/>**, built from [docs/](docs) (contents in
-[docs/README.md](docs/README.md)) and [examples/](examples): the language one
-topic at a time, a reference (builtins, standard library, command line, and
-[JIR](docs/jir.md), the IR format), and how the implementation works.
+Documentation: **<https://jihoo12.github.io/jihoo/>**, built from
+[docs/](docs) and [examples/](examples).
 
 ```jihoo
-fn greet(name: str) -> str {
-    return "Hello, " + name + "!"
+enum Expr {
+    Num(i64)
+    Add(Box(Expr), Box(Expr))
+}
+
+fn eval(e: Expr) -> i64 {
+    match e {
+        Num(n) => n
+        Add(a, b) => eval(a) + eval(b)
+    }
 }
 
 fn main() {
-    print(greet("jihoo"))
+    var counts = Map(String, i64).new()
+    for w in "a b a".split(" ") {
+        match counts.get_mut(w) {
+            Some(n) => n += 1
+            None => {
+                counts.insert(w.to_string(), 1)
+            }
+        }
+    }
+    println(counts["a"])                                        // 2
+    println(eval(Expr.Add(Box.new(Expr.Num(2)), Box.new(Expr.Num(3)))))  // 5
 }
 ```
 
 ```jihoo
-import libc                  // native, the default: C is right there
-
-fn main(argc: i32, argv: **u8) -> i64 {
-    libc.printf("hello, %s\n", argv[0])
-    return 0
-}
-```
-
-```jihoo
-#![freestanding]
-import sys                   // lib/sys.x86_64.jh or lib/sys.aarch64.jh
-
-fn _start() -> i64 {
-    syscall(sys.WRITE, 1, "hi\n", 3)
-    return 0                 // exit(0)
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    for x in v {
+        v.push(x)   // error: `v` is changed here while it is borrowed
+    }
 }
 ```
 
 ## Install
 
-The whole toolchain (VM, LLVM backend, linker, standard library) is a Nix flake:
-
 ```sh
-nix run github:jihoo12/jihoo -- run hello.jh       # try it
-nix profile install github:jihoo12/jihoo           # install `jihoo`
+nix run github:jihoo12/jihoo -- run hello.jh     # try it
+nix profile install github:jihoo12/jihoo         # install `jihoo`
 ```
 
-Flake outputs: `packages.<system>.default` (the toolchain, also `jihoo`),
-`jihoo-frontend` (VM only), `jihoo-llc`, `overlays.default`, `apps.default`, and
-`checks` (`nix flake check` builds and runs examples with the packaged toolchain).
-Building the frontend runs the test suite, including the VM-vs-native
-differential tests.
+## Build from source
 
-## Getting started
-
-Everything comes from `flake.nix` (Rust toolchain, LLVM 21, CMake, lld).
+Everything comes from `flake.nix` (Rust, clang and lld from LLVM 21).
 
 ```sh
-nix develop                 # or `direnv allow`
-
-# frontend + VM
+nix develop
 cargo build
 cargo test
-
-# LLVM backend, which native programs (the default) need
-cmake -S backend-llvm -B backend-llvm/build -G Ninja
-cmake --build backend-llvm/build
-export JIHOO_LLC=$PWD/backend-llvm/build/jihoo-llc
-
 cargo run -- run examples/hello.jh
-cargo run -- run examples/native.jh -- a b; echo $?
-cargo run -- emit-ir examples/fib.jh
-
-# executables: a native program (linked with libc by `cc`) and a freestanding one
-mkdir -p out
-cargo run -- build examples/native.jh -o out/native && ./out/native a b; echo $?
-cargo run -- build examples/freestanding.jh -o out/hello && ./out/hello; echo $?
-```
-
-Or build the whole toolchain (`jihoo`, `jihoo-llc`, `ld.lld`) with Nix:
-
-```sh
-nix build
-./result/bin/jihoo run examples/hello.jh
+cargo run -- build examples/calc.jh -o calc && ./calc
+cargo run -- emit-mir examples/hello.jh
 ```
 
 ## Layout
 
-| path                   | language | what |
-|------------------------|----------|------|
-| `crates/jihoo-syntax`  | Rust     | lexer, parser, AST |
-| `crates/jihoo-sema`    | Rust     | type checking + lowering AST → JIR |
-| `crates/jihoo-ir`      | Rust     | JIR data types, text printer, verifier |
-| `crates/jihoo-vm`      | Rust     | register VM and GC heap |
-| `crates/jihoo-cli`     | Rust     | the `jihoo` command |
-| `backend-llvm`         | C++      | `jihoo-llc`: JIR text → LLVM → object file |
-| `lib`                  | jihoo    | the standard library (`prelude`, `strings`, `lists`, `maps`, `iters`, `meta`, `libc`, `alloc`, `io`, `coro`, `sync`, `thread`, `channel`) |
-| `docs`                 | Markdown | the documentation, one file per page of the website |
-| `site`                 | Astro    | the website ([site/README.md](site/README.md)) |
-| `tests/diff`           | jihoo    | programs that must behave the same on the VM and natively |
+| path | what |
+|------|------|
+| `crates/jihoo` | the compiler, in Rust: parser, type checker, MIR, borrow checker, LLVM IR writer |
+| `lib/std` | the standard library, in jihoo |
+| `tests/run`, `tests/fail` | programs and their expected output or error |
+| `examples` | example programs, which the website shows |
+| `docs` | the documentation, one Markdown file per page |
+| `site` | the website ([site/README.md](site/README.md)) |
 
 ## Status
 
-v0. In every profile: static types with local inference; `bool`, `i8`…`u64`
-and `f32`/`f64`, with exact float builtins (`sqrt`, `floor`, `round`, ...);
-structs, tuples, bounds-checked arrays and enums with `match`, `Option` and `Result`;
-`while` and `for` loops (over ranges, arrays, lists, strings and
-iterators); blocks as expressions; function values; tail calls, which never
-grow the stack; generic functions and structs, with inferred type arguments;
-traits with impls and bounds (`comptime T: Ord`),
-associated types and supertraits, and the standard traits `Ord`, `Hash` and
-`Show`, which `meta.derive!` writes, and `Iterator`, which `for` walks;
-modules with private items and fields; contracts (`requires`, `ensures`),
-checked at run time and tried while compiling with made-up inputs, the
-smallest that breaks one becoming a compile error; `nocopy` functions, which
-natively must copy no list, string or closure, with whatever they call;
-rewrite rules (`replaces`), which the compiler checks against what they
-replace before it uses them, and applies only where the code they move has
-no effects, or where the checks show that they call the functions they are
-given as the pattern does; compile-time evaluation (`const`,
-`comptime`) and macros, both run on the VM, with functions on code, `meta` to
-look inside code and `type_of` to ask its type.
+Version 0.1, a rewrite that broke compatibility with everything before it
+([why](docs/internals/redesign.md)). Native (libc) and freestanding (no
+libc, static) programs for x86_64 and aarch64 Linux.
 
-- **native and hosted:** `str` (bytes, slices, ordering), lists `[T]` with
-  `push` and `pop`, `print` and `read_line`, `ref` for recursive data, `cell`
-  for shared state, closures, tasks with channels and `select`; the program's
-  arguments (`args()`), whole files (`read_file`, `write_file`) and floats in
-  text (`parse_f64`); the `strings`, `lists`, `maps`, `iters` and `files`
-  libraries. Natively these are freed by the compiler (copies share memory, counted, until one is written) and
-  tasks are threads, which share no cells; on the VM a GC frees them and tasks
-  take turns on one thread.
-- **native and freestanding:** pointers, `syscall` and inline asm, for x86_64
-  and aarch64 Linux (`--target` builds for either, and modules can have one
-  file per target); closures passed to `comptime` parameters; functions C can
-  call (`export fn`); atomics; the `alloc`, `io`, `sys` and `sync` (futex
-  locks) libraries.
-- **native:** `print`; C functions through `extern fn` and the `libc` module,
-  structs passed to C by value, C files and libraries linked in; threads on
-  every core (`go`, and the `thread` library) and channels and `Select`
-  between them (the `channel` library); the `coro` library.
+Done: ownership with moves, destructors and drop flags; borrowing with
+parameter conventions, projections and views, checked by a separate borrow
+kernel; structs, enums, tuples, arrays, slices; `match` with exhaustiveness;
+generics with inference; traits with default methods and generic impls;
+closures that borrow, and `comptime` closures that inline; `Option`,
+`Result` and `?`; `unsafe` pointers, `static` globals, C functions, system
+calls and atomics; the standard library.
 
-See the [examples](examples) and the [roadmap](docs/internals/roadmap.md).
-
-```sh
-# differential tests: VM vs native
-JIHOO_LLC=$PWD/backend-llvm/build/jihoo-llc cargo test --test differential
-```
-
-## License
-
-Apache-2.0
+Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo,
+compile-time evaluation, `derive`, dynamic dispatch, threads.

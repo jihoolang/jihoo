@@ -1,0 +1,194 @@
+// Map(K, V): a hash map, with open addressing and linear probing.
+
+import std.mem
+
+pub struct Map(K: type, V: type) {
+    // Each slot: 0 empty, 1 full, 2 deleted.
+    state: Vec(u8)
+    keys: *K
+    vals: *V
+    cap: i64
+    len: i64
+    used: i64
+}
+
+impl(K: Hash + Eq, V: type) Map(K, V) {
+    pub fn new() -> Map(K, V) {
+        Map(K, V) { state: Vec(u8).new(), keys: null, vals: null, cap: 0, len: 0, used: 0 }
+    }
+
+    pub fn len(self) -> i64 {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    // The slot of the key, or -1.
+    fn find(self, k: K) -> i64 {
+        if self.cap == 0 {
+            return -1
+        }
+        let mask = self.cap - 1
+        var i = (k.hash() as i64) & mask
+        loop {
+            let s = self.state[i]
+            if s == 0 {
+                return -1
+            }
+            if s == 1 && unsafe { (*(self.keys + i)).eq(k) } {
+                return i
+            }
+            i = (i + 1) & mask
+        }
+    }
+
+    pub fn contains(self, k: K) -> bool {
+        self.find(k) >= 0
+    }
+
+    pub fn get(self, k: K) -> Option(ref V) {
+        let i = self.find(k)
+        if i < 0 {
+            return None
+        }
+        unsafe { Some(*(self.vals + i)) }
+    }
+
+    pub fn get_mut(inout self, k: K) -> Option(inout V) {
+        let i = self.find(k)
+        if i < 0 {
+            return None
+        }
+        unsafe { Some(*(self.vals + i)) }
+    }
+
+    pub fn index(self, k: K) -> ref V {
+        let i = self.find(k)
+        if i < 0 {
+            panic("key not in the map")
+        }
+        unsafe { *(self.vals + i) }
+    }
+
+    pub fn index_mut(inout self, k: K) -> inout V {
+        let i = self.find(k)
+        if i < 0 {
+            panic("key not in the map")
+        }
+        unsafe { *(self.vals + i) }
+    }
+
+    // Puts the value under the key; returns the one it replaces.
+    pub fn insert(inout self, sink k: K, sink v: V) -> Option(V) {
+        if (self.used + 1) * 4 > self.cap * 3 {
+            self.grow()
+        }
+        let mask = self.cap - 1
+        var i = (k.hash() as i64) & mask
+        var tomb = -1
+        loop {
+            let s = self.state[i]
+            if s == 0 {
+                break
+            }
+            if s == 2 && tomb < 0 {
+                tomb = i
+            }
+            if s == 1 && unsafe { (*(self.keys + i)).eq(k) } {
+                let old = unsafe { mem.replace(&*(self.vals + i), v) }
+                return Some(old)
+            }
+            i = (i + 1) & mask
+        }
+        if tomb >= 0 {
+            i = tomb
+        } else {
+            self.used += 1
+        }
+        self.state[i] = 1
+        unsafe {
+            write(self.keys + i, k)
+            write(self.vals + i, v)
+        }
+        self.len += 1
+        None
+    }
+
+    pub fn remove(inout self, k: K) -> Option(V) {
+        let i = self.find(k)
+        if i < 0 {
+            return None
+        }
+        self.state[i] = 2
+        self.len -= 1
+        unsafe {
+            mem.drop_at(K, self.keys + i)
+            Some(read(self.vals + i))
+        }
+    }
+
+    fn grow(inout self) {
+        let old_cap = self.cap
+        let old_state = mem.replace(&self.state, Vec.filled(if old_cap == 0 { 8 } else { old_cap * 2 }, 0 as u8))
+        let old_keys = self.keys
+        let old_vals = self.vals
+        self.cap = self.state.len()
+        unsafe {
+            self.keys = mem.alloc(K, self.cap)
+            self.vals = mem.alloc(V, self.cap)
+        }
+        self.len = 0
+        self.used = 0
+        let mask = self.cap - 1
+        for i in 0..old_cap {
+            if old_state[i] == 1 {
+                unsafe {
+                    let k = read(old_keys + i)
+                    var j = (k.hash() as i64) & mask
+                    while self.state[j] != 0 {
+                        j = (j + 1) & mask
+                    }
+                    self.state[j] = 1
+                    write(self.keys + j, k)
+                    write(self.vals + j, read(old_vals + i))
+                }
+                self.len += 1
+                self.used += 1
+            }
+        }
+        unsafe {
+            mem.dealloc(K, old_keys, old_cap)
+            mem.dealloc(V, old_vals, old_cap)
+        }
+    }
+
+    // The keys, in no particular order.
+    pub fn keys(self) -> Vec(ref K) {
+        var out = Vec(ref K).with_capacity(self.len)
+        for i in 0..self.cap {
+            if self.state[i] == 1 {
+                unsafe { out.push(*(self.keys + i)) }
+            }
+        }
+        out
+    }
+}
+
+impl(K: type, V: type) Drop for Map(K, V) {
+    fn drop(inout self) {
+        for i in 0..self.cap {
+            if self.state[i] == 1 {
+                unsafe {
+                    mem.drop_at(K, self.keys + i)
+                    mem.drop_at(V, self.vals + i)
+                }
+            }
+        }
+        unsafe {
+            mem.dealloc(K, self.keys, self.cap)
+            mem.dealloc(V, self.vals, self.cap)
+        }
+    }
+}

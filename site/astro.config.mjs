@@ -20,15 +20,8 @@ const sidebar = [
 // the exact origin and path; these defaults match github.com/jihoo12/jihoo.
 const base = process.env.BASE_PATH ?? '/jihoo';
 
-// Pages that moved: when the docs were split into one file per topic, and since.
-const moved = {
-  'language/structs-and-pointers': 'language/structs',
-  'language/enums-and-match': 'language/enums',
-  'internals/gc': 'internals/vm',
-  'internals/why-the-ir-is-a-text-file': 'internals/architecture',
-  // `[T]` lists took the name; the example is about linked lists made of refs.
-  'examples/lists': 'examples/linked_lists',
-};
+// Pages that moved. The 0.1 rewrite replaced every page, so none redirect.
+const moved = {};
 
 export default defineConfig({
   site: process.env.SITE_URL ?? 'https://jihoo12.github.io',
@@ -40,7 +33,7 @@ export default defineConfig({
     starlight({
       title: 'jihoo',
       description:
-        'An easy programming language with a garbage-collected VM, native and freestanding LLVM builds, compile-time evaluation and macros.',
+        'A systems language as fast as C, memory-safe without lifetimes or a garbage collector.',
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/jihoo12/jihoo' }],
       customCss: ['./src/styles/custom.css'],

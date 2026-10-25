@@ -1,0 +1,5 @@
+fn main() {
+    let p: *i64 = null
+    let x = *p
+}
+// error: `unsafe`

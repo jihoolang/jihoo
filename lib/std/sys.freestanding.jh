@@ -1,0 +1,142 @@
+// The operating system, through Linux system calls (no libc).
+
+import std.sysno
+
+pub fn write_fd(fd: i32, s: str) -> i64 {
+    var done = 0
+    while done < s.len {
+        let n = unsafe { syscall(sysno.WRITE, fd as i64, s.ptr + done, s.len - done) }
+        if n <= 0 {
+            return -1
+        }
+        done += n
+    }
+    done
+}
+
+pub fn write_err(s: str) {
+    write_fd(2, s)
+}
+
+pub unsafe fn read_fd(fd: i32, buf: *u8, n: i64) -> i64 {
+    syscall(sysno.READ, fd as i64, buf, n)
+}
+
+fn c_path(path: str) -> Vec(u8) {
+    var v = Vec(u8).with_capacity(path.len + 1)
+    for b in path {
+        v.push(b)
+    }
+    v.push(0)
+    v
+}
+
+// AT_FDCWD
+const CWD: i64 = -100
+
+pub fn open_read(path: str) -> i32 {
+    let p = c_path(path)
+    unsafe { syscall(sysno.OPENAT, CWD, p.ptr, 0, 0) as i32 }
+}
+
+pub fn open_write(path: str) -> i32 {
+    let p = c_path(path)
+    unsafe { syscall(sysno.OPENAT, CWD, p.ptr, 0x241, 0o644) as i32 }
+}
+
+pub fn close(fd: i32) {
+    unsafe { syscall(sysno.CLOSE, fd as i64) }
+}
+
+pub fn exit(code: i32) -> never {
+    unsafe { syscall(sysno.EXIT_GROUP, code as i64) }
+    trap()
+}
+
+pub fn abort() -> never {
+    exit(134)
+}
+
+// ---- memory ----
+//
+// Blocks up to 2 KiB come from size classes (16, 32, ... 2048 bytes), each
+// with a list of free blocks, carved out of 1 MiB chunks; bigger ones are
+// mapped on their own. Each block's size class (or mapped size) is in the
+// 16 bytes before it.
+
+const CHUNK: i64 = 1048576
+
+static FREE: [*u8; 8] = zeroed([*u8; 8])
+static CUR: *u8 = null
+static END: *u8 = null
+
+unsafe fn map(n: i64) -> *u8 {
+    // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS
+    let p = syscall(sysno.MMAP, 0, n, 3, 0x22, -1, 0)
+    if p < 0 && p > -4096 {
+        write_err("out of memory\n")
+        abort()
+    }
+    p as *u8
+}
+
+fn class_of(n: i64) -> i64 {
+    var c = 0
+    var size = 16
+    while size < n {
+        size *= 2
+        c += 1
+    }
+    c
+}
+
+pub unsafe fn alloc_bytes(n: i64) -> *u8 {
+    let need = n + 16
+    if need > 2048 {
+        let total = (need + 4095) / 4096 * 4096
+        let p = map(total)
+        *(p as *i64) = total
+        return p + 16
+    }
+    let c = class_of(need)
+    let f = FREE[c]
+    if f != null {
+        FREE[c] = *(f as **u8)
+        return f
+    }
+    let size = 16 << c
+    if CUR == null || CUR + size > END {
+        CUR = map(CHUNK)
+        END = CUR + CHUNK
+    }
+    let b = CUR
+    CUR = b + size
+    *(b as *i64) = -1 - c
+    b + 16
+}
+
+pub unsafe fn free_bytes(p: *u8) {
+    if p == null {
+        return
+    }
+    let tag = *((p - 16) as *i64)
+    if tag >= 0 {
+        syscall(sysno.MUNMAP, p - 16, tag)
+        return
+    }
+    let c = -1 - tag
+    *(p as **u8) = FREE[c]
+    FREE[c] = p
+}
+
+pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
+    let tag = *((p - 16) as *i64)
+    let old = if tag >= 0 { tag - 16 } else { (16 << (-1 - tag)) - 16 }
+    if n <= old {
+        return p
+    }
+    let q = alloc_bytes(n)
+    mem_copy(q, p, old)
+    free_bytes(p)
+    q
+}

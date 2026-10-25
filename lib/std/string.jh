@@ -1,0 +1,265 @@
+// String: text, owned (UTF-8 bytes). A literal where a `String` is expected
+// borrows the literal's bytes; the first change copies them.
+
+import std.vec
+
+pub struct String {
+    bytes: Vec(u8)
+}
+
+impl String {
+    pub fn new() -> String {
+        String { bytes: Vec(u8).new() }
+    }
+
+    pub fn with_capacity(n: i64) -> String {
+        String { bytes: Vec(u8).with_capacity(n) }
+    }
+
+    // A `String` over bytes it does not own: a literal, or a `str` lent to
+    // a function that borrows a `String`. The first change copies them.
+    pub fn from_static(s: str) -> String {
+        String { bytes: Vec(u8) { ptr: s.ptr, len: s.len, cap: 0 } }
+    }
+
+    pub fn from(s: str) -> String {
+        var r = String.with_capacity(s.len)
+        r.push_str(s)
+        r
+    }
+
+    pub fn len(self) -> i64 {
+        self.bytes.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.bytes.len == 0
+    }
+
+    pub fn as_str(self) -> str {
+        unsafe { make_str(self.bytes.ptr, self.bytes.len) }
+    }
+
+    pub fn push(inout self, b: u8) {
+        self.bytes.push(b)
+    }
+
+    pub fn push_str(inout self, s: str) {
+        self.bytes.reserve(s.len)
+        unsafe {
+            mem_copy(self.bytes.ptr + self.bytes.len, s.ptr, s.len)
+        }
+        self.bytes.len += s.len
+    }
+
+    pub fn clear(inout self) {
+        self.bytes.clear()
+    }
+
+    pub fn add_assign(inout self, s: str) {
+        self.push_str(s)
+    }
+
+    pub fn add(sink self, s: str) -> String {
+        var r = self
+        r.push_str(s)
+        r
+    }
+
+    pub fn eq(self, other: str) -> bool {
+        self.as_str().eq(other)
+    }
+
+    pub fn into_bytes(sink self) -> Vec(u8) {
+        var s = self
+        s.bytes.reserve(0)
+        if s.bytes.cap == 0 && s.bytes.len > 0 {
+            s.bytes.reserve(1)
+        }
+        mem.replace(&s.bytes, Vec(u8).new())
+    }
+}
+
+impl Clone for String {
+    fn clone(self) -> String {
+        String.from(self.as_str())
+    }
+}
+
+impl Eq for String {
+    fn eq(self, other: String) -> bool {
+        self.as_str().eq(other.as_str())
+    }
+}
+
+impl Ord for String {
+    fn compare(self, other: String) -> Ordering {
+        self.as_str().compare(other.as_str())
+    }
+}
+
+impl Hash for String {
+    fn hash(self) -> u64 {
+        self.as_str().hash()
+    }
+}
+
+impl Show for String {
+    fn show(self, inout out: String) {
+        out.push_str(self.as_str())
+    }
+}
+
+impl Show for str {
+    fn show(self, inout out: String) {
+        out.push_str(self)
+    }
+}
+
+impl Show for bool {
+    fn show(self, inout out: String) {
+        out.push_str(if self { "true" } else { "false" })
+    }
+}
+
+impl(T: Int) Show for T {
+    fn show(self, inout out: String) {
+        var buf = [0 as u8; 24]
+        var i = 24
+        let neg = self < (0 as T)
+        // Work in u64 so that the most negative value is fine.
+        var n: u64 = if neg { 0 -% (self as i64) as u64 } else { self as u64 }
+        if n == 0 {
+            i -= 1
+            buf[i] = '0'
+        }
+        while n > 0 {
+            i -= 1
+            buf[i] = '0' + (n % 10) as u8
+            n = n / 10
+        }
+        if neg {
+            i -= 1
+            buf[i] = '-'
+        }
+        out.push_str(unsafe { make_str(&buf[i], 24 - i) })
+    }
+}
+
+impl str {
+    pub fn to_string(self) -> String {
+        String.from(self)
+    }
+
+    pub fn starts_with(self, p: str) -> bool {
+        self.len >= p.len && self[0..p.len] == p
+    }
+
+    pub fn ends_with(self, p: str) -> bool {
+        self.len >= p.len && self[self.len - p.len..] == p
+    }
+
+    // Where p first occurs.
+    pub fn find(self, p: str) -> Option(i64) {
+        if p.len > self.len {
+            return None
+        }
+        var i = 0
+        while i + p.len <= self.len {
+            if self[i..i + p.len] == p {
+                return Some(i)
+            }
+            i += 1
+        }
+        None
+    }
+
+    pub fn contains(self, p: str) -> bool {
+        self.find(p).is_some()
+    }
+
+    // Without spaces, tabs and newlines at either end.
+    pub fn trim(self) -> str {
+        var a = 0
+        var b = self.len
+        while a < b && is_space(self[a]) {
+            a += 1
+        }
+        while b > a && is_space(self[b - 1]) {
+            b -= 1
+        }
+        self[a..b]
+    }
+
+    // The parts between occurrences of a separator.
+    pub fn split(self, sep: str) -> Vec(str) {
+        var out = Vec(str).new()
+        var start = 0
+        var i = 0
+        while i + sep.len <= self.len {
+            if sep.len > 0 && self[i..i + sep.len] == sep {
+                out.push(self[start..i])
+                i += sep.len
+                start = i
+            } else {
+                i += 1
+            }
+        }
+        out.push(self[start..])
+        out
+    }
+
+    // The lines, without their newlines.
+    pub fn lines(self) -> Vec(str) {
+        var out = self.split("\n")
+        if out.len() > 0 && out[out.len() - 1].len == 0 {
+            out.pop()
+        }
+        out
+    }
+
+    // A decimal integer, with an optional sign.
+    pub fn parse_int(self) -> Option(i64) {
+        if self.len == 0 {
+            return None
+        }
+        var i = 0
+        var neg = false
+        if self[0] == '-' || self[0] == '+' {
+            neg = self[0] == '-'
+            i = 1
+        }
+        if i == self.len {
+            return None
+        }
+        var n: i64 = 0
+        while i < self.len {
+            let c = self[i]
+            if c < '0' || c > '9' {
+                return None
+            }
+            n = n *% 10 +% (c - '0') as i64
+            i += 1
+        }
+        Some(if neg { 0 -% n } else { n })
+    }
+
+    pub fn add(self, other: str) -> String {
+        var r = String.with_capacity(self.len + other.len)
+        r.push_str(self)
+        r.push_str(other)
+        r
+    }
+}
+
+pub fn is_space(b: u8) -> bool {
+    b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+pub fn is_digit(b: u8) -> bool {
+    b >= '0' && b <= '9'
+}
+
+pub fn is_alpha(b: u8) -> bool {
+    (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
+}

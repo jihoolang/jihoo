@@ -1,65 +1,101 @@
 # Architecture
 
-jihoo aims to be an easy language that can still go all the way down to bare
-syscalls. One surface language is lowered to one IR, JIR; that IR is either run
-by a VM or compiled by LLVM.
-
 ```text
-               ┌─────────────── Rust ───────────────┐      ┌──── C++ ─────┐
- source.jh ──► │ jihoo-syntax ─► jihoo-sema ──► JIR │ ──►  │  jihoo-llc   │ ──► .o ─┬─► cc + libc ──► program  (native)
-               │   (parse)      (typecheck    │    │ .jir │ (LLVM 21)    │         └─► ld.lld ─────► static ELF (freestanding)
-               │                 + lower)     ▼    │      └──────────────┘
-               │                           jihoo-vm│
-               └────────────────────────────────────┘
+source.jh ─► lex ─► parse ─► load ─► sema ─► MIR ─► elab ─► check ─► llvm ─► .ll ─► clang ─► program
 ```
 
-## Components
+The compiler is one Rust crate, `crates/jihoo`. It writes LLVM IR as text
+and runs `clang`, which optimizes it and links the program (with libc, or
+statically with `ld.lld` for freestanding programs). The Rust build does not
+link LLVM.
 
-| path | language | what |
-|------|----------|------|
-| `crates/jihoo-syntax` | Rust | lexer, parser, AST, and the module loader |
-| `crates/jihoo-sema` | Rust | type checking and lowering from the AST to JIR, compile-time evaluation, macros |
-| `crates/jihoo-ir` | Rust | JIR data types, the text printer and reader, layouts, the verifier |
-| `crates/jihoo-vm` | Rust | the register VM, its task scheduler and the GC heap |
-| `crates/jihoo-cli` | Rust | the `jihoo` command |
-| `backend-llvm` | C++ | `jihoo-llc`: JIR text → LLVM → object file |
-| `lib` | jihoo | the standard library |
-| `tests/diff` | jihoo | programs that must behave the same on the VM and natively |
-| `site` | Astro | this website |
+| file | what |
+|------|------|
+| `lex.rs`, `parse.rs`, `ast.rs` | tokens and the syntax tree; newlines end statements |
+| `load.rs` | finds and parses every imported module, picking per-target and per-profile files |
+| `types.rs` | interned types and their memory layout |
+| `sema/` | names, types, generic instances, and lowering to MIR |
+| `mir.rs` | the intermediate representation |
+| `elab.rs` | initialization: use after move, drop elaboration and drop flags |
+| `check.rs` | the borrow kernel: exclusivity and the lifetimes of views |
+| `llvm.rs` | MIR to LLVM IR text |
+| `main.rs` | the `jihoo` command |
 
-## A program's way through
+## Sema
 
-1. **Load** (`crates/jihoo-syntax/src/loader.rs`). The root file and every file
-   it imports, transitively, are parsed into one AST per module. Each file is
-   loaded once; positions carry a file number, so errors name the right file.
-   The target (x86_64 or aarch64 Linux) matters only here: `import a` prefers
-   `a.<target>.jh` to `a.jh`, so the rest of the compiler only ever sees the
-   target's files. The target is then recorded in the JIR for the backend.
-2. **Analyze** (`crates/jihoo-sema`). Item macros are expanded, then every
-   function is type checked and lowered to typed JIR in one pass, generic ones
-   once per instance. Constants, `comptime` expressions and macros run on the VM
-   along the way. See [Compiler](compiler.md).
-3. **Verify** (`crates/jihoo-ir/src/verify.rs`). The JIR module is checked on its
-   own: register types, operand types, terminators, and that the profile allows
-   every instruction. This catches frontend bugs before a backend sees them.
-4. **Run or compile.** A native module (the default) or a freestanding one is
-   printed as text, compiled by `jihoo-llc`
-   ([LLVM backend](llvm-backend.md)) and linked by `jihoo build` (which `jihoo run`
-   uses, then runs the result). A hosted module runs on the VM ([VM and GC](vm.md)).
+Sema checks and lowers in one pass per function instance. A generic
+function is checked per instance, with its compile-time arguments known, as
+in Zig: an instance is a declaration and its arguments, and calls make
+instances, which a queue lowers one by one. Every non-generic function of
+the program is lowered too, so it is checked even if nothing calls it.
 
-## Why the IR is a text file
+Names are looked up in local variables, then compile-time parameters, then
+the module, then the prelude's modules, then builtins. Methods are looked up
+in the type's impls, then in impls of traits; impl heads are matched against
+types to bind their parameters.
 
-The frontend (Rust) and the LLVM backend (C++) only talk through `.jir` files
-([JIR](../jir.md)). This keeps the IR an explicit, versioned contract
-([Versions](../jir.md#versions)), lets the backend be developed and tested on
-its own with hand-written `.jir` ([Testing](testing.md#backend-tests)), and
-keeps the Rust build free of LLVM. `jihoo` reads `.jir` files back too
-(`crates/jihoo-ir/src/parse.rs`), so a module written once can be run on the VM
-or built natively without its source.
+Sema decides how each value is used: a place in a value position moves (or
+copies, if plain); a place passed to a borrowed parameter is borrowed; an
+`inout` argument is borrowed mutably. It inserts a `Drop` for every owned
+local at the end of its scope, and at `return` and `break`.
 
-## Shared rules
+## MIR
 
-The typing rules of operators live once, in `crates/jihoo-ir/src/types.rs`, and
-are used both by the type checker and by the IR verifier, so the two cannot
-disagree. The C layout rules (`crates/jihoo-ir/src/layout.rs`) are recorded in
-JIR and checked again by the backend against the real target.
+A function is a control-flow graph over *places*: a local followed by
+fields, variant payloads, array indices and dereferences. Statements assign
+rvalues to places, mark locals live and dead, drop places, and forget
+locals whose parts were taken. Terminators jump, switch, call, assert and
+return. Every move, copy, borrow and drop is explicit, which is what the two
+checking passes read.
+
+`jihoo emit-mir file.jh` prints it.
+
+## Elaboration
+
+`elab.rs` follows which locals hold a value at every point. Using a local
+that may have been moved is an error; a drop of a moved local is removed;
+a local moved on some paths only gets a flag, and its drop checks it.
+
+## The borrow kernel
+
+`check.rs` does not trust sema. It finds every borrow in the MIR (a loan of
+a place, held by a local), follows loans through views (copies, aggregates,
+calls that return views, `inout` arguments that are views), and computes
+which locals are used later. A loan lasts while some local holding it is
+used later. Then it checks every access against the loans that last there:
+
+- a place borrowed mutably may not be used through anything else;
+- a place borrowed may not be changed, moved or dropped;
+- a returned view may only borrow what the parameters point to.
+
+The idea comes from proof checkers such as Horn: a large untrusted part
+(sema) produces something a small part checks in full, so a bug in the
+large part becomes a compile error and not a dangling pointer.
+
+## Code generation
+
+`llvm.rs` is simple on purpose:
+
+- every local is an `alloca`; `mem2reg` and SROA make registers of them;
+- fields are byte offsets, computed once in `types.rs`, which also lays out
+  enums (a tag, then each variant's fields);
+- aggregates are copied with `memcpy`, passed by pointer and returned
+  through `sret`;
+- borrowed parameters are pointers with `noalias` and `dereferenceable`
+  (`readonly` for shared borrows), which the borrow rules make true;
+- overflow checks use LLVM's `*.with.overflow` intrinsics, panics are cold
+  and `noreturn`;
+- destructors are glue functions per type: the `Drop` impl, then the parts.
+
+The C `main` stores `argc` and `argv` and calls the program's `main`; a
+freestanding program gets a `_start` in module-level assembly, and
+definitions of `memcpy`, `memmove`, `memset` and `memcmp`.
+
+## Written to be ported
+
+The compiler will be rewritten in jihoo, so the Rust follows rules that
+port line by line: data refers to other data by index (`TyId`, `Local`,
+`BlockId`, `FnId`), references are only parameters (except the syntax tree,
+which sema reads through one shared reference), and the code uses enums,
+`match`, `Vec`, `HashMap` and `String`, all of which the jihoo standard
+library has.

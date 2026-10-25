@@ -1,0 +1,37 @@
+fn parse_digit(c: u8) -> Option(i64) {
+    if c >= '0' && c <= '9' { Some((c - '0') as i64) } else { None }
+}
+
+fn parse(s: str) -> Result(i64, String) {
+    var n = 0
+    for c in s {
+        match parse_digit(c) {
+            Some(d) => n = n * 10 + d
+            None => return Err("not a digit")
+        }
+    }
+    Ok(n)
+}
+
+fn sum2(a: str, b: str) -> Result(i64, String) {
+    let x = parse(a)?
+    let y = parse(b)?
+    Ok(x + y)
+}
+
+fn main() {
+    println(parse("123").unwrap())
+    println(sum2("40", "2").unwrap())
+    match sum2("4x", "2") {
+        Ok(v) => println(v)
+        Err(e) => println(e)
+    }
+    let o: Option(i64) = None
+    println(o.unwrap_or(7))
+    println(parse_digit('5').is_some())
+}
+//> 123
+//> 42
+//> not a digit
+//> 7
+//> true

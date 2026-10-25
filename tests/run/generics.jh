@@ -1,0 +1,46 @@
+struct Pair(T: type) {
+    a: T
+    b: T
+}
+
+impl(T: Ord) Pair(T) {
+    fn larger(self) -> T {
+        if self.a > self.b { self.a.clone() } else { self.b.clone() }
+    }
+}
+
+fn biggest(comptime T: Ord, xs: [T]) -> T {
+    var m = xs[0].clone()
+    for x in xs {
+        if x > m {
+            m = x.clone()
+        }
+    }
+    m
+}
+
+fn sum(comptime N: i64, xs: [i64; N]) -> i64 {
+    var s = 0
+    for x in xs {
+        s += x
+    }
+    s
+}
+
+fn main() {
+    let p = Pair(i64) { a: 3, b: 9 }
+    println(p.larger())
+    let q = Pair(String) { a: "apple", b: "banana" }
+    println(q.larger())
+    let arr = [4, 8, 1, 7]
+    println(biggest(arr))
+    println(sum(arr))
+    println(max(2, 5))
+    println(size_of(Pair(i32)))
+}
+//> 9
+//> banana
+//> 8
+//> 20
+//> 5
+//> 8

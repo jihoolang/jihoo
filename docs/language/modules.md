@@ -1,141 +1,33 @@
 # Modules
 
-Every file is a module with its own namespace. `import` makes another module
-available under a short name, through which its public items are used.
+Each file is a module. `import a.b` loads `a/b.jh` and binds its last name,
+`b`; `import a.b as c` binds `c`. Modules are looked for next to the
+importing file, then in `-I` directories, `JIHOO_PATH`, and the standard
+library.
 
 ```jihoo
-#![freestanding]
-import alloc            // lib/alloc.jh
-import io as out        // lib/io.jh, used as `out`
+import std.fs
+import geometry as geo
 
-fn _start() -> i64 {
-    let arena = alloc.arena_new(1 << 20)
-    let v = alloc.vec_new(i64, &arena)
-    alloc.push(i64, &v, 42)
-    out.print_int(alloc.get(i64, &v, 0))
-    return 0
+fn main() {
+    let text = fs.read_file("input.txt").unwrap()
+    let p = geo.Point { x: 1, y: 2 }
 }
 ```
 
-## Using items of another module
+- Items are private to their module unless marked `pub`; struct fields
+  too.
+- The standard library's modules see each other's private items.
+- Imports may form cycles; items are checked when they are used, in any
+  order.
+- The prelude (`std/prelude.jh`) is seen by every module: `Option`,
+  `Result`, `Vec`, `String`, `Map`, `Box`, the standard traits, `print`,
+  `println`, `panic`, `sort`.
 
-Items of another module are always written `alias.item`: functions
-(`alloc.push(...)`), macros (`alias.m!(...)`), types (`alias.T`,
-`alias.Vec(i64)`), struct literals (`geo.Point { ... }`), enum variants
-(`geo.Shape.Empty`) and constants (`alloc.PROT_WRITE`). There is no way to
-import names unqualified.
+## Files per target and profile
 
-The one exception is the prelude, `lib/prelude.jh`: every module can name its
-public items, `Option` and `Result`, as if it declared them, unless it declares
-an item of the same name itself
-([Standard library](../reference/standard-library.md#prelude)).
-
-## Visibility
-
-Items are private to their module unless marked `pub`: `pub fn`, `pub struct`,
-`pub enum`, `pub const`, `pub macro`, `pub extern fn`, `pub export fn`. A `pub`
-enum's variants are public too. Using a private item from another module is an
-error that names it:
-
-```text
-error: main.jh:4:5: `alloc.helper` is private to module `alloc`
-```
-
-### Fields
-
-A struct's fields are private to its module too, even in a `pub` struct,
-unless they are marked `pub` themselves:
-
-```jihoo
-pub struct Account {
-    id: i64              // only this module reads, writes or names it
-    pub balance: i64     // every module does
-}
-
-pub fn open(id: i64) -> Account {
-    return Account { id: id, balance: 0 }
-}
-```
-
-Another module can read and assign `a.balance`, but not `a.id`, and it cannot
-build an `Account` with a literal, which would have to name `id`; it calls
-`open` instead. A struct pattern may name only public fields there, and `..`
-skips the others. So a module can keep what its structs hold to itself and
-change it later, as `alloc.Vec(T)` and `alloc.Arena` do with all of theirs: only
-`alloc` can change a Vec's length, so its bounds checks hold.
-
-A macro's code may use the private fields of the module the macro is defined
-in, wherever it is expanded, just as it may use that module's private items
-([Macros](macros.md#scope-and-hygiene)); code the caller passes to the macro may not.
-
-## Finding modules
-
-`import a.b` loads the file `a/b.jh` and names it `b`; `import a.b as c` names
-it `c`. The file is searched for, in order:
-
-1. next to the importing file,
-2. in the directories given with `-I`,
-3. in the directories listed in `JIHOO_PATH` (separated by `:`),
-4. in the standard library, `lib/` ([Standard library](../reference/standard-library.md)).
-
-Each file is loaded once, however many modules import it. Imports may be
-cyclic, since items are analyzed lazily; a file that imports itself is an
-error. Errors name the file they are in.
-
-## Per-target modules
-
-A program is built for one target, `x86_64` or `aarch64` Linux: the machine
-`jihoo` runs on, or the one given with `--target`
-([Command line](../reference/command-line.md#options)). In each directory,
-`import a.b` first looks for `a/b.<target>.jh`, then for `a/b.jh`. So code that
-differs between machines, such as syscall numbers or inline assembly, goes into
-one file per target, and only the target's file is ever read:
-
-```text
-lib/sys.x86_64.jh     pub const WRITE = 1
-lib/sys.aarch64.jh    pub const WRITE = 64
-```
-
-```jihoo
-#![freestanding]
-import sys              // lib/sys.x86_64.jh or lib/sys.aarch64.jh
-
-fn _start() -> i64 {
-    syscall(sys.WRITE, 1, "hi\n", 3)
-    return 0
-}
-```
-
-The module is `sys` either way, and its items are `sys.WRITE`. The files for
-the targets should declare the same public items, since the code that imports
-them is the same; a `sys.jh` beside them is the one for every other target, or
-can say that a target is not supported.
-
-## Modules and profiles
-
-The root file — the one given to `jihoo` — chooses the [profile](profiles.md)
-for the whole program. Other modules may require one: a module marked
-`#![freestanding]` uses neither GC nor libc and can be imported by native and
-freestanding programs, and one marked `#![native]`, such as `libc`, only by
-native programs. A module without an attribute can be imported by any program.
-
-A module marked `#![comptime]`, such as [`meta`](../reference/standard-library.md#meta),
-is only for [macros](macros.md): its functions and types exist only while
-compiling, never in the program, so any program may import it, freestanding
-ones included, whatever it uses. So does a module that only such modules
-import: `meta` uses `strings`, which is not part of a program that imports
-`meta` unless the program imports `strings` too.
-
-## Generics across modules
-
-Inside a [generic](generics.md) function or struct, names resolve in the module
-that declares it, while type arguments can come from the caller:
-`alloc.Vec(Point)` holds the caller's `Point`, and `alloc.push(Point, &v, p)`
-works on it.
-
-## In JIR
-
-A module's items are prefixed with its name (`alloc.push`, `alloc.Vec(i64)`);
-the root module's items keep their plain names. Every function of every loaded
-module is in the JIR (generic ones once per instance); natively they are
-internal symbols, so LLVM drops the ones the program never calls.
+`import a` prefers, in order, `a.<target>.<profile>.jh`,
+`a.<profile>.jh`, `a.<target>.jh` and `a.jh`, where the target is `x86_64`
+or `aarch64` and the profile `native` or `freestanding`
+([Profiles](profiles.md)). This is how `std.sys` talks to libc in one
+profile and to the kernel in the other, with one interface.

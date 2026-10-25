@@ -1,0 +1,92 @@
+// Snippets from the documentation.
+static COUNTER: i64 = 0
+
+fn next_id() -> i64 {
+    unsafe {
+        COUNTER += 1
+        COUNTER
+    }
+}
+
+fn fill(comptime T: Plain, comptime N: i64, x: T) -> [T; N] {
+    [x; N]
+}
+
+fn each(xs: [i64], f: fn(i64)) {
+    for x in xs {
+        f(x)
+    }
+}
+
+enum State {
+    Running(i64)
+    Stopped
+}
+
+struct Point {
+    x: f64
+    y: f64
+}
+
+impl Point {
+    pub fn origin() -> Point { Point { x: 0.0, y: 0.0 } }
+    pub fn len(self) -> f64 { sqrt(self.x * self.x + self.y * self.y) }
+    pub fn scale(inout self, k: f64) { self.x *= k; self.y *= k }
+}
+
+fn parse_pair(a: str, b: str) -> Option(i64) {
+    Some(a.parse_int()? + b.parse_int()?)
+}
+
+fn main() {
+    next_id()
+    println(next_id())
+    let a = fill(u8, 4, 7)
+    println(a[3])
+    var total = 0
+    let numbers = [1, 2, 3]
+    each(numbers, fn(x) { total += x })
+    println(total)
+    var state = State.Running(1)
+    match &state {
+        Running(count) => count += 1
+        Stopped => {}
+    }
+    match state {
+        Running(c) => println(c)
+        Stopped => {}
+    }
+    var buf = [0; 4]
+    let p = &buf[0]
+    unsafe {
+        *p = 2
+        *(p + 3) = 5
+    }
+    println(buf[3])
+    var pt = Point.origin()
+    pt.x = 3.0
+    pt.y = 4.0
+    pt.scale(2.0)
+    println(pt.len() as i64)
+    println(parse_pair("4", "5").unwrap())
+    let b = Box.new(3)
+    let v: Vec(u8) = Vec.new()
+    println(*b + v.len())
+    var v2 = Vec(i64).new()
+    v2.push(1)
+    inout last = &v2[v2.len() - 1]
+    last += 1
+    println(v2[0])
+    let sign = if total < 0 { -1 } else { 1 }
+    println(sign)
+}
+//> 2
+//> 7
+//> 6
+//> 2
+//> 5
+//> 10
+//> 9
+//> 3
+//> 2
+//> 1

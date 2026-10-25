@@ -1,0 +1,39 @@
+struct Noisy {
+    name: i64
+}
+
+impl Drop for Noisy {
+    fn drop(inout self) {
+        println(self.name)
+    }
+}
+
+fn take(sink n: Noisy) {
+    println(100)
+}
+
+fn main() {
+    let a = Noisy { name: 1 }
+    let b = Noisy { name: 2 }
+    take(b)
+    {
+        let c = Noisy { name: 3 }
+    }
+    var v = Vec(Noisy).new()
+    v.push(Noisy { name: 4 })
+    v.push(Noisy { name: 5 })
+    if a.name == 1 {
+        let d = Noisy { name: 6 }
+        take(d)
+    }
+    println(0)
+}
+//> 100
+//> 2
+//> 3
+//> 100
+//> 6
+//> 0
+//> 4
+//> 5
+//> 1

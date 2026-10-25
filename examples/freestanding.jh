@@ -1,25 +1,17 @@
 #![freestanding]
-// Freestanding program: no GC, no std, compiled with LLVM to a tiny static binary.
-//   jihoo build examples/freestanding.jh -o out/hello && ./out/hello; echo $?
-//
-// Returning from `_start` exits the process with that value. `sys` holds the
-// syscall numbers of the machine it is built for (lib/sys.x86_64.jh or
-// lib/sys.aarch64.jh).
+// No libc: the standard library talks to Linux with system calls and has
+// its own allocator, and the program is a small static executable. The
+// same code builds for x86_64 and aarch64 (`--target`).
+//   jihoo build examples/freestanding.jh -o hello && ./hello
 
-import sys
-
-fn write(fd: i64, buf: *u8, len: i64) -> i64 {
-    return syscall(sys.WRITE, fd, buf, len)
-}
-
-fn fib(n: i64) -> i64 {
-    if n < 2 {
-        return n
+fn main() {
+    var v = Vec(i64).new()
+    for i in 1..101 {
+        v.push(i)
     }
-    return fib(n - 1) + fib(n - 2)
-}
-
-fn _start() -> i64 {
-    write(1, "Hello from freestanding jihoo!\n", 31)
-    return fib(10)
+    var sum = 0
+    for x in v {
+        sum += x
+    }
+    println(sum)
 }

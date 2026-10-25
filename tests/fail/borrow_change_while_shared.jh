@@ -1,0 +1,9 @@
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    let first = v[0]
+    let s = v.as_slice()
+    v.push(2)
+    println(s.len)
+}
+// error: changed here while it is borrowed

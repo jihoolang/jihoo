@@ -1,0 +1,5 @@
+fn f(p: i64) {
+    p += 1
+}
+fn main() {}
+// error: cannot be changed

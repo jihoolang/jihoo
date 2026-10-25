@@ -1,0 +1,23 @@
+// Printing and reading.
+
+import std.sys
+
+pub fn print(comptime T: Show, x: T) {
+    var s = String.new()
+    x.show(&s)
+    sys.write_fd(1, s.as_str())
+}
+
+pub fn println(comptime T: Show, x: T) {
+    var s = String.new()
+    x.show(&s)
+    s.push('\n')
+    sys.write_fd(1, s.as_str())
+}
+
+pub fn eprintln(comptime T: Show, x: T) {
+    var s = String.new()
+    x.show(&s)
+    s.push('\n')
+    sys.write_fd(2, s.as_str())
+}

@@ -1,0 +1,40 @@
+fn greet(name: str) -> String {
+    "Hello, " + name + "!"
+}
+
+fn main() {
+    let s = greet("jihoo")
+    println(s)
+    println(s.len())
+    var t = String.new()
+    for i in 0..3 {
+        t += "ab"
+        t.push('0' + i as u8)
+    }
+    println(t)
+    let lit: String = "static"
+    var u = lit.clone()
+    u.push_str("!")
+    println(lit)
+    println(u)
+    println("abc" == "abc")
+    println("abc" < "abd")
+    let part = s.as_str()[0..5]
+    println(part)
+    var n = 0
+    for b in "a b c" {
+        if b == ' ' {
+            n += 1
+        }
+    }
+    println(n)
+}
+//> Hello, jihoo!
+//> 13
+//> ab0ab1ab2
+//> static
+//> static!
+//> true
+//> true
+//> Hello
+//> 2

@@ -1,0 +1,53 @@
+struct Point {
+    x: i64
+    y: i64
+}
+
+impl Point {
+    fn new(x: i64, y: i64) -> Point {
+        Point { x, y }
+    }
+    fn norm2(self) -> i64 {
+        self.x * self.x + self.y * self.y
+    }
+    fn shift(inout self, d: i64) {
+        self.x += d
+        self.y += d
+    }
+}
+
+struct Line {
+    a: Point
+    b: Point
+}
+
+fn bump(inout p: Point) {
+    p.x += 100
+}
+
+fn main() {
+    var p = Point.new(3, 4)
+    println(p.norm2())
+    p.shift(1)
+    println(p.x)
+    bump(&p)
+    println(p.x)
+    var l = Line { a: p, b: Point { x: 0, y: 0 } }
+    l.a.y = 9
+    l.b.shift(2)
+    println(l.a.y + l.b.x)
+    let t = (1, "two", 3.5)
+    println(t.0)
+    println(t.1)
+    let (a, b, _) = t
+    println(a)
+    println(b)
+}
+//> 25
+//> 4
+//> 104
+//> 11
+//> 1
+//> two
+//> 1
+//> two

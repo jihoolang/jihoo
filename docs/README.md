@@ -10,70 +10,37 @@ same on GitHub.
 
 ### Basics
 
-- [Profiles](language/profiles.md)
+- [A tour](language/tour.md)
 - [Syntax](language/syntax.md)
-- [Variables and control flow](language/control-flow.md)
 - [Types](language/types.md)
-- [Operators](language/operators.md)
-- [Functions](language/functions.md)
 - [Modules](language/modules.md)
 
-### Data
+### Memory
 
-- [Structs](language/structs.md)
-- [Tuples](language/tuples.md)
-- [Arrays](language/arrays.md)
-- [Lists](language/lists.md)
-- [Copy-free functions](language/nocopy.md)
-- [Paths](language/paths.md)
-- [Enums](language/enums.md)
-- [Pattern matching](language/patterns.md)
-- [Equality](language/equality.md)
+- [Values and ownership](language/ownership.md)
+- [Borrowing](language/borrowing.md)
 
-### Functions as values
+### Data and code
 
-- [Function values](language/function-values.md)
+- [Structs, enums and patterns](language/data.md)
+- [Generics and traits](language/generics.md)
 - [Closures](language/closures.md)
+- [Errors](language/errors.md)
 
-### Shared values and tasks
+### Down to the machine
 
-- [References](language/references.md)
-- [Cells](language/cells.md)
-- [Tasks and channels](language/tasks-and-channels.md)
-
-### Compile time
-
-- [Compile-time evaluation](language/compile-time-evaluation.md)
-- [Contracts](language/contracts.md)
-- [Rewrite rules](language/rules.md)
-- [Generics](language/generics.md)
-- [Traits](language/traits.md)
-- [Macros](language/macros.md)
-
-### Native and freestanding
-
-- [Pointers](language/pointers.md)
-- [Calling C](language/calling-c.md)
-- [Inline assembly](language/inline-assembly.md)
-- [Threads and atomics](language/threads.md)
+- [Unsafe code and C](language/unsafe.md)
+- [Profiles and targets](language/profiles.md)
 
 ## Reference
 
-- [Syntax summary](reference/syntax-summary.md)
-- [Builtins](reference/builtins.md)
 - [Standard library](reference/standard-library.md)
+- [Builtins](reference/builtins.md)
 - [Command line](reference/command-line.md)
-- [Limits](reference/limits.md)
-- [JIR](jir.md)
 
 ## Internals
 
 - [Architecture](internals/architecture.md)
-- [Compiler](internals/compiler.md)
-- [VM and GC](internals/vm.md)
-- [LLVM backend](internals/llvm-backend.md)
+- [Design: jihoo 0.1](internals/redesign.md)
 - [Testing](internals/testing.md)
-- [Design: code as data](internals/code-as-data.md)
-- [Design: traits](internals/traits.md)
-- [Design: native memory](internals/memory.md)
 - [Roadmap](internals/roadmap.md)

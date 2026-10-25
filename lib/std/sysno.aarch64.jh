@@ -1,0 +1,9 @@
+// Linux system call numbers on aarch64.
+
+pub const READ: i64 = 63
+pub const WRITE: i64 = 64
+pub const CLOSE: i64 = 57
+pub const MMAP: i64 = 222
+pub const MUNMAP: i64 = 215
+pub const OPENAT: i64 = 56
+pub const EXIT_GROUP: i64 = 94

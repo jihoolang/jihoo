@@ -1,0 +1,30 @@
+#![freestanding]
+// No libc: the standard library talks to Linux with system calls.
+
+import std.env
+
+fn main() -> i32 {
+    var v = Vec(String).new()
+    for i in 0..1000 {
+        v.push(i.to_string())
+    }
+    var m = Map(String, i64).new()
+    for s in v {
+        m.insert(s.clone(), s.len())
+    }
+    println(m["999"])
+    println(m.len())
+    var big = Vec(i64).with_capacity(100000)
+    for i in 0..100000 {
+        big.push(i)
+    }
+    println(big[99999])
+    println(env.args()[1])
+    7
+}
+// args: hello
+//> 3
+//> 1000
+//> 99999
+//> hello
+// exit: 7

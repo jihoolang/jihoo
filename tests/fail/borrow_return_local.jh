@@ -1,0 +1,6 @@
+fn name() -> str {
+    let s = String.from("temporary")
+    s.as_str()
+}
+fn main() {}
+// error: goes away

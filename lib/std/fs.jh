@@ -1,0 +1,39 @@
+// Files, whole.
+
+import std.sys
+
+// The whole file, or why it cannot be read.
+pub fn read_file(path: str) -> Result(String, String) {
+    let fd = sys.open_read(path)
+    if fd < 0 {
+        return Err("cannot open " + path)
+    }
+    var out = Vec(u8).new()
+    loop {
+        out.reserve(65536)
+        let n = unsafe { sys.read_fd(fd, out.ptr + out.len, out.cap - out.len) }
+        if n < 0 {
+            sys.close(fd)
+            return Err("cannot read " + path)
+        }
+        if n == 0 {
+            break
+        }
+        out.len += n
+    }
+    sys.close(fd)
+    Ok(String { bytes: out })
+}
+
+pub fn write_file(path: str, text: str) -> Result((), String) {
+    let fd = sys.open_write(path)
+    if fd < 0 {
+        return Err("cannot create " + path)
+    }
+    let n = sys.write_fd(fd, text)
+    sys.close(fd)
+    if n < 0 {
+        return Err("cannot write " + path)
+    }
+    Ok(())
+}

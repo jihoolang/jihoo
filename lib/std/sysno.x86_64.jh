@@ -1,0 +1,9 @@
+// Linux system call numbers on x86_64.
+
+pub const READ: i64 = 0
+pub const WRITE: i64 = 1
+pub const CLOSE: i64 = 3
+pub const MMAP: i64 = 9
+pub const MUNMAP: i64 = 11
+pub const OPENAT: i64 = 257
+pub const EXIT_GROUP: i64 = 231

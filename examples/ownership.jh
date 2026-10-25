@@ -1,0 +1,43 @@
+// Ownership without lifetimes. Every value has one owner; passing a value
+// lends it (read-only), `inout` lends it to be changed, and `sink` gives it
+// away. Values that own memory move instead of copying, and are freed when
+// their owner goes away: no garbage collector, no reference counts.
+//   jihoo run examples/ownership.jh
+
+struct Account {
+    owner: String
+    balance: i64
+}
+
+// Borrows the account to read it.
+fn report(a: Account) {
+    println(a.owner + ": " + a.balance.to_string())
+}
+
+// Borrows it to change it. The caller writes `&` to show that.
+fn deposit(inout a: Account, amount: i64) {
+    a.balance += amount
+}
+
+// Takes it: the caller's variable cannot be used afterwards.
+fn close(sink a: Account) -> i64 {
+    a.balance
+}
+
+fn main() {
+    var acc = Account { owner: "ada", balance: 10 }
+    report(acc)
+    deposit(&acc, 32)
+    report(acc)
+    let copy = acc.owner.clone()      // copies are written out
+    let total = close(acc)            // `acc` is gone from here on
+    println(copy + " closed with " + total.to_string())
+
+    // Borrows end where they are last used, and the compiler checks that
+    // nothing changes what is borrowed while it is.
+    var names = Vec(String).new()
+    names.push("x")
+    let first = names[0].clone()
+    names.push(first)
+    println(names.len())
+}

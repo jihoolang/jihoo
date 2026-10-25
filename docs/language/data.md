@@ -1,0 +1,95 @@
+# Structs, enums and patterns
+
+## Structs and tuples
+
+```jihoo
+struct Point {
+    x: f64
+    y: f64
+}
+
+let p = Point { x: 1.0, y: 2.0 }
+
+let t = (1, "two")
+println(t.1)
+```
+
+Fields are given by name; `Point { x, y }` takes them from variables of the
+same names. Fields are private to the module unless marked `pub`. Methods
+go in `impl` blocks:
+
+```jihoo
+impl Point {
+    pub fn origin() -> Point { Point { x: 0.0, y: 0.0 } }   // Point.origin()
+    pub fn len(self) -> f64 { sqrt(self.x * self.x + self.y * self.y) }
+    pub fn scale(inout self, k: f64) { self.x *= k; self.y *= k }
+}
+```
+
+Structs are laid out like C structs: fields in order, each at its natural
+alignment.
+
+## Enums
+
+Variants may carry values. A variant is written `Type.Variant`, or alone
+where the type is known; `Some`, `None`, `Ok` and `Err` always work alone.
+
+```jihoo
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+    Empty
+}
+
+let s = Shape.Circle(2.0)
+let n: Option(i64) = None
+```
+
+A recursive enum puts the inner value in a `Box`:
+`Add(Box(Expr), Box(Expr))`. A type that contains itself directly is an
+error.
+
+## `match`
+
+`match` tries the arms in order, and must cover every value; an arm that
+can never be reached is an error too.
+
+```jihoo
+match shape {
+    Circle(r) => 3.14 * r * r
+    Rect(w, h) if w == h => w * w
+    Rect(w, h) => w * h
+    Empty => 0.0
+}
+```
+
+Patterns are `_`, names, literals (integers, bytes, strings, `true`),
+ranges `1..=9`, alternatives `A | B` (which may not bind names), tuples,
+variants `Some(x)`, and structs `Point { x, y: 0.0 }` or `Point { x, .. }`.
+Patterns see through `Box`: `Add(Num(a), b)`.
+
+How bindings get their values:
+
+- On a new value (a call's result), bindings take its parts, moving them.
+- On a whole owned variable whose parts the arms bind, the same: the
+  variable is used up.
+- Otherwise bindings borrow (plain values are copied).
+- `match &x` borrows `x` mutably when it can change, so arms can change
+  what they bind.
+
+`let` destructures too, with a pattern that must always match:
+`let (a, b) = pair`.
+
+## Loops
+
+```jihoo
+for i in 0..n { ... }              // 0 up to n - 1
+for x in v { ... }                 // a Vec, slice, array or str, by element
+for i, x in v { ... }              // with the index
+while cond { ... }
+loop { ... break }
+```
+
+`for` borrows a collection and gives each element (borrowed, or copied if
+plain). A type with `next(inout self) -> Option(T)` is an iterator and is
+used up by the loop; a type with `iter()` gives one.

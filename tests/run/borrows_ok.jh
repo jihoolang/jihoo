@@ -1,0 +1,36 @@
+fn longest(a: str, b: str) -> str {
+    if a.len >= b.len { a } else { b }
+}
+
+fn first_word(s: str) -> str {
+    var i = 0
+    while i < s.len && s[i] != ' ' {
+        i += 1
+    }
+    s[0..i]
+}
+
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    v.push(v.len())
+    let n = v[0] + v[1]
+    v.push(n)
+    println(v[2])
+    let s = String.from("hello world")
+    let w = first_word(s.as_str())
+    println(w)
+    println(longest("ab", "abc"))
+    var words = Vec(str).new()
+    words.push(w)
+    words.push("x")
+    println(words.len())
+    inout last = &v[2]
+    last += 10
+    println(v[2])
+}
+//> 2
+//> hello
+//> abc
+//> 2
+//> 12

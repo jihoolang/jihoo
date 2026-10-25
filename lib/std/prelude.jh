@@ -1,0 +1,291 @@
+// The prelude: what every module sees without importing it. The modules it
+// imports with `pub import` are seen everywhere too.
+
+pub import std.mem
+pub import std.boxed
+pub import std.vec
+pub import std.string
+pub import std.io
+pub import std.map
+pub import std.sort
+
+pub enum Option(T: type) {
+    Some(T)
+    None
+}
+
+pub enum Result(T: type, E: type) {
+    Ok(T)
+    Err(E)
+}
+
+pub enum Ordering {
+    Less
+    Equal
+    Greater
+}
+
+// ---- traits ----
+
+// Runs when a value's owner goes away.
+pub trait Drop {
+    fn drop(inout self)
+}
+
+pub trait Clone {
+    fn clone(self) -> Self
+}
+
+pub trait Eq {
+    fn eq(self, other: Self) -> bool
+}
+
+pub trait Ord {
+    fn compare(self, other: Self) -> Ordering
+}
+
+pub trait Hash {
+    fn hash(self) -> u64
+}
+
+// Writes a value as text.
+pub trait Show {
+    fn show(self, inout out: String)
+
+    fn to_string(self) -> String {
+        var s = String.new()
+        self.show(&s)
+        s
+    }
+}
+
+pub trait Default {
+    fn default() -> Self
+}
+
+pub trait Iterator {
+    type Item
+    fn next(inout self) -> Option(Self.Item)
+}
+
+// Implemented by the compiler: values without owned memory (they copy),
+// integers, floats.
+pub trait Plain {}
+pub trait Int {}
+pub trait Signed {}
+pub trait Unsigned {}
+pub trait Float {}
+pub trait Number {}
+
+impl(T: Plain) Clone for T {
+    fn clone(self) -> T {
+        self
+    }
+}
+
+impl(T: Number) Eq for T {
+    fn eq(self, other: T) -> bool {
+        self == other
+    }
+}
+
+impl Eq for bool {
+    fn eq(self, other: bool) -> bool {
+        self == other
+    }
+}
+
+impl(T: Number) Ord for T {
+    fn compare(self, other: T) -> Ordering {
+        if self < other {
+            Ordering.Less
+        } else if self > other {
+            Ordering.Greater
+        } else {
+            Ordering.Equal
+        }
+    }
+}
+
+impl(T: Int) Hash for T {
+    fn hash(self) -> u64 {
+        // A 64-bit mix (from SplitMix64).
+        var x = self as u64
+        x = (x ^ (x >> 30)) *% 0xbf58476d1ce4e5b9
+        x = (x ^ (x >> 27)) *% 0x94d049bb133111eb
+        x ^ (x >> 31)
+    }
+}
+
+impl(T: Number) Default for T {
+    fn default() -> T {
+        0 as T
+    }
+}
+
+impl Default for bool {
+    fn default() -> bool {
+        false
+    }
+}
+
+impl Eq for str {
+    fn eq(self, other: str) -> bool {
+        if self.len != other.len {
+            return false
+        }
+        var i = 0
+        while i < self.len {
+            if self[i] != other[i] {
+                return false
+            }
+            i += 1
+        }
+        true
+    }
+}
+
+impl Ord for str {
+    fn compare(self, other: str) -> Ordering {
+        let n = if self.len < other.len { self.len } else { other.len }
+        var i = 0
+        while i < n {
+            if self[i] != other[i] {
+                return if self[i] < other[i] { Ordering.Less } else { Ordering.Greater }
+            }
+            i += 1
+        }
+        self.len.compare(other.len)
+    }
+}
+
+impl Hash for str {
+    fn hash(self) -> u64 {
+        // FNV-1a
+        var h: u64 = 0xcbf29ce484222325
+        for b in self {
+            h = (h ^ (b as u64)) *% 0x100000001b3
+        }
+        h
+    }
+}
+
+// ---- Option and Result ----
+
+impl(T: type) Option(T) {
+    pub fn is_some(self) -> bool {
+        match self {
+            Some(_) => true
+            None => false
+        }
+    }
+
+    pub fn is_none(self) -> bool {
+        !self.is_some()
+    }
+
+    pub fn unwrap(sink self) -> T {
+        match self {
+            Some(x) => x
+            None => panic("unwrap of None")
+        }
+    }
+
+    pub fn expect(sink self, msg: str) -> T {
+        match self {
+            Some(x) => x
+            None => panic(msg)
+        }
+    }
+
+    pub fn unwrap_or(sink self, sink other: T) -> T {
+        match self {
+            Some(x) => x
+            None => other
+        }
+    }
+}
+
+impl(T: type, E: type) Result(T, E) {
+    pub fn is_ok(self) -> bool {
+        match self {
+            Ok(_) => true
+            Err(_) => false
+        }
+    }
+
+    pub fn is_err(self) -> bool {
+        !self.is_ok()
+    }
+
+    pub fn unwrap(sink self) -> T {
+        match self {
+            Ok(x) => x
+            Err(_) => panic("unwrap of Err")
+        }
+    }
+
+    pub fn expect(sink self, msg: str) -> T {
+        match self {
+            Ok(x) => x
+            Err(_) => panic(msg)
+        }
+    }
+
+    pub fn ok(sink self) -> Option(T) {
+        match self {
+            Ok(x) => Some(x)
+            Err(_) => None
+        }
+    }
+}
+
+impl(T: Clone) Clone for Option(T) {
+    fn clone(self) -> Option(T) {
+        match self {
+            Some(x) => Some(x.clone())
+            None => None
+        }
+    }
+}
+
+impl(T: Eq) Eq for Option(T) {
+    fn eq(self, other: Option(T)) -> bool {
+        match self {
+            Some(a) => match other {
+                Some(b) => a.eq(b)
+                None => false
+            }
+            None => other.is_none()
+        }
+    }
+}
+
+// ---- stopping ----
+
+// Stops the program with a message.
+pub fn panic(msg: str) -> never {
+    sys.write_err("panic: ")
+    sys.write_err(msg)
+    sys.write_err("\n")
+    sys.abort()
+}
+
+pub fn assert(cond: bool, msg: str) {
+    if !cond {
+        panic(msg)
+    }
+}
+
+// Drops a value now.
+pub fn drop(comptime T: type, sink x: T) {}
+
+pub fn min(comptime T: Ord, a: T, b: T) -> T {
+    if b < a { b.clone() } else { a.clone() }
+}
+
+pub fn max(comptime T: Ord, a: T, b: T) -> T {
+    if b > a { b.clone() } else { a.clone() }
+}
+
+import std.sys

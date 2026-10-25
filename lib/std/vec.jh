@@ -1,0 +1,264 @@
+// Vec(T): a growable array, owned.
+
+import std.mem
+
+pub struct Vec(T: type) {
+    ptr: *T
+    len: i64
+    cap: i64
+}
+
+impl(T: type) Vec(T) {
+    pub fn new() -> Vec(T) {
+        Vec(T) { ptr: null, len: 0, cap: 0 }
+    }
+
+    pub fn with_capacity(n: i64) -> Vec(T) {
+        var v = Vec(T).new()
+        v.reserve(n)
+        v
+    }
+
+    pub fn len(self) -> i64 {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    pub fn capacity(self) -> i64 {
+        self.cap
+    }
+
+    // Room for at least n more values.
+    pub fn reserve(inout self, n: i64) {
+        let need = self.len + n
+        if need <= self.cap {
+            return
+        }
+        var c = if self.cap == 0 { 4 } else { self.cap * 2 }
+        if c < need {
+            c = need
+        }
+        unsafe {
+            if self.cap == 0 && self.len > 0 {
+                // Borrowed bytes (a `String` from a literal): copy them.
+                let p = mem.alloc(T, c)
+                mem_copy(p, self.ptr, self.len)
+                self.ptr = p
+            } else {
+                self.ptr = mem.realloc(T, self.ptr, self.cap, c)
+            }
+        }
+        self.cap = c
+    }
+
+    pub fn push(inout self, sink x: T) {
+        if self.len == self.cap {
+            self.reserve(1)
+        }
+        unsafe {
+            write(self.ptr + self.len, x)
+        }
+        self.len += 1
+    }
+
+    pub fn pop(inout self) -> Option(T) {
+        if self.len == 0 {
+            return None
+        }
+        self.len -= 1
+        unsafe { Some(read(self.ptr + self.len)) }
+    }
+
+    pub fn index(self, i: i64) -> ref T {
+        // One unsigned comparison checks both ends.
+        if (i as u64) >= (self.len as u64) {
+            panic("index out of bounds")
+        }
+        unsafe { *(self.ptr + i) }
+    }
+
+    pub fn index_mut(inout self, i: i64) -> inout T {
+        if (i as u64) >= (self.len as u64) {
+            panic("index out of bounds")
+        }
+        unsafe { *(self.ptr + i) }
+    }
+
+    pub fn first(self) -> Option(ref T) {
+        if self.len == 0 { None } else { Some(self.index(0)) }
+    }
+
+    pub fn last(self) -> Option(ref T) {
+        if self.len == 0 { None } else { Some(self.index(self.len - 1)) }
+    }
+
+    pub fn as_slice(self) -> [T] {
+        unsafe { make_slice(self.ptr, self.len) }
+    }
+
+    pub fn insert(inout self, i: i64, sink x: T) {
+        if i < 0 || i > self.len {
+            panic("insert index out of bounds")
+        }
+        if self.len == self.cap {
+            self.reserve(1)
+        }
+        unsafe {
+            mem_copy(self.ptr + i + 1, self.ptr + i, self.len - i)
+            write(self.ptr + i, x)
+        }
+        self.len += 1
+    }
+
+    pub fn remove(inout self, i: i64) -> T {
+        if i < 0 || i >= self.len {
+            panic("remove index out of bounds")
+        }
+        unsafe {
+            let x = read(self.ptr + i)
+            mem_copy(self.ptr + i, self.ptr + i + 1, self.len - i - 1)
+            self.len -= 1
+            x
+        }
+    }
+
+    pub fn swap(inout self, i: i64, j: i64) {
+        if i < 0 || i >= self.len || j < 0 || j >= self.len {
+            panic("swap index out of bounds")
+        }
+        if i != j {
+            unsafe {
+                let t = read(self.ptr + i)
+                write(self.ptr + i, read(self.ptr + j))
+                write(self.ptr + j, t)
+            }
+        }
+    }
+
+    // Drops the values from n on.
+    pub fn truncate(inout self, n: i64) {
+        while self.len > n {
+            self.len -= 1
+            unsafe { mem.drop_at(T, self.ptr + self.len) }
+        }
+    }
+
+    pub fn clear(inout self) {
+        self.truncate(0)
+    }
+
+    pub fn extend(inout self, sink other: Vec(T)) {
+        self.reserve(other.len)
+        unsafe {
+            mem_copy(self.ptr + self.len, other.ptr, other.len)
+            self.len += other.len
+            mem.dealloc(T, other.ptr, other.cap)
+            forget(other)
+        }
+    }
+
+    pub fn reverse(inout self) {
+        var i = 0
+        var j = self.len - 1
+        while i < j {
+            self.swap(i, j)
+            i += 1
+            j -= 1
+        }
+    }
+
+    pub fn iter(self) -> Iter(T) {
+        Iter(T) { ptr: self.ptr, end: unsafe { self.ptr + self.len } }
+    }
+}
+
+// Borrows the values of a `Vec` or slice one by one.
+#[view]
+pub struct Iter(T: type) {
+    ptr: *T
+    end: *T
+}
+
+impl(T: type) Iterator for Iter(T) {
+    type Item = ref T
+
+    fn next(inout self) -> Option(ref T) {
+        if self.ptr == self.end {
+            return None
+        }
+        unsafe {
+            let p = self.ptr
+            self.ptr = self.ptr + 1
+            Some(*p)
+        }
+    }
+}
+
+impl(T: Clone) Vec(T) {
+    // n copies of x.
+    pub fn filled(n: i64, x: T) -> Vec(T) {
+        var v = Vec(T).with_capacity(n)
+        var i = 0
+        while i < n {
+            unsafe { write(v.ptr + i, x.clone()) }
+            i += 1
+        }
+        v.len = n
+        v
+    }
+
+    // Grows to n values with copies of x, or drops the values past n.
+    pub fn resize(inout self, n: i64, x: T) {
+        if n <= self.len {
+            self.truncate(n)
+            return
+        }
+        self.reserve(n - self.len)
+        while self.len < n {
+            unsafe { write(self.ptr + self.len, x.clone()) }
+            self.len += 1
+        }
+    }
+}
+
+impl(T: type) Drop for Vec(T) {
+    fn drop(inout self) {
+        if needs_drop(T) {
+            var i = 0
+            while i < self.len {
+                unsafe { mem.drop_at(T, self.ptr + i) }
+                i += 1
+            }
+        }
+        unsafe { mem.dealloc(T, self.ptr, self.cap) }
+    }
+}
+
+impl(T: Clone) Clone for Vec(T) {
+    fn clone(self) -> Vec(T) {
+        var v = Vec(T).with_capacity(self.len)
+        for x in self.as_slice() {
+            v.push(x.clone())
+        }
+        v
+    }
+}
+
+impl(T: Eq) Eq for Vec(T) {
+    fn eq(self, other: Vec(T)) -> bool {
+        if self.len != other.len {
+            return false
+        }
+        var i = 0
+        while i < self.len {
+            if !self[i].eq(other[i]) {
+                return false
+            }
+            i += 1
+        }
+        true
+    }
+}

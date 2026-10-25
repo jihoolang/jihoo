@@ -1,0 +1,69 @@
+// Sorting, in place.
+
+// Sorts by `<`: a merge sort for long runs, insertion sort for short ones.
+// Stable.
+pub fn sort(comptime T: Ord, inout xs: Vec(T)) {
+    sort_by(&xs, fn(a: T, b: T) -> bool { a < b })
+}
+
+// Sorts by a function saying whether its first argument goes first.
+pub fn sort_by(comptime T: type, inout xs: Vec(T), comptime less: fn(T, T) -> bool) {
+    let n = xs.len()
+    if n < 2 {
+        return
+    }
+    unsafe {
+        let a = xs.ptr
+        let tmp = mem.alloc(T, n)
+        merge_sort(T, a, tmp, n, less)
+        mem.dealloc(T, tmp, n)
+    }
+}
+
+unsafe fn merge_sort(comptime T: type, a: *T, tmp: *T, n: i64, comptime less: fn(T, T) -> bool) {
+    if n <= 16 {
+        // Insertion sort.
+        var i = 1
+        while i < n {
+            let x = read(a + i)
+            var j = i
+            while j > 0 && less(x, *(a + j - 1)) {
+                write(a + j, read(a + j - 1))
+                j -= 1
+            }
+            write(a + j, x)
+            i += 1
+        }
+        return
+    }
+    let h = n / 2
+    merge_sort(T, a, tmp, h, less)
+    merge_sort(T, a + h, tmp, n - h, less)
+    // Merge into tmp, then move back.
+    var i = 0
+    var j = h
+    var k = 0
+    while i < h && j < n {
+        if less(*(a + j), *(a + i)) {
+            write(tmp + k, read(a + j))
+            j += 1
+        } else {
+            write(tmp + k, read(a + i))
+            i += 1
+        }
+        k += 1
+    }
+    while i < h {
+        write(tmp + k, read(a + i))
+        i += 1
+        k += 1
+    }
+    while j < n {
+        write(tmp + k, read(a + j))
+        j += 1
+        k += 1
+    }
+    mem_copy(a, tmp, n)
+}
+
+import std.mem

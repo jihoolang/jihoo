@@ -1,265 +1,47 @@
 # Roadmap
 
-## Done
+## 0.1: the rewrite
 
-1. Type checker (static types with inference) and typed JIR.
-2. Differential tests across both backends.
-3. Sized integers, pointers with loads and stores, structs, arrays, `size_of`,
-   inline asm.
-4. `comptime` on the VM, generic functions.
-5. Expression macros, generic structs, bitwise operators, modules and an
-   `alloc` library, `pub`, statement and item macros, `unique`/`ident`.
-6. GC hardening (one root set, generation-checked references, stress mode);
-   function values.
-7. Sum types and `match`; `ref T` for recursive data; nested patterns, guards,
-   `|` patterns and `match` expressions.
-8. Closures, captured by value and lifted into functions.
-9. Tasks and channels on the VM: one OS thread, a deterministic scheduler;
-   `select`.
-10. Comptime closures: closures passed to `comptime` parameters, one instance
-    per closure, captured values as hidden arguments.
-11. Coroutines for freestanding code, as a library on top of function values
-    and `asm`.
-12. A native profile: LLVM-compiled programs for an OS, linked with libc,
-    calling C through `extern fn`.
-13. Floats: `f32` and `f64`, identical on the VM and natively, and across into
-    C.
-14. Targets: x86_64 and aarch64 Linux with `--target`, recorded in JIR;
-    per-target modules (`sys.x86_64.jh`); the standard library on both, with
-    coroutines on libc's contexts.
-15. Macro hygiene: a template's locals are its own, and its other names
-    resolve where the macro is defined.
-16. Field visibility: `pub` fields, also through macros.
-17. Float builtins, the same in every profile: `sqrt`, `floor`, `ceil`,
-    `trunc`, `round`, `abs`, `copysign`, and a float's bits (`to_bits`,
-    `from_bits`).
-18. `print` in native programs, with the VM's output to the byte.
-19. Structs by value to and from C, lowered per target (x86_64 System V,
-    AAPCS64), and `export fn` for functions C calls.
-20. A Rust-side JIR reader: `jihoo run file.jir`, `jihoo build file.jir`.
-21. A hosted standard library: strings as bytes with `len`, `s[i]`, slices
-    and ordering; lists `[T]` with `push` and `pop`, in place when unshared;
-    `read_line`; the prelude (`Option`, `Result`); `lib/strings.jh` and
-    `lib/lists.jh`. JIR version 5.
-22. `trap()` in every profile (JIR version 6), and a checked `alloc`: bounds
-    checks on `Vec`, traps on misuse, overflow-safe sizes, private fields,
-    `arena_free`.
-23. Threads and atomics (JIR version 7): `atomic_load`, `atomic_store`,
-    `atomic_swap`, `atomic_add` and the other read-modify-writes,
-    `atomic_cas` and `fence`, sequentially consistent; `lib/sync.jh`, futex
-    locks (`Mutex`, `Cond`, `Group`) for native and freestanding code;
-    `lib/thread.jh`, POSIX threads for native code; `lib/channel.jh`,
-    channels between threads with `close`, and `Select` over them (`send`
-    and `recv` are now names a module may take); `go f(x)` in native code,
-    starting a detached thread (JIR version 8); `channel.wait_ms`, a Select
-    with a timeout, and `thread.now_ns`.
-24. Memory safety without a GC or a borrow checker: paths
-    (`path(Root).a[_]`, `root[p]`, `path_index`), references that hold
-    indices instead of addresses; lists in native programs, freed by an
-    ownership pass over JIR that moves values at their last use, clones
-    them where the original is still used, reads parts as views, and makes
-    consuming versions of functions for `xs = f(xs)` (JIR version 9:
-    `clone` and `drop`). Checked by hosted-versus-native tests and a list
-    mode of the fuzzer, under valgrind.
-25. `str`, capturing closures, `ref`, `cell`, tasks, channels and `select` in
-    native programs, then native as the default profile: a program without an
-    attribute is native, `#![hosted]` asks for the VM, and `jihoo run`
-    compiles and runs native and freestanding programs. Native tasks are
-    threads and share no cells; `comptime` and macros still run on the VM.
-26. `for` loops in every profile: ranges `lo..hi`, and lists, arrays and
-    strings, with the index (`for i, x in xs`). The loop walks the value it
-    started with; natively that is a view of the list, which the ownership
-    pass now also makes of any copy whose original is still used, unless one
-    of them changes. The libraries use `for` where it fits.
-27. Tuples in every profile: `(A, B)` types, `(a, b)`, `t.0`, tuple patterns
-    and `let (a, b) = ...`. A tuple type is a struct named by its spelling,
-    so JIR and both backends are unchanged.
-28. Inferred type arguments: a call to a generic function may leave out its
-    `comptime T: type` arguments, which are matched from the other arguments
-    (`lists.sort_by(xs, fn(a, b) { return a < b })`); literals and anonymous
-    functions take what those decide. The first step of
-    [traits](traits.md).
-29. Traits: `trait`, `impl` and bounds (`comptime T: Ord + Hash`), with
-    default bodies, method calls (`x.f()`), `Trait.f(x)` and `Type.f()`. An
-    impl's functions are compiled per type like generic functions and called
-    directly, so JIR is unchanged; impls live in the trait's or the type's
-    module, and every one is checked. The prelude has `Ord`, for integers
-    and `str`, and `lists.sort(xs)` sorts by it.
-    Generic impls (`impl(T: Ord) Ord for Option(T)`), matched against a
-    type's shape and applying when their parameters' bounds hold; the prelude
-    orders options, lists and tuples.
-    The standard traits: `Ord` (floats in total order), `Hash` with
-    `hash_of`, and `Show`, which `print` uses; `lib/maps.jh`, hash maps
-    `Map(K, V)` for keys with `Hash` and `==`.
-    `<`, `<=`, `>` and `>=` on any type with an `Ord`, through `compare`.
-    `meta.derive!(Show, Hash, Ord, T)` for structs and enums, with
-    `type_shape` and `to_items` for macros; `lists.min` and `lists.max`.
-    The fuzzer declares random traits, impls and derives and calls them.
-30. Tail calls of a function to itself are jumps, in every profile and at
-    every `-O` level: sema assigns the arguments to the parameters and jumps
-    back, so JIR only sees a loop and natively the ownership pass frees each
-    round as for any loop.
-31. Associated types (`type Item`, `T.Item`), supertraits
-    (`trait Greet: Named`), and the prelude's `Iterator`, which `for` walks
-    ([traits](traits.md)). Natively, the parts of a value that is only
-    taken apart, such as `Some((rest, x))`, move out of it instead of being
-    copied, so an iterator over a list copies nothing; a function whose
-    parameter is only taken apart gets a consuming version, so iterator
-    adapters (`lib/iters.jh`: `map`, `filter`, `take`, `zip`) copy nothing
-    either. `meta.derive!` for a generic type's name writes generic impls.
-32. Moving a field out of a struct that is used again (JIR 16: `take`):
-    natively a field read that would be copied moves out when nothing reads
-    the field before it is written or the struct dies, and the struct keeps
-    the field empty. So `b.xs = grow(b.xs)` and an iterator's
-    `s.inner = rest` copy nothing.
-33. Tail calls between functions (JIR 17: `tailcall`): `return g(...)` does
-    not nest, so mutual recursion and state machines run in constant stack
-    in every profile, at every `-O` and on both targets. The VM runs the
-    callee in the caller's frame; LLVM gets `musttail` calls between
-    `tailcc` bodies, which allows any two signatures; the ownership pass
-    hands the arguments over to a version of the callee that owns them.
-34. `jihoo build --cost`: where a native program copies lists, strings and
-    closures, and why, from source positions in JIR (JIR 18: `file`, `loc`),
-    which sema writes when asked and the backend reads past.
-35. `take` for any path of fields and elements (JIR 19): `rows[i] =
-    f(rows[i])` and `shelves[i].right.xs = f(shelves[i].right.xs)` move the
-    part out and back. Paths are compared step by step; elements at
-    different index registers, or an index written in between, count as the
-    same element, so the part is copied.
-36. Contracts ([Contracts](../language/contracts.md)): `requires` and
-    `ensures` clauses on functions, checked at run time in every profile,
-    and **tried while compiling**: each function with a contract runs on the
-    VM with special and seeded random inputs, and the smallest input that
-    makes an `ensures` false, breaks a callee's `requires` or traps is a
-    compile error that shows the call. JIR is unchanged: a false clause
-    calls a function named after it that traps.
-37. Copy-free functions ([Copy-free functions](../language/nocopy.md)):
-    `nocopy` after a signature makes a copy that the function or anything it
-    calls makes natively a compile error, which says where, why and through
-    which calls. Function values made inside are followed. On the way,
-    the ownership pass learned to hand a list on through functions that only
-    pass it along (they get consuming versions too), to move out a part
-    handed on while the rest is still used, and to take two parts of one
-    value. With `lists.sort_by` reading its length first, iterator chains
-    and `lists.sort` copy nothing over a list handed to them; the examples
-    and list tests copy 132 times instead of 153.
-38. Rewrite rules ([Rewrite rules](../language/rules.md)): a function with
-    `replaces pattern` is a rule. Calls matching the pattern call it
-    instead, with the matched parts evaluated once, in order, and the rule
-    applied only where their types fit. Before that, the compiler runs every
-    rule next to its pattern on the VM, with the inputs contracts are tried
-    with and functions it writes for parameters of function type, and
-    refuses a rule that gives a different value, prints differently or
-    traps differently. Generic rules are also checked at `i64`.
-39. Rewrite rules keep effects: the checks only try functions without
-    effects, so a rule now applies only where moving code cannot be seen.
-    The functions a call passes must be inert (no effect, and certain to
-    return: no print, cell, pointer, unknown call, integer division,
-    bounds check, loop or recursion, through every call), and so must any
-    part evaluated after one of the pattern's own calls that is not, and
-    any part right of `&&` or `||`. Elsewhere the call is compiled as
-    written. `map_map` still fuses `map`s of inert functions.
-40. Arguments, files and floats in text, in hosted and native programs alike
-    (JIR 20): `args()`, `read_file`, `write_file`, `append_file`, with Linux's
-    error numbers on the VM too, and `lib/files.jh` over them; `parse_f64`
-    and `strings.parse_float`, correctly rounded everywhere (Rust's parser on
-    the VM, `strtod` natively, after the same check of the syntax).
-41. A real program, `examples/json.jh` (a small `jq`), and what it showed
-    about native memory: each arm of a `match` now takes apart the value it
-    matches, so `Done(v, rest)` moves its parts out instead of copying them;
-    a part read stays a view while another part of the same value changes
-    in place (`let t = s.text` as `s.at += 1`); and a variable replaced by a
-    value made from its old one (`v = items[k]` with `items` part of `v`)
-    frees the old one, which leaked before. Parsing a 0.9 MB document went
-    from 19 s, quadratic, to 0.03 s natively (the VM takes 0.8 s).
-42. A call hands over what it can: when some of the parameters a function
-    copies get values at their last use and others do not, the call still
-    goes to the consuming version, and the caller copies the others. Before,
-    `m = maps.set(m, w, n)` with a word `w` still in a list copied the whole
-    map; counting 300,000 words took 129 s natively, now 0.13 s.
-43. The ownership pass is checked ([design](memory.md)): it writes down what
-    it decided (JIR 21: `own`, `views`, `moves`), and a checker follows every
-    value that owns memory along every path of every native function, so a
-    mistake in the pass (a leak, a double free, a use after a move, a view
-    outliving its value) is an internal compiler error, not memory
-    corruption. With the `v = items[k]` leak put back into the pass, it
-    rejects the programs that hit it, at the instruction.
-44. Counted list and string buffers ([design](memory.md)): natively a copy
-    of a list or a string shares its memory and counts one more holder, and
-    the first write to memory held more than once copies that list, one
-    level. Flags that remember which lists a function knows to be unique let
-    LLVM fold the checks away, so loops of writes cost what they did. Keeping
-    2,000 versions of a 200 x 200 grid went from 0.51 s and 643 MB to 0.02 s
-    and 14 MB; programs that copied nothing take the same time.
-45. `lists.map` to the same type and `lists.filter` write into the list
-    they are given, through rules in `lib/lists.jh` (`map_in_place`,
-    `filter_in_place`) that the compiler checks: `xs = lists.map(xs, f)`
-    allocates nothing (0.05 s and 17 MB instead of 0.10 s and 33 MB on 2
-    million integers). Dividing by a constant other than 0 and -1 counts as
-    inert for rules, so `x % 3 == 0` can be given to them.
-46. Rules that keep the order of calls apply to any function: the first
-    time a rule would apply to a function with effects, the compiler runs
-    it next to its pattern with functions that record each call and trap
-    at one of the first few, and the rule applies when the calls, the
-    output and where each side stops are all the same. `map_in_place` and
-    `filter_in_place` pass, so `lists.map` with `strings.to_upper`, or with
-    a function that prints, writes into the list too; `map_map` does not,
-    and still fuses only inert functions.
-47. Payloads move out of values used again: a value is taken apart in each
-    block that reads only its parts and where it dies, whatever the rest of
-    the function does with it, unless it is a view or a view of it is still
-    used. Rebuilding a state in a variable (`st = State.Busy(xs)` after
-    `push(xs, i)`) went from 0.87 s to 0.12 s for 30 million rounds; out of
-    a field every arm writes again, from O(n²) to O(n) (15.3 s to 2 ms for
-    100,000 rounds). The fuzzer now takes apart and rebuilds a `Slot(T)`
-    of random payload types.
+Done ([design](redesign.md)):
+
+1. One language and one compiler: a Rust crate writing LLVM IR text, with
+   no VM, no garbage collector and no C++ backend.
+2. Ownership: moves, explicit copies, destructors and drop flags; `let`,
+   `var` and `inout` locals.
+3. Borrowing: parameter conventions (`inout`, `sink`), projections
+   (`-> ref T`, `-> inout T`), views and their lifetimes, and a borrow
+   kernel that checks exclusivity on MIR.
+4. Structs, enums, tuples, arrays, slices; `match` with exhaustiveness
+   checking; `for` over ranges, collections and iterators.
+5. Generics as compile-time parameters, inferred; traits with default
+   methods, generic impls and associated types; marker traits from the
+   compiler.
+6. Closures that borrow, `comptime` closure parameters, function pointers.
+7. `Option`, `Result` and `?`; panics.
+8. `unsafe`: raw pointers, `static` globals, `extern fn` (with `...`),
+   `export fn`, system calls, atomics.
+9. The standard library in jihoo: `Vec`, `String`, `Map`, `Box`, sorting,
+   files, arguments, printing; native and freestanding.
+10. x86_64 and aarch64 Linux.
+11. Speed: on the benchmarks (recursion, a sieve, matrix multiplication,
+    n-body), within measurement noise of C compiled by clang at `-O2`, with
+    bounds checks on.
 
 ## Next
 
-- **Code as data** ([design](code-as-data.md)). Done: functions on code,
-  which macros build their code with, macros taking any number of code
-  arguments, and `meta.node` to look inside code (JIR 14: `codetext`), with
-  which `examples/pipe.jh` fuses `map`, `filter` and sums into one loop, three
-  times as fast as `lists`; blocks as expressions, so that a fused pipeline is
-  a value; `type_of` (JIR 15), so that it works for any element type;
-  `lists.fuse!` in the library, with `sum`, `count` and `collect`; and
-  `#![comptime]` modules, so `meta` costs programs nothing and works in
-  freestanding ones; random pipelines in the fuzzer, each checked against
-  the same stages written out as a loop.
-- **Traits** ([design](traits.md)): dynamic dispatch, when a program needs
-  it.
-- **Rules:** patterns that are operators (`x * 1`) or methods.
-- **Contracts:** clauses on trait functions, which every impl would keep;
-  invariants of a module's structs, so that `pub` functions taking them can
-  be tried; `old(e)` for the value of an expression at the start; and
-  telling apart runtime contract failures from other traps natively.
-- **Memory** ([design](memory.md)): taking a payload out of a field that
-  some arm of a `match` leaves as it is (`take` of paths through payloads),
-  or putting it back on that path.
-
-- **Floats:** `fma`, which IEEE also defines exactly, but freestanding code on
-  x86_64 would need an exact software version.
-- **Tail calls** through function values (`return f(x)` with `f` a
-  parameter), which need a convention for every function value.
-- **Native code:** structs by value through function values handed to C
-  (callbacks take scalars only); `print` in freestanding programs.
-- **Concurrency:** weaker memory orders (acquire/release) for code that needs
-  the speed; threads in freestanding programs, over `clone`; tasks on more
-  than one core in the VM, which needs a GC that threads can share.
-- **Library:** directories, and reading a file a piece at a time; the
-  environment.
-
-## Library layers
-
-The standard library is meant to grow into three layers:
-
-```text
-std    hosted only: GC types, I/O, collections
-alloc  any compiled profile, given an allocator: Vec(T), strings
-core   everywhere: integers, pointers, slices, Option
-```
-
-Today `std` is the prelude, `strings` and `lists`, on the VM's `str` and `[T]`,
-and `alloc` is a bump arena with `Vec(T)` (`lib/alloc.jh`); the goal is for
-freestanding code to bring its own allocator, written in jihoo on top of
-`syscall`, and use the same collections with it.
+- **The compiler in jihoo.** The first goal after 0.1: port
+  `crates/jihoo` to jihoo, then build it with itself.
+- **Compile-time evaluation**: an interpreter of MIR with the target's
+  memory layout, for `const` items, `comptime` expressions and compile-time
+  arguments beyond the arithmetic sema folds today.
+- **`#[derive]`** for `Clone`, `Eq`, `Ord`, `Hash` and `Show`.
+- **Dynamic dispatch**: `dyn Trait` values, and closures that own what they
+  capture, so they can be stored.
+- **Concurrency**: threads, channels and locks as library code over
+  atomics, and `Send`-like rules for what may cross threads.
+- **The C ABI**: structs by value to and from C functions.
+- **Formatting**: `print` with several values, and formatting options.
+- **Tail calls** that never grow the stack.
+- **Contracts and macros**, which v0 had, on the new foundation.
+- **Error messages**: more than one error per run, and notes that show where
+  a moved value went or a borrow started.

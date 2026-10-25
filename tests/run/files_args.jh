@@ -1,0 +1,29 @@
+import std.fs
+import std.env
+
+fn main() {
+    let a = env.args()
+    println(a.len())
+    println(a[1])
+    let path = "/tmp/jihoo-files-test.txt"
+    fs.write_file(path, "one 1\ntwo 22\nthree 333\n").unwrap()
+    let text = fs.read_file(path).unwrap()
+    var total = 0
+    for line in text.as_str().lines() {
+        let parts = line.split(" ")
+        total += parts[1].parse_int().unwrap()
+    }
+    println(total)
+    println("  hi  ".trim())
+    println("hello".starts_with("he"))
+    println("hello".find("ll").unwrap())
+    println(fs.read_file("/nonexistent/x").is_err())
+}
+// args: first second
+//> 3
+//> first
+//> 356
+//> hi
+//> true
+//> 2
+//> true

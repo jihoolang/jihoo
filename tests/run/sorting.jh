@@ -1,0 +1,31 @@
+fn main() {
+    var v = Vec(i64).new()
+    var x = 12345
+    for i in 0..100 {
+        x = (x * 1103515245 + 12345) % 2147483648
+        v.push(x % 1000)
+    }
+    sort(&v)
+    var ok = true
+    for i in 1..v.len() {
+        if v[i - 1] > v[i] {
+            ok = false
+        }
+    }
+    println(ok)
+    var names = Vec(String).new()
+    names.push("pear")
+    names.push("apple")
+    names.push("fig")
+    sort(&names)
+    for n in names {
+        println(n)
+    }
+    sort_by(&v, fn(a, b) { a > b })
+    println(v[0] >= v[99])
+}
+//> true
+//> apple
+//> fig
+//> pear
+//> true

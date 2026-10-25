@@ -1,0 +1,8 @@
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    for x in v {
+        v.push(x)
+    }
+}
+// error: borrowed

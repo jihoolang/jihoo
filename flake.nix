@@ -1,5 +1,5 @@
 {
-  description = "jihoo: an easy language with a GC'd VM and native and freestanding LLVM builds";
+  description = "jihoo: a systems language as fast as C, memory-safe without lifetimes";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -22,9 +22,6 @@
           ./lib
           ./examples
           ./tests
-          # The JIR version tests compare these with the frontend.
-          ./docs/jir.md
-          ./backend-llvm/src/jir.h
         ];
       };
 
@@ -34,81 +31,39 @@
         platforms = lib.platforms.linux;
       };
 
-      # Change the LLVM version here only.
+      # Change the LLVM version here only. The compiler writes LLVM IR as
+      # text, which this clang compiles and links.
       llvmFor = pkgs: pkgs.llvmPackages_21;
 
       mkPackages = pkgs:
         let llvm = llvmFor pkgs; in
         rec {
-          # C++ LLVM backend: JIR text -> object file.
-          jihoo-llc = llvm.stdenv.mkDerivation {
-            pname = "jihoo-llc";
-            inherit version;
-            src = ./backend-llvm;
-            nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
-            buildInputs = [ llvm.llvm ];
-
-            # The backend's own tests, with hand-written modules
-            # (backend-llvm/tests), independent of the frontend.
-            doCheck = true;
-            nativeCheckInputs = [ llvm.lld ];
-            checkPhase = ''
-              runHook preCheck
-              ctest --output-on-failure
-              runHook postCheck
-            '';
-
-            meta = meta // {
-              description = "LLVM backend of the jihoo compiler";
-              mainProgram = "jihoo-llc";
-            };
-          };
-
-          # Rust frontend, VM and standard library. On its own it runs hosted
-          # programs; `jihoo` below adds native builds.
-          jihoo-frontend = pkgs.rustPlatform.buildRustPackage {
-            pname = "jihoo-frontend";
+          jihoo = pkgs.rustPlatform.buildRustPackage {
+            pname = "jihoo";
             inherit version src;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
-            # Run the differential tests against the real backend too, so a build
-            # only succeeds if the VM and native code agree.
-            nativeCheckInputs = [ llvm.lld ];
+            # The tests compile and run programs, native and freestanding.
+            nativeCheckInputs = [ llvm.clang llvm.lld ];
             preCheck = ''
-              export JIHOO_LLC=${jihoo-llc}/bin/jihoo-llc
+              export JIHOO_CC=${llvm.clang}/bin/clang
             '';
 
-            # Ship the standard library and point `import` at it.
+            # Ship the standard library, and clang and lld to finish programs.
             postInstall = ''
               mkdir -p $out/share/jihoo
               cp -r lib $out/share/jihoo/lib
-              wrapProgram $out/bin/jihoo --suffix JIHOO_PATH : $out/share/jihoo/lib
+              wrapProgram $out/bin/jihoo \
+                --suffix JIHOO_PATH : $out/share/jihoo/lib \
+                --set-default JIHOO_CC ${llvm.clang}/bin/clang \
+                --prefix PATH : ${llvm.lld}/bin
             '';
             meta = meta // {
-              description = "jihoo compiler frontend and VM";
+              description = "The jihoo compiler and standard library";
               mainProgram = "jihoo";
             };
           };
-
-          # The whole toolchain: `jihoo run` and `jihoo build` with no setup.
-          jihoo = pkgs.runCommand "jihoo-${version}"
-            {
-              nativeBuildInputs = [ pkgs.makeWrapper ];
-              meta = meta // {
-                description = "jihoo toolchain: VM, LLVM backend, linkers and standard library";
-                mainProgram = "jihoo";
-              };
-            }
-            ''
-              mkdir -p $out/bin $out/share
-              ln -s ${jihoo-frontend}/share/jihoo $out/share/jihoo
-              ln -s ${jihoo-llc}/bin/jihoo-llc $out/bin/jihoo-llc
-              makeWrapper ${jihoo-frontend}/bin/jihoo $out/bin/jihoo \
-                --set-default JIHOO_LLC ${jihoo-llc}/bin/jihoo-llc \
-                --set-default JIHOO_LD ${llvm.lld}/bin/ld.lld \
-                --set-default JIHOO_CC ${llvm.clang}/bin/clang
-            '';
 
           default = jihoo;
         };
@@ -117,78 +72,55 @@
       packages = forAllSystems mkPackages;
 
       overlays.default = final: prev: {
-        inherit (mkPackages final) jihoo jihoo-frontend jihoo-llc;
+        inherit (mkPackages final) jihoo;
       };
 
       apps = forAllSystems (pkgs: {
         default = {
           type = "app";
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo}/bin/jihoo";
-          meta.description = "Run the jihoo toolchain";
+          meta.description = "Run the jihoo compiler";
         };
       });
 
-      # `nix flake check`: the installed toolchain, used from outside the source
-      # tree, runs examples (native unless they say otherwise, and one hosted)
-      # and builds and runs native and freestanding ones.
+      # `nix flake check`: the installed compiler, used from outside the
+      # source tree, builds and runs the examples, natively and
+      # freestanding, and cross-compiles one for the other machine.
       checks = forAllSystems (pkgs:
         let
           jihoo = self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo;
           otherTarget = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64" else "x86_64";
         in
         {
-          toolchain = pkgs.runCommand "jihoo-toolchain-check" { nativeBuildInputs = [ jihoo ]; } (''
-            # Outputs go to files: with pipefail, `| grep -q` would fail the
-            # pipeline by closing it early.
+          toolchain = pkgs.runCommand "jihoo-toolchain-check" { nativeBuildInputs = [ jihoo ]; } ''
             cp ${./examples}/*.jh .
             jihoo run hello.jh > hello.out
             grep -qx "Hello, jihoo!" hello.out
-            jihoo run floats.jh > floats.out
-            grep -qx 0.33333334 floats.out
-            printf "#![hosted]\nfn main() { print(\"on the VM\") }\n" > vm.jh
-            jihoo run vm.jh > vm.out
-            grep -qx "on the VM" vm.out
-            jihoo run native.jh -- one > native-run.out && status=0 || status=$?
-            test "$status" = 49
-            jihoo build native.jh -o native
-            ./native one > native.out && status=0 || status=$?
-            test "$status" = 49
-            grep -qx "  argv\[1\] = one" native.out
+            jihoo run calc.jh > calc.out
+            grep -qx 42 calc.out
             jihoo build freestanding.jh -o freestanding
-            ./freestanding > /dev/null && status=0 || status=$?
-            test "$status" = 55
-            jihoo build arena.jh -o arena
-            ./arena > arena.out || true
-            grep -qx 332833500 arena.out
-            jihoo build coroutines.jh -o coroutines
-            ./coroutines > coroutines.out && status=0 || status=$?
-            test "$status" = 4
-            grep -qx 34 coroutines.out
-            # And for the other machine, which needs nothing more when freestanding.
-            jihoo build --target ${otherTarget} arena.jh -o arena-${otherTarget}
+            ./freestanding > fs.out && status=0 || status=$?
+            test "$status" = 0
+            grep -qx 5050 fs.out
+            jihoo build --target ${otherTarget} freestanding.jh -o freestanding-${otherTarget}
             touch $out
-          '');
+          '';
         });
 
       devShells = forAllSystems (pkgs:
         let llvm = llvmFor pkgs; in
         {
-          default = (pkgs.mkShell.override { stdenv = llvm.stdenv; }) {
+          default = pkgs.mkShell {
             nativeBuildInputs = [
-              # Rust
               pkgs.cargo
               pkgs.rustc
               pkgs.rustfmt
               pkgs.clippy
               pkgs.rust-analyzer
-              # C++ / LLVM
-              pkgs.cmake
-              pkgs.ninja
-              llvm.clang-tools # clangd, clang-format
-              llvm.lld # ld.lld for linking freestanding binaries
+              llvm.clang # finishes programs: LLVM IR to executables
+              llvm.lld # links freestanding programs
+              llvm.llvm # opt, llc, llvm-dis for looking at what the compiler writes
             ];
-            buildInputs = [ llvm.llvm ];
-
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
           };
 

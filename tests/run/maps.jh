@@ -1,0 +1,30 @@
+fn main() {
+    var m = Map(String, i64).new()
+    for w in ["a", "b", "a", "c", "a", "b"] {
+        match m.get_mut(w) {
+            Some(n) => n += 1
+            None => {
+                m.insert(String.from(w), 1)
+            }
+        }
+    }
+    println(m.len())
+    println(m["a"])
+    println(m["b"])
+    println(m.contains("z"))
+    var big = Map(i64, i64).new()
+    for i in 0..10000 {
+        big.insert(i, i * i)
+    }
+    println(big[9999])
+    big.remove(5)
+    println(big.contains(5))
+    println(big.len())
+}
+//> 3
+//> 3
+//> 2
+//> false
+//> 99980001
+//> false
+//> 9999

@@ -65,17 +65,17 @@
     },
     "keywords": {
       "patterns": [
-        { "name": "keyword.control.jihoo", "match": "\\b(if|else|while|break|continue|match|select|return|go)\\b" },
-        { "name": "storage.type.jihoo", "match": "\\b(let|const|fn|macro|struct|enum)\\b" },
-        { "name": "storage.modifier.jihoo", "match": "\\b(pub|extern|export|comptime|ref|chan|cell)\\b" },
-        { "name": "keyword.other.jihoo", "match": "\\b(import|as|quote|asm|items|requires|ensures|nocopy|replaces)\\b" }
+        { "name": "keyword.control.jihoo", "match": "\\b(if|else|while|loop|for|in|break|continue|match|return)\\b" },
+        { "name": "storage.type.jihoo", "match": "\\b(let|var|const|static|fn|struct|enum|impl|trait|type)\\b" },
+        { "name": "storage.modifier.jihoo", "match": "\\b(pub|extern|export|comptime|ref|inout|sink|move|unsafe)\\b" },
+        { "name": "keyword.other.jihoo", "match": "\\b(import|as)\\b" }
       ]
     },
     "types": {
       "patterns": [
         {
           "name": "support.type.primitive.jihoo",
-          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|unit|str|type|expr|stmts)\\b"
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|int|str|never|fnptr)\\b"
         }
       ]
     },

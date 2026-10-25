@@ -1,0 +1,57 @@
+// Box(T): a value on the heap, owned. Patterns and field access see
+// through it.
+
+import std.mem
+
+pub struct Box(T: type) {
+    ptr: *T
+}
+
+impl(T: type) Box(T) {
+    pub fn new(sink v: T) -> Box(T) {
+        unsafe {
+            let p = mem.alloc(T, 1)
+            write(p, v)
+            Box(T) { ptr: p }
+        }
+    }
+
+    pub fn deref(self) -> ref T {
+        unsafe { *self.ptr }
+    }
+
+    pub fn deref_mut(inout self) -> inout T {
+        unsafe { *self.ptr }
+    }
+
+    // The value, out of the box.
+    pub fn unbox(sink self) -> T {
+        unsafe {
+            let v = read(self.ptr)
+            mem.dealloc(T, self.ptr, 1)
+            forget(self)
+            v
+        }
+    }
+}
+
+impl(T: type) Drop for Box(T) {
+    fn drop(inout self) {
+        unsafe {
+            mem.drop_at(T, self.ptr)
+            mem.dealloc(T, self.ptr, 1)
+        }
+    }
+}
+
+impl(T: Clone) Clone for Box(T) {
+    fn clone(self) -> Box(T) {
+        Box.new(self.deref().clone())
+    }
+}
+
+impl(T: Eq) Eq for Box(T) {
+    fn eq(self, other: Box(T)) -> bool {
+        self.deref().eq(other.deref())
+    }
+}
