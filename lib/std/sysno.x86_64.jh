@@ -11,3 +11,6 @@ pub const CLONE: i64 = 56
 pub const EXECVE: i64 = 59
 pub const WAIT4: i64 = 61
 pub const FACCESSAT: i64 = 269
+pub const PIPE2: i64 = 293
+pub const DUP3: i64 = 292
+pub const PPOLL: i64 = 271

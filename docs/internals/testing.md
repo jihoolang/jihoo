@@ -5,6 +5,7 @@ cargo test                                  # everything
 cargo test --test programs                  # the programs in tests/
 JIHOO_TEST=maps cargo test --test programs  # those whose path has `maps`
 JIHOO_TEST_OPT=-O0 cargo test --test programs
+JIHOO_COMPILER=out/jihoo2 cargo test --test programs  # with another compiler
 cargo clippy --all-targets -- -D warnings
 nix flake check                             # what CI runs
 ```
@@ -19,6 +20,11 @@ in `tests/fail/` and checks the error:
   order, `// exit: N` the exit status (default 0; a trap is 132), and
   `// args: a b` the program's arguments;
 - in `tests/fail`, each `// error: text` must appear in the error message.
+
+`JIHOO_COMPILER` names the compiler to test instead of the Rust one built
+with the tests, such as the compiler in jihoo
+([stage 1 or 2](self-hosting.md#bootstrap-and-packaging)); `nix flake
+check` runs these tests with the installed one.
 
 Add a `tests/run` program for every feature and every bug fixed, and a
 `tests/fail` one for every error the compiler should give, in particular

@@ -187,3 +187,22 @@ fn stage2_agrees_with_stage1() {
     let _ = std::fs::remove_file(&stage2);
     report(&failed, files.len());
 }
+
+/// A failed link reports clang's messages, without its warnings, the same
+/// way from both compilers.
+#[test]
+fn link_errors_agree() {
+    let stage0 = stage0();
+    let stage1 = build_compiler(&stage0, "stage1-link");
+    let out = std::env::temp_dir().join(format!("jihoo-link-{}", std::process::id()));
+    let lib = root().join("lib").canonicalize().unwrap();
+    let run = |exe: &Path| {
+        let o = Command::new(exe).arg("build").arg("examples/hello.jh").arg("no-such-input.o").arg("-o").arg(&out).env("JIHOO_PATH", &lib).current_dir(root()).output().unwrap();
+        (String::from_utf8_lossy(&o.stderr).to_string(), o.status.code())
+    };
+    let want = run(&stage0);
+    let got = run(&stage1);
+    let _ = std::fs::remove_file(&stage1);
+    assert!(want.0.contains("failed:\n") && want.0.contains("no-such-input.o"), "stage 0 says:\n{}", want.0);
+    assert_eq!(want, got);
+}

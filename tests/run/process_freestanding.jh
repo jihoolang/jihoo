@@ -13,10 +13,37 @@ fn main() {
     println(process.run("no-such-program-xyz", []).is_err())
     println(env.get("PATH").is_some())
     println(env.get("NO_SUCH_VARIABLE_XYZ").is_none())
+
+    // Capturing what a program writes.
+    let o = process.output("sh", ["-c", "echo out; echo err >&2; exit 4"]).unwrap()
+    print(o.stdout)
+    print(o.stderr)
+    match o.status {
+        Code(c) => println(c)
+        Signal(s) => println(s)
+    }
+    // More than a pipe holds, on standard error first: both streams are
+    // read at once.
+    let big = process.output("sh", ["-c", "head -c 300000 /dev/zero >&2; head -c 200000 /dev/zero"]).unwrap()
+    println(big.stderr.len())
+    println(big.stdout.len())
+    println(big.status.success())
+    // Standard input is empty.
+    let cat = process.output("cat", []).unwrap()
+    println(cat.stdout.len())
+    println(process.output("no-such-program-xyz", []).is_err())
 }
 //> 3
 //> true
 //> false
 //> true
 //> true
+//> true
+//> out
+//> err
+//> 4
+//> 300000
+//> 200000
+//> true
+//> 0
 //> true

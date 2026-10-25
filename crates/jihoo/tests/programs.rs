@@ -7,6 +7,8 @@
 //
 //   cargo test --test programs            all of them
 //   JIHOO_TEST=name cargo test --test programs   the ones whose name has `name`
+//   JIHOO_COMPILER=path cargo test --test programs   with another compiler,
+//                                         such as the one in jihoo (stage 1)
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,8 +29,13 @@ fn files(dir: &str) -> Vec<PathBuf> {
     v
 }
 
-fn jihoo() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jihoo"))
+/// The compiler under test: `JIHOO_COMPILER`, else the Rust one built with
+/// the tests. It finds the checkout's standard library through `JIHOO_PATH`.
+fn jihoo() -> Command {
+    let exe = std::env::var_os("JIHOO_COMPILER").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_jihoo")));
+    let mut c = Command::new(exe);
+    c.env("JIHOO_PATH", root().join("lib"));
+    c
 }
 
 fn run_one(p: &Path) -> Result<(), String> {
@@ -38,7 +45,7 @@ fn run_one(p: &Path) -> Result<(), String> {
     let args: Vec<String> = src.lines().find_map(|l| l.trim_start().strip_prefix("// args:")).map(|s| s.split_whitespace().map(String::from).collect()).unwrap_or_default();
     let exe = std::env::temp_dir().join(format!("jihoo-test-{}-{}", std::process::id(), p.file_stem().unwrap().to_string_lossy()));
     let opt = std::env::var("JIHOO_TEST_OPT").unwrap_or_else(|_| "-O1".into());
-    let o = Command::new(jihoo()).arg("build").arg(&opt).arg(p).arg("-o").arg(&exe).output().unwrap();
+    let o = jihoo().arg("build").arg(&opt).arg(p).arg("-o").arg(&exe).output().unwrap();
     if !o.status.success() {
         return Err(format!("does not compile:\n{}", String::from_utf8_lossy(&o.stderr)));
     }
@@ -67,7 +74,7 @@ fn fail_one(p: &Path) -> Result<(), String> {
     if want.is_empty() {
         return Err("no `// error:` line".into());
     }
-    let o = Command::new(jihoo()).arg("emit-mir").arg(p).output().unwrap();
+    let o = jihoo().arg("emit-mir").arg(p).output().unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
     if o.status.success() {
         return Err("compiles, but should not".into());

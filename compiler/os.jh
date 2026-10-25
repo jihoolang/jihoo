@@ -1,7 +1,7 @@
 // What the compiler asks of the system beyond `std`: whether files exist,
 // canonical paths, where the compiler itself is, its process id, removing
-// files, and the system's reasons for failing, worded as Rust's
-// `io::Error` words them.
+// files, a large stack, and the system's reasons for failing, worded as
+// Rust's `io::Error` words them.
 
 import std.env
 import std.libc
@@ -12,6 +12,10 @@ extern fn strerror(e: i32) -> *u8
 extern fn __errno_location() -> *i32
 extern fn getpid() -> i32
 extern fn unlink(path: *u8) -> i32
+extern fn pthread_attr_init(attr: *u64) -> i32
+extern fn pthread_attr_setstacksize(attr: *u64, n: i64) -> i32
+extern fn pthread_create(t: *u64, attr: *u64, f: fnptr(*u8) -> *u8, arg: *u8) -> i32
+extern fn pthread_join(t: u64, result: **u8) -> i32
 
 // `s` as a C string: its bytes and a 0.
 fn c_str(s: str) -> String {
@@ -140,5 +144,21 @@ pub fn temp_dir() -> String {
     match env.get("TMPDIR") {
         Some(d) => String.from(d)
         None => String.from("/tmp")
+    }
+}
+
+// Runs `f` on a thread with a stack of `size` bytes and waits for it; on
+// this thread if no thread can be made. (Rust's `thread::Builder` with
+// `stack_size`: the main thread's stack is the system's, often 8 MiB.)
+pub fn with_stack(size: i64, f: fnptr(*u8) -> *u8) {
+    // pthread_attr_t: 56 bytes on x86_64, 64 on aarch64
+    var attr = [0 as u64; 8]
+    var t: u64 = 0
+    unsafe {
+        if pthread_attr_init(&attr[0]) != 0 || pthread_attr_setstacksize(&attr[0], size) != 0 || pthread_create(&t, &attr[0], f, null) != 0 {
+            f(null)
+            return
+        }
+        pthread_join(t, null)
     }
 }

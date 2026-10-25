@@ -9,6 +9,11 @@ and runs `clang`, which optimizes it and links the program (with libc, or
 statically with `ld.lld` for freestanding programs). The Rust build does not
 link LLVM.
 
+The same compiler is written in jihoo in `compiler/`, a `.jh` file for
+each file below, and that one is installed and is the reference; the Rust
+crate bootstraps it ([Self-hosting](self-hosting.md)). This page names the
+Rust files.
+
 | file | what |
 |------|------|
 | `lex.rs`, `parse.rs`, `ast.rs` | tokens and the syntax tree; newlines end statements |

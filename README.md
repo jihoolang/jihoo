@@ -67,8 +67,11 @@ nix profile install github:jihoolang/jihoo         # install `jihoo`
 ## Build from source
 
 Everything comes from `flake.nix` (Rust, clang and lld from LLVM 21).
+`nix build` bootstraps the compiler: the Rust one (`crates/jihoo`) builds
+the one in jihoo (`compiler/`), which builds itself again and is installed.
 
 ```sh
+nix build                                    # ./result/bin/jihoo
 nix develop
 cargo build
 cargo test
@@ -81,7 +84,8 @@ cargo run -- emit-mir examples/hello.jh
 
 | path | what |
 |------|------|
-| `crates/jihoo` | the compiler, in Rust: parser, type checker, MIR, borrow checker, LLVM IR writer |
+| `compiler` | the compiler, in jihoo: parser, type checker, MIR, borrow checker, LLVM IR writer |
+| `crates/jihoo` | the same compiler in Rust, which bootstraps the one in jihoo |
 | `lib/std` | the standard library, in jihoo |
 | `tests/run`, `tests/fail` | programs and their expected output or error |
 | `examples` | example programs, which the website shows |
@@ -103,10 +107,10 @@ that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions, system calls and atomics; the standard library,
 including running other programs.
 
-The compiler is also written in jihoo, in `compiler/`, and
-[self-hosted](docs/internals/self-hosting.md): it builds itself, and writes
-the same LLVM IR as the Rust compiler for every program.
+The compiler is written in jihoo, in `compiler/`, and
+[self-hosted](docs/internals/self-hosting.md): it builds itself, writes the
+same LLVM IR as the Rust compiler for every program, and is the one
+installed. The Rust compiler only bootstraps it.
 
-Next ([roadmap](docs/internals/roadmap.md)): making the compiler in jihoo
-the one that is used, compile-time evaluation, `derive`, dynamic dispatch,
-threads.
+Next ([roadmap](docs/internals/roadmap.md)): compile-time evaluation,
+`derive`, dynamic dispatch, threads.

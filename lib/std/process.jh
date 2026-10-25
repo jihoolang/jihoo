@@ -24,6 +24,83 @@ impl Exit {
 // `/` is looked for in the directories of `PATH`. The program inherits the
 // environment and the standard streams.
 pub fn run(program: str, args: [str]) -> Result(Exit, String) {
+    let pid = start(program, args, [-1, -1, -1])?
+    finish(program, pid)
+}
+
+// What a program wrote, and how it ended.
+pub struct Output {
+    pub status: Exit
+    pub stdout: String
+    pub stderr: String
+}
+
+// Runs a program as `run` does, but keeps what it writes to standard
+// output and standard error; its standard input is empty (`/dev/null`).
+pub fn output(program: str, args: [str]) -> Result(Output, String) {
+    let pipes = match (sys.pipe(), sys.pipe()) {
+        (Some(o), Some(e)) => (o, e)
+        _ => return Err("cannot make pipes for " + program)
+    }
+    let ((out_r, out_w), (err_r, err_w)) = pipes
+    let null_fd = sys.open_read("/dev/null")
+    let started = start(program, args, [null_fd, out_w, err_w])
+    // The child has the write ends now: reading ends when it closes them.
+    sys.close(out_w)
+    sys.close(err_w)
+    if null_fd >= 0 {
+        sys.close(null_fd)
+    }
+    let pid = match started {
+        Ok(p) => p
+        Err(e) => {
+            sys.close(out_r)
+            sys.close(err_r)
+            return Err(e)
+        }
+    }
+    // Both streams at once, so that a full pipe cannot stop the program
+    // while this one waits on the other.
+    var stdout = String.new()
+    var stderr = String.new()
+    var fds = [sys.PollFd { fd: out_r, events: 1, revents: 0 }, sys.PollFd { fd: err_r, events: 1, revents: 0 }]
+    var buf = [0 as u8; 4096]
+    var open = 2
+    while open > 0 {
+        if unsafe { sys.poll(&fds[0], 2) } < 0 {
+            break
+        }
+        for i in 0..2 {
+            if fds[i].fd < 0 || fds[i].revents == 0 {
+                continue
+            }
+            let n = unsafe { sys.read_fd(fds[i].fd, &buf[0], 4096) }
+            if n <= 0 {
+                sys.close(fds[i].fd)
+                fds[i].fd = -1
+                open -= 1
+            } else if i == 0 {
+                stdout.push_str(unsafe { make_str(&buf[0], n) })
+            } else {
+                stderr.push_str(unsafe { make_str(&buf[0], n) })
+            }
+        }
+    }
+    for i in 0..2 {
+        if fds[i].fd >= 0 {
+            sys.close(fds[i].fd)
+        }
+    }
+    let status = finish(program, pid)?
+    if open > 0 {
+        return Err("cannot read the output of " + program)
+    }
+    Ok(Output { status: status, stdout: stdout, stderr: stderr })
+}
+
+// Starts a program with `stdio` as its standard streams (see
+// `sys.spawn_io`); its pid.
+fn start(program: str, args: [str], stdio: [i32; 3]) -> Result(i32, String) {
     let path = match find(program) {
         Some(p) => p
         None => return Err("cannot find " + program)
@@ -40,10 +117,15 @@ pub fn run(program: str, args: [str]) -> Result(Exit, String) {
         argv.push(strings[i].ptr)
     }
     argv.push(null)
-    let pid = unsafe { sys.spawn(strings[0].ptr, argv.ptr, env.environ()) }
+    let pid = unsafe { sys.spawn_io(strings[0].ptr, argv.ptr, env.environ(), stdio) }
     if pid < 0 {
         return Err("cannot start " + program)
     }
+    Ok(pid)
+}
+
+// Waits for a program started by `start` to end.
+fn finish(program: str, pid: i32) -> Result(Exit, String) {
     let status = sys.wait(pid)
     if status < 0 {
         return Err("cannot wait for " + program)

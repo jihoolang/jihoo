@@ -1,0 +1,528 @@
+// The deepest code the parser accepts: calls and parentheses 498 levels
+// deep, `if`s 249 (a block is two levels). Every compiler must have the
+// stack for it (the compiler in jihoo runs on a thread with a large one).
+
+fn id(x: i64) -> i64 {
+    x
+}
+
+fn calls() -> i64 {
+    id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(id(1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+}
+
+fn parens() -> i64 {
+    ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((2))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+}
+
+fn ifs() -> i64 {
+    var x = 0
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+if true {
+x = 3
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+    x
+}
+
+fn main() {
+    println(calls())
+    println(parens())
+    println(ifs())
+}
+//> 1
+//> 2
+//> 3

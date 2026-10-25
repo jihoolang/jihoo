@@ -28,6 +28,18 @@ import pat
 const USAGE = "usage:\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --keep-ll         keep the LLVM IR next to the output"
 
 fn main() {
+    // The parser and sema recurse once per level of nesting, and a frame
+    // can be large: give them room for the deepest code the parser
+    // accepts, as the Rust compiler does.
+    os.with_stack(256 << 20, run)
+}
+
+fn run(_arg: *u8) -> *u8 {
+    drive()
+    null
+}
+
+fn drive() {
     let args = env.args()
     if args.len() < 2 {
         fail(USAGE, 2)
@@ -210,9 +222,8 @@ fn with_extension(path: str, ext: str) -> String {
     path[0..name_start(path)] + file_stem(path) + "." + ext
 }
 
-// Writes the IR and has clang (`JIHOO_CC`) optimize and link it. Unlike the
-// Rust compiler, clang's messages go straight to standard error: there is
-// no way yet to capture another program's output.
+// Writes the IR and has clang (`JIHOO_CC`) optimize and link it. If clang
+// fails, its messages, without warnings, are the error.
 fn link_exe(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool, link: Vec(str), keep: bool) -> Result((), String) {
     var ll_path = String.new()
     if keep {
@@ -256,14 +267,30 @@ fn link_exe(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool,
     }
     c.push("-o")
     c.push(exe)
-    let r = process.run(cc, c.as_slice())
+    let r = process.output(cc, c.as_slice())
     if !keep {
         os.remove(ll_path.as_str())
     }
-    match r {
-        Ok(s) => if s.success() { Ok(()) } else { Err(cc + " failed") }
-        Err(e) => Err("cannot run " + cc + ": " + e.as_str() + " (set JIHOO_CC to clang)")
+    let o = match r {
+        Ok(o) => o
+        Err(e) => return Err("cannot run " + cc + ": " + e.as_str() + " (set JIHOO_CC to clang)")
     }
+    if !o.status.success() {
+        var msg = cc + " failed:\n"
+        var first = true
+        for l in o.stderr.as_str().lines() {
+            if l.contains("warning:") {
+                continue
+            }
+            if !first {
+                msg.push('\n')
+            }
+            msg.push_str(l)
+            first = false
+        }
+        return Err(msg)
+    }
+    Ok(())
 }
 
 fn fail(msg: str, code: i32) -> never {

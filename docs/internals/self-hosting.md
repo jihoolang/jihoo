@@ -14,9 +14,24 @@ page is how it got there and how it stays there.
 jihoo is self-hosted when stage 1 can build stage 2 and the two agree: for
 every program, stage 2 writes the same LLVM IR as stage 1. That holds now.
 For `compiler/main.jh` itself, stages 0, 1 and 2 all write the same IR: a
-fixed point. The Rust compiler is still where the language changes first
-(see below); in the end it is only needed to bootstrap a machine that has
-no jihoo yet.
+fixed point. The compiler in jihoo is now the one that is used and the
+one the language changes in; the Rust compiler only bootstraps it on a
+machine that has no jihoo yet ([below](#the-compiler-in-jihoo-is-the-reference)).
+
+## Bootstrap and packaging
+
+`nix build` makes the compiler in three steps: the Rust compiler
+(`jihoo-bootstrap`, whose tests include the comparisons below) builds
+`compiler/main.jh` at `-O2` (stage 1), stage 1 builds it again (stage 2),
+and stage 2 is installed as `jihoo` once stages 1 and 2 write the same IR
+for `compiler/main.jh`. `nix flake check` runs the programs of `tests/run`
+and `tests/fail` with the installed compiler. By hand:
+
+```sh
+cargo run -- build -O2 compiler/main.jh -o out/jihoo1     # stage 1
+out/jihoo1 build -O2 compiler/main.jh -o out/jihoo2       # stage 2
+JIHOO_COMPILER=$PWD/out/jihoo2 cargo test --test programs
+```
 
 ## Pass by pass, compared all the way
 
@@ -70,10 +85,10 @@ are in `tests/selfhost/elab/`.
 
 The code generator (step 6) is compared by `emit-llvm`, on the host target
 and on aarch64, and the driver by building and running the test programs
-with each compiler. The driver in jihoo runs clang through `std.process`;
-it cannot capture another program's output yet, so clang's messages go
-straight to standard error instead of being filtered, as the Rust driver
-does. With both done, stage 1 builds stage 2 (step 7).
+with each compiler. The driver in jihoo runs clang through `std.process`,
+and like the Rust driver keeps clang's standard error (`process.output`),
+to show it without warnings when clang fails. With both done, stage 1
+builds stage 2 (step 7).
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
@@ -114,8 +129,28 @@ better way the port takes it and says so in a comment; so far:
   of the block being written is kept as blocks start, where Rust finds it
   in the text written so far.
 
-While both compilers exist, a language change has to be made in both:
-stage 0 must compile `compiler/`, and stage 1 must agree with stage 0.
+## The compiler in jihoo is the reference
+
+From self-hosting on, `compiler/` is where the language and the compiler
+change: new features, fixes and error messages go there, with their
+tests and documentation. The Rust compiler is frozen as the bootstrap:
+
+- It changes only so that it still builds `compiler/` correctly: a bug
+  that stage 1 inherits from it, or something `compiler/` cannot do
+  without. It gets no new features otherwise.
+- So `compiler/`, and the parts of `lib/std` it imports, use only the
+  language the Rust compiler knows. A feature added since can be used
+  there only by adding it to the Rust compiler too, which should be rare.
+- What must stay true: stage 0 builds stage 1, stage 1 builds stage 2,
+  and the two write the same IR for `compiler/main.jh`
+  (`stage2_agrees_with_stage1`, and `nix build`).
+- `tests/run` and `tests/fail` test the compiler in jihoo
+  (`JIHOO_COMPILER`, and `nix flake check` with the installed stage 2).
+  The comparisons with stage 0 on every file of the repository
+  (`self_hosted_compiler_agrees`, `stage1_builds_programs`) hold for now,
+  as the two compilers still agree. A change to the compiler in jihoo
+  that makes them differ restricts those comparisons to `compiler/` and
+  `lib/`, the code the Rust compiler still has to compile.
 
 ## What porting has found
 
@@ -180,6 +215,14 @@ far, each fixed in stage 0 with a test:
   began with `llvm.`, which LLVM keeps for intrinsics (the code generator
   in jihoo is `llvm.jh`). Such symbols now get a `_` in front
   (`tests/run/module_llvm.jh`).
+- The compiler in jihoo needs a large stack for deeply nested code, as
+  the Rust one does: at the parser's depth limit, 498 nested calls take
+  sema 16 MiB of stack built at `-O1` or `-O2` and 48 MiB at `-O0` (every
+  temporary has its own stack slot), more than the 8 MiB a main thread
+  usually gets. Like the Rust compiler it runs on a thread with a 256 MiB
+  stack (`os.with_stack`, over libc's `pthread_create`; jihoo has no
+  threads of its own yet). `tests/run/deep_nesting.jh` is code as deep as
+  the parser accepts, and `tests/fail/nested_too_deeply.jh` one level more.
 - Writing the code generator also met two limits, left as they are:
   string literals cannot span lines (long texts use `\n`), and `Map` has
   no `clone`.
@@ -209,11 +252,3 @@ also found that a shift ignored the type its context expected:
   (`tests/fail/borrow_return_local_ref.jh`). Both compilers agree; the first
   message should be the second.
 
-- Built at `-O0`, stage 1 needs more than 16 MiB of stack to reach the
-  parser's depth limit (500 levels of nesting), since every temporary has
-  its own stack slot; built at `-O1` or more it needs about 4 MiB. The Rust
-  compiler runs on a thread with a large stack for the same reason; stage
-  1 will need the same once it has threads, or a smaller depth limit.
-- The driver in jihoo cannot capture clang's output, so a failed link
-  shows clang's own messages, warnings included, then "error: clang
-  failed".

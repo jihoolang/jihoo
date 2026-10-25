@@ -145,13 +145,59 @@ pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
 
 // Starts a program in a new process; the child's pid, or -1.
 pub unsafe fn spawn(path: *u8, argv: **u8, envp: **u8) -> i32 {
+    spawn_io(path, argv, envp, [-1, -1, -1])
+}
+
+// Starts a program with `stdio[i]` as its file descriptor `i` (-1 keeps
+// this process's own); the child's pid, or -1.
+pub unsafe fn spawn_io(path: *u8, argv: **u8, envp: **u8, stdio: [i32; 3]) -> i32 {
     // clone(SIGCHLD): a fork.
     let pid = syscall(sysno.CLONE, 17, 0, 0, 0, 0)
     if pid == 0 {
+        for i in 0..3 {
+            if stdio[i] >= 0 && stdio[i] != i as i32 {
+                syscall(sysno.DUP3, stdio[i] as i64, i, 0)
+            }
+        }
+        for i in 0..3 {
+            if stdio[i] > 2 {
+                syscall(sysno.CLOSE, stdio[i] as i64)
+            }
+        }
         syscall(sysno.EXECVE, path, argv, envp)
         syscall(sysno.EXIT_GROUP, 127)
     }
     if pid < 0 { -1 } else { pid as i32 }
+}
+
+// A pipe, as (read end, write end); both ends close when a program is
+// started.
+pub fn pipe() -> Option((i32, i32)) {
+    var fds = [0 as i32; 2]
+    // O_CLOEXEC
+    if unsafe { syscall(sysno.PIPE2, &fds[0], 0x80000) } < 0 {
+        return None
+    }
+    Some((fds[0], fds[1]))
+}
+
+// A file descriptor to wait on, and what happened to it.
+pub struct PollFd {
+    pub fd: i32
+    pub events: i16
+    pub revents: i16
+}
+
+// Waits until something happens to one of `n` descriptors (C's `poll`, no
+// timeout); how many, or -1.
+pub unsafe fn poll(fds: *PollFd, n: i64) -> i32 {
+    loop {
+        let r = syscall(sysno.PPOLL, fds, n, 0, 0, 8)
+        // -EINTR: a signal came first
+        if r != -4 {
+            return if r < 0 { -1 } else { r as i32 }
+        }
+    }
 }
 
 // Waits for a child; its raw wait status, or -1.

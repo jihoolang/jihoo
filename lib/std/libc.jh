@@ -21,3 +21,7 @@ pub extern fn execve(path: *u8, argv: **u8, envp: **u8) -> i32
 pub extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32
 pub extern fn _exit(code: i32) -> never
 pub extern fn access(path: *u8, mode: i32) -> i32
+pub extern fn pipe2(fds: *i32, flags: i32) -> i32
+pub extern fn dup2(fd: i32, to: i32) -> i32
+pub extern fn poll(fds: *u8, n: u64, timeout: i32) -> i32
+pub extern fn __errno_location() -> *i32

@@ -35,7 +35,8 @@ cargo run -- run examples/calc.jh -- a b         # args after --
 cargo run -- build examples/freestanding.jh -o out/hello
 cargo run -- emit-mir examples/hello.jh          # the compiler's MIR
 cargo run -- emit-llvm examples/hello.jh         # the LLVM IR it writes
-nix build                                        # packaged compiler → ./result/bin/jihoo
+nix build                                        # stage 2 (the compiler in jihoo) → ./result/bin/jihoo
+nix build .#jihoo-bootstrap                      # stage 0 (the Rust compiler) alone
 ```
 
 The compiler writes LLVM IR text and runs `clang` (`JIHOO_CC`) to optimize and
@@ -48,6 +49,7 @@ link. `import` searches the importing file's directory, `-I` dirs,
 cargo test                                         # everything
 cargo test --test programs                         # tests/run and tests/fail
 JIHOO_TEST=maps cargo test --test programs         # those whose path contains `maps`
+JIHOO_COMPILER=out/jihoo2 cargo test --test programs  # with another compiler (stage 1 or 2)
 cargo clippy --all-targets --locked -- -D warnings # CI runs this
 nix flake check                                    # everything CI runs
 ```
@@ -89,13 +91,19 @@ The Rust is written to be ported to jihoo: index-based data (`TyId`,
 Keep it that way.
 
 `compiler/` is the same compiler written in jihoo, ported pass by pass and
-self-hosted (`docs/internals/self-hosting.md`). Each pass has a dump command
+self-hosted (`docs/internals/self-hosting.md`). It is the reference and the
+one installed (`nix build`: stage 0 builds stage 1, stage 1 builds stage 2,
+stage 2 is `jihoo`). Change the language and the compiler in `compiler/`;
+the Rust compiler is frozen as the bootstrap and changes only so that it
+still builds `compiler/` correctly, so `compiler/` and the `lib/std` it
+imports use only what the Rust compiler knows. Each pass has a dump command
 (`emit-tokens`, `emit-ast`, `emit-program`, `emit-mir` with and without
 `JIHOO_NO_ELAB`, `emit-llvm`) in both compilers with identical output;
 `cargo test --test selfhost` compares them on every `.jh` file in the repo,
 runs the test programs built by each, and checks that stage 2 (the jihoo
-compiler built by itself) writes the same IR as stage 1. A change to either
-compiler, or to the language they use, must keep both in step.
+compiler built by itself) writes the same IR as stage 1. While the two
+agree, keep them agreeing; once a change to `compiler/` makes them differ,
+restrict the stage 0 comparisons to `compiler/` and `lib/`.
 
 ## Standard library
 
