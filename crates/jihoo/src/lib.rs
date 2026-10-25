@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod ast;
+pub mod astdump;
 pub mod check;
 pub mod diag;
 pub mod elab;

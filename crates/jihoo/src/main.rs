@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   jihoo emit-mir <file.jh>                      print the compiler's MIR
   jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
   jihoo emit-tokens <file.jh>                   print the tokens of one file
+  jihoo emit-ast <file.jh>                      print the syntax tree of one file
 
 options:
   -O0 -O1 -O2 -O3   optimization (default -O2)
@@ -22,6 +23,16 @@ options:
   --keep-ll         keep the LLVM IR next to the output";
 
 fn main() {
+    // The parser and sema recurse once per level of nesting, and a debug
+    // build's frames are large: give them room for the deepest code the
+    // parser accepts.
+    let t = std::thread::Builder::new().stack_size(256 << 20).spawn(run).expect("thread");
+    if t.join().is_err() {
+        exit(101);
+    }
+}
+
+fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first().cloned() else {
         eprintln!("{}", USAGE);
@@ -84,8 +95,8 @@ fn main() {
         eprintln!("error: no source file\n\n{}", USAGE);
         exit(2);
     };
-    if cmd == "emit-tokens" {
-        emit_tokens(&file);
+    if cmd == "emit-tokens" || cmd == "emit-ast" {
+        emit_syntax(&file, cmd == "emit-ast");
         return;
     }
     let opts = Options { search, target, checked, no_prelude: false };
@@ -177,9 +188,10 @@ fn link_exe(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool,
     Ok(())
 }
 
-/// One line per token: its byte range, whether a newline came before it, and
-/// the token. The compiler written in jihoo prints the same, to compare.
-fn emit_tokens(file: &Path) {
+/// The tokens of one file, one per line: its byte range, whether a newline
+/// came before it, and the token; or its syntax tree (`astdump.rs`). The
+/// compiler written in jihoo prints the same, to compare.
+fn emit_syntax(file: &Path, ast: bool) {
     use jihoo::lex::Tok;
     let mut sources = Sources::default();
     let text = match std::fs::read(file) {
@@ -197,6 +209,16 @@ fn emit_tokens(file: &Path) {
             exit(1);
         }
     };
+    if ast {
+        match jihoo::parse::parse_module(id, toks) {
+            Ok(m) => print!("{}", jihoo::astdump::module(&m)),
+            Err(d) => {
+                eprintln!("{}", sources.render(&d));
+                exit(1);
+            }
+        }
+        return;
+    }
     let mut out = String::new();
     for t in &toks {
         let what = match &t.tok {

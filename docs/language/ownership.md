@@ -92,6 +92,10 @@ match parse(text) {                 // a new value: owned
 }
 ```
 
+So does a `match` on a whole variable that owns its value, when the arms
+bind its parts: the variable is used up by the `match`, whichever arm runs.
+On a field or an element, `match` borrows the parts instead.
+
 ## Integer overflow, bounds and other bugs
 
 Bugs stop the program at once with a message on standard error: an index

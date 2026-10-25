@@ -173,6 +173,12 @@ impl(T: type) Vec(T) {
     pub fn iter(self) -> Iter(T) {
         Iter(T) { ptr: self.ptr, end: unsafe { self.ptr + self.len } }
     }
+
+    // Gives the values away one by one: `for x in v.into_iter()` owns each
+    // `x`, where `for x in v` borrows it.
+    pub fn into_iter(sink self) -> IntoIter(T) {
+        IntoIter(T) { v: self, next: 0 }
+    }
 }
 
 // Borrows the values of a `Vec` or slice one by one.
@@ -194,6 +200,37 @@ impl(T: type) Iterator for Iter(T) {
             self.ptr = self.ptr + 1
             Some(*p)
         }
+    }
+}
+
+// Owns a `Vec` and gives its values away one by one.
+pub struct IntoIter(T: type) {
+    v: Vec(T)
+    next: i64
+}
+
+impl(T: type) Iterator for IntoIter(T) {
+    type Item = T
+
+    fn next(inout self) -> Option(T) {
+        if self.next == self.v.len {
+            return None
+        }
+        self.next += 1
+        Some(unsafe { read(self.v.ptr + self.next - 1) })
+    }
+}
+
+impl(T: type) Drop for IntoIter(T) {
+    // Drops the values not given away; the `Vec` then frees its memory.
+    fn drop(inout self) {
+        if needs_drop(T) {
+            while self.next < self.v.len {
+                unsafe { mem.drop_at(T, self.v.ptr + self.next) }
+                self.next += 1
+            }
+        }
+        self.v.len = 0
     }
 }
 

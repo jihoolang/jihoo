@@ -1,0 +1,1269 @@
+// The parser: tokens to a syntax tree. Recursive descent, with precedence
+// climbing for binary operators. A statement ends at a newline, `;` or `}`;
+// an expression continues onto the next line only after an operator, or
+// before a `.`.
+
+import ast
+import diag
+import fmt
+import lex
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Tok = lex.Tok
+type Op = lex.Op
+type Token = lex.Token
+
+type Module = ast.Module
+type Attr = ast.Attr
+type Item = ast.Item
+type ItemKind = ast.ItemKind
+type Mode = ast.Mode
+type Param = ast.Param
+type FnDecl = ast.FnDecl
+type Ty = ast.Ty
+type TyKind = ast.TyKind
+type FnTyParam = ast.FnTyParam
+type Block = ast.Block
+type Stmt = ast.Stmt
+type StmtKind = ast.StmtKind
+type Expr = ast.Expr
+type ExprKind = ast.ExprKind
+type UnOp = ast.UnOp
+type Arm = ast.Arm
+type LambdaParam = ast.LambdaParam
+type FieldInit = ast.FieldInit
+type Pat = ast.Pat
+type PatKind = ast.PatKind
+type PatInt = ast.PatInt
+type FieldPat = ast.FieldPat
+
+const MAX_DEPTH = 500
+
+pub struct Parser {
+    toks: Vec(Token)
+    i: i64
+    depth: i64
+}
+
+pub fn parse_module(file: u32, sink toks: Vec(Token)) -> Result(Module, Diag) {
+    var p = Parser { toks: toks, i: 0, depth: 0 }
+    var attrs = Vec(String).new()
+    while p.at(Tok.HashBang) {
+        p.bump()
+        p.expect(Tok.LBracket)?
+        attrs.push(p.ident()?)
+        p.expect(Tok.RBracket)?
+    }
+    var items = Vec(Item).new()
+    while !p.at(Tok.Eof) {
+        if p.eat(Tok.Semi) {
+            continue
+        }
+        items.push(p.item()?)
+    }
+    Ok(Module { file: file, attrs: attrs, items: items })
+}
+
+// A closure's parameter list may turn out to be a function type's: each
+// entry is a name with a type, or a type.
+enum LambdaEntry {
+    Named(LambdaParam)
+    Typed(Mode, Ty)
+}
+
+impl Parser {
+    fn tok(self) -> Tok {
+        self.toks[self.i].tok
+    }
+
+    fn peek(self, n: i64) -> Tok {
+        self.toks[min(self.i + n, self.toks.len() - 1)].tok
+    }
+
+    // The name of the current token, if it is an `Ident`.
+    fn text(self) -> str {
+        self.toks[self.i].text.as_str()
+    }
+
+    fn span(self) -> Span {
+        self.toks[self.i].span
+    }
+
+    fn prev_span(self) -> Span {
+        self.toks[max(self.i - 1, 0)].span
+    }
+
+    fn nl(self) -> bool {
+        self.toks[self.i].nl_before
+    }
+
+    fn at(self, t: Tok) -> bool {
+        self.tok() == t
+    }
+
+    // Moves past the current token; returns its span.
+    fn bump(inout self) -> Span {
+        let sp = self.span()
+        if self.i < self.toks.len() - 1 {
+            self.i += 1
+        }
+        sp
+    }
+
+    fn eat(inout self, t: Tok) -> bool {
+        if self.at(t) {
+            self.bump()
+            true
+        } else {
+            false
+        }
+    }
+
+    fn error(self, msg: str) -> Diag {
+        Diag.new(self.span(), msg)
+    }
+
+    // An error that ends with what was found: `msg` then the token.
+    fn found(self, msg: str) -> Diag {
+        var s = String.from(msg)
+        s.push_str(self.describe().as_str())
+        Diag.new(self.span(), s.as_str())
+    }
+
+    fn describe(self) -> String {
+        let t = self.toks[self.i]
+        var s = String.new()
+        match t.tok {
+            Ident => {
+                s.push('`')
+                s.push_str(t.text.as_str())
+                s.push('`')
+            }
+            Int => {
+                s.push('`')
+                t.int.show(&s)
+                s.push('`')
+            }
+            Float => {
+                s.push('`')
+                fmt.push_f64(&s, t.float)
+                s.push('`')
+            }
+            Str => s.push_str("a string")
+            Char => s.push_str("a character")
+            Eof => s.push_str("the end of the file")
+            OpAssign => {
+                s.push('`')
+                s.push_str(t.op.text())
+                s.push_str("=`")
+            }
+            k => {
+                s.push('`')
+                s.push_str(lex.tok_text(k))
+                s.push('`')
+            }
+        }
+        s
+    }
+
+    fn expect(inout self, t: Tok) -> Result(Span, Diag) {
+        if self.at(t) {
+            return Ok(self.bump())
+        }
+        var s = String.from("expected `")
+        s.push_str(lex.tok_text(t))
+        s.push_str("`, found ")
+        Err(self.found(s.as_str()))
+    }
+
+    fn ident(inout self) -> Result(String, Diag) {
+        if !self.at(Tok.Ident) {
+            return Err(self.found("expected a name, found "))
+        }
+        let s = self.text().to_string()
+        self.bump()
+        Ok(s)
+    }
+
+    fn enter(inout self) -> Result((), Diag) {
+        self.depth += 1
+        if self.depth > MAX_DEPTH {
+            return Err(self.error("code is nested too deeply"))
+        }
+        Ok(())
+    }
+
+    // Separators between list elements: a comma, or a newline before the
+    // next element.
+    fn sep(inout self, close: Tok) -> Result(bool, Diag) {
+        if self.eat(Tok.Comma) || self.eat(Tok.Semi) {
+            return Ok(true)
+        }
+        if self.at(close) {
+            return Ok(false)
+        }
+        if self.nl() {
+            return Ok(true)
+        }
+        var s = String.from("expected `,` or `")
+        s.push_str(lex.tok_text(close))
+        s.push_str("`, found ")
+        Err(self.found(s.as_str()))
+    }
+
+    // ---- items ----
+
+    fn attrs(inout self) -> Result(Vec(Attr), Diag) {
+        var out = Vec(Attr).new()
+        while self.at(Tok.Hash) {
+            let start = self.bump()
+            self.expect(Tok.LBracket)?
+            let name = self.ident()?
+            var args = Vec(String).new()
+            if self.eat(Tok.LParen) {
+                while !self.at(Tok.RParen) {
+                    args.push(self.ident()?)
+                    if !self.eat(Tok.Comma) {
+                        break
+                    }
+                }
+                self.expect(Tok.RParen)?
+            }
+            let end = self.expect(Tok.RBracket)?
+            out.push(Attr { name: name, args: args, span: start.to(end) })
+        }
+        Ok(out)
+    }
+
+    fn item(inout self) -> Result(Item, Diag) {
+        let attrs = self.attrs()?
+        let start = self.span()
+        let public = self.eat(Tok.Pub)
+        let kind = match self.tok() {
+            Import => {
+                self.bump()
+                var path = Vec(String).new()
+                path.push(self.ident()?)
+                while self.eat(Tok.Dot) {
+                    path.push(self.ident()?)
+                }
+                let alias = if self.eat(Tok.As) { Some(self.ident()?) } else { None }
+                ItemKind.Import(ast.Import { path: path, alias: alias })
+            }
+            Fn | Extern | Export | Unsafe => ItemKind.Fn(self.fn_decl()?)
+            Struct => {
+                self.bump()
+                let name = self.ident()?
+                let params = self.generic_params()?
+                self.expect(Tok.LBrace)?
+                var fields = Vec(ast.Field).new()
+                while !self.at(Tok.RBrace) {
+                    let fs = self.span()
+                    let public = self.eat(Tok.Pub)
+                    let fname = self.ident()?
+                    self.expect(Tok.Colon)?
+                    let ty = self.ty()?
+                    fields.push(ast.Field { name: fname, ty: ty, public: public, span: fs.to(self.prev_span()) })
+                    if !self.sep(Tok.RBrace)? {
+                        break
+                    }
+                }
+                self.expect(Tok.RBrace)?
+                ItemKind.Struct(ast.StructDecl { name: name, params: params, fields: fields })
+            }
+            Enum => {
+                self.bump()
+                let name = self.ident()?
+                let params = self.generic_params()?
+                self.expect(Tok.LBrace)?
+                var variants = Vec(ast.Variant).new()
+                while !self.at(Tok.RBrace) {
+                    let vs = self.span()
+                    let vname = self.ident()?
+                    var fields = Vec(Ty).new()
+                    if self.eat(Tok.LParen) {
+                        while !self.at(Tok.RParen) {
+                            fields.push(self.ty()?)
+                            if !self.eat(Tok.Comma) {
+                                break
+                            }
+                        }
+                        self.expect(Tok.RParen)?
+                    }
+                    variants.push(ast.Variant { name: vname, fields: fields, span: vs.to(self.prev_span()) })
+                    if !self.sep(Tok.RBrace)? {
+                        break
+                    }
+                }
+                self.expect(Tok.RBrace)?
+                ItemKind.Enum(ast.EnumDecl { name: name, params: params, variants: variants })
+            }
+            Impl => {
+                self.bump()
+                var params = Vec(Param).new()
+                if self.at(Tok.LParen) {
+                    let (ps, _) = self.param_list()?
+                    params = ps
+                }
+                let first = self.ty()?
+                var trait_: Option(Ty) = None
+                var self_ty = first
+                if self.eat(Tok.For) {
+                    trait_ = Some(self_ty)
+                    self_ty = self.ty()?
+                }
+                let items = self.item_block()?
+                ItemKind.Impl(ast.ImplDecl { params: params, trait_: trait_, self_ty: self_ty, items: items })
+            }
+            Trait => {
+                self.bump()
+                let name = self.ident()?
+                let params = self.generic_params()?
+                var supertraits = Vec(Ty).new()
+                if self.eat(Tok.Colon) {
+                    supertraits.push(self.ty()?)
+                    while self.eat(Tok.Plus) {
+                        supertraits.push(self.ty()?)
+                    }
+                }
+                let items = self.item_block()?
+                ItemKind.Trait(ast.TraitDecl { name: name, params: params, supertraits: supertraits, items: items })
+            }
+            Const | Static => {
+                let is_static = self.at(Tok.Static)
+                self.bump()
+                let name = self.ident()?
+                let ty = if self.eat(Tok.Colon) { Some(self.ty()?) } else { None }
+                self.expect(Tok.Assign)?
+                let value = self.expr()?
+                let c = ast.ConstDecl { name: name, ty: ty, value: value }
+                if is_static { ItemKind.Static(c) } else { ItemKind.Const(c) }
+            }
+            Type => {
+                self.bump()
+                let name = self.ident()?
+                let ty = if self.eat(Tok.Assign) { Some(self.ty()?) } else { None }
+                ItemKind.TypeAlias(name, ty)
+            }
+            _ => return Err(self.found("expected an item (`fn`, `struct`, `enum`, `impl`, ...), found "))
+        }
+        Ok(Item { span: start.to(self.prev_span()), public: public, attrs: attrs, kind: kind })
+    }
+
+    fn item_block(inout self) -> Result(Vec(Item), Diag) {
+        self.expect(Tok.LBrace)?
+        var items = Vec(Item).new()
+        while !self.at(Tok.RBrace) {
+            if self.eat(Tok.Semi) {
+                continue
+            }
+            items.push(self.item()?)
+        }
+        self.expect(Tok.RBrace)?
+        Ok(items)
+    }
+
+    fn generic_params(inout self) -> Result(Vec(Param), Diag) {
+        if !self.at(Tok.LParen) {
+            return Ok(Vec(Param).new())
+        }
+        let (var ps, _) = self.param_list()?
+        for i in 0..ps.len() {
+            ps[i].mode = Mode.Comptime
+        }
+        Ok(ps)
+    }
+
+    fn fn_decl(inout self) -> Result(FnDecl, Diag) {
+        var kind = ast.FnKind.Normal
+        let is_unsafe = self.eat(Tok.Unsafe)
+        if self.eat(Tok.Extern) {
+            kind = ast.FnKind.Extern
+        } else if self.eat(Tok.Export) {
+            kind = ast.FnKind.Export
+        }
+        self.expect(Tok.Fn)?
+        let name = self.ident()?
+        let name_span = self.prev_span()
+        let (params, variadic) = self.param_list()?
+        var ret: Option(Ty) = None
+        var ret_mode = ast.RetMode.Value
+        if self.eat(Tok.Arrow) {
+            if self.eat(Tok.Ref) {
+                ret_mode = ast.RetMode.Ref
+            } else if self.eat(Tok.Inout) {
+                ret_mode = ast.RetMode.Inout
+            }
+            ret = Some(self.ty()?)
+        }
+        let body = if self.at(Tok.LBrace) { Some(self.block()?) } else { None }
+        Ok(FnDecl {
+            name: name
+            name_span: name_span
+            params: params
+            ret: ret
+            ret_mode: ret_mode
+            body: body
+            kind: kind
+            variadic: variadic
+            is_unsafe: is_unsafe
+        })
+    }
+
+    fn param_list(inout self) -> Result((Vec(Param), bool), Diag) {
+        self.expect(Tok.LParen)?
+        var params = Vec(Param).new()
+        var variadic = false
+        while !self.at(Tok.RParen) {
+            if self.eat(Tok.Ellipsis) {
+                variadic = true
+                break
+            }
+            let start = self.span()
+            let mode = self.param_mode_or_comptime()
+            let name = self.ident()?
+            var ty: Option(Ty) = None
+            var bounds = Vec(Ty).new()
+            if self.eat(Tok.Colon) {
+                ty = Some(self.ty()?)
+                while self.eat(Tok.Plus) {
+                    bounds.push(self.ty()?)
+                }
+            } else if name != "self" {
+                return Err(self.error("expected `:` and the parameter's type"))
+            }
+            params.push(Param { name: name, mode: mode, ty: ty, bounds: bounds, span: start.to(self.prev_span()) })
+            if !self.eat(Tok.Comma) {
+                break
+            }
+        }
+        self.expect(Tok.RParen)?
+        Ok((params, variadic))
+    }
+
+    fn param_mode_or_comptime(inout self) -> Mode {
+        if self.eat(Tok.Comptime) {
+            Mode.Comptime
+        } else {
+            self.param_mode()
+        }
+    }
+
+    // ---- types ----
+
+    pub fn ty(inout self) -> Result(Ty, Diag) {
+        self.enter()?
+        let start = self.span()
+        let kind = match self.tok() {
+            Star => {
+                self.bump()
+                TyKind.Ptr(Box.new(self.ty()?))
+            }
+            LBracket => {
+                self.bump()
+                let elem = self.ty()?
+                if self.eat(Tok.Semi) {
+                    let n = self.expr()?
+                    self.expect(Tok.RBracket)?
+                    TyKind.Array(Box.new(elem), Box.new(n))
+                } else {
+                    self.expect(Tok.RBracket)?
+                    TyKind.Slice(Box.new(elem))
+                }
+            }
+            LParen => {
+                self.bump()
+                var tys = Vec(Ty).new()
+                while !self.at(Tok.RParen) {
+                    tys.push(self.ty()?)
+                    if !self.eat(Tok.Comma) {
+                        break
+                    }
+                }
+                self.expect(Tok.RParen)?
+                if tys.len() == 1 {
+                    self.depth -= 1
+                    return Ok(tys.pop().unwrap())
+                }
+                TyKind.Tuple(tys)
+            }
+            Fn => {
+                self.bump()
+                let (ps, r) = self.fn_ty_rest()?
+                TyKind.Fn(ps, r)
+            }
+            Type => {
+                self.bump()
+                TyKind.Path(one("type"), None)
+            }
+            Ref | Inout => {
+                let m = self.at(Tok.Inout)
+                self.bump()
+                TyKind.Ref(Box.new(self.ty()?), m)
+            }
+            Ident if self.text() == "fnptr" && self.peek(1) == Tok.LParen => {
+                self.bump()
+                let (ps, r) = self.fn_ty_rest()?
+                TyKind.FnPtr(ps, r)
+            }
+            Ident => {
+                var path = Vec(String).new()
+                path.push(self.ident()?)
+                while self.at(Tok.Dot) && self.peek(1) == Tok.Ident {
+                    self.bump()
+                    path.push(self.ident()?)
+                }
+                let args = if self.at(Tok.LParen) && !self.nl() { Some(self.call_args()?) } else { None }
+                TyKind.Path(path, args)
+            }
+            _ => return Err(self.found("expected a type, found "))
+        }
+        self.depth -= 1
+        Ok(Ty { kind: kind, span: start.to(self.prev_span()) })
+    }
+
+    fn param_mode(inout self) -> Mode {
+        if self.eat(Tok.Inout) {
+            Mode.Inout
+        } else if self.eat(Tok.Sink) {
+            Mode.Sink
+        } else {
+            Mode.Let
+        }
+    }
+
+    fn fn_ty_rest(inout self) -> Result((Vec(FnTyParam), Option(Box(Ty))), Diag) {
+        self.expect(Tok.LParen)?
+        var ps = Vec(FnTyParam).new()
+        while !self.at(Tok.RParen) {
+            let m = self.param_mode()
+            ps.push(FnTyParam { mode: m, ty: self.ty()? })
+            if !self.eat(Tok.Comma) {
+                break
+            }
+        }
+        self.expect(Tok.RParen)?
+        var r: Option(Box(Ty)) = None
+        if self.at(Tok.Arrow) && !self.nl() {
+            self.bump()
+            r = Some(Box.new(self.ty()?))
+        }
+        Ok((ps, r))
+    }
+
+    // ---- statements ----
+
+    pub fn block(inout self) -> Result(Block, Diag) {
+        self.enter()?
+        let start = self.expect(Tok.LBrace)?
+        var stmts = Vec(Stmt).new()
+        var tail: Option(Box(Expr)) = None
+        loop {
+            while self.eat(Tok.Semi) {}
+            if self.at(Tok.RBrace) {
+                break
+            }
+            let s = self.stmt()?
+            let ended_semi = self.at(Tok.Semi)
+            if !self.at(Tok.RBrace) && !self.at(Tok.Semi) && !self.nl() {
+                return Err(self.found("expected the end of the statement, found "))
+            }
+            if self.at(Tok.RBrace) && !ended_semi && is_expr_stmt(s) {
+                match s {
+                    Stmt { kind: Expr(e), span: _ } => tail = Some(Box.new(e))
+                    _ => {}
+                }
+                break
+            }
+            stmts.push(s)
+        }
+        let end = self.expect(Tok.RBrace)?
+        self.depth -= 1
+        Ok(Block { stmts: stmts, tail: tail, span: start.to(end) })
+    }
+
+    fn stmt(inout self) -> Result(Stmt, Diag) {
+        let start = self.span()
+        let kind = match self.tok() {
+            Let | Var | Inout => {
+                let kind = match self.tok() {
+                    Let => ast.LetKind.Let
+                    Var => ast.LetKind.Var
+                    _ => ast.LetKind.Inout
+                }
+                self.bump()
+                let pat = self.pattern()?
+                let ty = if self.eat(Tok.Colon) { Some(self.ty()?) } else { None }
+                self.expect(Tok.Assign)?
+                let value = self.expr()?
+                StmtKind.Let(ast.LetStmt { kind: kind, pat: pat, ty: ty, value: value })
+            }
+            _ => {
+                let e = self.expr()?
+                if self.at(Tok.Assign) && !self.nl() {
+                    self.bump()
+                    let v = self.expr()?
+                    StmtKind.Assign(e, v)
+                } else if self.at(Tok.OpAssign) && !self.nl() {
+                    let op = self.toks[self.i].op
+                    self.bump()
+                    let v = self.expr()?
+                    StmtKind.OpAssign(op, e, v)
+                } else {
+                    StmtKind.Expr(e)
+                }
+            }
+        }
+        Ok(Stmt { kind: kind, span: start.to(self.prev_span()) })
+    }
+
+    // ---- expressions ----
+
+    pub fn expr(inout self) -> Result(Expr, Diag) {
+        self.expr_bp(0, false)
+    }
+
+    // An expression where a struct literal cannot start (`if x {`).
+    fn expr_ns(inout self) -> Result(Expr, Diag) {
+        self.expr_bp(0, true)
+    }
+
+    fn binop(self) -> Option((Op, i64)) {
+        if self.nl() {
+            return None
+        }
+        Some(match self.tok() {
+            OrOr => (Op.LogOr, 1)
+            AndAnd => (Op.LogAnd, 2)
+            EqEq => (Op.Eq, 3)
+            NotEq => (Op.Ne, 3)
+            Lt => (Op.Lt, 3)
+            Le => (Op.Le, 3)
+            Gt => (Op.Gt, 3)
+            Ge => (Op.Ge, 3)
+            Pipe => (Op.Or, 4)
+            Caret => (Op.Xor, 5)
+            Amp => (Op.And, 6)
+            Shl => (Op.Shl, 7)
+            Shr => (Op.Shr, 7)
+            Plus => (Op.Add, 8)
+            Minus => (Op.Sub, 8)
+            PlusWrap => (Op.AddWrap, 8)
+            MinusWrap => (Op.SubWrap, 8)
+            Star => (Op.Mul, 9)
+            Slash => (Op.Div, 9)
+            Percent => (Op.Rem, 9)
+            StarWrap => (Op.MulWrap, 9)
+            _ => return None
+        })
+    }
+
+    fn expr_bp(inout self, min: i64, ns: bool) -> Result(Expr, Diag) {
+        self.enter()?
+        let start = self.span()
+        if self.at(Tok.DotDot) {
+            self.bump()
+            var hi: Option(Box(Expr)) = None
+            if !self.range_end() {
+                hi = Some(Box.new(self.expr_bp(1, ns)?))
+            }
+            self.depth -= 1
+            return Ok(Expr { kind: ExprKind.Range(None, hi), span: start.to(self.prev_span()) })
+        }
+        var lhs = self.unary(ns)?
+        loop {
+            if self.at(Tok.As) && !self.nl() {
+                self.bump()
+                let t = self.ty()?
+                let sp = lhs.span.to(t.span)
+                lhs = Expr { kind: ExprKind.Cast(Box.new(lhs), t), span: sp }
+                continue
+            }
+            if min == 0 && self.at(Tok.DotDot) && !self.nl() {
+                self.bump()
+                var hi: Option(Box(Expr)) = None
+                if !self.range_end() {
+                    hi = Some(Box.new(self.expr_bp(1, ns)?))
+                }
+                let sp = start.to(self.prev_span())
+                lhs = Expr { kind: ExprKind.Range(Some(Box.new(lhs)), hi), span: sp }
+                break
+            }
+            var op = Op.Add
+            var prec = 0
+            match self.binop() {
+                Some((o, p)) => {
+                    op = o
+                    prec = p
+                }
+                None => break
+            }
+            if prec <= min {
+                break
+            }
+            self.bump()
+            let rhs = self.expr_bp(prec, ns)?
+            if op.is_compare() {
+                match self.binop() {
+                    Some((op2, p2)) => {
+                        if p2 == prec && op2.is_compare() {
+                            return Err(self.error("comparisons do not chain; use `&&`"))
+                        }
+                    }
+                    None => {}
+                }
+            }
+            let sp = lhs.span.to(rhs.span)
+            lhs = Expr { kind: ExprKind.Binary(op, Box.new(lhs), Box.new(rhs)), span: sp }
+        }
+        self.depth -= 1
+        Ok(lhs)
+    }
+
+    fn range_end(self) -> bool {
+        self.at(Tok.RBracket) || self.at(Tok.RParen) || self.at(Tok.LBrace) || self.at(Tok.Comma) || self.nl()
+    }
+
+    fn unary(inout self, ns: bool) -> Result(Expr, Diag) {
+        let start = self.span()
+        var op = UnOp.Neg
+        var is_op = true
+        match self.tok() {
+            Minus => op = UnOp.Neg
+            Bang => op = UnOp.Not
+            Star => op = UnOp.Deref
+            Amp => op = UnOp.Addr
+            _ => is_op = false
+        }
+        if is_op {
+            self.bump()
+            self.enter()?
+            let e = self.unary(ns)?
+            self.depth -= 1
+            let sp = start.to(e.span)
+            return Ok(Expr { kind: ExprKind.Unary(op, Box.new(e)), span: sp })
+        }
+        if self.eat(Tok.Move) {
+            let e = self.unary(ns)?
+            let sp = start.to(e.span)
+            return Ok(Expr { kind: ExprKind.Move(Box.new(e)), span: sp })
+        }
+        let e = self.primary(ns)?
+        self.postfix(e, ns)
+    }
+
+    fn call_args(inout self) -> Result(Vec(Expr), Diag) {
+        self.expect(Tok.LParen)?
+        var args = Vec(Expr).new()
+        while !self.at(Tok.RParen) {
+            args.push(self.expr()?)
+            if !self.sep(Tok.RParen)? {
+                break
+            }
+        }
+        self.expect(Tok.RParen)?
+        Ok(args)
+    }
+
+    fn postfix(inout self, sink e: Expr, ns: bool) -> Result(Expr, Diag) {
+        var e = e
+        loop {
+            match self.tok() {
+                LParen if !self.nl() => {
+                    let args = self.call_args()?
+                    let sp = e.span.to(self.prev_span())
+                    e = Expr { kind: ExprKind.Call(Box.new(e), args), span: sp }
+                }
+                LBracket if !self.nl() => {
+                    self.bump()
+                    let idx = self.expr()?
+                    self.expect(Tok.RBracket)?
+                    let sp = e.span.to(self.prev_span())
+                    e = Expr { kind: ExprKind.Index(Box.new(e), Box.new(idx)), span: sp }
+                }
+                Dot => {
+                    self.bump()
+                    if self.at(Tok.Int) {
+                        let n = self.toks[self.i].int
+                        self.bump()
+                        let sp = e.span.to(self.prev_span())
+                        e = Expr { kind: ExprKind.TupleField(Box.new(e), n as u32), span: sp }
+                    } else {
+                        let name = self.ident()?
+                        let sp = e.span.to(self.prev_span())
+                        e = Expr { kind: ExprKind.Field(Box.new(e), name), span: sp }
+                    }
+                }
+                Question if !self.nl() => {
+                    self.bump()
+                    let sp = e.span.to(self.prev_span())
+                    e = Expr { kind: ExprKind.Try(Box.new(e)), span: sp }
+                }
+                LBrace if !ns && !self.nl() && is_path_expr(e) && self.struct_lit_ahead() => {
+                    e = self.struct_lit(e)?
+                }
+                _ => return Ok(e)
+            }
+        }
+    }
+
+    // After `Name {`: a struct literal starts with `}` or `name:` or `name,`.
+    fn struct_lit_ahead(self) -> bool {
+        let a = self.peek(1)
+        let b = self.peek(2)
+        a == Tok.RBrace || (a == Tok.Ident && (b == Tok.Colon || b == Tok.Comma || b == Tok.RBrace))
+    }
+
+    fn struct_lit(inout self, sink path: Expr) -> Result(Expr, Diag) {
+        self.expect(Tok.LBrace)?
+        var fields = Vec(FieldInit).new()
+        while !self.at(Tok.RBrace) {
+            let name = self.ident()?
+            let sp = self.prev_span()
+            var value = Expr { kind: ExprKind.Name(name.clone()), span: sp }
+            if self.eat(Tok.Colon) {
+                value = self.expr()?
+            }
+            fields.push(FieldInit { name: name, value: value, span: sp })
+            if !self.sep(Tok.RBrace)? {
+                break
+            }
+        }
+        let end = self.expect(Tok.RBrace)?
+        let span = path.span.to(end)
+        Ok(Expr { kind: ExprKind.StructLit(Box.new(path), fields), span: span })
+    }
+
+    fn primary(inout self, ns: bool) -> Result(Expr, Diag) {
+        let start = self.span()
+        let kind = match self.tok() {
+            Int => {
+                let n = self.toks[self.i].int
+                self.bump()
+                ExprKind.Int(n)
+            }
+            Float => {
+                let f = self.toks[self.i].float
+                self.bump()
+                ExprKind.Float(f)
+            }
+            Str => {
+                let s = self.toks[self.i].text.clone()
+                self.bump()
+                ExprKind.Str(s)
+            }
+            Char => {
+                let c = self.toks[self.i].int as u8
+                self.bump()
+                ExprKind.Char(c)
+            }
+            True => {
+                self.bump()
+                ExprKind.Bool(true)
+            }
+            False => {
+                self.bump()
+                ExprKind.Bool(false)
+            }
+            Ident => {
+                if self.text() == "fnptr" && self.peek(1) == Tok.LParen {
+                    ExprKind.Type(self.ty()?)
+                } else {
+                    ExprKind.Name(self.ident()?)
+                }
+            }
+            Type => {
+                self.bump()
+                ExprKind.Name("type".to_string())
+            }
+            Ref | Inout => ExprKind.Type(self.ty()?)
+            LParen => {
+                self.bump()
+                if self.eat(Tok.RParen) {
+                    ExprKind.Unit
+                } else {
+                    var first = self.expr()?
+                    if self.eat(Tok.RParen) {
+                        first.span = start.to(self.prev_span())
+                        return Ok(first)
+                    }
+                    var items = Vec(Expr).new()
+                    items.push(first)
+                    while self.eat(Tok.Comma) {
+                        if self.at(Tok.RParen) {
+                            break
+                        }
+                        items.push(self.expr()?)
+                    }
+                    self.expect(Tok.RParen)?
+                    ExprKind.Tuple(items)
+                }
+            }
+            LBracket => {
+                self.bump()
+                if self.eat(Tok.RBracket) {
+                    ExprKind.Array(Vec(Expr).new())
+                } else {
+                    let first = self.expr()?
+                    if self.eat(Tok.Semi) {
+                        let n = self.expr()?
+                        self.expect(Tok.RBracket)?
+                        ExprKind.ArrayRepeat(Box.new(first), Box.new(n))
+                    } else {
+                        var items = Vec(Expr).new()
+                        items.push(first)
+                        while self.sep(Tok.RBracket)? {
+                            if self.at(Tok.RBracket) {
+                                break
+                            }
+                            items.push(self.expr()?)
+                        }
+                        self.expect(Tok.RBracket)?
+                        ExprKind.Array(items)
+                    }
+                }
+            }
+            LBrace => ExprKind.Block(self.block()?)
+            Unsafe => {
+                self.bump()
+                ExprKind.Unsafe(self.block()?)
+            }
+            Comptime => {
+                self.bump()
+                ExprKind.Comptime(Box.new(self.unary(ns)?))
+            }
+            If => return self.if_expr()
+            Match => {
+                self.bump()
+                let scrut = self.expr_ns()?
+                self.expect(Tok.LBrace)?
+                var arms = Vec(Arm).new()
+                while !self.at(Tok.RBrace) {
+                    let astart = self.span()
+                    let pat = self.pattern()?
+                    let guard = if self.eat(Tok.If) { Some(self.expr()?) } else { None }
+                    self.expect(Tok.FatArrow)?
+                    let body = self.arm_body()?
+                    arms.push(Arm { pat: pat, guard: guard, body: body, span: astart.to(self.prev_span()) })
+                    if !self.sep(Tok.RBrace)? {
+                        break
+                    }
+                }
+                self.expect(Tok.RBrace)?
+                ExprKind.Match(Box.new(scrut), arms)
+            }
+            While => {
+                self.bump()
+                let c = self.expr_ns()?
+                let b = self.block()?
+                ExprKind.While(Box.new(c), b)
+            }
+            Loop => {
+                self.bump()
+                ExprKind.Loop(self.block()?)
+            }
+            For => {
+                self.bump()
+                var pat = self.pattern()?
+                var index: Option(ast.ForIndex) = None
+                if self.eat(Tok.Comma) {
+                    match pat.kind {
+                        Name(n, false) => index = Some(ast.ForIndex { name: n.clone(), span: pat.span })
+                        _ => return Err(Diag.new(pat.span, "the index of a `for` loop is a name"))
+                    }
+                    pat = self.pattern()?
+                }
+                self.expect(Tok.In)?
+                let it = self.expr_ns()?
+                let b = self.block()?
+                ExprKind.For(index, pat, Box.new(it), b)
+            }
+            Fn => return self.lambda_or_type()
+            Return => {
+                self.bump()
+                var v: Option(Box(Expr)) = None
+                if !(self.at(Tok.RBrace) || self.nl() || self.at(Tok.Semi) || self.at(Tok.Comma)) {
+                    v = Some(Box.new(self.expr()?))
+                }
+                ExprKind.Return(v)
+            }
+            Break => {
+                self.bump()
+                ExprKind.Break
+            }
+            Continue => {
+                self.bump()
+                ExprKind.Continue
+            }
+            _ => return Err(self.found("expected an expression, found "))
+        }
+        Ok(Expr { kind: kind, span: start.to(self.prev_span()) })
+    }
+
+    // An arm's body: an expression, or a statement (`x => n += 1`).
+    fn arm_body(inout self) -> Result(Expr, Diag) {
+        let s = self.stmt()?
+        if !is_expr_stmt(s) {
+            let span = s.span
+            var stmts = Vec(Stmt).new()
+            stmts.push(s)
+            return Ok(Expr { kind: ExprKind.Block(Block { stmts: stmts, tail: None, span: span }), span: span })
+        }
+        match s {
+            Stmt { kind: Expr(e), span: _ } => Ok(e)
+            _ => panic("not an expression statement")
+        }
+    }
+
+    fn if_expr(inout self) -> Result(Expr, Diag) {
+        let start = self.expect(Tok.If)?
+        let c = self.expr_ns()?
+        let then = self.block()?
+        var els: Option(Box(Expr)) = None
+        if self.at(Tok.Else) {
+            self.bump()
+            if self.at(Tok.If) {
+                els = Some(Box.new(self.if_expr()?))
+            } else {
+                let b = self.block()?
+                let sp = b.span
+                els = Some(Box.new(Expr { kind: ExprKind.Block(b), span: sp }))
+            }
+        }
+        Ok(Expr { kind: ExprKind.If(Box.new(c), then, els), span: start.to(self.prev_span()) })
+    }
+
+    // `fn(x, y: i64) -> T { ... }` is a closure; `fn(i64) -> T` is a type.
+    fn lambda_or_type(inout self) -> Result(Expr, Diag) {
+        let start = self.expect(Tok.Fn)?
+        self.expect(Tok.LParen)?
+        var entries = Vec(LambdaEntry).new()
+        while !self.at(Tok.RParen) {
+            if self.at(Tok.Ident) && self.peek(1) == Tok.Colon {
+                let n = self.ident()?
+                let sp = self.prev_span()
+                self.bump()
+                let ty = self.ty()?
+                entries.push(LambdaEntry.Named(LambdaParam { name: n, ty: Some(ty), span: sp }))
+            } else {
+                let m = self.param_mode()
+                entries.push(LambdaEntry.Typed(m, self.ty()?))
+            }
+            if !self.eat(Tok.Comma) {
+                break
+            }
+        }
+        self.expect(Tok.RParen)?
+        var ret: Option(Ty) = None
+        if self.at(Tok.Arrow) && !self.nl() {
+            self.bump()
+            ret = Some(self.ty()?)
+        }
+        if self.at(Tok.LBrace) {
+            var params = Vec(LambdaParam).new()
+            for e in entries.into_iter() {
+                match e {
+                    Named(p) => params.push(p)
+                    Typed(m, t) => {
+                        match lambda_param_name(m, t) {
+                            Some(n) => params.push(LambdaParam { name: n, ty: None, span: t.span })
+                            None => return Err(Diag.new(t.span, "expected a parameter name"))
+                        }
+                    }
+                }
+            }
+            let body = self.block()?
+            return Ok(Expr { kind: ExprKind.Lambda(params, ret, body), span: start.to(self.prev_span()) })
+        }
+        var tys = Vec(FnTyParam).new()
+        for e in entries.into_iter() {
+            match e {
+                Typed(m, t) => tys.push(FnTyParam { mode: m, ty: t })
+                Named(p) => return Err(Diag.new(p.span, "a function type lists types, not names"))
+            }
+        }
+        let span = start.to(self.prev_span())
+        var r: Option(Box(Ty)) = None
+        match ret {
+            Some(t) => r = Some(Box.new(t))
+            None => {}
+        }
+        Ok(Expr { kind: ExprKind.Type(Ty { kind: TyKind.Fn(tys, r), span: span }), span: span })
+    }
+
+    // ---- patterns ----
+
+    pub fn pattern(inout self) -> Result(Pat, Diag) {
+        self.enter()?
+        let start = self.span()
+        let first = self.single_pattern()?
+        if !self.at(Tok.Pipe) {
+            self.depth -= 1
+            return Ok(first)
+        }
+        var alts = Vec(Pat).new()
+        alts.push(first)
+        while self.eat(Tok.Pipe) {
+            alts.push(self.single_pattern()?)
+        }
+        self.depth -= 1
+        Ok(Pat { kind: PatKind.Or(alts), span: start.to(self.prev_span()) })
+    }
+
+    // An integer or a byte, maybe after `-`.
+    fn pat_int(inout self) -> Option(PatInt) {
+        let neg = self.at(Tok.Minus)
+        let save = self.i
+        if neg {
+            self.bump()
+        }
+        if !self.at(Tok.Int) && !self.at(Tok.Char) {
+            self.i = save
+            return None
+        }
+        let v = self.toks[self.i].int
+        self.bump()
+        Some(PatInt { neg: neg && v != 0, mag: v })
+    }
+
+    fn single_pattern(inout self) -> Result(Pat, Diag) {
+        let start = self.span()
+        let is_char = self.at(Tok.Char)
+        match self.pat_int() {
+            Some(v) => {
+                if self.at(Tok.DotDot) {
+                    self.bump()
+                    self.eat(Tok.Assign)
+                    match self.pat_int() {
+                        Some(hi) => return Ok(Pat { kind: PatKind.Range(v, hi), span: start.to(self.prev_span()) })
+                        None => return Err(self.error("expected the end of the range"))
+                    }
+                }
+                let kind = if is_char { PatKind.Char(v.mag as u8) } else { PatKind.Int(v) }
+                return Ok(Pat { kind: kind, span: start.to(self.prev_span()) })
+            }
+            None => {}
+        }
+        let kind = match self.tok() {
+            True => {
+                self.bump()
+                PatKind.Bool(true)
+            }
+            False => {
+                self.bump()
+                PatKind.Bool(false)
+            }
+            Str => {
+                let s = self.toks[self.i].text.clone()
+                self.bump()
+                PatKind.Str(s)
+            }
+            Var => {
+                self.bump()
+                PatKind.Name(self.ident()?, true)
+            }
+            LParen => {
+                self.bump()
+                var ps = Vec(Pat).new()
+                while !self.at(Tok.RParen) {
+                    ps.push(self.pattern()?)
+                    if !self.eat(Tok.Comma) {
+                        break
+                    }
+                }
+                self.expect(Tok.RParen)?
+                if ps.len() == 1 {
+                    return Ok(ps.pop().unwrap())
+                }
+                PatKind.Tuple(ps)
+            }
+            Ident if self.text() == "_" => {
+                self.bump()
+                PatKind.Wild
+            }
+            Ident => {
+                var path = Vec(String).new()
+                path.push(self.ident()?)
+                while self.at(Tok.Dot) {
+                    self.bump()
+                    path.push(self.ident()?)
+                }
+                if self.at(Tok.LParen) {
+                    self.bump()
+                    var ps = Vec(Pat).new()
+                    while !self.at(Tok.RParen) {
+                        ps.push(self.pattern()?)
+                        if !self.eat(Tok.Comma) {
+                            break
+                        }
+                    }
+                    self.expect(Tok.RParen)?
+                    PatKind.Variant(path, ps)
+                } else if self.at(Tok.LBrace) {
+                    self.bump()
+                    var fields = Vec(FieldPat).new()
+                    var rest = false
+                    while !self.at(Tok.RBrace) {
+                        if self.eat(Tok.DotDot) {
+                            rest = true
+                            break
+                        }
+                        let f = self.ident()?
+                        let sp = self.prev_span()
+                        var p = Pat { kind: PatKind.Name(f.clone(), false), span: sp }
+                        if self.eat(Tok.Colon) {
+                            p = self.pattern()?
+                        }
+                        fields.push(FieldPat { name: f, pat: p })
+                        if !self.sep(Tok.RBrace)? {
+                            break
+                        }
+                    }
+                    self.expect(Tok.RBrace)?
+                    PatKind.Struct(path, fields, rest)
+                } else if path.len() == 1 {
+                    PatKind.Name(path.pop().unwrap(), false)
+                } else {
+                    PatKind.Variant(path, Vec(Pat).new())
+                }
+            }
+            _ => return Err(self.found("expected a pattern, found "))
+        }
+        Ok(Pat { kind: kind, span: start.to(self.prev_span()) })
+    }
+}
+
+fn is_expr_stmt(s: Stmt) -> bool {
+    match s.kind {
+        Expr(_) => true
+        _ => false
+    }
+}
+
+// A closure parameter written without a type parses as a type: a path of
+// one name, with no arguments, borrowed.
+fn lambda_param_name(m: Mode, t: Ty) -> Option(String) {
+    if m != Mode.Let {
+        return None
+    }
+    match t.kind {
+        Path(p, None) => if p.len() == 1 { Some(p[0].clone()) } else { None }
+        _ => None
+    }
+}
+
+fn is_path_expr(e: Expr) -> bool {
+    match e.kind {
+        Name(_) => true
+        Field(b, _) => is_path_expr(b.deref())
+        Call(b, _) => is_path_expr(b.deref())
+        _ => false
+    }
+}
+
+fn one(s: str) -> Vec(String) {
+    var v = Vec(String).new()
+    v.push(s.to_string())
+    v
+}

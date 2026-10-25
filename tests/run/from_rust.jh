@@ -116,4 +116,36 @@ fn main() {
     }
     println(x)
     //> 6
+
+    // `let (var a, b)`, not `let (mut a, b)`
+    let (var a, b) = (1, 2)
+    a += b
+    println(a)
+    //> 3
+
+    // `for x in v` borrows; `into_iter` gives the values away
+    var names = Vec(String).new()
+    names.push("x".to_string())
+    var all = String.new()
+    for n in names.into_iter() {
+        all = all + n.as_str()
+    }
+    println(all)
+    //> x
+
+    // a `match` that binds parts of a whole owned variable uses it up
+    println(first_name(Named.One("y".to_string())))
+    //> y
+}
+
+enum Named {
+    One(String)
+    Two(String, String)
+}
+
+fn first_name(sink n: Named) -> String {
+    match n {
+        One(s) => s
+        Two(s, _) => s
+    }
 }

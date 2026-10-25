@@ -362,7 +362,9 @@ impl<'a> Sema<'a> {
         let env = fb.env.clone();
         let ok = match self.lookup_path(env.module, path) {
             Some((super::Sym::Adt(d), _)) => d == decl,
-            _ => path.len() == 1 && path[0] == "Self" && env.self_ty == Some(ty),
+            _ if path.len() == 1 && path[0] == "Self" => env.self_ty == Some(ty),
+            // an alias (`type P = m.Point`), or a type parameter
+            _ => self.path_is_type(path, &env) && self.resolve_path_ty_pub(path, &env, span).ok() == Some(ty),
         };
         if !ok {
             return ty_err(span, &format!("this pattern is for `{}`, but the value is a `{}`", path.join("."), self.types.show(ty)));

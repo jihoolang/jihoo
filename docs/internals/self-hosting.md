@@ -33,9 +33,9 @@ live in `tests/selfhost/<pass>/`.
 | step | jihoo | Rust | compared by | state |
 |------|-------|------|-------------|-------|
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
-| 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (to add) | |
+| 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh` | `load.rs` | `emit-ast` of the whole program | |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | |
+| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | needs `i128` (below) |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
@@ -58,6 +58,10 @@ better way the port takes it and says so in a comment; so far:
 - Enum variants with named fields (`StmtKind::Let { .. }` in Rust) become
   variants holding a struct.
 - `format!` becomes `String` building with `push_str` and `show`.
+- Pattern literals (`i128` in Rust) are a sign and a `u64` (`ast.PatInt`)
+  until jihoo has `i128`.
+- Rust's `Display` for floats, which messages use, is `fmt.push_f64`
+  (the shortest `%e` that reads back exactly, through libc).
 
 While both compilers exist, a language change has to be made in both:
 stage 0 must compile `compiler/`, and stage 1 must agree with stage 0.
@@ -72,3 +76,29 @@ far, each fixed in stage 0 with a test:
   returning a reborrow (`&*r`) of a `ref` that a call had returned, though
   `r`'s own loans were checked. (`tests/run/borrows_ok.jh`,
   `tests/fail/borrow_return_reborrow_local.jh`.)
+- A struct pattern could not name its type through an alias
+  (`type Stmt = ast.Stmt`, then `Stmt { kind, .. }`), though an enum
+  variant pattern could. (`tests/run/structs.jh`.)
+- There was no way to take the values of a `Vec` one by one: `for x in v`
+  borrows. `Vec.into_iter()` now gives them away. (`tests/run/drops.jh`.)
+- A debug build of the Rust compiler overflowed its stack on deeply nested
+  code before the parser's depth limit stopped it; it now runs on a thread
+  with a 256 MiB stack.
+
+And differences from Rust that are by design, now documented in
+[Coming from Rust](../language/from-rust.md): `let (var a, b)`, and
+`match` using up a whole owned variable on every path.
+
+## Next: `i128`
+
+Sema folds constants in `i128` (a `u64` and a negative number both fit) and
+MIR keeps integer constants that way. Before step 4, jihoo gets `i128` and
+`u128`, which LLVM has already.
+
+## Known issues
+
+- Built at `-O0`, stage 1 needs more than 16 MiB of stack to reach the
+  parser's depth limit (500 levels of nesting), since every temporary has
+  its own stack slot; built at `-O1` or more it needs about 4 MiB. The Rust
+  compiler runs on a thread with a large stack for the same reason; stage
+  1 will need the same once it has threads, or a smaller depth limit.

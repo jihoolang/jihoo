@@ -6,10 +6,12 @@
 import std.env
 import std.fs
 import std.sys
+import astdump
 import diag
 import lex
+import parse
 
-const USAGE = "usage:\n  jihoo emit-tokens <file.jh>   print the tokens of one file"
+const USAGE = "usage:\n  jihoo emit-tokens <file.jh>   print the tokens of one file\n  jihoo emit-ast <file.jh>      print the syntax tree of one file"
 
 fn main() {
     let args = env.args()
@@ -18,8 +20,8 @@ fn main() {
     }
     let cmd = args[1]
     let file = args[2]
-    if cmd == "emit-tokens" {
-        emit_tokens(file)
+    if cmd == "emit-tokens" || cmd == "emit-ast" {
+        emit_syntax(file, cmd == "emit-ast")
     } else {
         fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
     }
@@ -30,9 +32,9 @@ fn fail(msg: str, code: i32) -> never {
     sys.exit(code)
 }
 
-// One line per token: its byte range, whether a newline came before it, and
-// the token.
-fn emit_tokens(file: str) {
+// The tokens of one file, one per line: its byte range, whether a newline
+// came before it, and the token; or its syntax tree.
+fn emit_syntax(file: str, ast: bool) {
     var sources = diag.Sources.new()
     let text = match fs.read_file(file) {
         Ok(t) => t
@@ -42,6 +44,13 @@ fn emit_tokens(file: str) {
     let toks = match lex.lex(id, sources.files[id as i64].text.as_str()) {
         Ok(t) => t
         Err(d) => fail(sources.render(d).as_str(), 1)
+    }
+    if ast {
+        match parse.parse_module(id, toks) {
+            Ok(m) => print(astdump.module(m))
+            Err(d) => fail(sources.render(d).as_str(), 1)
+        }
+        return
     }
     var out = String.new()
     for t in toks {

@@ -27,7 +27,9 @@ A growable array. `Vec(T).new()`, `with_capacity(n)`, `Vec.filled(n, x)`;
 `len`, `is_empty`, `capacity`, `push`, `pop`, `insert`, `remove`, `swap`,
 `truncate`, `clear`, `extend`, `reverse`, `reserve`, `resize`, `first`,
 `last`, `as_slice`, `iter`; `v[i]` (bounds-checked). `Clone` and `Eq` when
-`T` has them. `for x in v` borrows each element.
+`T` has them. `for x in v` borrows each element; `for x in v.into_iter()`
+owns each one (`into_iter` takes the `Vec`; the values a loop that stops
+early does not reach are dropped with it).
 
 ## `String` and `str`
 

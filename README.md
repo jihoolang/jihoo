@@ -104,5 +104,5 @@ calls and atomics; the standard library, including running other
 programs.
 
 Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo
-([in progress](docs/internals/self-hosting.md): the lexer),
+([in progress](docs/internals/self-hosting.md): the lexer and the parser),
 compile-time evaluation, `derive`, dynamic dispatch, threads.

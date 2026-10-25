@@ -95,4 +95,5 @@ loop { ... break }
 
 `for` borrows a collection and gives each element (borrowed, or copied if
 plain). A type with `next(inout self) -> Option(T)` is an iterator and is
-used up by the loop; a type with `iter()` gives one.
+used up by the loop; a type with `iter()` gives one. To own the elements of
+a `Vec`, loop over `v.into_iter()`.

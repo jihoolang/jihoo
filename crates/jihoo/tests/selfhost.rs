@@ -9,7 +9,7 @@ use std::process::Command;
 
 /// The commands both compilers have, which print what a pass makes. Each
 /// pass ported to jihoo adds its own.
-const COMMANDS: &[&[&str]] = &[&["emit-tokens"]];
+const COMMANDS: &[&[&str]] = &[&["emit-tokens"], &["emit-ast"]];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")

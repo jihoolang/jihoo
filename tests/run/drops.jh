@@ -27,6 +27,22 @@ fn main() {
         take(d)
     }
     println(0)
+    consume()
+}
+
+// `into_iter` gives each value away; the ones not taken drop with it.
+fn consume() {
+    var v = Vec(Noisy).new()
+    v.push(Noisy { name: 7 })
+    v.push(Noisy { name: 8 })
+    v.push(Noisy { name: 9 })
+    for n in v.into_iter() {
+        if n.name == 8 {
+            break
+        }
+        take(n)
+    }
+    println(10)
 }
 //> 100
 //> 2
@@ -34,6 +50,11 @@ fn main() {
 //> 100
 //> 6
 //> 0
+//> 100
+//> 7
+//> 8
+//> 9
+//> 10
 //> 4
 //> 5
 //> 1

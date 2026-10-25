@@ -1,0 +1,725 @@
+// The syntax tree as S-expressions, with every span, for `emit-ast`; the
+// same text as the Rust compiler's `astdump.rs`, to compare the parsers.
+
+import ast
+import diag
+
+type Span = diag.Span
+
+pub fn module(m: ast.Module) -> String {
+    var d = Dump { out: String.new() }
+    d.s("(module [")
+    d.words(m.attrs)
+    d.s("]")
+    for it in m.items {
+        d.s("\n ")
+        d.item(it)
+    }
+    d.s(")\n")
+    match d {
+        Dump { out } => out
+    }
+}
+
+struct Dump {
+    out: String
+}
+
+impl Dump {
+    fn s(inout self, s: str) {
+        self.out.push_str(s)
+    }
+
+    fn open(inout self, tag: str, sp: Span) {
+        self.out.push('(')
+        self.out.push_str(tag)
+        self.span(sp)
+    }
+
+    fn span(inout self, sp: Span) {
+        self.out.push(' ')
+        sp.lo.show(&self.out)
+        self.out.push(':')
+        sp.hi.show(&self.out)
+    }
+
+    fn words(inout self, ws: Vec(String)) {
+        for i, w in ws {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.s(w.as_str())
+        }
+    }
+
+    fn bytes(inout self, b: str) {
+        self.s(" \"")
+        for c in b {
+            self.out.push(hex(c >> 4))
+            self.out.push(hex(c & 15))
+        }
+        self.s("\"")
+    }
+
+    fn mode(inout self, m: ast.Mode) {
+        self.s(match m {
+            Let => " let"
+            Inout => " inout"
+            Sink => " sink"
+            Comptime => " comptime"
+        })
+    }
+
+    fn opt_ty(inout self, t: Option(ast.Ty)) {
+        match t {
+            Some(t) => {
+                self.s(" ")
+                self.ty(t)
+            }
+            None => self.s(" _")
+        }
+    }
+
+    fn opt_expr(inout self, e: Option(ast.Expr)) {
+        match e {
+            Some(e) => {
+                self.s(" ")
+                self.expr(e)
+            }
+            None => self.s(" _")
+        }
+    }
+
+    fn opt_box(inout self, e: Option(Box(ast.Expr))) {
+        match e {
+            Some(e) => {
+                self.s(" ")
+                self.expr(e.deref())
+            }
+            None => self.s(" _")
+        }
+    }
+
+    fn tys(inout self, ts: Vec(ast.Ty)) {
+        self.s(" [")
+        for i, t in ts {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.ty(t)
+        }
+        self.s("]")
+    }
+
+    fn exprs(inout self, es: Vec(ast.Expr)) {
+        self.s(" [")
+        for i, e in es {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.expr(e)
+        }
+        self.s("]")
+    }
+
+    fn pats(inout self, ps: Vec(ast.Pat)) {
+        self.s(" [")
+        for i, p in ps {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.pat(p)
+        }
+        self.s("]")
+    }
+
+    fn params(inout self, ps: Vec(ast.Param)) {
+        self.s(" [")
+        for i, p in ps {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.open("param", p.span)
+            self.s(" ")
+            self.s(p.name.as_str())
+            self.mode(p.mode)
+            self.opt_ty(p.ty)
+            self.tys(p.bounds)
+            self.s(")")
+        }
+        self.s("]")
+    }
+
+    fn items(inout self, items: Vec(ast.Item)) {
+        self.s(" [")
+        for i, it in items {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.item(it)
+        }
+        self.s("]")
+    }
+
+    fn item(inout self, it: ast.Item) {
+        self.open("item", it.span)
+        self.s(if it.public { " pub [" } else { " priv [" })
+        for i, a in it.attrs {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.open("attr", a.span)
+            self.s(" ")
+            self.s(a.name.as_str())
+            self.s(" [")
+            self.words(a.args)
+            self.s("])")
+        }
+        self.s("] ")
+        match it.kind {
+            Import(im) => {
+                self.s("(import [")
+                self.words(im.path)
+                self.s("] ")
+                match im.alias {
+                    Some(a) => self.s(a.as_str())
+                    None => self.s("_")
+                }
+                self.s(")")
+            }
+            Fn(f) => {
+                self.s("(fn ")
+                self.s(f.name.as_str())
+                self.span(f.name_span)
+                self.s(match f.kind {
+                    Normal => " normal"
+                    Extern => " extern"
+                    Export => " export"
+                })
+                self.s(if f.is_unsafe { " unsafe" } else { " safe" })
+                self.s(if f.variadic { " variadic" } else { " fixed" })
+                self.params(f.params)
+                self.s(match f.ret_mode {
+                    Value => " value"
+                    Ref => " ref"
+                    Inout => " inout"
+                })
+                self.opt_ty(f.ret)
+                match f.body {
+                    Some(b) => {
+                        self.s(" ")
+                        self.block(b)
+                    }
+                    None => self.s(" _")
+                }
+                self.s(")")
+            }
+            Struct(sd) => {
+                self.s("(struct ")
+                self.s(sd.name.as_str())
+                self.params(sd.params)
+                self.s(" [")
+                for i, f in sd.fields {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.open("field", f.span)
+                    self.s(" ")
+                    self.s(f.name.as_str())
+                    self.s(if f.public { " pub " } else { " priv " })
+                    self.ty(f.ty)
+                    self.s(")")
+                }
+                self.s("])")
+            }
+            Enum(e) => {
+                self.s("(enum ")
+                self.s(e.name.as_str())
+                self.params(e.params)
+                self.s(" [")
+                for i, v in e.variants {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.open("variant", v.span)
+                    self.s(" ")
+                    self.s(v.name.as_str())
+                    self.tys(v.fields)
+                    self.s(")")
+                }
+                self.s("])")
+            }
+            Impl(im) => {
+                self.s("(impl")
+                self.params(im.params)
+                self.opt_ty(im.trait_)
+                self.s(" ")
+                self.ty(im.self_ty)
+                self.items(im.items)
+                self.s(")")
+            }
+            Trait(t) => {
+                self.s("(trait ")
+                self.s(t.name.as_str())
+                self.params(t.params)
+                self.tys(t.supertraits)
+                self.items(t.items)
+                self.s(")")
+            }
+            Const(c) => self.const_(c, "(const ")
+            Static(c) => self.const_(c, "(static ")
+            TypeAlias(name, t) => {
+                self.s("(type ")
+                self.s(name.as_str())
+                self.opt_ty(t)
+                self.s(")")
+            }
+        }
+        self.s(")")
+    }
+
+    fn const_(inout self, c: ast.ConstDecl, tag: str) {
+        self.s(tag)
+        self.s(c.name.as_str())
+        self.opt_ty(c.ty)
+        self.s(" ")
+        self.expr(c.value)
+        self.s(")")
+    }
+
+    fn fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty))) {
+        self.s(" [")
+        for i, p in ps {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.s("(")
+            self.mode(p.mode)
+            self.s(" ")
+            self.ty(p.ty)
+            self.s(")")
+        }
+        self.s("]")
+        match r {
+            Some(t) => {
+                self.s(" ")
+                self.ty(t.deref())
+            }
+            None => self.s(" _")
+        }
+    }
+
+    fn ty(inout self, t: ast.Ty) {
+        match t.kind {
+            Path(p, args) => {
+                self.open("path", t.span)
+                self.s(" [")
+                self.words(p)
+                self.s("]")
+                match args {
+                    Some(a) => self.exprs(a)
+                    None => self.s(" _")
+                }
+            }
+            Ptr(i) => {
+                self.open("ptr", t.span)
+                self.s(" ")
+                self.ty(i.deref())
+            }
+            Ref(i, m) => {
+                self.open(if m { "inout" } else { "ref" }, t.span)
+                self.s(" ")
+                self.ty(i.deref())
+            }
+            Array(i, n) => {
+                self.open("array", t.span)
+                self.s(" ")
+                self.ty(i.deref())
+                self.s(" ")
+                self.expr(n.deref())
+            }
+            Slice(i) => {
+                self.open("slice", t.span)
+                self.s(" ")
+                self.ty(i.deref())
+            }
+            Tuple(ts) => {
+                self.open("tuple", t.span)
+                self.tys(ts)
+            }
+            Fn(ps, r) => {
+                self.open("fn", t.span)
+                self.fn_ty(ps, r)
+            }
+            FnPtr(ps, r) => {
+                self.open("fnptr", t.span)
+                self.fn_ty(ps, r)
+            }
+        }
+        self.s(")")
+    }
+
+    fn block(inout self, b: ast.Block) {
+        self.open("block", b.span)
+        self.s(" [")
+        for i, st in b.stmts {
+            if i > 0 {
+                self.s(" ")
+            }
+            self.stmt(st)
+        }
+        self.s("]")
+        self.opt_box(b.tail)
+        self.s(")")
+    }
+
+    fn stmt(inout self, st: ast.Stmt) {
+        match st.kind {
+            Let(l) => {
+                self.open("let", st.span)
+                self.s(match l.kind {
+                    Let => " let "
+                    Var => " var "
+                    Inout => " inout "
+                })
+                self.pat(l.pat)
+                self.opt_ty(l.ty)
+                self.s(" ")
+                self.expr(l.value)
+            }
+            Assign(l, r) => {
+                self.open("assign", st.span)
+                self.s(" ")
+                self.expr(l)
+                self.s(" ")
+                self.expr(r)
+            }
+            OpAssign(op, l, r) => {
+                self.open("opassign", st.span)
+                self.s(" ")
+                self.s(op.text())
+                self.s(" ")
+                self.expr(l)
+                self.s(" ")
+                self.expr(r)
+            }
+            Expr(e) => {
+                self.open("expr", st.span)
+                self.s(" ")
+                self.expr(e)
+            }
+        }
+        self.s(")")
+    }
+
+    fn expr(inout self, e: ast.Expr) {
+        let sp = e.span
+        match e.kind {
+            Int(n) => {
+                self.open("int", sp)
+                self.s(" ")
+                n.show(&self.out)
+            }
+            Float(f) => {
+                self.open("float", sp)
+                self.s(" ")
+                var x = f
+                unsafe { *(&x as *u64) }.show(&self.out)
+            }
+            Str(b) => {
+                self.open("str", sp)
+                self.bytes(b.as_str())
+            }
+            Char(c) => {
+                self.open("char", sp)
+                self.s(" ")
+                c.show(&self.out)
+            }
+            Bool(b) => {
+                self.open("bool", sp)
+                self.s(if b { " true" } else { " false" })
+            }
+            Unit => self.open("unit", sp)
+            Name(n) => {
+                self.open("name", sp)
+                self.s(" ")
+                self.s(n.as_str())
+            }
+            Field(x, n) => {
+                self.open("field", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" ")
+                self.s(n.as_str())
+            }
+            TupleField(x, n) => {
+                self.open("tfield", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" ")
+                n.show(&self.out)
+            }
+            Call(f, args) => {
+                self.open("call", sp)
+                self.s(" ")
+                self.expr(f.deref())
+                self.exprs(args)
+            }
+            Index(x, i) => {
+                self.open("index", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" ")
+                self.expr(i.deref())
+            }
+            Unary(op, x) => {
+                self.open("unary", sp)
+                self.s(match op {
+                    Neg => " neg "
+                    Not => " not "
+                    Deref => " deref "
+                    Addr => " addr "
+                })
+                self.expr(x.deref())
+            }
+            Binary(op, l, r) => {
+                self.open("binary", sp)
+                self.s(" ")
+                self.s(op.text())
+                self.s(" ")
+                self.expr(l.deref())
+                self.s(" ")
+                self.expr(r.deref())
+            }
+            Cast(x, t) => {
+                self.open("cast", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" ")
+                self.ty(t)
+            }
+            Try(x) => {
+                self.open("try", sp)
+                self.s(" ")
+                self.expr(x.deref())
+            }
+            Move(x) => {
+                self.open("move", sp)
+                self.s(" ")
+                self.expr(x.deref())
+            }
+            StructLit(p, fields) => {
+                self.open("structlit", sp)
+                self.s(" ")
+                self.expr(p.deref())
+                self.s(" [")
+                for i, f in fields {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.open(f.name.as_str(), f.span)
+                    self.s(" ")
+                    self.expr(f.value)
+                    self.s(")")
+                }
+                self.s("]")
+            }
+            Tuple(xs) => {
+                self.open("tuple", sp)
+                self.exprs(xs)
+            }
+            Array(xs) => {
+                self.open("array", sp)
+                self.exprs(xs)
+            }
+            ArrayRepeat(x, n) => {
+                self.open("repeat", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" ")
+                self.expr(n.deref())
+            }
+            Block(b) => {
+                self.open("do", sp)
+                self.s(" ")
+                self.block(b)
+            }
+            Unsafe(b) => {
+                self.open("unsafe", sp)
+                self.s(" ")
+                self.block(b)
+            }
+            Comptime(x) => {
+                self.open("comptime", sp)
+                self.s(" ")
+                self.expr(x.deref())
+            }
+            If(c, then, els) => {
+                self.open("if", sp)
+                self.s(" ")
+                self.expr(c.deref())
+                self.s(" ")
+                self.block(then)
+                self.opt_box(els)
+            }
+            Match(x, arms) => {
+                self.open("match", sp)
+                self.s(" ")
+                self.expr(x.deref())
+                self.s(" [")
+                for i, a in arms {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.open("arm", a.span)
+                    self.s(" ")
+                    self.pat(a.pat)
+                    self.opt_expr(a.guard)
+                    self.s(" ")
+                    self.expr(a.body)
+                    self.s(")")
+                }
+                self.s("]")
+            }
+            While(c, b) => {
+                self.open("while", sp)
+                self.s(" ")
+                self.expr(c.deref())
+                self.s(" ")
+                self.block(b)
+            }
+            Loop(b) => {
+                self.open("loop", sp)
+                self.s(" ")
+                self.block(b)
+            }
+            For(index, pat, it, b) => {
+                self.open("for", sp)
+                match index {
+                    Some(ix) => {
+                        self.s(" ")
+                        self.open(ix.name.as_str(), ix.span)
+                        self.s(")")
+                    }
+                    None => self.s(" _")
+                }
+                self.s(" ")
+                self.pat(pat)
+                self.s(" ")
+                self.expr(it.deref())
+                self.s(" ")
+                self.block(b)
+            }
+            Lambda(params, ret, b) => {
+                self.open("lambda", sp)
+                self.s(" [")
+                for i, p in params {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.open(p.name.as_str(), p.span)
+                    self.opt_ty(p.ty)
+                    self.s(")")
+                }
+                self.s("]")
+                self.opt_ty(ret)
+                self.s(" ")
+                self.block(b)
+            }
+            Return(x) => {
+                self.open("return", sp)
+                self.opt_box(x)
+            }
+            Break => self.open("break", sp)
+            Continue => self.open("continue", sp)
+            Range(lo, hi) => {
+                self.open("range", sp)
+                self.opt_box(lo)
+                self.opt_box(hi)
+            }
+            Type(t) => {
+                self.open("type", sp)
+                self.s(" ")
+                self.ty(t)
+            }
+        }
+        self.s(")")
+    }
+
+    fn pat_int(inout self, v: ast.PatInt) {
+        self.s(if v.neg { " -" } else { " " })
+        v.mag.show(&self.out)
+    }
+
+    fn pat(inout self, p: ast.Pat) {
+        let sp = p.span
+        match p.kind {
+            Wild => self.open("wild", sp)
+            Name(n, var_) => {
+                self.open("name", sp)
+                self.s(" ")
+                self.s(n.as_str())
+                self.s(if var_ { " var" } else { " let" })
+            }
+            Int(v) => {
+                self.open("int", sp)
+                self.pat_int(v)
+            }
+            Char(c) => {
+                self.open("char", sp)
+                self.s(" ")
+                c.show(&self.out)
+            }
+            Bool(b) => {
+                self.open("bool", sp)
+                self.s(if b { " true" } else { " false" })
+            }
+            Str(b) => {
+                self.open("str", sp)
+                self.bytes(b.as_str())
+            }
+            Tuple(ps) => {
+                self.open("tuple", sp)
+                self.pats(ps)
+            }
+            Variant(path, ps) => {
+                self.open("variant", sp)
+                self.s(" [")
+                self.words(path)
+                self.s("]")
+                self.pats(ps)
+            }
+            Struct(path, fields, rest) => {
+                self.open("struct", sp)
+                self.s(" [")
+                self.words(path)
+                self.s("] [")
+                for i, f in fields {
+                    if i > 0 {
+                        self.s(" ")
+                    }
+                    self.s("(")
+                    self.s(f.name.as_str())
+                    self.s(" ")
+                    self.pat(f.pat)
+                    self.s(")")
+                }
+                self.s(if rest { "] rest" } else { "] exact" })
+            }
+            Or(ps) => {
+                self.open("or", sp)
+                self.pats(ps)
+            }
+            Range(lo, hi) => {
+                self.open("range", sp)
+                self.pat_int(lo)
+                self.pat_int(hi)
+            }
+        }
+        self.s(")")
+    }
+}
+
+fn hex(d: u8) -> u8 {
+    if d < 10 { '0' + d } else { 'a' + d - 10 }
+}

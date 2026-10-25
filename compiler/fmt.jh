@@ -1,0 +1,64 @@
+// Text the standard library cannot make yet.
+
+import std.libc
+
+// A float as Rust's `Display` writes it: the shortest digits that read back
+// as the same value, in plain notation (`1e300` is a 1 and 300 zeros,
+// `2.0` is `2`).
+pub fn push_f64(inout out: String, f: f64) {
+    if f != f {
+        out.push_str("NaN")
+        return
+    }
+    var x = f
+    if x < 0.0 || (x == 0.0 && 1.0 / x < 0.0) {
+        out.push('-')
+        x = 0.0 - x
+    }
+    if x == 1.0 / 0.0 {
+        out.push_str("inf")
+        return
+    }
+    if x == 0.0 {
+        out.push('0')
+        return
+    }
+    // The shortest `%.*e` that reads back exactly: `d.ddde±x`.
+    var buf = [0 as u8; 40]
+    var n: i32 = 0
+    var p: i32 = 0
+    while p < 17 {
+        n = unsafe { libc.snprintf(&buf[0], 40, "%.*e\0".ptr, p, x) }
+        if unsafe { libc.strtod(&buf[0], null) } == x {
+            break
+        }
+        p += 1
+    }
+    let s = unsafe { make_str(&buf[0], n as i64) }
+    var digits = String.new()
+    var i = 0
+    while s[i] != 'e' {
+        if s[i] != '.' {
+            digits.push(s[i])
+        }
+        i += 1
+    }
+    let exp = s[i + 1..s.len].parse_int().unwrap()
+    let d = digits.as_str()
+    if exp >= d.len - 1 {
+        out.push_str(d)
+        for _ in 0..exp - (d.len - 1) {
+            out.push('0')
+        }
+    } else if exp >= 0 {
+        out.push_str(d[0..exp + 1])
+        out.push('.')
+        out.push_str(d[exp + 1..d.len])
+    } else {
+        out.push_str("0.")
+        for _ in 0..-exp - 1 {
+            out.push('0')
+        }
+        out.push_str(d)
+    }
+}

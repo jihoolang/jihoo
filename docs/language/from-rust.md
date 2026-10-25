@@ -1,3 +1,6 @@
+| `for x in &v` | `for x in v` (borrows) |
+| `for x in v` (moves `v`) | `for x in v.into_iter()` |
+| `let (mut a, b) = t` | `let (var a, b) = t` |
 # Coming from Rust
 
 jihoo looks like Rust and shares many of its ideas, so the places where it
@@ -114,8 +117,14 @@ Rust struct with a lifetime parameter, without the annotation
 - A `match` arm's body may be a statement: `Run(c) => c += 1`. Arms are
   separated by newlines or commas.
 - `match &x` lets the arms change what they bind. A plain `match x` on a
-  place borrows the parts it binds; on a new value (a call's result) it
-  moves them out.
+  part of something (a field, an element) or on a borrow borrows the parts
+  it binds. On a new value (a call's result), or on a whole variable that
+  owns a value with a destructor, the arms move the parts out: the variable
+  is used up by the `match`, on every path, not only in the arms that bind.
+  To keep it on the other paths, decide before the `match`:
+  `if is_expr(s) { match s { ... } } else { keep(s) }`.
+- `let (a, b) = pair` borrows the parts when `pair` is a variable (like
+  every `let x = place`); to take a value apart, `match` it.
 
 ## Equality and printing
 

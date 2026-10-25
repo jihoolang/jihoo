@@ -25,9 +25,19 @@ fn bump(inout p: Point) {
     p.x += 100
 }
 
+// A struct pattern may name the type through an alias.
+type Pt = Point
+
+fn sum(sink p: Point) -> i64 {
+    match p {
+        Pt { x, y } => x + y
+    }
+}
+
 fn main() {
     var p = Point.new(3, 4)
     println(p.norm2())
+    println(sum(Point.new(5, 6)))
     p.shift(1)
     println(p.x)
     bump(&p)
@@ -44,6 +54,7 @@ fn main() {
     println(b)
 }
 //> 25
+//> 11
 //> 4
 //> 104
 //> 11

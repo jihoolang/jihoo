@@ -1,0 +1,96 @@
+#![freestanding]
+import std.vec
+pub import a.b.c as d
+
+#[view]
+#[derive(Clone, Eq)]
+pub struct Pair(T: type, comptime N: i64) {
+    pub a: T, b: [T; N]
+    c: *u8; d: (i64, bool)
+}
+
+enum E(T: type) { A, B(T, i64)
+    C(fn(inout i64, sink T) -> bool, fnptr(i64))
+}
+
+unsafe extern fn printf(fmt: *u8, ...) -> i32
+export fn entry(argc: i32) -> i32 { 0 }
+const N: i64 = 10
+static mut_: [u8; 4] = [0; 4]
+type Alias = std.map.Map(String, Vec(i64))
+
+trait Show2: Show + Clone {
+    type Item
+    fn show2(self, inout out: String)
+    fn twice(sink self) -> (Self, Self) { (self.clone(), self) }
+}
+
+impl(T: Ord + Hash, comptime n: i64) Show2 for Pair(T, n) {
+    type Item = ref T
+    fn show2(self, inout out: String) {}
+    pub fn get(self, i: i64) -> ref T { self.b[i] }
+    fn get_mut(inout self) -> inout T { self.a }
+}
+
+fn main() {
+    let x: i64 = -1 + 2 * 3 - 4 / 5 % 6 +% 7 -% 8 *% 9
+    var y = (x << 2 >> 1) & 0xff | 3 ^ 4
+    inout z = &y
+    z += 1; z -= 1; z *= 2; z /= 2; z %= 3; z &= 1; z |= 2; z ^= 3; z <<= 1; z >>= 1; z +%= 1; z -%= 1; z *%= 1
+    let b = !true && false || x == 1 && x != 2 && x < 3 && x <= 4 && x > 5 && x >= 6
+    let c = x as u8 as i64 * 2
+    let p = Pair(i64, 2) { a: 1, b: [1, 2], c: null, d: (1, true) }
+    let q = P { a, b }
+    let e = P {}
+    let t = (1,)
+    let u = ()
+    let v = t.0.1
+    let w = a.b.c(1, 2)[3]?.d
+    let r = 0..10
+    let r2 = ..
+    let r3 = ..5
+    let s = xs[1..]
+    let arr = [
+        1
+        2,
+        3
+    ]
+    let cl = fn(a, b: i64) -> i64 { a + b }
+    let ft = fn(i64, inout String) -> bool
+    let fp = fnptr(i64) -> i64
+    let rt = ref Vec(i64)
+    let it = inout i64
+    let ty = type
+    let m = move x
+    let d = *p + &x
+    let k = comptime size_of(i64)
+    let blk = { let a = 1; a }
+    let un = unsafe { read(p) }
+    if x > 0 { 1 } else if x < 0 { 2 } else { 3 }
+    if (P { a: 1 }) == q {}
+    while x < 10 { x += 1; continue }
+    loop { break }
+    for i, v in xs { }
+    for (a, b) in pairs {}
+    for _ in 0..3 {}
+    match x {
+        0 => 1
+        -5 => 2, 1..9 => 3
+        'a'..='z' => 4
+        -10..-1 => 5
+        Some(var y) if y > 3 => y += 1
+        E.B(a, _) | E.A => {}
+        P { a, b: (c, d), .. } => {}
+        P { a: _ } => {}
+        "str" => {}
+        true | false => {}
+        (a, b) => {}
+        Shape.Circle => {}
+        n => return n
+        _ => return
+    }
+    let f = 1.5
+    let g = 'x'
+    let h = "a\tb\n"
+    return
+}
