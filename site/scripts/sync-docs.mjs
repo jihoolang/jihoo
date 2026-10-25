@@ -15,7 +15,7 @@ import { docs, readToc, repo } from './toc.mjs';
 
 const site = path.join(repo, 'site');
 const out = path.join(site, 'src/content/docs');
-const github = 'https://github.com/jihoo12/jihoo/blob/main';
+const github = 'https://github.com/jihoolang/jihoo/blob/main';
 const { groups, pages } = readToc();
 const errors = [];
 

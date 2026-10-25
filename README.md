@@ -16,7 +16,7 @@ lifetime annotations or a garbage collector.
 - **A standard library written in jihoo** (`Vec`, `String`, `Map`, `Box`,
   sorting, files, processes), with or without libc.
 
-Documentation: **<https://jihoo12.github.io/jihoo/>**, built from
+Documentation: **<https://jihoolang.github.io/jihoo/>**, built from
 [docs/](docs) and [examples/](examples).
 
 ```jihoo
@@ -60,8 +60,8 @@ fn main() {
 ## Install
 
 ```sh
-nix run github:jihoo12/jihoo -- run hello.jh     # try it
-nix profile install github:jihoo12/jihoo         # install `jihoo`
+nix run github:jihoolang/jihoo -- run hello.jh     # try it
+nix profile install github:jihoolang/jihoo         # install `jihoo`
 ```
 
 ## Build from source

@@ -35,7 +35,7 @@ npm run build          # into dist/
 ```
 
 `SITE_URL` and `BASE_PATH` override the default address
-(`https://jihoo12.github.io` + `/jihoo`); the deploy workflow sets them from the
+(`https://jihoolang.github.io` + `/jihoo`); the deploy workflow sets them from the
 repository's Pages settings.
 
 To publish, set the repository's **Settings → Pages → Source** to

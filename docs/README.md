@@ -1,7 +1,7 @@
 # jihoo documentation
 
 This directory is the source of the documentation website,
-<https://jihoo12.github.io/jihoo/>. Each file is one page; this list is the
+<https://jihoolang.github.io/jihoo/>. Each file is one page; this list is the
 site's table of contents and sidebar, in order (`site/scripts/toc.mjs` reads it).
 Links between pages are ordinary relative Markdown links, so the files read the
 same on GitHub.

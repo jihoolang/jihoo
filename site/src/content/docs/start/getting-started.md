@@ -11,20 +11,20 @@ clang and lld it uses to finish programs, and the standard library.
 Try it without installing:
 
 ```sh
-nix run github:jihoo12/jihoo -- run hello.jh
+nix run github:jihoolang/jihoo -- run hello.jh
 ```
 
 Install it into your profile:
 
 ```sh
-nix profile install github:jihoo12/jihoo
+nix profile install github:jihoolang/jihoo
 ```
 
 Or use it from your own flake:
 
 ```nix
 {
-  inputs.jihoo.url = "github:jihoo12/jihoo";
+  inputs.jihoo.url = "github:jihoolang/jihoo";
 
   outputs = { self, nixpkgs, jihoo }: {
     # jihoo.packages.<system>.default is the compiler;
@@ -38,7 +38,7 @@ jihoo compiles for x86_64 and aarch64 Linux.
 ### From source
 
 ```sh
-git clone https://github.com/jihoo12/jihoo
+git clone https://github.com/jihoolang/jihoo
 cd jihoo
 nix develop                     # Rust, clang, lld
 cargo build
