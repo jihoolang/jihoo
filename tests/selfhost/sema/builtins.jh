@@ -1,0 +1,37 @@
+// load-args: --no-prelude
+struct P {
+    a: u8
+    b: i64
+}
+
+fn main() {
+    let s = size_of(P)
+    let al: u32 = align_of(P)
+    let n = type_name([P; 2])
+    let d = needs_drop(P)
+    let f = sqrt(2.0)
+    let g = abs(-3)
+    let h = copysign(1.0, -2.0)
+    let fl: f32 = floor(1.5)
+    var x: i64 = 5
+    let px = &x
+    unsafe {
+        let y = read(px)
+        write(px, 7)
+        let z = zeroed(P)
+        mem_fill(px, 0, 8)
+        mem_copy(px, px, 1)
+        let sl = make_slice(px, 1)
+        let cs: *u8 = "abc"
+        let st = make_str(cs, 3)
+        let old = atomic_load(px)
+        atomic_store(px, 1)
+        let sw = atomic_add(px, 2)
+        let ok = atomic_cas(px, 1, 2)
+        let r = syscall(39)
+    }
+    fence()
+    let ac = argc()
+    let av = argv()
+    forget(P { a: 1, b: 2 })
+}

@@ -1,0 +1,5 @@
+// load-args: --no-prelude
+fn main() {
+    let k = 1
+    let p: fnptr(i64) -> i64 = fn(x) { x + k }
+}

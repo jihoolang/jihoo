@@ -1,0 +1,8 @@
+// load-args: --no-prelude
+fn ev(comptime f: fn(i64) -> i64) -> i64 {
+    f(1, 2)
+}
+
+fn main() {
+    let a = ev(fn(x) { x })
+}

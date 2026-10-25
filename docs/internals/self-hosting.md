@@ -38,22 +38,22 @@ same way.
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh`, `sema.jh` (`mod.rs`, `consts.rs`), `body.jh` (functions, statements, operators, control flow, calls); `emit-mir` agrees on `tests/selfhost/sema/` |
+| 4 | `types.jh`, `mir.jh`, `sema.jh`, `body.jh`, `pat.jh`, `builtins.jh` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | done |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
 
-Sema (step 4) is half of the compiler, about 6,000 of its 12,000 lines.
-Every program loads the prelude, which uses nearly the whole language, so
-`emit-mir` on ordinary programs can only agree once almost all of sema is
-ported. Until then the comparison runs on small programs in
-`tests/selfhost/sema/` compiled with `--no-prelude` (an option for this
-only, in both compilers), and grows feature by feature: functions and
-integers, control flow, structs and enums, patterns, generics, traits,
-closures. Then the standard library, then everything. Until elaboration is
-ported too, the comparison is of MIR before it (`JIHOO_NO_ELAB=1`). The
-parts of `body.rs` not ported yet stop with "the compiler in jihoo cannot
-lower ... yet".
+Sema (step 4) is half of the compiler, about 6,000 of its 12,000 lines:
+`sema/mod.rs` and `consts.rs` became `sema.jh`, `body.rs` `body.jh`,
+`pat.rs` `pat.jh` and `builtins.rs` `builtins.jh`. Every program loads the
+prelude, which uses nearly the whole language, so `emit-mir` on ordinary
+programs could only agree once almost all of sema was ported. Until then
+the comparison ran on small programs in `tests/selfhost/sema/` compiled
+with `--no-prelude` (an option for this only, in both compilers), grown
+feature by feature; they stay, as tests of single features and of sema's
+errors. Now `emit-mir` agrees on every file in the repository, the
+standard library and `compiler/` included. Until elaboration is ported
+too, the comparison is of MIR before it (`JIHOO_NO_ELAB=1`).
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
@@ -140,6 +140,13 @@ far, each fixed in stage 0 with a test:
   [Coming from Rust](../language/from-rust.md): a `match` arm cannot hand
   out a borrowed part as its value, and `None` alone in an `if` arm needs
   the type written.
+- Also left as it is and documented there: a method called on a `ref T`
+  value (`self.types.variants(t).unwrap()`) is looked up on the borrow
+  first, so `.clone()` copies the borrow and the result still borrows
+  `self`; named first, the value clones the `T`
+  (`tests/fail/clone_of_ref_value.jh`). Porting the rest of sema found no
+  compiler bugs; it used `|` patterns that bind names (not supported) and
+  `==` on a payload-free enum (needs `Eq`), both documented already.
 
 And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and

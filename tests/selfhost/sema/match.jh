@@ -1,0 +1,89 @@
+// load-args: --no-prelude
+enum Shape {
+    Circle(i64)
+    Rect(i64, i64)
+    Empty
+}
+
+enum Opt(comptime T: type) {
+    Some(T)
+    None
+}
+
+struct P {
+    x: i64
+    y: i64
+}
+
+struct Named {
+    s: Shape
+    n: i64
+}
+
+fn area(s: Shape) -> i64 {
+    match s {
+        Circle(r) => r * r * 3
+        Shape.Rect(w, h) => w * h
+        Empty => 0
+    }
+}
+
+fn kind(n: i64) -> i64 {
+    match n {
+        0 => 10
+        1..=9 => 20
+        10 | 20 | 30 => 30
+        x if x < 0 => 40
+        _ => 50
+    }
+}
+
+fn get(o: Opt(i64)) -> i64 {
+    match o {
+        Some(v) => v
+        None => 0
+    }
+}
+
+fn flag(b: bool, c: u8) -> i64 {
+    match (b, c) {
+        (true, 'a') => 1
+        (false, _) => 2
+        (_, x) => x as i64
+    }
+}
+
+fn change(inout s: Shape) {
+    match &s {
+        Circle(r) => r += 1
+        _ => {}
+    }
+}
+
+fn main() {
+    let a = area(Shape.Circle(2))
+    let k = kind(5)
+    let g = get(Opt(i64).Some(3))
+    let f = flag(true, 'b')
+    let p = P { x: 1, y: 2 }
+    let P { x, y } = p
+    let P { x: px, .. } = p
+    let (q, r) = (1, 2)
+    let (var u, _) = (3, 4)
+    u += 1
+    var s = Shape.Rect(1, 2)
+    change(&s)
+    let nm = Named { s: Shape.Empty, n: 1 }
+    let v = match nm {
+        Named { s: Circle(_), n } => n
+        Named { n, .. } => n + 1
+    }
+    let w = match p {
+        P { x: 0, y } => y
+        P { x, y: _ } => x
+    }
+    match s {
+        Rect(_, _) => {}
+        _ => return
+    }
+}

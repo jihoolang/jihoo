@@ -1,0 +1,37 @@
+// load-args: --no-prelude
+fn apply(f: fn(i64) -> i64, x: i64) -> i64 {
+    f(x)
+}
+
+fn each(comptime f: fn(i64) -> i64, n: i64) -> i64 {
+    var s = 0
+    for i in 0..n {
+        s += f(i)
+    }
+    s
+}
+
+fn twice(comptime g: fn(i64) -> i64, x: i64) -> i64 {
+    each(g, x) + g(x)
+}
+
+fn inc(x: i64) -> i64 {
+    x + 1
+}
+
+fn main() {
+    var total = 0
+    let k = 3
+    let add = fn(x: i64) -> i64 { x + k }
+    let a = apply(add, 1)
+    let b = apply(fn(x) { x * 2 }, 4)
+    let c = apply(inc, 5)
+    let p: fnptr(i64) -> i64 = fn(x) { x - 1 }
+    let d = p(9)
+    let bump = fn(x: i64) {
+        total += x
+    }
+    bump(2)
+    let e = each(fn(i) { i * k }, 4)
+    let t = twice(fn(i) { i + 1 }, 3)
+}

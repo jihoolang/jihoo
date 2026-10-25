@@ -1,0 +1,9 @@
+// load-args: --no-prelude
+struct P {
+    a: i64
+    b: i64
+}
+
+fn main() {
+    let q = P { a: 1, a: 2, b: 3 }
+}

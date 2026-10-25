@@ -1,0 +1,71 @@
+// load-args: --no-prelude
+struct Point {
+    x: i64
+    y: i64
+}
+
+impl Point {
+    fn new(x: i64, y: i64) -> Point {
+        Point { y: y, x: x }
+    }
+
+    fn sum(self) -> i64 {
+        self.x + self.y
+    }
+
+    fn shift(inout self, d: i64) {
+        self.x += d
+    }
+
+    fn add(self, o: Point) -> Point {
+        Point { x: self.x + o.x, y: self.y + o.y }
+    }
+}
+
+struct Pair(comptime T: type) {
+    a: T
+    b: T
+}
+
+impl(comptime T: type) Pair(T) {
+    fn make(a: T, b: T) -> Pair(T) {
+        Pair(T) { a: a, b: b }
+    }
+
+    fn first(self) -> ref T {
+        self.a
+    }
+}
+
+enum Shape {
+    Circle(i64)
+    Rect(i64, i64)
+    Empty
+}
+
+enum Maybe(comptime T: type) {
+    Just(T)
+    Nothing
+}
+
+fn area(s: Shape) -> i64 {
+    0
+}
+
+fn main() {
+    var p = Point.new(1, 2)
+    p.shift(3)
+    let s = p.sum()
+    let q = p.add(Point { x: 1, y: 1 })
+    p.x = q.y
+    let c = Shape.Circle(2)
+    let r: Shape = Rect(1, 2)
+    let e = Shape.Empty
+    let a = area(Shape.Rect(3, 4))
+    let pr = Pair.make(1, 2)
+    let pf = pr.first()
+    let pu = Pair(u8) { a: 1, b: 2 }
+    let m: Maybe(i64) = Just(3)
+    let n = Maybe(bool).Nothing
+    let k: Maybe(u8) = Maybe.Just(1)
+}

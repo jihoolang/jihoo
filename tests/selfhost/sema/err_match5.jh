@@ -1,0 +1,14 @@
+// load-args: --no-prelude
+enum Shape {
+    Circle(i64)
+    Rect(i64, i64)
+}
+
+fn f(s: Shape) -> i64 {
+    match s {
+        Rect(a) => a
+        _ => 0
+    }
+}
+
+fn main() {}

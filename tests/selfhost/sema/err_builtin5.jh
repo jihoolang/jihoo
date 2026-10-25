@@ -1,0 +1,5 @@
+// load-args: --no-prelude
+fn main() {
+    var x: i64 = 0
+    let y = unsafe { atomic_load(&x, 1) }
+}

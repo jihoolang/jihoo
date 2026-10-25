@@ -151,6 +151,15 @@ fn main() {
     }
     //> p
 
+    // `.clone()` of a named `ref T` clones the `T`
+    var words = Vec(String).new()
+    words.push("a".to_string())
+    let w = words.first().unwrap()
+    let wc = w.clone()
+    words.push("b".to_string())
+    println(wc)
+    //> a
+
     // `None` alone in an `if` arm needs the type written
     let picked: Option(i64) = if names.len() > 5 { None } else { Some(1) }
     println(picked.is_some())

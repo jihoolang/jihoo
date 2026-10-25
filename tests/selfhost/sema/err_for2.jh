@@ -1,0 +1,4 @@
+// load-args: --no-prelude
+fn main() {
+    for x in 3 {}
+}

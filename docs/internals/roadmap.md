@@ -32,7 +32,7 @@ Done ([design](redesign.md)):
 
 - **The compiler in jihoo.** The first goal after 0.1: port
   `crates/jihoo` to jihoo, then build it with itself
-  ([plan and progress](self-hosting.md)). The lexer, the parser and the loader are done; for sema, jihoo gained `i128` and `u128`.
+  ([plan and progress](self-hosting.md)). The lexer, the parser, the loader and sema are done (for sema, jihoo gained `i128` and `u128`); next are elaboration and the borrow kernel.
 - **Compile-time evaluation**: an interpreter of MIR with the target's
   memory layout, for `const` items, `comptime` expressions and compile-time
   arguments beyond the arithmetic sema folds today.

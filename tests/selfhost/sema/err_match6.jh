@@ -1,0 +1,9 @@
+// load-args: --no-prelude
+fn f(n: i64, b: bool) -> i64 {
+    match (n, b) {
+        (1, true) => 1
+        (_, false) => 2
+    }
+}
+
+fn main() {}

@@ -16,6 +16,8 @@ import types
 import mir
 import sema
 import body
+import builtins
+import pat
 
 const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n  jihoo emit-mir <file.jh>       print MIR before elaboration\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
 

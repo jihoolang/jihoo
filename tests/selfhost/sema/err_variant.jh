@@ -1,0 +1,9 @@
+// load-args: --no-prelude
+enum E {
+    A(i64)
+    B
+}
+
+fn main() {
+    let e = E.A(1, 2)
+}

@@ -1,0 +1,8 @@
+// load-args: --no-prelude
+fn ap(f: fn(i64) -> i64) -> i64 {
+    f(1)
+}
+
+fn main() {
+    let a = ap(fn(x, y) { x })
+}

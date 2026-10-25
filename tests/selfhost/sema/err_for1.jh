@@ -1,0 +1,15 @@
+// load-args: --no-prelude
+struct It {
+    n: i64
+}
+
+impl It {
+    fn next(inout self) -> i64 {
+        self.n
+    }
+}
+
+fn main() {
+    var it = It { n: 0 }
+    for x in it {}
+}

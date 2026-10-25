@@ -11,9 +11,6 @@ use std::process::Command;
 /// pass ported to jihoo adds its own.
 const COMMANDS: &[&[&str]] = &[&["emit-tokens"], &["emit-ast"], &["emit-program"], &["emit-mir"]];
 
-/// Sema is being ported: `emit-mir` is compared on the programs here only.
-const SEMA_DIR: &str = "tests/selfhost/sema";
-
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -64,9 +61,6 @@ fn self_hosted_compiler_agrees() {
             .unwrap_or_default();
         for cmd in COMMANDS {
             let mut args: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
-            if cmd[0] == "emit-mir" && !rel.starts_with(SEMA_DIR) {
-                continue;
-            }
             if cmd[0] == "emit-program" || cmd[0] == "emit-mir" {
                 args.extend(load_args.iter().cloned());
             }

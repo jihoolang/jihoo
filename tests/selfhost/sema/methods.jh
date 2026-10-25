@@ -1,0 +1,69 @@
+// load-args: --no-prelude
+enum Ordering {
+    Less
+    Equal
+    Greater
+}
+
+struct N {
+    v: i64
+}
+
+impl N {
+    fn eq(self, o: N) -> bool {
+        self.v == o.v
+    }
+
+    fn compare(self, o: N) -> Ordering {
+        if self.v < o.v { Ordering.Less } else if self.v > o.v { Ordering.Greater } else { Ordering.Equal }
+    }
+
+    fn add(self, o: N) -> N {
+        N { v: self.v + o.v }
+    }
+
+    fn add_assign(inout self, o: N) {
+        self.v += o.v
+    }
+}
+
+struct Holder {
+    n: N
+}
+
+impl Holder {
+    fn deref(self) -> ref N {
+        self.n
+    }
+
+    fn deref_mut(inout self) -> inout N {
+        self.n
+    }
+}
+
+struct Wrap {
+    f: fnptr(i64) -> i64
+}
+
+fn twice(x: i64) -> i64 {
+    x * 2
+}
+
+fn main() {
+    let a = N { v: 1 }
+    let b = N { v: 2 }
+    let e = a == b
+    let ne = a != b
+    let lt = a < b
+    let ge = a >= b
+    let c = a + b
+    var d = N { v: 0 }
+    d += c
+    var h = Holder { n: N { v: 3 } }
+    let hv = h.v
+    h.v = 4
+    let hn = *h
+    let w = Wrap { f: twice }
+    let r = w.f(3)
+    let o = Ordering.Less as i64
+}

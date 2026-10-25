@@ -1,0 +1,1340 @@
+// Patterns: `match`, destructuring `let`, and exhaustiveness. The Rust
+// compiler's `sema/pat.rs`.
+//
+// A `match` on a place borrows it: bindings are borrows (or copies of plain
+// values). A `match` on a new value owns it: bindings move out of it, and
+// the parts no binding takes are dropped in the arm. `match &place` borrows
+// mutably, so bindings can change the place.
+
+import ast
+import body
+import diag
+import lex
+import mir
+import sema
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Fb = body.Fb
+type Val = body.Val
+type VK = body.VK
+type VarKind = body.VarKind
+type TyKind = types.TyKind
+type Place = mir.Place
+type Proj = mir.Proj
+type Operand = mir.Operand
+type Rvalue = mir.Rvalue
+type Const = mir.Const
+type Stmt = mir.Stmt
+type Term = mir.Term
+type PatKind = ast.PatKind
+
+pub enum BindMode {
+    // Borrow a place (copy plain values); own a new value.
+    Auto
+    Owned
+    Borrow
+    BorrowMut
+}
+
+impl Eq for BindMode {
+    fn eq(self, other: BindMode) -> bool {
+        mode_index(self) == mode_index(other)
+    }
+}
+
+fn mode_index(m: BindMode) -> i64 {
+    match m {
+        Auto => 0
+        Owned => 1
+        Borrow => 2
+        BorrowMut => 3
+    }
+}
+
+// The constructor that stands for an or-pattern: its fields are the
+// alternatives, and `useful` expands it.
+const OR_CTOR: u32 = 0xffffffff
+
+// Patterns reduced to constructors, for exhaustiveness.
+enum P {
+    Wild
+    // A constructor (a variant, the one constructor of a struct or tuple,
+    // `false`/`true`) and its fields.
+    Ctor(u32, Vec(P))
+    // A value of an infinite domain (integers, strings).
+    Lit
+}
+
+impl Clone for P {
+    fn clone(self) -> P {
+        match self {
+            Wild => P.Wild
+            Ctor(c, fs) => P.Ctor(c, fs.clone())
+            Lit => P.Lit
+        }
+    }
+}
+
+// A constructor of a type and the types of its fields.
+struct CtorTys {
+    c: u32
+    tys: Vec(u32)
+}
+
+impl Clone for CtorTys {
+    fn clone(self) -> CtorTys {
+        CtorTys { c: self.c, tys: self.tys.clone() }
+    }
+}
+
+fn err(span: Span, msg: str) -> Diag {
+    Diag.new(span, msg)
+}
+
+fn one_name(sink n: String) -> Vec(String) {
+    var v = Vec(String).new()
+    v.push(n)
+    v
+}
+
+fn wilds(n: i64) -> Vec(P) {
+    var v = Vec(P).new()
+    for _ in 0..n {
+        v.push(P.Wild)
+    }
+    v
+}
+
+// `a` then `b[from..]`.
+fn concat(sink a: Vec(P), b: Vec(P), from: i64) -> Vec(P) {
+    var out = a
+    for i in from..b.len() {
+        out.push(b[i].clone())
+    }
+    out
+}
+
+fn concat_tys(sink a: Vec(u32), b: Vec(u32), from: i64) -> Vec(u32) {
+    var out = a
+    for i in from..b.len() {
+        out.push(b[i])
+    }
+    out
+}
+
+// `c` around the first `arity` parts of a witness, then the rest of it.
+fn wrap_witness(c: u32, w: Vec(P), arity: i64) -> Vec(P) {
+    var fs = Vec(P).new()
+    for i in 0..arity {
+        fs.push(w[i].clone())
+    }
+    var out = Vec(P).new()
+    out.push(P.Ctor(c, fs))
+    concat(out, w, arity)
+}
+
+// `p` then the witness.
+fn prepend(sink p: P, w: Vec(P)) -> Vec(P) {
+    var out = Vec(P).new()
+    out.push(p)
+    concat(out, w, 0)
+}
+
+fn is_structural(p: ast.Pat) -> bool {
+    match p.kind {
+        Variant(_, _) | Struct(_, _, _) | Tuple(_) => true
+        _ => false
+    }
+}
+
+fn is_struct_pat(p: ast.Pat) -> bool {
+    match p.kind {
+        Struct(_, _, _) => true
+        _ => false
+    }
+}
+
+impl sema.Sema {
+    pub fn match_expr(inout self, inout fb: Fb, scrut: ast.Expr, arms: Vec(ast.Arm), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        var place = Place.local(0)
+        var ty: u32 = 0
+        var mode = BindMode.Borrow
+        var addr = false
+        match scrut.kind {
+            Unary(op, inner) => match op {
+                Addr => {
+                    // `match &x`: borrows x (mutably, if it can change).
+                    addr = true
+                    let v = self.expr_mut(&fb, inner.deref())?
+                    let p = match v.vk {
+                        Place(p) => p.clone()
+                        Op(_) => return Err(err(inner.span, "`match &` needs a place"))
+                    }
+                    mode = if self.place_mutable(fb, p) { BindMode.BorrowMut } else { BindMode.Borrow }
+                    place = p
+                    ty = v.ty
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        if !addr {
+            let v = self.expr(&fb, scrut, None)?
+            if v.ty == types.NEVER {
+                return Ok(body.val_never())
+            }
+            // A new value is owned; so is a whole owned variable whose
+            // parts the arms bind (it is used up, as in Rust).
+            var whole_owned = false
+            var is_op = false
+            match v.vk {
+                Place(p) => {
+                    if p.proj.len() == 0 && !self.types.is_ref(fb.ty_of(p.local)) && self.types.needs_drop(v.ty) {
+                        for a in arms {
+                            if pat_binds(a.pat) {
+                                whole_owned = true
+                            }
+                        }
+                    }
+                }
+                Op(_) => is_op = true
+            }
+            let owned = v.temp || is_op || whole_owned
+            let t = v.ty
+            ty = t
+            if owned {
+                let o = self.operand(&fb, v, scrut.span)?
+                let tmp = fb.temp(t, scrut.span)
+                fb.assign(Place.local(tmp), Rvalue.Use(o), scrut.span)
+                place = Place.local(tmp)
+                mode = BindMode.Owned
+            } else {
+                place = self.place_of_val(v)
+                mode = BindMode.Borrow
+            }
+        }
+        self.check_exhaustive(&fb, arms, ty, span)?
+        let want = exp != Some(types.UNIT)
+        let result = fb.new_local(types.UNIT, None, true, mir.LocalKind.Temp, span)
+        fb.add_temp_local(result)
+        var rty: Option(u32) = Some(types.UNIT)
+        if want {
+            rty = match exp {
+                Some(t) => if t != types.NEVER { Some(t) } else { None }
+                None => None
+            }
+        }
+        let done = fb.new_block()
+        for arm in arms {
+            let fail = fb.new_block()
+            self.test_pat(&fb, arm.pat, place.clone(), ty, fail)?
+            fb.push_scope(false)
+            match arm.guard {
+                Some(g) => {
+                    // The guard sees borrows; owned bindings move after it holds.
+                    let gmode = if mode == BindMode.Owned { BindMode.Borrow } else { mode }
+                    fb.push_scope(false)
+                    self.bind(&fb, arm.pat, place.clone(), ty, gmode)?
+                    let gv = self.expr(&fb, g, Some(types.BOOL))?
+                    let gv = self.coerce(&fb, gv, types.BOOL, g.span)?
+                    let go = self.operand(&fb, gv, g.span)?
+                    let c = fb.new_local(types.BOOL, None, true, mir.LocalKind.Temp, g.span)
+                    fb.assign(Place.local(c), Rvalue.Use(go), g.span)
+                    let pass = fb.new_block()
+                    let reject = fb.new_block()
+                    self.pop_scope(&fb)
+                    var ts = Vec(mir.SwitchTarget).new()
+                    ts.push(mir.SwitchTarget { value: 0, block: reject })
+                    fb.term(Term.Switch(Operand.Copy(Place.local(c)), ts, pass))
+                    fb.switch_to(reject)
+                    // Leave the arm scope (nothing bound in it yet).
+                    fb.goto(fail)
+                    fb.switch_to(pass)
+                }
+                None => {}
+            }
+            self.bind(&fb, arm.pat, place.clone(), ty, mode)?
+            if mode == BindMode.Owned && self.types.needs_drop(ty) {
+                self.drop_rest(&fb, arm.pat, place.clone(), ty, arm.span)?
+                fb.push(Stmt.Forget(place.local))
+            }
+            fb.push_scope(true)
+            let bv = self.expr(&fb, arm.body, if want { rty } else { Some(types.UNIT) })?
+            if bv.ty != types.NEVER {
+                if want {
+                    var bv = bv
+                    match rty {
+                        Some(t) => bv = self.coerce(&fb, bv, t, arm.body.span)?
+                        None => {}
+                    }
+                    if rty.is_none() {
+                        rty = Some(bv.ty)
+                    }
+                    if bv.ty != types.UNIT {
+                        fb.body.locals[result as i64].ty = bv.ty
+                        let o = self.operand(&fb, bv, arm.body.span)?
+                        fb.assign(Place.local(result), Rvalue.Use(o), arm.span)
+                    }
+                } else {
+                    self.discard_val(&fb, bv, arm.body.span)?
+                }
+            }
+            self.pop_scope(&fb)
+            self.pop_scope(&fb)
+            fb.goto(done)
+            fb.switch_to(fail)
+        }
+        // Exhaustiveness was checked: no value gets here.
+        fb.term(Term.Unreachable)
+        fb.switch_to(done)
+        match rty {
+            None => {
+                fb.term(Term.Unreachable)
+                Ok(body.val_never())
+            }
+            Some(t) => {
+                if t == types.UNIT || !want {
+                    return Ok(body.val_unit())
+                }
+                fb.body.locals[result as i64].ty = t
+                Ok(Val { vk: VK.Place(Place.local(result)), ty: t, temp: true })
+            }
+        }
+    }
+
+    fn discard_val(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result((), Diag) {
+        var moved = false
+        match v.vk {
+            Op(o) => match o {
+                Move(_) => moved = true
+                _ => {}
+            }
+            _ => {}
+        }
+        if moved {
+            let t = fb.temp(v.ty, span)
+            let o = self.operand(&fb, v, span)?
+            fb.assign(Place.local(t), Rvalue.Use(o), span)
+        }
+        Ok(())
+    }
+
+    // `let pattern = value`.
+    pub fn destructure(inout self, inout fb: Fb, pat: ast.Pat, sink v: Val, mode: BindMode, span: Span) -> Result((), Diag) {
+        let ty = v.ty
+        // The pattern must match every value.
+        let p = self.reduce(&fb, pat, ty)?
+        var rows = Vec(Vec(P)).new()
+        var row = Vec(P).new()
+        row.push(p)
+        rows.push(row)
+        var tys = Vec(u32).new()
+        tys.push(ty)
+        match self.useful(rows, wilds(1), tys)? {
+            Some(w) => return Err(err(pat.span, ("this pattern does not match every value; `" + self.show_witness(w[0], ty).as_str() + "` is not covered (use `match`)").as_str()))
+            None => {}
+        }
+        var is_op = false
+        match v.vk {
+            Op(_) => is_op = true
+            _ => {}
+        }
+        let owned = match mode {
+            Auto => v.temp || is_op
+            Owned => true
+            _ => false
+        }
+        if owned {
+            var whole: Option(Place) = None
+            match v.vk {
+                Place(p) => {
+                    if v.temp && p.proj.len() == 0 {
+                        whole = Some(p.clone())
+                    }
+                }
+                _ => {}
+            }
+            let place = match whole {
+                Some(p) => p
+                None => {
+                    let o = self.operand(&fb, v, span)?
+                    let tmp = fb.temp(ty, span)
+                    fb.assign(Place.local(tmp), Rvalue.Use(o), span)
+                    Place.local(tmp)
+                }
+            }
+            self.bind(&fb, pat, place.clone(), ty, BindMode.Owned)?
+            if self.types.needs_drop(ty) {
+                self.drop_rest(&fb, pat, place.clone(), ty, span)?
+                fb.push(Stmt.Forget(place.local))
+            }
+            Ok(())
+        } else {
+            let (place, _) = self.as_place(&fb, v, span)
+            let m = if mode == BindMode.BorrowMut { BindMode.BorrowMut } else { BindMode.Borrow }
+            self.bind(&fb, pat, place, ty, m)
+        }
+    }
+
+    // The enum variant a pattern path names, checking any type prefix.
+    fn pat_variant(inout self, fb: Fb, path: Vec(String), ty: u32, span: Span) -> Result(Option(u32), Diag) {
+        let vs = match self.types.variants(ty) {
+            Some(vs) => vs.clone()
+            None => return Ok(None)
+        }
+        let name = path[path.len() - 1].clone()
+        var found: Option(i64) = None
+        for i, v in vs {
+            if v.name == name {
+                found = Some(i)
+                break
+            }
+        }
+        let i = match found {
+            Some(i) => i
+            None => {
+                if path.len() == 1 {
+                    return Ok(None)
+                }
+                return Err(err(span, ("`" + self.types.show(ty).as_str() + "` has no variant `" + name.as_str() + "`").as_str()))
+            }
+        }
+        if path.len() > 1 {
+            var head = Vec(String).new()
+            for k in 0..path.len() - 1 {
+                head.push(path[k].clone())
+            }
+            let env = fb.env.clone()
+            var ok = false
+            match self.lookup_path(env.module, head) {
+                Some((Adt(d), _)) => {
+                    match self.types.adt_index(ty) {
+                        Some(a) => ok = self.types.adts[a as i64].decl == d
+                        None => {}
+                    }
+                }
+                _ => {
+                    if self.path_is_type(head, env) {
+                        ok = self.resolve_path_ty_pub(head, env, span).ok() == Some(ty)
+                    }
+                }
+            }
+            if !ok {
+                return Err(err(span, ("this pattern is for `" + sema.join_path(head).as_str() + "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
+            }
+        }
+        Ok(Some(i as u32))
+    }
+
+    // Whether a structural pattern fits the type as it is (not through
+    // `deref`).
+    fn pat_fits(inout self, pat: ast.Pat, ty: u32) -> Result(bool, Diag) {
+        match pat.kind {
+            Tuple(_) => Ok(match self.types.kind(ty) {
+                Tuple(_) => true
+                _ => false
+            })
+            Variant(_, _) => Ok(self.types.variants(ty).is_some())
+            Struct(_, _, _) => match self.types.kind(ty) {
+                Adt(_) => Ok(self.types.variants(ty).is_none() && self.find_method(ty, "deref")?.is_none())
+                _ => Ok(false)
+            }
+            _ => Ok(false)
+        }
+    }
+
+    // The place a `Box` (or anything with `deref`) points to, when a
+    // pattern looks inside it.
+    fn deref_for_pat(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, span: Span) -> Result(Option((Place, u32)), Diag) {
+        // Through a borrow held as a value (`Option(ref T)`'s payload): what
+        // it points to. A name binds the borrow itself, unless it names a
+        // variant.
+        match self.pat_through_ref(fb, pat, ty) {
+            Some(inner) => return Ok(Some((place.with(Proj.Deref), inner)))
+            None => {}
+        }
+        let structural = is_structural(pat)
+        let fits = self.pat_fits(pat, ty)?
+        if !structural || fits || self.types.adt_index(ty).is_none() || self.find_method(ty, "deref")?.is_none() {
+            return Ok(None)
+        }
+        let v = self.method_call_val(&fb, body.val_place(place, ty), "deref", Vec(Val).new(), span, None)?
+        let t = v.ty
+        match v.vk {
+            Place(p) => Ok(Some((p.clone(), t)))
+            Op(_) => Ok(None)
+        }
+    }
+
+    // The type a pattern sees through a `ref`/`inout` type, if it looks
+    // inside (anything but `_`, a binding name, or `|`).
+    fn pat_through_ref(self, fb: Fb, pat: ast.Pat, ty: u32) -> Option(u32) {
+        if !self.types.is_ref(ty) {
+            return None
+        }
+        let inner = self.types.pointee(ty)?
+        match pat.kind {
+            Wild | Or(_) => None
+            Name(n, _) => if self.names_variant(fb, n.as_str(), inner) { Some(inner) } else { None }
+            _ => Some(inner)
+        }
+    }
+
+    // Jumps to `fail` unless the place matches the pattern.
+    fn test_pat(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, fail: u32) -> Result((), Diag) {
+        let span = pat.span
+        match self.deref_for_pat(&fb, pat, place.clone(), ty, span)? {
+            Some((p, t)) => return self.test_pat(&fb, pat, p, t, fail)
+            None => {}
+        }
+        match pat.kind {
+            Wild => Ok(())
+            Name(n, _) => {
+                if self.names_variant(fb, n.as_str(), ty) {
+                    let v = self.pat_variant(fb, one_name(n.clone()), ty, span)?.unwrap()
+                    self.test_discr(&fb, place, v, fail, span)
+                }
+                Ok(())
+            }
+            Int(v) => {
+                if !self.types.is_int(ty) {
+                    return Err(err(span, ("an integer pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                if !self.int_fits(v, ty) {
+                    var m = String.new()
+                    v.show(&m)
+                    m.push_str(" does not fit in `")
+                    m.push_str(self.types.show(ty).as_str())
+                    m.push('`')
+                    return Err(err(span, m.as_str()))
+                }
+                test_eq(&fb, place, v, fail)
+                Ok(())
+            }
+            Char(c) => {
+                if !self.types.is_int(ty) {
+                    return Err(err(span, ("a character pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                test_eq(&fb, place, c as i128, fail)
+                Ok(())
+            }
+            Bool(b) => {
+                if ty != types.BOOL {
+                    return Err(err(span, ("a bool pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                let ok = fb.new_block()
+                let t = if b { ok } else { fail }
+                let f = if b { fail } else { ok }
+                var ts = Vec(mir.SwitchTarget).new()
+                ts.push(mir.SwitchTarget { value: 0, block: f })
+                fb.term(Term.Switch(Operand.Copy(place), ts, t))
+                fb.switch_to(ok)
+                Ok(())
+            }
+            Range(lo, hi) => {
+                if !self.types.is_int(ty) {
+                    return Err(err(span, ("a range pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                let c1 = fb.temp(types.BOOL, span)
+                fb.assign(Place.local(c1), Rvalue.Bin(lex.Op.Ge, Operand.Copy(place.clone()), Operand.Const(Const.Int(lo, ty))), span)
+                let ok1 = fb.new_block()
+                fb.term(Term.Switch(Operand.Copy(Place.local(c1)), fail_target(fail), ok1))
+                fb.switch_to(ok1)
+                let c2 = fb.temp(types.BOOL, span)
+                fb.assign(Place.local(c2), Rvalue.Bin(lex.Op.Le, Operand.Copy(place), Operand.Const(Const.Int(hi, ty))), span)
+                let ok2 = fb.new_block()
+                fb.term(Term.Switch(Operand.Copy(Place.local(c2)), fail_target(fail), ok2))
+                fb.switch_to(ok2)
+                Ok(())
+            }
+            Str(s) => {
+                let sv = body.val_op(Operand.Const(Const.Str(s.clone())), types.STR)
+                var target = body.val_place(place, ty)
+                if ty != types.STR {
+                    target = self.coerce(&fb, target, types.STR, span)?
+                }
+                var sargs = Vec(Val).new()
+                sargs.push(sv)
+                let r = self.method_call_val(&fb, target, "eq", sargs, span, None)?
+                let o = self.operand(&fb, r, span)?
+                let ok = fb.new_block()
+                fb.term(Term.Switch(o, fail_target(fail), ok))
+                fb.switch_to(ok)
+                Ok(())
+            }
+            Tuple(ps) => {
+                let ts = match self.types.kind(ty) {
+                    Tuple(ts) => ts.clone()
+                    _ => return Err(err(span, ("a tuple pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                if ts.len() != ps.len() {
+                    var m = String.from("this tuple has ")
+                    ts.len().show(&m)
+                    m.push_str(" parts, the pattern ")
+                    ps.len().show(&m)
+                    return Err(err(span, m.as_str()))
+                }
+                for i, p in ps {
+                    self.test_pat(&fb, p, place.with(Proj.Field(i as u32)), ts[i], fail)?
+                }
+                Ok(())
+            }
+            Struct(path, fields, _) => {
+                let fs = self.struct_fields_for_pat(fb, path, ty, span)?
+                for f in fields {
+                    let i = match field_index(fs, f.name.as_str()) {
+                        Some(i) => i
+                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() + "` has no field `" + f.name.as_str() + "`").as_str()))
+                    }
+                    self.test_pat(&fb, f.pat, place.with(Proj.Field(i as u32)), fs[i].ty, fail)?
+                }
+                Ok(())
+            }
+            Variant(path, ps) => {
+                let v = match self.pat_variant(fb, path, ty, span)? {
+                    Some(v) => v
+                    None => return Err(err(span, ("`" + sema.join_path(path).as_str() + "` is not a variant of `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                let fields = self.variant_fields(ty, v)
+                if fields.len() != ps.len() {
+                    return Err(self.variant_arity_err(path, fields.len(), ps.len(), span))
+                }
+                self.test_discr(&fb, place.clone(), v, fail, span)
+                for i, p in ps {
+                    self.test_pat(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], fail)?
+                }
+                Ok(())
+            }
+            Or(alts) => {
+                for a in alts {
+                    if pat_binds(a) {
+                        return Err(err(span, "the alternatives of a `|` pattern cannot bind names yet"))
+                    }
+                }
+                let ok = fb.new_block()
+                for i, a in alts {
+                    let next = if i + 1 == alts.len() { fail } else { fb.new_block() }
+                    self.test_pat(&fb, a, place.clone(), ty, next)?
+                    fb.goto(ok)
+                    if next != fail {
+                        fb.switch_to(next)
+                    }
+                }
+                fb.switch_to(ok)
+                Ok(())
+            }
+        }
+    }
+
+    fn variant_fields(self, ty: u32, v: u32) -> Vec(u32) {
+        self.types.variants(ty).unwrap()[v as i64].fields.clone()
+    }
+
+    fn variant_arity_err(self, path: Vec(String), nfields: i64, npats: i64, span: Span) -> Diag {
+        var m = "`" + path[path.len() - 1].as_str() + "` has "
+        nfields.show(&m)
+        m.push_str(" field(s), the pattern ")
+        npats.show(&m)
+        err(span, m.as_str())
+    }
+
+    fn struct_fields_for_pat(inout self, fb: Fb, path: Vec(String), ty: u32, span: Span) -> Result(Vec(types.FieldDef), Diag) {
+        let a = match self.types.adt_index(ty) {
+            Some(a) => a
+            None => return Err(err(span, ("a struct pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+        }
+        let decl = self.types.adts[a as i64].decl
+        let fs = match self.types.adts[a as i64].body {
+            Struct(fs) => fs.clone()
+            _ => return Err(err(span, ("`" + self.types.show(ty).as_str() + "` is not a struct").as_str()))
+        }
+        let env = fb.env.clone()
+        var ok = false
+        match self.lookup_path(env.module, path) {
+            Some((Adt(d), _)) => ok = d == decl
+            _ => {
+                if path.len() == 1 && path[0] == "Self" {
+                    ok = env.self_ty == Some(ty)
+                } else if self.path_is_type(path, env) {
+                    // an alias (`type P = m.Point`), or a type parameter
+                    ok = self.resolve_path_ty_pub(path, env, span).ok() == Some(ty)
+                }
+            }
+        }
+        if !ok {
+            return Err(err(span, ("this pattern is for `" + sema.join_path(path).as_str() + "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
+        }
+        Ok(fs)
+    }
+
+    fn test_discr(inout self, inout fb: Fb, sink place: Place, v: u32, fail: u32, span: Span) {
+        let d = fb.temp(types.I64, span)
+        fb.assign(Place.local(d), Rvalue.Discriminant(place), span)
+        let ok = fb.new_block()
+        var ts = Vec(mir.SwitchTarget).new()
+        ts.push(mir.SwitchTarget { value: v as i128, block: ok })
+        fb.term(Term.Switch(Operand.Copy(Place.local(d)), ts, fail))
+        fb.switch_to(ok)
+    }
+
+    // Makes the pattern's variables, for a place known to match.
+    fn bind(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, mode: BindMode) -> Result((), Diag) {
+        let span = pat.span
+        match self.deref_for_pat(&fb, pat, place.clone(), ty, span)? {
+            Some((p, t)) => {
+                // Inside a box or a borrow, bindings borrow; through an `inout`
+                // one, mutably.
+                let through_mut = match self.types.kind(ty) {
+                    RefMut(_) => true
+                    _ => false
+                }
+                let m = match mode {
+                    Owned => if through_mut { BindMode.BorrowMut } else { BindMode.Borrow }
+                    Auto => if through_mut { BindMode.BorrowMut } else { BindMode.Auto }
+                    Borrow => BindMode.Borrow
+                    BorrowMut => BindMode.BorrowMut
+                }
+                return self.bind(&fb, pat, p, t, m)
+            }
+            None => {}
+        }
+        match pat.kind {
+            Name(n, var_) => {
+                if self.names_variant(fb, n.as_str(), ty) {
+                    return Ok(())
+                }
+                // A borrow held as a value (`Option(ref T)`'s payload): the
+                // variable is what it points to.
+                if self.types.is_ref(ty) && mode != BindMode.BorrowMut {
+                    let is_mut = match self.types.kind(ty) {
+                        RefMut(_) => true
+                        _ => false
+                    }
+                    let o = if is_mut && mode != BindMode.Borrow { Operand.Move(place) } else { Operand.Copy(place) }
+                    let l = fb.declare(n.as_str(), ty, false, VarKind.Borrow, span)
+                    fb.assign(Place.local(l), Rvalue.Use(o), span)
+                    return Ok(())
+                }
+                match mode {
+                    Owned | Auto => {
+                        let v = Val { vk: VK.Place(place), ty: ty, temp: true }
+                        let o = self.operand_part(&fb, v, span)?
+                        let l = fb.declare(n.as_str(), ty, var_, VarKind.Owned, span)
+                        fb.assign(Place.local(l), Rvalue.Use(o), span)
+                    }
+                    Borrow => {
+                        if self.types.is_plain(ty) {
+                            let l = fb.declare(n.as_str(), ty, var_, VarKind.Owned, span)
+                            fb.assign(Place.local(l), Rvalue.Use(Operand.Copy(place)), span)
+                        } else {
+                            if var_ {
+                                return Err(err(span, "`var` would copy a value that is not plain; use `.clone()`"))
+                            }
+                            let rt = self.types.refty(ty)
+                            let l = fb.declare(n.as_str(), rt, false, VarKind.Borrow, span)
+                            fb.assign(Place.local(l), Rvalue.Ref(place), span)
+                        }
+                    }
+                    BorrowMut => {
+                        let rt = self.types.refmut(ty)
+                        let l = fb.declare(n.as_str(), rt, false, VarKind.Borrow, span)
+                        fb.assign(Place.local(l), Rvalue.RefMut(place), span)
+                    }
+                }
+                Ok(())
+            }
+            Tuple(ps) => {
+                let ts = match self.types.kind(ty) {
+                    Tuple(ts) => ts.clone()
+                    _ => return Ok(())
+                }
+                for i, p in ps {
+                    if i < ts.len() {
+                        self.bind(&fb, p, place.with(Proj.Field(i as u32)), ts[i], mode)?
+                    }
+                }
+                Ok(())
+            }
+            Struct(path, fields, _) => {
+                let fs = self.struct_fields_for_pat(fb, path, ty, span)?
+                for f in fields {
+                    let i = field_index(fs, f.name.as_str()).unwrap()
+                    self.bind(&fb, f.pat, place.with(Proj.Field(i as u32)), fs[i].ty, mode)?
+                }
+                Ok(())
+            }
+            Variant(path, ps) => {
+                let v = self.pat_variant(fb, path, ty, span)?.unwrap()
+                let fields = self.variant_fields(ty, v)
+                for i, p in ps {
+                    if i < fields.len() {
+                        self.bind(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], mode)?
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(())
+        }
+    }
+
+    // Drops the parts of an owned value that the pattern's bindings did
+    // not move out.
+    fn drop_rest(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, span: Span) -> Result((), Diag) {
+        if !self.types.needs_drop(ty) {
+            return Ok(())
+        }
+        // Through a box, bindings borrowed: the box itself is dropped.
+        if is_structural(pat) && self.types.adt_index(ty).is_some() && self.types.variants(ty).is_none() && !is_struct_pat(pat) {
+            fb.push(Stmt.Drop(place, span))
+            return Ok(())
+        }
+        if is_struct_pat(pat) && self.find_method(ty, "deref")?.is_some() {
+            fb.push(Stmt.Drop(place, span))
+            return Ok(())
+        }
+        match pat.kind {
+            Wild | Or(_) | Int(_) | Char(_) | Bool(_) | Str(_) | Range(_, _) => {
+                fb.push(Stmt.Drop(place, span))
+                Ok(())
+            }
+            Name(n, _) => {
+                if self.names_variant(fb, n.as_str(), ty) {
+                    fb.push(Stmt.Drop(place, span))
+                }
+                Ok(())
+            }
+            Tuple(ps) => {
+                let ts = match self.types.kind(ty) {
+                    Tuple(ts) => ts.clone()
+                    _ => return Ok(())
+                }
+                for i, p in ps {
+                    if i < ts.len() {
+                        self.drop_rest(&fb, p, place.with(Proj.Field(i as u32)), ts[i], span)?
+                    }
+                }
+                Ok(())
+            }
+            Struct(path, fields, _) => {
+                if self.adt_has_drop(ty) {
+                    return Err(err(span, ("cannot take apart a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                }
+                let fs = self.struct_fields_for_pat(fb, path, ty, span)?
+                for i, fd in fs {
+                    let fp = place.with(Proj.Field(i as u32))
+                    var given: Option(i64) = None
+                    for k, f in fields {
+                        if f.name == fd.name {
+                            given = Some(k)
+                            break
+                        }
+                    }
+                    match given {
+                        Some(k) => self.drop_rest(&fb, fields[k].pat, fp, fd.ty, span)?
+                        None => {
+                            if self.types.needs_drop(fd.ty) {
+                                fb.push(Stmt.Drop(fp, span))
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Variant(path, ps) => {
+                if self.adt_has_drop(ty) {
+                    return Err(err(span, ("cannot take apart a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                }
+                let v = self.pat_variant(fb, path, ty, span)?.unwrap()
+                let fields = self.variant_fields(ty, v)
+                for i, p in ps {
+                    if i < fields.len() {
+                        self.drop_rest(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], span)?
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn adt_has_drop(self, ty: u32) -> bool {
+        match self.types.adt_index(ty) {
+            Some(a) => self.types.adts[a as i64].has_drop
+            None => false
+        }
+    }
+
+    // ---- exhaustiveness ----
+
+    fn check_exhaustive(inout self, inout fb: Fb, arms: Vec(ast.Arm), ty: u32, span: Span) -> Result((), Diag) {
+        var rows = Vec(P).new()
+        var tys = Vec(u32).new()
+        tys.push(ty)
+        for a in arms {
+            let p = self.reduce(&fb, a.pat, ty)?
+            // An arm that no value reaches.
+            var m = Vec(Vec(P)).new()
+            for r in rows {
+                var row = Vec(P).new()
+                row.push(r.clone())
+                m.push(row)
+            }
+            var v = Vec(P).new()
+            v.push(p.clone())
+            if self.useful(m, v, tys)?.is_none() {
+                return Err(err(a.pat.span, "this arm is never reached: the arms above match everything it matches"))
+            }
+            if a.guard.is_none() {
+                rows.push(p)
+            }
+        }
+        var m = Vec(Vec(P)).new()
+        for r in rows.into_iter() {
+            var row = Vec(P).new()
+            row.push(r)
+            m.push(row)
+        }
+        match self.useful(m, wilds(1), tys)? {
+            Some(w) => Err(err(span, ("this `match` does not cover `" + self.show_witness(w[0], ty).as_str() + "`").as_str()))
+            None => Ok(())
+        }
+    }
+
+    fn reduce(inout self, inout fb: Fb, pat: ast.Pat, ty: u32) -> Result(P, Diag) {
+        let span = pat.span
+        // Looking through a borrow: one constructor around what it points to.
+        match self.pat_through_ref(fb, pat, ty) {
+            Some(inner) => {
+                var fs = Vec(P).new()
+                fs.push(self.reduce(&fb, pat, inner)?)
+                return Ok(P.Ctor(0, fs))
+            }
+            None => {}
+        }
+        // Looking inside a box.
+        if is_structural(pat) && !self.pat_fits(pat, ty)? {
+            match self.deref_target(ty)? {
+                Some(t) => {
+                    var fs = Vec(P).new()
+                    fs.push(self.reduce(&fb, pat, t)?)
+                    return Ok(P.Ctor(0, fs))
+                }
+                None => {}
+            }
+        }
+        match pat.kind {
+            Wild => Ok(P.Wild)
+            Name(n, _) => {
+                if self.names_variant(fb, n.as_str(), ty) {
+                    let v = self.pat_variant(fb, one_name(n.clone()), ty, span)?.unwrap()
+                    Ok(P.Ctor(v, Vec(P).new()))
+                } else {
+                    Ok(P.Wild)
+                }
+            }
+            Bool(b) => Ok(P.Ctor(if b { 1 } else { 0 }, Vec(P).new()))
+            Int(_) | Char(_) | Str(_) | Range(_, _) => Ok(P.Lit)
+            Tuple(ps) => {
+                let ts = match self.types.kind(ty) {
+                    Tuple(ts) => ts.clone()
+                    _ => return Err(err(span, ("a tuple pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                if ts.len() != ps.len() {
+                    var m = String.from("this tuple has ")
+                    ts.len().show(&m)
+                    m.push_str(" parts, the pattern ")
+                    ps.len().show(&m)
+                    return Err(err(span, m.as_str()))
+                }
+                var v = Vec(P).new()
+                for i, p in ps {
+                    v.push(self.reduce(&fb, p, ts[i])?)
+                }
+                Ok(P.Ctor(0, v))
+            }
+            Struct(path, fields, rest) => {
+                let fs = self.struct_fields_for_pat(fb, path, ty, span)?
+                var v = wilds(fs.len())
+                for f in fields {
+                    let i = match field_index(fs, f.name.as_str()) {
+                        Some(i) => i
+                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() + "` has no field `" + f.name.as_str() + "`").as_str()))
+                    }
+                    v[i] = self.reduce(&fb, f.pat, fs[i].ty)?
+                }
+                if !rest && fields.len() != fs.len() {
+                    var missing = String.new()
+                    for fd in fs {
+                        var given = false
+                        for f in fields {
+                            if f.name == fd.name {
+                                given = true
+                            }
+                        }
+                        if !given {
+                            if missing.len() > 0 {
+                                missing.push_str(", ")
+                            }
+                            missing.push_str(fd.name.as_str())
+                        }
+                    }
+                    return Err(err(span, ("the pattern leaves out " + missing.as_str() + "; add them or `..`").as_str()))
+                }
+                Ok(P.Ctor(0, v))
+            }
+            Variant(path, ps) => {
+                let vi = match self.pat_variant(fb, path, ty, span)? {
+                    Some(v) => v
+                    None => return Err(err(span, ("`" + sema.join_path(path).as_str() + "` is not a variant of `" + self.types.show(ty).as_str() + "`").as_str()))
+                }
+                let fields = self.variant_fields(ty, vi)
+                if fields.len() != ps.len() {
+                    return Err(self.variant_arity_err(path, fields.len(), ps.len(), span))
+                }
+                var v = Vec(P).new()
+                for i, p in ps {
+                    v.push(self.reduce(&fb, p, fields[i])?)
+                }
+                Ok(P.Ctor(vi, v))
+            }
+            Or(alts) => {
+                // Each alternative is tried as its own row: an or-pattern
+                // covers what any alternative covers.
+                var out = Vec(P).new()
+                for a in alts {
+                    out.push(self.reduce(&fb, a, ty)?)
+                }
+                Ok(P.Ctor(OR_CTOR, out))
+            }
+        }
+    }
+
+    // The type `deref` points to, for types patterns can see through.
+    fn deref_target(inout self, ty: u32) -> Result(Option(u32), Diag) {
+        if self.types.adt_index(ty).is_none() {
+            return Ok(None)
+        }
+        let h = match self.find_method(ty, "deref")? {
+            Some(h) => h
+            None => return Ok(None)
+        }
+        let id = self.instance(h.imp, h.args.clone(), Span.new(0, 0, 0))?
+        let r = self.out[id as i64].sig.ret
+        Ok(self.types.pointee(r))
+    }
+
+    // The constructors of a type: `Some(n)` if finite (with the types of
+    // their fields), or `None` for infinite domains.
+    fn ctors(inout self, ty: u32) -> Result(Option(Vec(CtorTys)), Diag) {
+        var out = Vec(CtorTys).new()
+        match self.types.kind(ty).clone() {
+            Bool => {
+                out.push(CtorTys { c: 0, tys: Vec(u32).new() })
+                out.push(CtorTys { c: 1, tys: Vec(u32).new() })
+            }
+            Tuple(ts) => out.push(CtorTys { c: 0, tys: ts })
+            Ref(_) | RefMut(_) => {
+                var ts = Vec(u32).new()
+                ts.push(self.types.pointee(ty).unwrap())
+                out.push(CtorTys { c: 0, tys: ts })
+            }
+            Adt(_) => {
+                if self.types.variants(ty).is_some() {
+                    for i, v in self.variants_of(ty) {
+                        out.push(CtorTys { c: i as u32, tys: v.fields.clone() })
+                    }
+                } else {
+                    match self.deref_target(ty)? {
+                        Some(t) => {
+                            var ts = Vec(u32).new()
+                            ts.push(t)
+                            out.push(CtorTys { c: 0, tys: ts })
+                        }
+                        None => out.push(CtorTys { c: 0, tys: self.types.field_tys(ty) })
+                    }
+                }
+            }
+            _ => return Ok(None)
+        }
+        Ok(Some(out))
+    }
+
+    // Maranget's usefulness: a value matched by `v` and by no row of `m`,
+    // if there is one (the witness).
+    fn useful(inout self, m: Vec(Vec(P)), v: Vec(P), tys: Vec(u32)) -> Result(Option(Vec(P)), Diag) {
+        // Expand or-patterns in the first column.
+        if v.len() > 0 {
+            match v[0] {
+                Ctor(c, alts) => {
+                    if c == OR_CTOR {
+                        for a in alts {
+                            var v2 = Vec(P).new()
+                            v2.push(a.clone())
+                            let v2 = concat(v2, v, 1)
+                            match self.useful(m, v2, tys)? {
+                                Some(w) => return Ok(Some(w))
+                                None => {}
+                            }
+                        }
+                        return Ok(None)
+                    }
+                }
+                _ => {}
+            }
+        }
+        var m2 = Vec(Vec(P)).new()
+        for row in m {
+            var expanded = false
+            if row.len() == 0 {
+                m2.push(row.clone())
+                continue
+            }
+            match row[0] {
+                Ctor(c, alts) => {
+                    if c == OR_CTOR {
+                        expanded = true
+                        for a in alts {
+                            var r = Vec(P).new()
+                            r.push(a.clone())
+                            m2.push(concat(r, row, 1))
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if !expanded {
+                m2.push(row.clone())
+            }
+        }
+        let m = m2
+        if v.len() == 0 {
+            return Ok(if m.len() == 0 { Some(Vec(P).new()) } else { None })
+        }
+        let ty = tys[0]
+        match v[0] {
+            Ctor(c, fields) => {
+                let arity = fields.len()
+                let ftys = self.ctor_field_tys(ty, c)?
+                let sm = specialize(m, c, arity)
+                let sv = concat(fields.clone(), v, 1)
+                let st = concat_tys(ftys, tys, 1)
+                match self.useful(sm, sv, st)? {
+                    Some(w) => Ok(Some(wrap_witness(c, w, arity)))
+                    None => Ok(None)
+                }
+            }
+            Lit => {
+                // A literal is useful if the rows without it (wildcards) do
+                // not cover the rest.
+                let dm = default_rows(m)
+                match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                    Some(w) => Ok(Some(prepend(P.Lit, w)))
+                    None => Ok(None)
+                }
+            }
+            Wild => {
+                var present = Vec(u32).new()
+                for r in m {
+                    match r[0] {
+                        Ctor(c, _) => present.push(c)
+                        _ => {}
+                    }
+                }
+                match self.ctors(ty)? {
+                    Some(all) => {
+                        var complete = true
+                        for x in all {
+                            if !contains(present, x.c) {
+                                complete = false
+                            }
+                        }
+                        if complete {
+                            for x in all {
+                                let arity = x.tys.len()
+                                let sm = specialize(m, x.c, arity)
+                                let sv = concat(wilds(arity), v, 1)
+                                let st = concat_tys(x.tys.clone(), tys, 1)
+                                match self.useful(sm, sv, st)? {
+                                    Some(w) => return Ok(Some(wrap_witness(x.c, w, arity)))
+                                    None => {}
+                                }
+                            }
+                            return Ok(None)
+                        }
+                        let dm = default_rows(m)
+                        match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                            Some(w) => {
+                                var missing = P.Wild
+                                for x in all {
+                                    if !contains(present, x.c) {
+                                        missing = P.Ctor(x.c, wilds(x.tys.len()))
+                                        break
+                                    }
+                                }
+                                Ok(Some(prepend(missing, w)))
+                            }
+                            None => Ok(None)
+                        }
+                    }
+                    None => {
+                        let dm = default_rows(m)
+                        match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                            Some(w) => Ok(Some(prepend(P.Wild, w)))
+                            None => Ok(None)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn ctor_field_tys(inout self, ty: u32, c: u32) -> Result(Vec(u32), Diag) {
+        match self.ctors(ty)? {
+            Some(all) => {
+                for x in all {
+                    if x.c == c {
+                        return Ok(x.tys.clone())
+                    }
+                }
+                Ok(Vec(u32).new())
+            }
+            None => Ok(Vec(u32).new())
+        }
+    }
+
+    fn show_witness(inout self, p: P, ty: u32) -> String {
+        let (c, fs) = match p {
+            Wild | Lit => return String.from("_")
+            Ctor(c, fs) => (c, fs.clone())
+        }
+        match self.types.kind(ty).clone() {
+            Bool => String.from(if c == 1 { "true" } else { "false" })
+            Ref(t) => self.show_witness(fs[0], t)
+            RefMut(t) => self.show_witness(fs[0], t)
+            Tuple(ts) => {
+                var s = String.from("(")
+                for i, f in fs {
+                    if i > 0 {
+                        s.push_str(", ")
+                    }
+                    s.push_str(self.show_witness(f, ts[i]).as_str())
+                }
+                s.push(')')
+                s
+            }
+            _ => {
+                if self.types.variants(ty).is_some() {
+                    let vs = self.variants_of(ty)
+                    let v = vs[c as i64]
+                    if fs.len() == 0 {
+                        return v.name.clone()
+                    }
+                    var s = v.name.clone()
+                    s.push('(')
+                    for i, f in fs {
+                        if i > 0 {
+                            s.push_str(", ")
+                        }
+                        s.push_str(self.show_witness(f, v.fields[i]).as_str())
+                    }
+                    s.push(')')
+                    return s
+                }
+                match self.deref_target(ty) {
+                    Ok(Some(t)) => return self.show_witness(fs[0], t)
+                    _ => {}
+                }
+                self.types.show(ty) + " { .. }"
+            }
+        }
+    }
+}
+
+fn fail_target(fail: u32) -> Vec(mir.SwitchTarget) {
+    var ts = Vec(mir.SwitchTarget).new()
+    ts.push(mir.SwitchTarget { value: 0, block: fail })
+    ts
+}
+
+// Jumps to `fail` unless the integer at the place is `v`.
+fn test_eq(inout fb: Fb, sink place: Place, v: i128, fail: u32) {
+    let ok = fb.new_block()
+    var ts = Vec(mir.SwitchTarget).new()
+    ts.push(mir.SwitchTarget { value: v, block: ok })
+    fb.term(Term.Switch(Operand.Copy(place), ts, fail))
+    fb.switch_to(ok)
+}
+
+fn field_index(fs: Vec(types.FieldDef), name: str) -> Option(i64) {
+    for i, f in fs {
+        if f.name == name {
+            return Some(i)
+        }
+    }
+    None
+}
+
+fn contains(xs: Vec(u32), x: u32) -> bool {
+    for y in xs {
+        if y == x {
+            return true
+        }
+    }
+    false
+}
+
+fn specialize(m: Vec(Vec(P)), c: u32, arity: i64) -> Vec(Vec(P)) {
+    var out = Vec(Vec(P)).new()
+    for row in m {
+        match row[0] {
+            Ctor(rc, fs) => {
+                if rc == c {
+                    out.push(concat(fs.clone(), row, 1))
+                }
+            }
+            Wild => out.push(concat(wilds(arity), row, 1))
+            Lit => {}
+        }
+    }
+    out
+}
+
+fn default_rows(m: Vec(Vec(P))) -> Vec(Vec(P)) {
+    var out = Vec(Vec(P)).new()
+    for row in m {
+        match row[0] {
+            Wild => out.push(concat(Vec(P).new(), row, 1))
+            _ => {}
+        }
+    }
+    out
+}
+
+pub fn pat_binds(p: ast.Pat) -> bool {
+    match p.kind {
+        // Capitalized names are taken for variants.
+        Name(n, _) => !(n.len() > 0 && n.as_str()[0] >= 'A' && n.as_str()[0] <= 'Z')
+        Tuple(ps) => any_binds(ps)
+        Variant(_, ps) => any_binds(ps)
+        Or(ps) => any_binds(ps)
+        Struct(_, fs, _) => {
+            for f in fs {
+                if pat_binds(f.pat) {
+                    return true
+                }
+            }
+            false
+        }
+        _ => false
+    }
+}
+
+fn any_binds(ps: Vec(ast.Pat)) -> bool {
+    for p in ps {
+        if pat_binds(p) {
+            return true
+        }
+    }
+    false
+}
