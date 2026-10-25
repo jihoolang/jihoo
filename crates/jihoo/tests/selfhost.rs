@@ -9,7 +9,10 @@ use std::process::Command;
 
 /// The commands both compilers have, which print what a pass makes. Each
 /// pass ported to jihoo adds its own.
-const COMMANDS: &[&[&str]] = &[&["emit-tokens"], &["emit-ast"], &["emit-program"]];
+const COMMANDS: &[&[&str]] = &[&["emit-tokens"], &["emit-ast"], &["emit-program"], &["emit-mir"]];
+
+/// Sema is being ported: `emit-mir` is compared on the programs here only.
+const SEMA_DIR: &str = "tests/selfhost/sema";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -28,10 +31,11 @@ fn jihoo_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// What a command prints, both streams, and how it exits. Both compilers
 /// find the standard library through `JIHOO_PATH`, so they name its files
-/// the same way.
+/// the same way. `JIHOO_NO_ELAB` makes the Rust compiler print MIR before
+/// elaboration, which is as far as the compiler in jihoo goes yet.
 fn run(exe: &Path, args: &[String], file: &Path) -> String {
     let lib = root().join("lib").canonicalize().unwrap();
-    let o = Command::new(exe).args(args).arg(file).env("JIHOO_PATH", lib).current_dir(root()).output().unwrap();
+    let o = Command::new(exe).args(args).arg(file).env("JIHOO_PATH", lib).env("JIHOO_NO_ELAB", "1").current_dir(root()).output().unwrap();
     format!("{}{}exit {:?}\n", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr), o.status.code())
 }
 
@@ -60,7 +64,10 @@ fn self_hosted_compiler_agrees() {
             .unwrap_or_default();
         for cmd in COMMANDS {
             let mut args: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
-            if cmd[0] == "emit-program" {
+            if cmd[0] == "emit-mir" && !rel.starts_with(SEMA_DIR) {
+                continue;
+            }
+            if cmd[0] == "emit-program" || cmd[0] == "emit-mir" {
                 args.extend(load_args.iter().cloned());
             }
             let want = run(&stage0, &args, rel);

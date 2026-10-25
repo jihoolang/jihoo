@@ -1,0 +1,26 @@
+// load-args: --no-prelude
+fn add(a: i64, b: i64) -> i64 {
+    a + b * 2 - (a / b) % 3
+}
+
+fn wrap(x: u8) -> u8 {
+    x +% 200 -% 1 *% 3
+}
+
+fn bits(a: u32, b: u32) -> u32 {
+    (a & b | a ^ b) << 2 >> 1
+}
+
+fn main() {
+    let x = add(1, 2)
+    var y: i64 = -5
+    y = y + x
+    y += 3
+    y -= 1
+    let z = wrap(10)
+    let w = bits(3, 5)
+    let f = 1.5 * 2.0
+    let c = 'a'
+    let t = !true
+    let n = -y
+}

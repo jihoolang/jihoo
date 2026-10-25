@@ -1821,11 +1821,6 @@ impl Sema {
         Ok(())
     }
 
-    // The body of a function instance, lowered to MIR. (Not ported yet.)
-    pub fn lower_fn(inout self, id: u32, decl: u32, env: Env) -> Result((), Diag) {
-        Err(ty_err(at(self.fns[decl as i64].decl).name_span, "the compiler in jihoo cannot lower function bodies yet"))
-    }
-
     fn with_origin(self, sink d: Diag, id: u32) -> Diag {
         if (id as i64) < self.inst_info.len() {
             match self.inst_info[id as i64] {

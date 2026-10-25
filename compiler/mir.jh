@@ -741,3 +741,40 @@ fn show_term(inout s: String, p: Program, term: Term) {
         Pending => s.push_str("<pending>")
     }
 }
+
+impl Clone for Intrinsic {
+    fn clone(self) -> Intrinsic {
+        match self {
+            Trap => Intrinsic.Trap
+            Syscall => Intrinsic.Syscall
+            Copy(t) => Intrinsic.Copy(t)
+            Fill => Intrinsic.Fill
+            Sqrt(t) => Intrinsic.Sqrt(t)
+            Floor(t) => Intrinsic.Floor(t)
+            Ceil(t) => Intrinsic.Ceil(t)
+            Trunc(t) => Intrinsic.Trunc(t)
+            Round(t) => Intrinsic.Round(t)
+            Abs(t) => Intrinsic.Abs(t)
+            Copysign(t) => Intrinsic.Copysign(t)
+            Asm(a, b, t) => Intrinsic.Asm(a.clone(), b.clone(), t)
+            AtomicLoad(t) => Intrinsic.AtomicLoad(t)
+            AtomicStore(t) => Intrinsic.AtomicStore(t)
+            AtomicRmw(op, t) => Intrinsic.AtomicRmw(op.clone(), t)
+            AtomicCas(t) => Intrinsic.AtomicCas(t)
+            Fence => Intrinsic.Fence
+            Argc => Intrinsic.Argc
+            Argv => Intrinsic.Argv
+        }
+    }
+}
+
+impl Clone for Callee {
+    fn clone(self) -> Callee {
+        match self {
+            Fn(f) => Callee.Fn(f)
+            Ptr(o) => Callee.Ptr(o.clone())
+            Closure(o) => Callee.Closure(o.clone())
+            Intrinsic(i) => Callee.Intrinsic(i.clone())
+        }
+    }
+}

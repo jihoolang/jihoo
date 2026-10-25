@@ -15,8 +15,9 @@ import target
 import types
 import mir
 import sema
+import body
 
-const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
+const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n  jihoo emit-mir <file.jh>       print MIR before elaboration\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
 
 fn main() {
     let args = env.args()
@@ -70,6 +71,23 @@ fn main() {
             Ok(p) => print(astdump.program(p))
             Err(d) => fail(sources.render(d).as_str(), 1)
         }
+    } else if cmd == "emit-mir" {
+        // MIR before elaboration: what `JIHOO_NO_ELAB=1` shows in the Rust
+        // compiler (elaboration and the borrow kernel are not ported yet).
+        var sources = diag.Sources.new()
+        let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
+            Ok(a) => a
+            Err(d) => fail(sources.render(d).as_str(), 1)
+        }
+        let prog = match sema.compile(a, tgt, true) {
+            Ok(p) => p
+            Err(d) => fail(sources.render(d).as_str(), 1)
+        }
+        var out = String.new()
+        for f in prog.fns {
+            out.push_str(mir.show_function(prog, f).as_str())
+        }
+        print(out)
     } else {
         fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
     }

@@ -1,0 +1,4 @@
+// load-args: --no-prelude
+fn f() {}
+fn f() {}
+fn main() {}

@@ -101,4 +101,4 @@ loop { ... break }
 plain). A type with `next(inout self) -> Option(T)` is an iterator and is
 used up by the loop; a type with `iter()` gives one. To own the elements of
 a `Vec`, loop over `v.into_iter()`. A borrow held as a value (a field of
-type `ref Vec(T)`) is looped over as what it points to.
+type `ref Vec(T)`) is looped over, and indexed, as what it points to.

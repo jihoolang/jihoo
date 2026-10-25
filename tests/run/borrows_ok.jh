@@ -78,6 +78,7 @@ fn loop_elements_outlive_iteration() {
     println(entries[0].of.name)
     // a loop over a `ref Vec` held in a struct
     let shelf = Shelf { items: named }
+    println(shelf.items[0].name)
     for n in shelf.items {
         println(n.name)
     }
@@ -121,6 +122,7 @@ fn borrows_as_values() {
 //> 1
 //> b
 //> 2
+//> c
 //> c
 //> c
 //> 2

@@ -90,7 +90,7 @@ Keep it that way.
 
 `compiler/` is the compiler being ported to jihoo, pass by pass
 (`docs/internals/self-hosting.md`). Each ported pass has a dump command
-(`emit-tokens`, `emit-ast`, `emit-program`, ...) in both compilers with identical output;
+(`emit-tokens`, `emit-ast`, `emit-program`, `emit-mir` on `tests/selfhost/sema/`, ...) in both compilers with identical output;
 `cargo test --test selfhost` compares them on every `.jh` file in the repo.
 A change to a ported pass, or to the language it uses, must keep both in step.
 

@@ -1,0 +1,3048 @@
+// Lowering function bodies to MIR, checking types on the way: the Rust
+// compiler's `sema/body.rs`. Features not ported yet stop with an error
+// that says so.
+
+import ast
+import diag
+import lex
+import mir
+import sema
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Op = lex.Op
+type Sema = sema.Sema
+type Env = sema.Env
+type CVal = sema.CVal
+type TyKind = types.TyKind
+type Place = mir.Place
+type Proj = mir.Proj
+type Operand = mir.Operand
+type Rvalue = mir.Rvalue
+type Const = mir.Const
+type Stmt = mir.Stmt
+type Term = mir.Term
+type LocalKind = mir.LocalKind
+
+pub enum VarKind {
+    // The local holds the value.
+    Owned
+    // The local holds a borrow; the variable is what it points to.
+    Borrow
+    // A closure's captured variable: field `i` of its environment.
+    Capture(u32)
+}
+
+pub struct Var {
+    pub local: u32
+    pub kind: VarKind
+}
+
+struct ScopeVar {
+    name: String
+    v: Var
+}
+
+pub struct Scope {
+    vars: Vec(ScopeVar)
+    // Locals to drop and end, in the order they were made.
+    locals: Vec(u32)
+    // A statement's temporaries (not a block).
+    temp: bool
+}
+
+struct LoopCtx {
+    brk: u32
+    cont: u32
+    depth: i64
+}
+
+pub struct Fb {
+    pub id: u32
+    pub body: mir.Body
+    pub cur: u32
+    scopes: Vec(Scope)
+    loops: Vec(LoopCtx)
+    pub env: Env
+    pub ret_mode: ast.RetMode
+    pub unsafe_depth: u32
+    // The environment parameter of a closure body.
+    pub env_local: Option(u32)
+    // The next block's value stays a place (the body of a function that
+    // returns `ref` or `inout`).
+    pub keep_place: bool
+    // The place being lowered will be changed: indexing and `deref` take
+    // their mutable forms.
+    pub want_mut: bool
+}
+
+// The result of lowering an expression: a place to read or borrow, or an
+// operand already computed.
+pub enum VK {
+    Place(Place)
+    Op(Operand)
+}
+
+impl Clone for VK {
+    fn clone(self) -> VK {
+        match self {
+            Place(p) => VK.Place(p.clone())
+            Op(o) => VK.Op(o.clone())
+        }
+    }
+}
+
+pub struct Val {
+    pub vk: VK
+    pub ty: u32
+    // A temporary holding a new value: it may be moved out of freely.
+    pub temp: bool
+}
+
+impl Clone for Val {
+    fn clone(self) -> Val {
+        Val { vk: self.vk.clone(), ty: self.ty, temp: self.temp }
+    }
+}
+
+pub fn val_op(sink o: Operand, ty: u32) -> Val {
+    Val { vk: VK.Op(o), ty: ty, temp: false }
+}
+
+pub fn val_place(sink p: Place, ty: u32) -> Val {
+    Val { vk: VK.Place(p), ty: ty, temp: false }
+}
+
+pub fn val_unit() -> Val {
+    val_op(Operand.Const(Const.Zst(types.UNIT)), types.UNIT)
+}
+
+pub fn val_never() -> Val {
+    val_op(Operand.Const(Const.Zst(types.NEVER)), types.NEVER)
+}
+
+fn copy_of(l: u32) -> Operand {
+    Operand.Copy(Place.local(l))
+}
+
+fn int_const(v: i128, t: u32) -> Operand {
+    Operand.Const(Const.Int(v, t))
+}
+
+// `[(v, b)]`: one target of a switch.
+fn switch1(v: i128, b: u32) -> Vec(mir.SwitchTarget) {
+    var ts = Vec(mir.SwitchTarget).new()
+    ts.push(mir.SwitchTarget { value: v, block: b })
+    ts
+}
+
+fn err(span: Span, msg: str) -> Diag {
+    Diag.new(span, msg)
+}
+
+fn not_ported(span: Span, what: str) -> Diag {
+    Diag.new(span, ("the compiler in jihoo cannot lower " + what + " yet").as_str())
+}
+
+fn is_ret_value(m: ast.RetMode) -> bool {
+    match m {
+        Value => true
+        _ => false
+    }
+}
+
+impl Fb {
+    pub fn new(id: u32, sink env: Env, ret: u32, ret_mode: ast.RetMode, span: Span) -> Fb {
+        var fb = Fb {
+            id: id
+            body: mir.Body { locals: Vec(mir.LocalDecl).new(), blocks: Vec(mir.Block).new(), arg_count: 0 }
+            cur: 0
+            scopes: Vec(Scope).new()
+            loops: Vec(LoopCtx).new()
+            env: env
+            ret_mode: ret_mode
+            unsafe_depth: 0
+            env_local: None
+            keep_place: false
+            want_mut: false
+        }
+        fb.new_local(ret, None, true, LocalKind.Ret, span)
+        fb.cur = fb.new_block()
+        fb.scopes.push(Scope { vars: Vec(ScopeVar).new(), locals: Vec(u32).new(), temp: false })
+        fb
+    }
+
+    pub fn new_local(inout self, ty: u32, sink name: Option(String), mutable: bool, kind: LocalKind, span: Span) -> u32 {
+        self.body.locals.push(mir.LocalDecl { ty: ty, name: name, span: span, mutable: mutable, kind: kind })
+        (self.body.locals.len() - 1) as u32
+    }
+
+    pub fn new_block(inout self) -> u32 {
+        self.body.blocks.push(mir.Block { stmts: Vec(Stmt).new(), term: Term.Pending })
+        (self.body.blocks.len() - 1) as u32
+    }
+
+    pub fn push(inout self, sink s: Stmt) {
+        let c = self.cur as i64
+        self.body.blocks[c].stmts.push(s)
+    }
+
+    pub fn assign(inout self, sink p: Place, sink r: Rvalue, span: Span) {
+        self.push(Stmt.Assign(p, r, span))
+    }
+
+    // Ends the current block; code after it goes in a new (unreachable
+    // until something jumps there) block.
+    pub fn term(inout self, sink t: Term) {
+        let c = self.cur as i64
+        let pending = match self.body.blocks[c].term {
+            Pending => true
+            _ => false
+        }
+        if pending {
+            self.body.blocks[c].term = t
+        }
+        self.cur = self.new_block()
+    }
+
+    pub fn goto(inout self, b: u32) {
+        self.term(Term.Goto(b))
+        self.cur = b
+    }
+
+    pub fn switch_to(inout self, b: u32) {
+        self.cur = b
+    }
+
+    pub fn ty_of(self, l: u32) -> u32 {
+        self.body.locals[l as i64].ty
+    }
+
+    // A temporary that lives until the end of the current statement.
+    pub fn temp(inout self, ty: u32, span: Span) -> u32 {
+        let l = self.new_local(ty, None, true, LocalKind.Temp, span)
+        self.push(Stmt.StorageLive(l))
+        let n = self.scopes.len()
+        self.scopes[n - 1].locals.push(l)
+        l
+    }
+
+    fn last_block_scope(self) -> i64 {
+        var i = self.scopes.len() - 1
+        while self.scopes[i].temp {
+            i -= 1
+        }
+        i
+    }
+
+    // A temporary that lives until the end of the enclosing block.
+    pub fn block_temp(inout self, ty: u32, span: Span) -> u32 {
+        let l = self.new_local(ty, None, true, LocalKind.Temp, span)
+        self.push(Stmt.StorageLive(l))
+        let i = self.last_block_scope()
+        self.scopes[i].locals.push(l)
+        l
+    }
+
+    pub fn declare(inout self, name: str, ty: u32, mutable: bool, kind: VarKind, span: Span) -> u32 {
+        let borrow = match kind {
+            Borrow => true
+            _ => false
+        }
+        let k = if borrow { false } else { mutable }
+        let l = self.new_local(ty, Some(name.to_string()), k, LocalKind.Var, span)
+        self.push(Stmt.StorageLive(l))
+        let i = self.last_block_scope()
+        self.scopes[i].locals.push(l)
+        self.scopes[i].vars.push(ScopeVar { name: name.to_string(), v: Var { local: l, kind: kind } })
+        l
+    }
+
+    pub fn bind_var(inout self, name: str, v: Var) {
+        let i = self.last_block_scope()
+        self.scopes[i].vars.push(ScopeVar { name: name.to_string(), v: v })
+    }
+
+    pub fn lookup(self, name: str) -> Option(Var) {
+        var i = self.scopes.len()
+        while i > 0 {
+            i -= 1
+            var j = self.scopes[i].vars.len()
+            while j > 0 {
+                j -= 1
+                if self.scopes[i].vars[j].name == name {
+                    return Some(self.scopes[i].vars[j].v)
+                }
+            }
+        }
+        None
+    }
+
+    pub fn push_scope(inout self, temp: bool) {
+        self.scopes.push(Scope { vars: Vec(ScopeVar).new(), locals: Vec(u32).new(), temp: temp })
+    }
+
+    pub fn depth(self) -> i64 {
+        self.scopes.len()
+    }
+
+    pub fn own_param(inout self, l: u32) {
+        self.scopes[0].locals.push(l)
+    }
+
+    // Registers a local made earlier as a temporary of the current scope.
+    pub fn add_temp_local(inout self, l: u32) {
+        let c = self.cur as i64
+        self.body.blocks[c].stmts.push(Stmt.StorageLive(l))
+        let n = self.scopes.len()
+        self.scopes[n - 1].locals.push(l)
+    }
+}
+
+impl sema.Sema {
+    // The place a variable stands for.
+    pub fn var_place(self, fb: Fb, v: Var) -> Place {
+        match v.kind {
+            Owned => Place.local(v.local)
+            Borrow => Place.deref(v.local)
+            Capture(i) => {
+                var p = Place.local(fb.env_local.unwrap())
+                p.proj.push(Proj.Deref)
+                p.proj.push(Proj.Field(i))
+                p.proj.push(Proj.Deref)
+                p
+            }
+        }
+    }
+
+    // The type of a place.
+    pub fn place_ty(self, fb: Fb, p: Place) -> u32 {
+        var t = fb.ty_of(p.local)
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => t = self.types.pointee(t).expect("deref of a non-pointer")
+                Variant(v) => variant = Some(v)
+                Field(i) => {
+                    match variant {
+                        Some(v) => {
+                            t = self.types.variants(t).unwrap()[v as i64].fields[i as i64]
+                            variant = None
+                        }
+                        None => {
+                            match self.types.kind(t) {
+                                Slice(e) => {
+                                    if i == 0 {
+                                        return self.types_ptr_lookup(e)
+                                    }
+                                    t = types.I64
+                                }
+                                Str => {
+                                    if i == 0 {
+                                        return self.types_ptr_lookup(types.U8)
+                                    }
+                                    t = types.I64
+                                }
+                                _ => t = self.types.field_tys(t)[i as i64]
+                            }
+                        }
+                    }
+                }
+                Index(_) => match self.types.kind(t) {
+                    Array(e, _) => t = e
+                    _ => panic("index of a non-array")
+                }
+            }
+        }
+        t
+    }
+
+    fn types_ptr_lookup(self, e: u32) -> u32 {
+        // Pointer types of views' elements are interned when the view type
+        // is made (see `view_ty`).
+        for i, k in self.types.kinds {
+            match k {
+                Ptr(x) => {
+                    if x == e {
+                        return i as u32
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic("pointer type interned")
+    }
+
+    pub fn view_ty(inout self, sink k: TyKind) -> u32 {
+        match k.clone() {
+            Slice(e) => {
+                self.types.ptr(e)
+            }
+            Str => {
+                self.types.ptr(types.U8)
+            }
+            _ => 0
+        }
+        self.types.intern(k)
+    }
+
+    pub fn place_mutable(self, fb: Fb, p: Place) -> bool {
+        var m = fb.body.locals[p.local as i64].mutable
+        var t = fb.ty_of(p.local)
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => {
+                    m = match self.types.kind(t) {
+                        RefMut(_) | Ptr(_) => true
+                        _ => false
+                    }
+                    t = self.types.pointee(t).unwrap()
+                }
+                Variant(v) => variant = Some(v)
+                Field(i) => {
+                    match variant {
+                        Some(v) => {
+                            t = self.types.variants(t).unwrap()[v as i64].fields[i as i64]
+                            variant = None
+                        }
+                        None => match self.types.kind(t) {
+                            Slice(_) | Str => return false
+                            _ => t = self.types.field_tys(t)[i as i64]
+                        }
+                    }
+                }
+                Index(_) => match self.types.kind(t) {
+                    Array(e, _) => t = e
+                    _ => {}
+                }
+            }
+        }
+        m
+    }
+
+    // Why a value cannot be moved out of the place (an owned local or its
+    // fields can), or `None`.
+    pub fn place_movable(self, fb: Fb, p: Place) -> Option(str) {
+        for x in p.proj {
+            match x {
+                Deref => return Some("it is borrowed")
+                _ => {}
+            }
+        }
+        for x in p.proj {
+            match x {
+                Index(_) => return Some("it is an element of an array")
+                _ => {}
+            }
+        }
+        if p.proj.len() > 0 {
+            return Some("it is part of another value")
+        }
+        if fb.body.locals[p.local as i64].kind == LocalKind.Arg && self.types.is_ref(fb.ty_of(p.local)) {
+            return Some("it is borrowed")
+        }
+        None
+    }
+
+    // ---- scopes ----
+
+    fn emit_scope_exit(inout self, inout fb: Fb, idx: i64) {
+        let locals = fb.scopes[idx].locals.clone()
+        var i = locals.len()
+        while i > 0 {
+            i -= 1
+            let l = locals[i]
+            let t = fb.ty_of(l)
+            if self.types.needs_drop(t) {
+                let sp = fb.body.locals[l as i64].span
+                fb.push(Stmt.Drop(Place.local(l), sp))
+            }
+            fb.push(Stmt.StorageDead(l))
+        }
+    }
+
+    pub fn pop_scope(inout self, inout fb: Fb) {
+        let i = fb.scopes.len() - 1
+        self.emit_scope_exit(&fb, i)
+        fb.scopes.pop()
+    }
+
+    // Drops everything in scopes deeper than `depth` (for `break`,
+    // `return`), without leaving them.
+    fn exit_to(inout self, inout fb: Fb, depth: i64) {
+        var i = fb.scopes.len()
+        while i > depth {
+            i -= 1
+            self.emit_scope_exit(&fb, i)
+        }
+    }
+
+    // ---- functions ----
+
+    pub fn lower_fn(inout self, id: u32, decl: u32, sink env: Env) -> Result((), Diag) {
+        let d = sema.at(self.fns[decl as i64].decl)
+        let sig = self.out[id as i64].sig.clone()
+        let pass = self.out[id as i64].pass.clone()
+        var fb = Fb.new(id, env.clone(), sig.ret, d.ret_mode, d.name_span)
+        if d.is_unsafe {
+            fb.unsafe_depth = 1
+        }
+        var pi = 0
+        for p in d.params {
+            if p.mode == ast.Mode.Comptime {
+                match env.get(p.name.as_str()) {
+                    Some(Lambda(_, _)) => return Err(not_ported(p.span, "compile-time closure parameters"))
+                    _ => {}
+                }
+                continue
+            }
+            let t = sig.params[pi]
+            let borrow = pass[pi] == mir.ParamPass.Borrow
+            let kind = if borrow { VarKind.Borrow } else { VarKind.Owned }
+            let mutable = p.mode == ast.Mode.Sink
+            let l = fb.new_local(t, Some(p.name.clone()), mutable, LocalKind.Arg, p.span)
+            fb.bind_var(p.name.as_str(), Var { local: l, kind: kind })
+            // An owned parameter is dropped when the function ends.
+            if !borrow {
+                fb.own_param(l)
+            }
+            pi += 1
+        }
+        fb.body.arg_count = pi
+        let ret_val_ty = if is_ret_value(d.ret_mode) { sig.ret } else { self.types.pointee(sig.ret).unwrap() }
+        match d.body {
+            Some(body) => self.lower_body(&fb, body, ret_val_ty)?
+            None => {}
+        }
+        match fb {
+            Fb { body, .. } => self.out[id as i64].body = Some(body)
+        }
+        Ok(())
+    }
+
+    // The function's block, its value going to the return place.
+    fn lower_body(inout self, inout fb: Fb, body: ast.Block, ret_ty: u32) -> Result((), Diag) {
+        fb.push_scope(true)
+        fb.keep_place = !is_ret_value(fb.ret_mode)
+        let v = self.block(&fb, body, Some(ret_ty), true)?
+        if v.ty != types.NEVER {
+            let sp = match body.tail {
+                Some(t) => t.span
+                None => body.span
+            }
+            self.write_return(&fb, v, ret_ty, sp)?
+        }
+        self.exit_to(&fb, 0)
+        fb.term(Term.Return)
+        Ok(())
+    }
+
+    fn write_return(inout self, inout fb: Fb, sink v: Val, ret_ty: u32, span: Span) -> Result((), Diag) {
+        if is_ret_value(fb.ret_mode) {
+            let v = self.coerce(&fb, v, ret_ty, span)?
+            let o = self.operand(&fb, v, span)?
+            fb.assign(Place.local(mir.RET), Rvalue.Use(o), span)
+            return Ok(())
+        }
+        if v.ty != ret_ty {
+            return Err(err(span, self.expected_found(ret_ty, v.ty).as_str()))
+        }
+        let p = match v.vk.clone() {
+            Place(p) => p
+            Op(_) => return Err(err(span, "a function returning `ref` or `inout` returns a place, not a new value"))
+        }
+        if v.temp {
+            return Err(err(span, "this returns a borrow of a temporary value"))
+        }
+        let inout_ret = match fb.ret_mode {
+            Inout => true
+            _ => false
+        }
+        if inout_ret {
+            if !self.place_mutable(fb, p) {
+                return Err(err(span, "this place cannot be changed, so it cannot be returned as `inout`"))
+            }
+            fb.assign(Place.local(mir.RET), Rvalue.RefMut(p), span)
+        } else {
+            fb.assign(Place.local(mir.RET), Rvalue.Ref(p), span)
+        }
+        Ok(())
+    }
+
+    // ---- blocks and statements ----
+
+    // A block; `want` says whether its value is used.
+    pub fn block(inout self, inout fb: Fb, b: ast.Block, exp: Option(u32), want: bool) -> Result(Val, Diag) {
+        let keep_place = fb.keep_place
+        fb.keep_place = false
+        // A block expected to give `()` throws its last value away.
+        let want = want && exp != Some(types.UNIT)
+        let exp: Option(u32) = if want { exp } else { None }
+        fb.push_scope(false)
+        var diverged = false
+        for s in b.stmts {
+            fb.push_scope(true)
+            let r = self.stmt(&fb, s)?
+            self.pop_scope(&fb)
+            if r {
+                diverged = true
+            }
+        }
+        var result = val_unit()
+        match b.tail {
+            Some(t) => {
+                fb.push_scope(true)
+                if keep_place {
+                    // `unsafe { *p }` as a function's `ref` result.
+                    match t.kind {
+                        Unsafe(_) | Block(_) => fb.keep_place = true
+                        _ => {}
+                    }
+                }
+                let texp: Option(u32) = if want { exp } else { None }
+                let v = self.expr(&fb, t.deref(), texp)?
+                let is_place = match v.vk {
+                    Place(_) => true
+                    _ => false
+                }
+                if v.ty == types.NEVER {
+                    result = val_never()
+                } else if keep_place && is_place && !v.temp {
+                    // The place may start at a pointer in a temporary of the
+                    // block: keep that pointer in one that outlives it.
+                    let p = match v.vk.clone() {
+                        Place(p) => p
+                        Op(_) => Place.local(0)
+                    }
+                    let root_kind = fb.body.locals[p.local as i64].kind
+                    let rt = fb.body.locals[p.local as i64].ty
+                    let through = p.proj.len() > 0 && p.proj[0] == Proj.Deref
+                    if root_kind == LocalKind.Temp && through {
+                        let n = fb.scopes.len()
+                        let tmp = fb.new_local(rt, None, true, LocalKind.Temp, t.span)
+                        fb.push(Stmt.StorageLive(tmp))
+                        fb.scopes[n - 3].locals.push(tmp)
+                        fb.assign(Place.local(tmp), Rvalue.Use(copy_of(p.local)), t.span)
+                        result = Val { vk: VK.Place(Place { local: tmp, proj: p.proj.clone() }), ty: v.ty, temp: false }
+                    } else {
+                        result = v
+                    }
+                } else if want && v.ty != types.UNIT {
+                    let v = match exp {
+                        Some(e) => self.coerce(&fb, v, e, t.span)?
+                        None => v
+                    }
+                    // The value outlives the block's scopes: move it to the
+                    // statement around the block.
+                    let vt = v.ty
+                    let o = self.operand(&fb, v, t.span)?
+                    let n = fb.scopes.len()
+                    let tmp = fb.new_local(vt, None, true, LocalKind.Temp, t.span)
+                    fb.push(Stmt.StorageLive(tmp))
+                    fb.scopes[n - 3].locals.push(tmp)
+                    fb.assign(Place.local(tmp), Rvalue.Use(o), t.span)
+                    result = Val { vk: VK.Place(Place.local(tmp)), ty: vt, temp: true }
+                } else {
+                    self.discard(&fb, v, t.span)?
+                    result = val_unit()
+                }
+                self.pop_scope(&fb)
+            }
+            None => {
+                if diverged {
+                    result = val_never()
+                }
+            }
+        }
+        self.pop_scope(&fb)
+        Ok(result)
+    }
+
+    // Evaluates and throws away a value (an expression statement).
+    fn discard(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result((), Diag) {
+        match v.vk {
+            Op(o) => match o {
+                Move(_) => {
+                    let t = fb.temp(v.ty, span)
+                    fb.assign(Place.local(t), Rvalue.Use(o.clone()), span)
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // One statement; returns whether it never finishes (`return`, ...).
+    fn stmt(inout self, inout fb: Fb, s: ast.Stmt) -> Result(bool, Diag) {
+        match s.kind {
+            Expr(e) => {
+                let v = self.expr(&fb, e, None)?
+                let never = v.ty == types.NEVER
+                self.discard(&fb, v, e.span)?
+                Ok(never)
+            }
+            Let(l) => {
+                self.let_stmt(&fb, l.kind, l.pat, l.ty, l.value, s.span)?
+                Ok(false)
+            }
+            Assign(place, value) => {
+                // The value first, then the place: `c[i] = c[i] + 1` borrows
+                // `c` mutably only once the value is computed.
+                let guess = self.peek_type(fb, place)
+                let v = self.expr(&fb, value, guess)?
+                let v = self.value_operand_val(&fb, v, value.span)?
+                let pv = self.expr_mut(&fb, place)?
+                let p = match pv.vk.clone() {
+                    Place(p) => p
+                    Op(_) => return Err(err(place.span, "cannot assign to this"))
+                }
+                if pv.temp {
+                    return Err(err(place.span, "cannot assign to a temporary value"))
+                }
+                let v = self.coerce(&fb, v, pv.ty, value.span)?
+                if !self.place_mutable(fb, p) {
+                    return Err(err(place.span, self.not_mutable_msg(fb, p).as_str()))
+                }
+                let o = self.operand(&fb, v, value.span)?
+                if self.types.needs_drop(pv.ty) {
+                    fb.push(Stmt.Drop(p.clone(), s.span))
+                }
+                fb.assign(p, Rvalue.Use(o), s.span)
+                Ok(false)
+            }
+            OpAssign(op, place, value) => {
+                if !self.peek_is_adt(fb, place) {
+                    // Numbers: the value first, then the place.
+                    let guess = self.peek_type(fb, place)
+                    let v = self.expr(&fb, value, guess)?
+                    let v = self.value_operand_val(&fb, v, value.span)?
+                    let pv = self.expr_mut(&fb, place)?
+                    let p = match pv.vk.clone() {
+                        Place(p) => p
+                        Op(_) => return Err(err(place.span, "cannot assign to this"))
+                    }
+                    if self.types.adt_index(pv.ty).is_some() {
+                        return Err(err(place.span, "internal: op-assign on a struct took the number path"))
+                    }
+                    if !self.place_mutable(fb, p) {
+                        return Err(err(place.span, self.not_mutable_msg(fb, p).as_str()))
+                    }
+                    let lhs = val_op(Operand.Copy(p.clone()), pv.ty)
+                    let r = self.binary_vals(&fb, op, lhs, v, s.span)?
+                    let o = self.operand(&fb, r, s.span)?
+                    fb.assign(p, Rvalue.Use(o), s.span)
+                    return Ok(false)
+                }
+                let pv = self.expr_mut(&fb, place)?
+                let p = match pv.vk.clone() {
+                    Place(p) => p
+                    Op(_) => return Err(err(place.span, "cannot assign to this"))
+                }
+                if self.types.adt_index(pv.ty).is_some() {
+                    return Err(not_ported(s.span, "`+=` on a struct"))
+                }
+                if !self.place_mutable(fb, p) {
+                    return Err(err(place.span, self.not_mutable_msg(fb, p).as_str()))
+                }
+                let lhs = Operand.Copy(p.clone())
+                let r = self.binary_on(&fb, op, val_op(lhs, pv.ty), value, s.span)?
+                let o = self.operand(&fb, r, s.span)?
+                fb.assign(p, Rvalue.Use(o), s.span)
+                Ok(false)
+            }
+        }
+    }
+
+    pub fn not_mutable_msg(self, fb: Fb, p: Place) -> String {
+        let l = fb.body.locals[p.local as i64]
+        match l.name {
+            Some(n) => {
+                if p.proj.len() == 0 {
+                    return "`" + n.as_str() + "` cannot be changed; declare it with `var`"
+                }
+                if p.proj[0] == Proj.Deref && l.kind == LocalKind.Arg {
+                    return "`" + n.as_str() + "` is borrowed read-only; make the parameter `inout` to change it"
+                }
+                if l.mutable {
+                    return "this part of `" + n.as_str() + "` cannot be changed"
+                }
+                "`" + n.as_str() + "` cannot be changed; declare it with `var`"
+            }
+            None => "this place cannot be changed".to_string()
+        }
+    }
+
+    fn let_stmt(inout self, inout fb: Fb, kind: ast.LetKind, pat: ast.Pat, ty: Option(ast.Ty), value: ast.Expr, span: Span) -> Result((), Diag) {
+        let env = fb.env.clone()
+        var exp: Option(u32) = None
+        match ty {
+            Some(t) => exp = Some(self.resolve_ty(t, env)?)
+            None => {}
+        }
+        let is_inout = match kind {
+            Inout => true
+            _ => false
+        }
+        if is_inout {
+            let name = match pat.kind {
+                Name(n, _) => n.clone()
+                _ => return Err(err(pat.span, "`inout` binds one name"))
+            }
+            let (p, t) = self.mut_place(&fb, value)?
+            match exp {
+                Some(e) => {
+                    if e != t {
+                        return Err(err(value.span, self.expected_found(e, t).as_str()))
+                    }
+                }
+                None => {}
+            }
+            let rt = self.types.refmut(t)
+            let l = fb.declare(name.as_str(), rt, false, VarKind.Borrow, pat.span)
+            fb.assign(Place.local(l), Rvalue.RefMut(p), span)
+            return Ok(())
+        }
+        let v = self.expr(&fb, value, exp)?
+        let v = match exp {
+            Some(e) => self.coerce(&fb, v, e, value.span)?
+            None => v
+        }
+        if v.ty == types.NEVER {
+            return Ok(())
+        }
+        let is_var = match kind {
+            Var => true
+            _ => false
+        }
+        match pat.kind {
+            Name(name, var_) => {
+                if !self.names_variant(fb, name.as_str(), v.ty) {
+                    let mutable = is_var || var_
+                    self.bind_name(&fb, name.as_str(), v, mutable, pat.span)?
+                    return Ok(())
+                }
+            }
+            _ => {}
+        }
+        Err(not_ported(pat.span, "this pattern"))
+    }
+
+    // `let x = v`: a borrow of a place that is not plain, else an owned
+    // value.
+    pub fn bind_name(inout self, inout fb: Fb, name: str, sink v: Val, mutable: bool, span: Span) -> Result(u32, Diag) {
+        match self.types.kind(v.ty) {
+            Type => return Err(err(span, "types exist only while compiling; use `comptime` or a constant"))
+            _ => {}
+        }
+        if self.types.is_ref(v.ty) {
+            let t = v.ty
+            let o = self.operand(&fb, v, span)?
+            let l = fb.declare(name, t, false, VarKind.Borrow, span)
+            fb.assign(Place.local(l), Rvalue.Use(o), span)
+            return Ok(l)
+        }
+        match v.vk.clone() {
+            Place(p) => {
+                if !mutable && !v.temp && !self.types.is_plain(v.ty) {
+                    let rt = self.types.refty(v.ty)
+                    let l = fb.declare(name, rt, false, VarKind.Borrow, span)
+                    fb.assign(Place.local(l), Rvalue.Ref(p), span)
+                    return Ok(l)
+                }
+            }
+            Op(_) => {}
+        }
+        let t = v.ty
+        let o = self.operand(&fb, v, span)?
+        let l = fb.declare(name, t, mutable, VarKind.Owned, span)
+        fb.assign(Place.local(l), Rvalue.Use(o), span)
+        Ok(l)
+    }
+
+    pub fn names_variant(self, fb: Fb, name: str, t: u32) -> bool {
+        if fb.lookup(name).is_some() {
+            return false
+        }
+        match self.types.variants(t) {
+            Some(vs) => {
+                for v in vs {
+                    if v.name == name && v.fields.len() == 0 {
+                        return true
+                    }
+                }
+                false
+            }
+            None => false
+        }
+    }
+
+    // ---- values ----
+
+    // The operand for a value used up: a copy of a plain place, or a move.
+    pub fn operand(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Operand, Diag) {
+        // A part of a temporary (`pair().1`): it moves out now, and the
+        // temporary's other parts are dropped, so that it is never dropped
+        // whole with a part missing.
+        match v.vk.clone() {
+            Place(p) => {
+                let whole = fb.ty_of(p.local)
+                var fields_only = p.proj.len() > 0
+                for x in p.proj {
+                    match x {
+                        Field(_) | Variant(_) => {}
+                        _ => fields_only = false
+                    }
+                }
+                if v.temp && fields_only && fb.body.locals[p.local as i64].kind == LocalKind.Temp && !self.types.is_plain(v.ty) && self.types.needs_drop(whole) {
+                    let t = fb.temp(v.ty, span)
+                    fb.assign(Place.local(t), Rvalue.Use(Operand.Move(p.clone())), span)
+                    self.drop_others(&fb, Place.local(p.local), whole, p.proj, 0, span)?
+                    fb.push(Stmt.Forget(p.local))
+                    return Ok(Operand.Move(Place.local(t)))
+                }
+            }
+            Op(_) => {}
+        }
+        self.operand_part(&fb, v, span)
+    }
+
+    // The other parts of a temporary than the one at `path[at..]` (below
+    // `base`, of type `ty`), dropped.
+    fn drop_others(inout self, inout fb: Fb, base: Place, ty: u32, path: Vec(Proj), at: i64, span: Span) -> Result((), Diag) {
+        if at < path.len() {
+            match self.types.adt_index(ty) {
+                Some(a) => {
+                    if self.types.adts[a as i64].has_drop {
+                        return Err(err(span, ("cannot move a part out of a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                    }
+                }
+                None => {}
+            }
+        }
+        var parts = Vec(Place).new()
+        var fts = Vec(u32).new()
+        var here: i64 = 0
+        var next = at
+        if at + 1 < path.len() {
+            match path[at] {
+                Variant(v) => match path[at + 1] {
+                    Field(i) => {
+                        fts = self.types.variants(ty).unwrap()[v as i64].fields.clone()
+                        for j in 0..fts.len() {
+                            parts.push(base.with(Proj.Variant(v)).with(Proj.Field(j as u32)))
+                        }
+                        here = i as i64
+                        next = at + 2
+                    }
+                    _ => return Ok(())
+                }
+                _ => {}
+            }
+        }
+        if next == at {
+            if at >= path.len() {
+                return Ok(())
+            }
+            match path[at] {
+                Field(i) => {
+                    fts = self.types.field_tys(ty)
+                    for j in 0..fts.len() {
+                        parts.push(base.with(Proj.Field(j as u32)))
+                    }
+                    here = i as i64
+                    next = at + 1
+                }
+                _ => return Ok(())
+            }
+        }
+        for j, fp in parts {
+            let ft = fts[j]
+            if j == here {
+                self.drop_others(&fb, fp.clone(), ft, path, next, span)?
+            } else if self.types.needs_drop(ft) {
+                fb.push(Stmt.Drop(fp.clone(), span))
+            }
+        }
+        Ok(())
+    }
+
+    // An operand for a value; a part of a temporary moves out alone (for
+    // patterns, which drop the other parts themselves).
+    pub fn operand_part(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Operand, Diag) {
+        let p = match v.vk.clone() {
+            Op(o) => return Ok(o)
+            Place(p) => p
+        }
+        if self.types.is_plain(v.ty) {
+            return Ok(Operand.Copy(p))
+        }
+        if v.temp {
+            return Ok(Operand.Move(p))
+        }
+        match self.place_movable(fb, p) {
+            Some(why) => {
+                let what = self.describe_place(fb, p)
+                let m = "cannot move " + what.as_str() + " out of its place: " + why + "; use `.clone()` to copy it, or `std.mem.take`/`replace`"
+                return Err(err(span, m.as_str()))
+            }
+            None => {}
+        }
+        Ok(Operand.Move(p))
+    }
+
+    pub fn describe_place(self, fb: Fb, p: Place) -> String {
+        match fb.body.locals[p.local as i64].name {
+            Some(n) => {
+                if p.proj.len() == 0 || (p.proj.len() == 1 && p.proj[0] == Proj.Deref) {
+                    return "`" + n.as_str() + "`"
+                }
+                "a part of `" + n.as_str() + "`"
+            }
+            None => "this value".to_string()
+        }
+    }
+
+    // A place holding the value: the place itself, or a temporary.
+    pub fn as_place(inout self, inout fb: Fb, sink v: Val, span: Span) -> (Place, bool) {
+        match v.vk.clone() {
+            Place(p) => (p, v.temp)
+            Op(o) => {
+                let t = fb.temp(v.ty, span)
+                fb.assign(Place.local(t), Rvalue.Use(o), span)
+                (Place.local(t), true)
+            }
+        }
+    }
+
+    // Puts an rvalue in a fresh temporary.
+    pub fn rvalue(inout self, inout fb: Fb, sink r: Rvalue, ty: u32, span: Span) -> Val {
+        let t = fb.temp(ty, span)
+        fb.assign(Place.local(t), r, span)
+        Val { vk: VK.Place(Place.local(t)), ty: ty, temp: true }
+    }
+
+    // A place to change, from `&place`: an `inout` argument, or the value
+    // of `inout x = &place`. The `&` is required, so that the reader sees
+    // what may change.
+    pub fn mut_place(inout self, inout fb: Fb, e: ast.Expr) -> Result((Place, u32), Diag) {
+        match e.kind {
+            Unary(op, inner) => match op {
+                Addr => {
+                    let v = self.expr_mut(&fb, inner.deref())?
+                    let p = match v.vk.clone() {
+                        Place(p) => p
+                        Op(_) => return Err(err(e.span, "expected a place (a variable, a field, an element)"))
+                    }
+                    if !self.place_mutable(fb, p) {
+                        return Err(err(e.span, self.not_mutable_msg(fb, p).as_str()))
+                    }
+                    return Ok((p, v.ty))
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        Err(err(e.span, "this is changed through an `inout` parameter, so write `&` before it"))
+    }
+
+    // Converts a value to the expected type, where the language allows it.
+    pub fn coerce(inout self, inout fb: Fb, sink v: Val, to: u32, span: Span) -> Result(Val, Diag) {
+        if v.ty == to || v.ty == types.NEVER {
+            let t = if v.ty == types.NEVER { types.NEVER } else { to }
+            return Ok(Val { vk: v.vk.clone(), ty: t, temp: v.temp })
+        }
+        let from = v.ty
+        // An integer literal typed before its type was known.
+        match v.vk.clone() {
+            Op(o) => match o {
+                Const(c) => match c {
+                    Int(x, _) => {
+                        if self.types.is_int(to) && self.types.is_int(from) && self.int_fits(x, to) {
+                            return Ok(val_op(int_const(x, to), to))
+                        }
+                        if self.types.is_float(to) && self.types.is_int(from) && (x as f64) as i128 == x {
+                            return Ok(val_op(Operand.Const(Const.Float(x as f64, to)), to))
+                        }
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        // A borrow held as a value (`ref T`) where a `T` is expected: what it
+        // points to, lent on (moving out of it is still an error).
+        if self.types.is_ref(from) && self.types.pointee(from).unwrap() == to {
+            return self.auto_deref(&fb, v, span)
+        }
+        // A place where a borrow of it is expected.
+        let tk = self.types.kind(to).clone()
+        var to_ref: Option(u32) = None
+        var m = false
+        match tk.clone() {
+            Ref(inner) => to_ref = Some(inner)
+            RefMut(inner) => {
+                to_ref = Some(inner)
+                m = true
+            }
+            _ => {}
+        }
+        match to_ref {
+            Some(inner) => {
+                if inner == from {
+                    let (p, temp) = self.as_place(&fb, v, span)
+                    if temp {
+                        return Err(err(span, "this would borrow a temporary value, which does not live long enough"))
+                    }
+                    if m && !self.place_mutable(fb, p) {
+                        return Err(err(span, self.not_mutable_msg(fb, p).as_str()))
+                    }
+                    let r = if m { Rvalue.RefMut(p) } else { Rvalue.Ref(p) }
+                    return Ok(self.rvalue(&fb, r, to, span))
+                }
+            }
+            None => {}
+        }
+        // A string literal where a C string is expected: its bytes end
+        // with a zero.
+        let pu8 = self.types.ptr(types.U8)
+        let is_str_lit = match v.vk {
+            Op(o) => match o {
+                Const(c) => match c {
+                    Str(_) => true
+                    _ => false
+                }
+                _ => false
+            }
+            _ => false
+        }
+        if from == types.STR && to == pu8 && is_str_lit {
+            let (p, _) = self.as_place(&fb, v, span)
+            return Ok(val_op(Operand.Copy(p.with(Proj.Field(0))), to))
+        }
+        // A string literal where a `String` is expected: no allocation.
+        if self.string_ty() == Some(to) && from == types.STR && is_str_lit {
+            return Err(not_ported(span, "a literal where a `String` is expected"))
+        }
+        // `[T; N]` place to `[T]`.
+        match self.types.kind(from).clone() {
+            Array(e, n) => match tk.clone() {
+                Slice(e2) => {
+                    if e == e2 {
+                        let (p, _) = self.as_place(&fb, v, span)
+                        let pt = self.types.ptr(e)
+                        var addr = Operand.Const(Const.Null(pt))
+                        if n != 0 {
+                            let fp = self.types.ptr(from)
+                            let a = self.rvalue(&fb, Rvalue.Addr(p), fp, span)
+                            let ap = self.place_of_val(a)
+                            let c = self.rvalue(&fb, Rvalue.Cast(Operand.Copy(ap), pt, mir.CastKind.Ptr), pt, span)
+                            addr = Operand.Copy(self.place_of_val(c))
+                        }
+                        let vt = self.view_ty(TyKind.Slice(e))
+                        var ops = Vec(Operand).new()
+                        ops.push(addr)
+                        ops.push(int_const(n as i128, types.I64))
+                        return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.View(vt), ops), vt, span))
+                    }
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        let to_view = match tk.clone() {
+            Str | Slice(_) => true
+            _ => false
+        }
+        if to_view && self.types.adt_index(from).is_some() {
+            return Err(not_ported(span, "a library type where its view is expected"))
+        }
+        if self.types.adt_index(from).is_some() && self.find_method(from, "deref")?.is_some() {
+            return Err(not_ported(span, "`deref` where a value is expected"))
+        }
+        Err(err(span, self.expected_found(to, from).as_str()))
+    }
+
+    pub fn place_of_val(self, v: Val) -> Place {
+        match v.vk {
+            Place(p) => p.clone()
+            Op(_) => panic("place_of_val on an operand")
+        }
+    }
+
+    pub fn string_ty(inout self) -> Option(u32) {
+        let d = match self.lang.string {
+            Some(d) => d
+            None => return None
+        }
+        self.adt_instance(d, Vec(CVal).new(), Span.new(0, 0, 0)).ok()
+    }
+
+    // ---- expressions ----
+
+    // Lowers a place that will be changed.
+    pub fn expr_mut(inout self, inout fb: Fb, e: ast.Expr) -> Result(Val, Diag) {
+        fb.want_mut = true
+        self.expr(&fb, e, None)
+    }
+
+    pub fn expr(inout self, inout fb: Fb, e: ast.Expr, exp: Option(u32)) -> Result(Val, Diag) {
+        let span = e.span
+        let wm = fb.want_mut
+        fb.want_mut = false
+        if wm {
+            match e.kind {
+                Field(base, name) => {
+                    match sema.expr_path(e) {
+                        Some(p) => {
+                            if fb.lookup(p[0].as_str()).is_none() {
+                                return self.field_expr(&fb, e, base.deref(), name.as_str(), exp)
+                            }
+                        }
+                        None => {}
+                    }
+                    let bv = self.expr_mut(&fb, base.deref())?
+                    fb.want_mut = true
+                    let r = self.field_of(&fb, bv, name.as_str(), span)
+                    fb.want_mut = false
+                    return r
+                }
+                TupleField(base, i) => {
+                    let bv = self.expr_mut(&fb, base.deref())?
+                    fb.want_mut = true
+                    let bv = self.auto_deref(&fb, bv, span)
+                    fb.want_mut = false
+                    return self.tuple_field(&fb, bv?, i, span)
+                }
+                Index(_, _) => return Err(not_ported(span, "indexing"))
+                Unary(op, inner) => match op {
+                    Deref => {
+                        let v = self.expr_mut(&fb, inner.deref())?
+                        match self.types.kind(v.ty) {
+                            Ptr(_) => return self.auto_deref(&fb, v, span)
+                            Adt(_) => return Err(not_ported(span, "`*` on a library type"))
+                            _ => return self.expr(&fb, e, exp)
+                        }
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+        self.expr_plain(&fb, e, exp, span)
+    }
+
+    fn tuple_field(inout self, inout fb: Fb, sink bv: Val, i: u32, span: Span) -> Result(Val, Diag) {
+        let ts = match self.types.kind(bv.ty) {
+            Tuple(ts) => ts.clone()
+            _ => {
+                var m = String.from("`.")
+                i.show(&m)
+                m.push_str("` needs a tuple, found `")
+                m.push_str(self.types.show(bv.ty).as_str())
+                m.push('`')
+                return Err(err(span, m.as_str()))
+            }
+        }
+        if i as i64 >= ts.len() {
+            var m = String.from("this tuple has ")
+            ts.len().show(&m)
+            m.push_str(" parts")
+            return Err(err(span, m.as_str()))
+        }
+        let temp = bv.temp
+        let (p, _) = self.as_place(&fb, bv, span)
+        Ok(Val { vk: VK.Place(p.with(Proj.Field(i))), ty: ts[i as i64], temp: temp })
+    }
+
+    fn expr_plain(inout self, inout fb: Fb, e: ast.Expr, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        match e.kind {
+            Int(v) => {
+                var t = types.I64
+                match exp {
+                    Some(x) => {
+                        if self.types.is_int(x) {
+                            t = x
+                        } else if self.types.is_float(x) {
+                            let f = v as f64
+                            if f as u64 != v {
+                                return Err(err(span, "this integer is not exact as a float"))
+                            }
+                            return Ok(val_op(Operand.Const(Const.Float(f, x)), x))
+                        }
+                    }
+                    None => {}
+                }
+                if !self.int_fits(v as i128, t) {
+                    var m = String.new()
+                    v.show(&m)
+                    m.push_str(" does not fit in `")
+                    m.push_str(self.types.show(t).as_str())
+                    m.push('`')
+                    return Err(err(span, m.as_str()))
+                }
+                Ok(val_op(int_const(v as i128, t), t))
+            }
+            Char(c) => {
+                var t = types.U8
+                match exp {
+                    Some(x) => {
+                        if self.types.is_int(x) {
+                            t = x
+                        }
+                    }
+                    None => {}
+                }
+                Ok(val_op(int_const(c as i128, t), t))
+            }
+            Float(f) => {
+                var t = types.F64
+                match exp {
+                    Some(x) => {
+                        if self.types.is_float(x) {
+                            t = x
+                        }
+                    }
+                    None => {}
+                }
+                let v = if t == types.F32 { f as f32 as f64 } else { f }
+                Ok(val_op(Operand.Const(Const.Float(v, t)), t))
+            }
+            Bool(b) => Ok(val_op(Operand.Const(Const.Bool(b)), types.BOOL))
+            Str(s) => {
+                self.view_ty(TyKind.Str)
+                Ok(val_op(Operand.Const(Const.Str(s.clone())), types.STR))
+            }
+            Unit => Ok(val_unit())
+            Name(n) => self.name_expr(&fb, n.as_str(), exp, span)
+            Field(base, name) => self.field_expr(&fb, e, base.deref(), name.as_str(), exp)
+            TupleField(base, i) => {
+                let bv = self.expr(&fb, base.deref(), None)?
+                let bv = self.auto_deref(&fb, bv, span)?
+                self.tuple_field(&fb, bv, i, span)
+            }
+            Call(callee, args) => self.call_expr(&fb, callee.deref(), args, exp, span)
+            Unary(op, inner) => self.unary_expr(&fb, op, inner.deref(), exp, span)
+            Binary(op, a, b) => {
+                match op {
+                    LogAnd | LogOr => return self.logic(&fb, op, a.deref(), b.deref(), span)
+                    _ => {}
+                }
+                // A shift has its left side's type, so `let b: u8 = 1 << 3`
+                // makes the `1` a `u8`.
+                let ea: Option(u32) = if op.is_compare() { None } else { exp }
+                var av = self.expr(&fb, a.deref(), ea)?
+                // `1 + x`: let the literal take the other side's type (not for
+                // a shift, whose sides may differ).
+                let shift = match op {
+                    Shl | Shr => true
+                    _ => false
+                }
+                if is_literal(a.deref()) && ea.is_none() && !shift && !is_literal(b.deref()) {
+                    match self.peek_type(fb, b.deref()) {
+                        Some(bt) => {
+                            if self.types.is_int(bt) || self.types.is_float(bt) {
+                                av = self.expr(&fb, a.deref(), Some(bt))?
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                self.binary_on(&fb, op, av, b.deref(), span)
+            }
+            Cast(inner, t) => {
+                let env = fb.env.clone()
+                let to = self.resolve_ty(t, env)?
+                self.cast(&fb, inner.deref(), to, span)
+            }
+            Move(inner) => {
+                let v = self.expr(&fb, inner.deref(), exp)?
+                let p = match v.vk.clone() {
+                    Place(p) => p
+                    Op(_) => return Ok(v)
+                }
+                if !v.temp {
+                    match self.place_movable(fb, p) {
+                        Some(why) => return Err(err(span, ("cannot move " + self.describe_place(fb, p).as_str() + ": " + why).as_str()))
+                        None => {}
+                    }
+                }
+                Ok(Val { vk: VK.Op(Operand.Move(p)), ty: v.ty, temp: false })
+            }
+            Tuple(items) => {
+                var exps = Vec(Option(u32)).new()
+                var known = false
+                match exp {
+                    Some(t) => match self.types.kind(t) {
+                        Tuple(ts) => {
+                            if ts.len() == items.len() {
+                                for x in ts {
+                                    exps.push(Some(x))
+                                }
+                                known = true
+                            }
+                        }
+                        _ => {}
+                    }
+                    None => {}
+                }
+                if !known {
+                    for _ in 0..items.len() {
+                        exps.push(None)
+                    }
+                }
+                var ops = Vec(Operand).new()
+                var tys = Vec(u32).new()
+                for i, it in items {
+                    let ex = exps[i]
+                    let v = self.expr(&fb, it, ex)?
+                    let v = match ex {
+                        Some(t) => self.coerce(&fb, v, t, it.span)?
+                        None => v
+                    }
+                    tys.push(v.ty)
+                    ops.push(self.operand(&fb, v, it.span)?)
+                }
+                let t = self.types.tuple(tys)
+                Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(t), ops), t, span))
+            }
+            Array(items) => {
+                var ee: Option(u32) = None
+                var exp_slice: Option(u32) = None
+                match exp {
+                    Some(t) => match self.types.kind(t) {
+                        Array(x, _) => ee = Some(x)
+                        Slice(x) => {
+                            ee = Some(x)
+                            exp_slice = Some(x)
+                        }
+                        _ => {}
+                    }
+                    None => {}
+                }
+                // `[]` where a slice is expected: an empty view.
+                match exp_slice {
+                    Some(x) => {
+                        if items.len() == 0 {
+                            let vt = self.view_ty(TyKind.Slice(x))
+                            let pt = self.types.ptr(x)
+                            var ops = Vec(Operand).new()
+                            ops.push(Operand.Const(Const.Null(pt)))
+                            ops.push(int_const(0, types.I64))
+                            return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.View(vt), ops), vt, span))
+                        }
+                    }
+                    None => {}
+                }
+                if items.len() == 0 {
+                    let et = match ee {
+                        Some(t) => t
+                        None => return Err(err(span, "the type of an empty array must be known: write `let a: [T; 0] = []`"))
+                    }
+                    let t = self.types.intern(TyKind.Array(et, 0))
+                    return Ok(val_op(Operand.Const(Const.Zst(t)), t))
+                }
+                var ops = Vec(Operand).new()
+                var et = ee
+                for it in items {
+                    let v = self.expr(&fb, it, et)?
+                    let v = match et {
+                        Some(t) => self.coerce(&fb, v, t, it.span)?
+                        None => v
+                    }
+                    et = Some(v.ty)
+                    ops.push(self.operand(&fb, v, it.span)?)
+                }
+                let t = self.types.intern(TyKind.Array(et.unwrap(), items.len() as u64))
+                Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Array(t), ops), t, span))
+            }
+            ArrayRepeat(el, n) => {
+                var ee: Option(u32) = None
+                match exp {
+                    Some(t) => match self.types.kind(t) {
+                        Array(x, _) => ee = Some(x)
+                        _ => {}
+                    }
+                    None => {}
+                }
+                let env = fb.env.clone()
+                let n = self.const_int(n.deref(), env)?
+                if n < 0 {
+                    return Err(err(span, "an array's length cannot be negative"))
+                }
+                let v = self.expr(&fb, el.deref(), ee)?
+                let v = match ee {
+                    Some(t) => self.coerce(&fb, v, t, el.span)?
+                    None => v
+                }
+                if !self.types.is_plain(v.ty) {
+                    return Err(err(el.span, "`[x; n]` copies `x`, so it must be a plain value; build the array with a loop"))
+                }
+                let et = v.ty
+                let o = self.operand(&fb, v, el.span)?
+                let t = self.types.intern(TyKind.Array(et, n as u64))
+                Ok(self.rvalue(&fb, Rvalue.Repeat(o, n as u64), t, span))
+            }
+            Block(b) => self.block(&fb, b, exp, true)
+            Unsafe(b) => {
+                fb.unsafe_depth += 1
+                let r = self.block(&fb, b, exp, true)
+                fb.unsafe_depth -= 1
+                r
+            }
+            Comptime(inner) => {
+                let env = fb.env.clone()
+                let r = self.const_expr(inner.deref(), env, exp)?
+                Ok(val_op(Operand.Const(r.c.clone()), r.ty))
+            }
+            If(c, then, els) => self.if_expr(&fb, c.deref(), then, els, exp, span)
+            While(c, body) => {
+                let head = fb.new_block()
+                let exit = fb.new_block()
+                fb.goto(head)
+                let cv = self.expr(&fb, c.deref(), Some(types.BOOL))?
+                let cv = self.coerce(&fb, cv, types.BOOL, c.span)?
+                let co = self.operand(&fb, cv, c.span)?
+                let bb = fb.new_block()
+                fb.term(Term.Switch(co, switch1(0, exit), bb))
+                fb.switch_to(bb)
+                fb.loops.push(LoopCtx { brk: exit, cont: head, depth: fb.depth() })
+                self.block(&fb, body, Some(types.UNIT), false)?
+                fb.loops.pop()
+                fb.goto(head)
+                fb.switch_to(exit)
+                Ok(val_unit())
+            }
+            Loop(body) => {
+                let head = fb.new_block()
+                let exit = fb.new_block()
+                fb.goto(head)
+                fb.loops.push(LoopCtx { brk: exit, cont: head, depth: fb.depth() })
+                self.block(&fb, body, Some(types.UNIT), false)?
+                fb.loops.pop()
+                fb.goto(head)
+                fb.switch_to(exit)
+                // A loop without `break` never ends.
+                Ok(if block_reached(fb, exit) { val_unit() } else { val_never() })
+            }
+            Return(v) => {
+                let ret_ty = if is_ret_value(fb.ret_mode) { fb.ty_of(mir.RET) } else { self.types.pointee(fb.ty_of(mir.RET)).unwrap() }
+                match v {
+                    Some(v) => {
+                        let val = self.expr(&fb, v.deref(), Some(ret_ty))?
+                        if val.ty == types.NEVER {
+                            return Ok(val_never())
+                        }
+                        self.write_return(&fb, val, ret_ty, v.span)?
+                    }
+                    None => {
+                        if ret_ty != types.UNIT {
+                            return Err(err(span, ("this function returns `" + self.types.show(ret_ty).as_str() + "`").as_str()))
+                        }
+                    }
+                }
+                self.exit_to(&fb, 0)
+                fb.term(Term.Return)
+                Ok(val_never())
+            }
+            Break | Continue => {
+                let n = fb.loops.len()
+                if n == 0 {
+                    return Err(err(span, "`break` and `continue` belong in a loop"))
+                }
+                let is_break = match e.kind {
+                    Break => true
+                    _ => false
+                }
+                let target = if is_break { fb.loops[n - 1].brk } else { fb.loops[n - 1].cont }
+                let depth = fb.loops[n - 1].depth
+                self.exit_to(&fb, depth)
+                fb.term(Term.Goto(target))
+                Ok(val_never())
+            }
+            Range(_, _) => Err(err(span, "a range only goes in a `for` loop or a slice (`xs[a..b]`)"))
+            Type(_) => Err(err(span, "a type is not a value here"))
+            Index(_, _) => Err(not_ported(span, "indexing"))
+            Try(_) => Err(not_ported(span, "`?`"))
+            StructLit(_, _) => Err(not_ported(span, "struct literals"))
+            Match(_, _) => Err(not_ported(span, "`match`"))
+            For(_, _, _, _) => Err(not_ported(span, "`for` loops"))
+            Lambda(_, _, _) => Err(not_ported(span, "closures"))
+        }
+    }
+
+    // The type an expression would have, for literals beside it; only for
+    // simple expressions that can be looked at without lowering.
+    fn peek_type(inout self, fb: Fb, e: ast.Expr) -> Option(u32) {
+        match e.kind {
+            Name(n) => {
+                let v = fb.lookup(n.as_str())?
+                let p = self.var_place(fb, v)
+                Some(self.place_ty(fb, p))
+            }
+            Cast(_, t) => {
+                let env = fb.env.clone()
+                self.resolve_ty(t, env).ok()
+            }
+            Field(b, f) => {
+                let bt = self.peek_type(fb, b.deref())?
+                var t = bt
+                if self.types.is_ref(bt) || self.types.is_ptr(bt) {
+                    t = self.types.pointee(bt).unwrap()
+                }
+                let a = self.types.adt_index(t)?
+                match self.types.adts[a as i64].body {
+                    Struct(fs) => {
+                        for x in fs {
+                            if x.name == f {
+                                return Some(x.ty)
+                            }
+                        }
+                        None
+                    }
+                    _ => None
+                }
+            }
+            Binary(op, a, _) => {
+                if op.is_compare() {
+                    return None
+                }
+                self.peek_type(fb, a.deref())
+            }
+            Unary(op, a) => match op {
+                Deref => {
+                    let t = self.peek_type(fb, a.deref())?
+                    self.types.pointee(t)
+                }
+                Neg => self.peek_type(fb, a.deref())
+                _ => None
+            }
+            Index(b, _) => {
+                let bt = self.peek_type(fb, b.deref())?
+                match self.types.kind(bt) {
+                    Array(x, _) => Some(x)
+                    Slice(x) => Some(x)
+                    Ptr(x) => Some(x)
+                    Str => Some(types.U8)
+                    _ => None
+                }
+            }
+            _ => None
+        }
+    }
+
+    fn name_expr(inout self, inout fb: Fb, n: str, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        match fb.lookup(n) {
+            Some(v) => {
+                let p = self.var_place(fb, v)
+                let t = self.place_ty(fb, p)
+                return Ok(val_place(p, t))
+            }
+            None => {}
+        }
+        match fb.env.get(n) {
+            Some(c) => return match c {
+                Int(i) => {
+                    var t = types.I64
+                    match exp {
+                        Some(x) => {
+                            if self.types.is_int(x) {
+                                t = x
+                            }
+                        }
+                        None => {}
+                    }
+                    Ok(val_op(int_const(i, t), t))
+                }
+                Bool(b) => Ok(val_op(Operand.Const(Const.Bool(b)), types.BOOL))
+                Type(_) => Err(err(span, ("`" + n + "` is a type, not a value").as_str()))
+                Lambda(_, _) => Err(err(span, "a compile-time closure can only be called"))
+            }
+            None => {}
+        }
+        if n == "null" {
+            match exp {
+                Some(t) => {
+                    if self.types.is_ptr(t) {
+                        return Ok(val_op(Operand.Const(Const.Null(t)), t))
+                    }
+                }
+                None => {}
+            }
+            return Err(err(span, "the type of `null` must be known: a pointer type is expected here"))
+        }
+        let module = fb.env.module
+        match self.lookup(module, n) {
+            Some(s) => match s {
+                Const(c) => {
+                    let r = self.const_value(c)?
+                    Ok(val_op(Operand.Const(r.c.clone()), r.ty))
+                }
+                Static(i) => self.static_place(&fb, i, span)
+                Fn(f) => self.fn_value(f, Vec(CVal).new(), span)
+                _ => Err(err(span, ("`" + n + "` is not a value").as_str()))
+            }
+            None => {
+                // A variant named alone: `None`, or one of the expected enum.
+                match self.variant_owner(exp, n)? {
+                    Some(_) => Err(not_ported(span, "enum variants"))
+                    None => Err(err(span, ("unknown name `" + n + "`").as_str()))
+                }
+            }
+        }
+    }
+
+    // The enum a bare variant name belongs to: the expected type's.
+    pub fn variant_owner(inout self, exp: Option(u32), n: str) -> Result(Option(u32), Diag) {
+        match exp {
+            Some(t) => match self.types.variants(t) {
+                Some(vs) => {
+                    for v in vs {
+                        if v.name == n {
+                            return Ok(Some(t))
+                        }
+                    }
+                }
+                None => {}
+            }
+            None => {}
+        }
+        Ok(None)
+    }
+
+    // A `static` as a place, through its address.
+    fn static_place(inout self, inout fb: Fb, i: u32, span: Span) -> Result(Val, Diag) {
+        if fb.unsafe_depth == 0 {
+            return Err(err(span, "a `static` is shared by the whole program, so it is only used in `unsafe` code"))
+        }
+        let t = self.static_info(i)?.ty
+        let pt = self.types.ptr(t)
+        let a = fb.temp(pt, span)
+        fb.assign(Place.local(a), Rvalue.Use(Operand.Const(Const.Static(i, pt))), span)
+        Ok(val_place(Place.deref(a), t))
+    }
+
+    pub fn fn_value(inout self, f: u32, args: Vec(CVal), span: Span) -> Result(Val, Diag) {
+        let d = sema.at(self.fns[f as i64].decl)
+        var generic = false
+        for p in d.params {
+            if p.mode == ast.Mode.Comptime {
+                generic = true
+            }
+        }
+        if generic && args.len() == 0 {
+            return Err(err(span, "a generic function cannot be used as a value without its compile-time arguments"))
+        }
+        let id = self.instance(f, args, span)?
+        for p in self.out[id as i64].pass {
+            match p {
+                Owned => return Err(err(span, "a function with `sink` parameters of non-plain types cannot be used as a `fnptr` yet"))
+                _ => {}
+            }
+        }
+        let sig = self.out[id as i64].sig.clone()
+        let t = self.types.intern(TyKind.FnPtr(sig))
+        Ok(val_op(Operand.Const(Const.Fn(id)), t))
+    }
+
+    fn auto_deref(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Val, Diag) {
+        if self.types.is_ref(v.ty) {
+            let inner = self.types.pointee(v.ty).unwrap()
+            let (p, _) = self.as_place(&fb, v, span)
+            return Ok(val_place(p.with(Proj.Deref), inner))
+        }
+        match self.types.kind(v.ty).clone() {
+            Ptr(inner) => {
+                if fb.unsafe_depth == 0 {
+                    return Err(err(span, "reading through a pointer is only allowed in `unsafe` code"))
+                }
+                let o = self.operand(&fb, v, span)?
+                var keep: Option(Place) = None
+                match o.clone() {
+                    Copy(p) => {
+                        var has_index = false
+                        for x in p.proj {
+                            match x {
+                                Index(_) => has_index = true
+                                _ => {}
+                            }
+                        }
+                        if !has_index {
+                            keep = Some(p.clone())
+                        }
+                    }
+                    _ => {}
+                }
+                let tmp = match keep {
+                    Some(p) => p
+                    None => {
+                        let pt = self.types.ptr(inner)
+                        let t = fb.temp(pt, span)
+                        fb.assign(Place.local(t), Rvalue.Use(o), span)
+                        Place.local(t)
+                    }
+                }
+                Ok(val_place(tmp.with(Proj.Deref), inner))
+            }
+            _ => Ok(v)
+        }
+    }
+
+    fn field_expr(inout self, inout fb: Fb, whole: ast.Expr, base: ast.Expr, name: str, exp: Option(u32)) -> Result(Val, Diag) {
+        let span = whole.span
+        // A path: `module.item`, `Type.Variant`, `Type.CONST`.
+        match sema.expr_path(whole) {
+            Some(p) => {
+                if fb.lookup(p[0].as_str()).is_none() {
+                    match self.path_value(&fb, p, exp, span)? {
+                        Some(v) => return Ok(v)
+                        None => {}
+                    }
+                }
+            }
+            None => {}
+        }
+        let bv = self.expr(&fb, base, None)?
+        self.field_of(&fb, bv, name, span)
+    }
+
+    pub fn field_of(inout self, inout fb: Fb, sink bv: Val, name: str, span: Span) -> Result(Val, Diag) {
+        let bv = self.auto_deref(&fb, bv, span)?
+        match self.types.adt_index(bv.ty) {
+            Some(a) => {
+                var found: Option(i64) = None
+                var ft: u32 = 0
+                var public = false
+                match self.types.adts[a as i64].body {
+                    Struct(fs) => {
+                        for i, f in fs {
+                            if f.name == name {
+                                found = Some(i)
+                                ft = f.ty
+                                public = f.public
+                                break
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                match found {
+                    Some(i) => {
+                        let decl = self.types.adts[a as i64].decl
+                        let decl_mod = self.adts[decl as i64].module
+                        if !public && !self.same_package(decl_mod, fb.env.module) {
+                            return Err(err(span, ("the field `" + name + "` of `" + self.types.adts[a as i64].name.as_str() + "` is private").as_str()))
+                        }
+                        let temp = bv.temp
+                        let (p, _) = self.as_place(&fb, bv, span)
+                        return Ok(Val { vk: VK.Place(p.with(Proj.Field(i as u32))), ty: ft, temp: temp })
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+        // `len` of views is a field; the rest are methods.
+        let elem = match self.types.kind(bv.ty) {
+            Slice(e) => Some(e)
+            Str => Some(types.U8)
+            _ => None
+        }
+        match elem {
+            Some(et) => {
+                if name == "len" || name == "ptr" {
+                    let (p, _) = self.as_place(&fb, bv, span)
+                    if name == "len" {
+                        return Ok(val_op(Operand.Copy(p.with(Proj.Field(1))), types.I64))
+                    }
+                    let pt = self.types.ptr(et)
+                    return Ok(val_op(Operand.Copy(p.with(Proj.Field(0))), pt))
+                }
+            }
+            None => {}
+        }
+        if self.find_method(bv.ty, "deref")?.is_some() {
+            return Err(not_ported(span, "fields through `deref`"))
+        }
+        Err(err(span, ("`" + self.types.show(bv.ty).as_str() + "` has no field `" + name + "`").as_str()))
+    }
+
+    // A dotted path that names something other than a variable's field.
+    fn path_value(inout self, inout fb: Fb, p: Vec(String), exp: Option(u32), span: Span) -> Result(Option(Val), Diag) {
+        let env = fb.env.clone()
+        let n = p.len()
+        var head = Vec(String).new()
+        for i in 0..n - 1 {
+            head.push(p[i].clone())
+        }
+        if self.path_is_type(head, env) {
+            return Err(not_ported(span, "members of types"))
+        }
+        match self.lookup_path(env.module, p) {
+            Some((s, _)) => match s {
+                Const(c) => {
+                    let r = self.const_value(c)?
+                    return Ok(Some(val_op(Operand.Const(r.c.clone()), r.ty)))
+                }
+                Fn(f) => return Ok(Some(self.fn_value(f, Vec(CVal).new(), span)?))
+                Static(i) => return Ok(Some(self.static_place(&fb, i, span)?))
+                _ => {}
+            }
+            None => {}
+        }
+        Ok(None)
+    }
+
+    fn unary_expr(inout self, inout fb: Fb, op: ast.UnOp, inner: ast.Expr, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        match op {
+            Neg => {
+                match inner.kind {
+                    Int(v) => {
+                        // `-128` fits in an i8 although 128 does not.
+                        var t = types.I64
+                        match exp {
+                            Some(x) => {
+                                if self.types.is_int(x) || self.types.is_float(x) {
+                                    t = x
+                                }
+                            }
+                            None => {}
+                        }
+                        if self.types.is_float(t) {
+                            return Ok(val_op(Operand.Const(Const.Float(0.0 - v as f64, t)), t))
+                        }
+                        let n = 0 - (v as i128)
+                        if !self.int_fits(n, t) {
+                            var m = String.from("-")
+                            v.show(&m)
+                            m.push_str(" does not fit in `")
+                            m.push_str(self.types.show(t).as_str())
+                            m.push('`')
+                            return Err(err(span, m.as_str()))
+                        }
+                        return Ok(val_op(int_const(n, t), t))
+                    }
+                    _ => {}
+                }
+                let v = self.expr(&fb, inner, exp)?
+                let t = v.ty
+                var ok = self.types.is_float(t)
+                match self.types.int(t) {
+                    Some(i) => ok = i.signed
+                    None => {}
+                }
+                if !ok {
+                    return Err(err(span, ("`-` needs a signed integer or a float, found `" + self.types.show(t).as_str() + "`").as_str()))
+                }
+                let o = self.operand(&fb, v, span)?
+                Ok(self.rvalue(&fb, Rvalue.Un(mir.UnOp.Neg, o), t, span))
+            }
+            Not => {
+                let v = self.expr(&fb, inner, exp)?
+                let t = v.ty
+                if t != types.BOOL && !self.types.is_int(t) {
+                    return Err(err(span, ("`!` needs a bool or an integer, found `" + self.types.show(t).as_str() + "`").as_str()))
+                }
+                let o = self.operand(&fb, v, span)?
+                Ok(self.rvalue(&fb, Rvalue.Un(mir.UnOp.Not, o), t, span))
+            }
+            Deref => {
+                let v = self.expr(&fb, inner, None)?
+                match self.types.kind(v.ty) {
+                    Ptr(_) => self.auto_deref(&fb, v, span)
+                    Adt(_) => Err(not_ported(span, "`*` on a library type"))
+                    _ => Err(err(span, ("`*` needs a pointer, found `" + self.types.show(v.ty).as_str() + "`").as_str()))
+                }
+            }
+            Addr => {
+                // The address of a place, as a raw pointer.
+                let v = self.expr(&fb, inner, None)?
+                let t = v.ty
+                match v.vk.clone() {
+                    Place(p) => {
+                        if !v.temp {
+                            let pt = self.types.ptr(t)
+                            return Ok(self.rvalue(&fb, Rvalue.Addr(p), pt, span))
+                        }
+                    }
+                    Op(_) => {}
+                }
+                Err(err(span, "`&` takes the address of a place (a variable, a field, an element)"))
+            }
+        }
+    }
+
+    fn logic(inout self, inout fb: Fb, op: Op, a: ast.Expr, b: ast.Expr, span: Span) -> Result(Val, Diag) {
+        let r = fb.temp(types.BOOL, span)
+        let av = self.expr(&fb, a, Some(types.BOOL))?
+        let av = self.coerce(&fb, av, types.BOOL, a.span)?
+        let ao = self.operand(&fb, av, a.span)?
+        fb.assign(Place.local(r), Rvalue.Use(ao.clone()), span)
+        let rhs = fb.new_block()
+        let done = fb.new_block()
+        let and = op == Op.LogAnd
+        let t = if and { rhs } else { done }
+        let f = if and { done } else { rhs }
+        fb.term(Term.Switch(ao, switch1(0, f), t))
+        fb.switch_to(rhs)
+        fb.push_scope(true)
+        let bv = self.expr(&fb, b, Some(types.BOOL))?
+        let bv = self.coerce(&fb, bv, types.BOOL, b.span)?
+        let bo = self.operand(&fb, bv, b.span)?
+        fb.assign(Place.local(r), Rvalue.Use(bo), span)
+        self.pop_scope(&fb)
+        fb.goto(done)
+        Ok(val_op(copy_of(r), types.BOOL))
+    }
+
+    // A value as an operand in a temporary, so that what is lowered next
+    // cannot change it.
+    fn value_operand_val(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Val, Diag) {
+        match v.vk.clone() {
+            Op(o) => match o {
+                Const(_) => return Ok(v)
+                _ => {}
+            }
+            Place(_) => {
+                if v.temp {
+                    return Ok(v)
+                }
+            }
+        }
+        let t = v.ty
+        let o = self.operand(&fb, v, span)?
+        let l = fb.temp(t, span)
+        fb.assign(Place.local(l), Rvalue.Use(o), span)
+        Ok(Val { vk: VK.Place(Place.local(l)), ty: t, temp: true })
+    }
+
+    fn peek_is_adt(inout self, fb: Fb, e: ast.Expr) -> bool {
+        match self.peek_type(fb, e) {
+            Some(t) => self.types.adt_index(t).is_some()
+            // Unknown: take the general path.
+            None => true
+        }
+    }
+
+    // A binary operation on two values already lowered (numbers).
+    fn binary_vals(inout self, inout fb: Fb, op: Op, sink av: Val, sink bv: Val, span: Span) -> Result(Val, Diag) {
+        let at = av.ty
+        let shift = match op {
+            Shl | Shr => true
+            _ => false
+        }
+        var bv = bv
+        if bv.ty != at && !shift {
+            match bv.vk.clone() {
+                Op(o) => match o {
+                    Const(c) => match c {
+                        Int(v, _) => {
+                            if self.types.is_int(at) && self.int_fits(v, at) {
+                                bv = val_op(int_const(v, at), at)
+                            } else if self.types.is_float(at) {
+                                bv = val_op(Operand.Const(Const.Float(v as f64, at)), at)
+                            }
+                        }
+                        _ => {}
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+        let bt = bv.ty
+        let num = self.types.is_int(at) || self.types.is_float(at)
+        var ok = num && (at == bt || (shift && self.types.is_int(bt)))
+        let bitwise = match op {
+            And | Or | Xor => true
+            _ => false
+        }
+        ok = ok || (at == types.BOOL && bt == types.BOOL && bitwise)
+        if !ok {
+            return Err(self.op_err(op, at, bt, span))
+        }
+        let int_only = match op {
+            And | Or | Xor | Shl | Shr | AddWrap | SubWrap | MulWrap => true
+            _ => false
+        }
+        if self.types.is_float(at) && int_only {
+            return Err(self.op_err(op, at, bt, span))
+        }
+        let ao = self.operand(&fb, av, span)?
+        var bo = self.operand(&fb, bv, span)?
+        if shift && bt != at {
+            let c = self.rvalue(&fb, Rvalue.Cast(bo, at, mir.CastKind.Numeric), at, span)
+            bo = Operand.Copy(self.place_of_val(c))
+        }
+        Ok(self.rvalue(&fb, Rvalue.Bin(op, ao, bo), at, span))
+    }
+
+    pub fn binary_on(inout self, inout fb: Fb, op: Op, sink av: Val, b: ast.Expr, span: Span) -> Result(Val, Diag) {
+        let at = av.ty
+        // Operators on library types call their methods.
+        let compound = match self.types.kind(at) {
+            Slice(_) | Tuple(_) => true
+            _ => false
+        }
+        if self.types.adt_index(at).is_some() || at == types.STR || compound && at != types.UNIT {
+            return Err(not_ported(span, "operators on library types"))
+        }
+        let shift = match op {
+            Shl | Shr => true
+            _ => false
+        }
+        let bexp: Option(u32) = if shift { None } else { Some(at) }
+        let bv = self.expr(&fb, b, bexp)?
+        let bt = bv.ty
+        let num_at = self.types.is_int(at) || self.types.is_float(at)
+        var rt = at
+        match op {
+            Add | Sub | Mul | Div | Rem => {
+                let ptr_arith = match op {
+                    Add | Sub => self.types.is_ptr(at) && self.types.is_int(bt)
+                    _ => false
+                }
+                if ptr_arith {
+                    if fb.unsafe_depth == 0 {
+                        return Err(err(span, "pointer arithmetic is only allowed in `unsafe` code"))
+                    }
+                    let ao = self.operand(&fb, av, span)?
+                    var bo = self.operand(&fb, bv, span)?
+                    if bt != types.I64 {
+                        let c = self.rvalue(&fb, Rvalue.Cast(bo, types.I64, mir.CastKind.Numeric), types.I64, span)
+                        bo = Operand.Copy(self.place_of_val(c))
+                    }
+                    if op == Op.Sub {
+                        let n = self.rvalue(&fb, Rvalue.Un(mir.UnOp.Neg, bo), types.I64, span)
+                        bo = Operand.Copy(self.place_of_val(n))
+                    }
+                    return Ok(self.rvalue(&fb, Rvalue.Offset(ao, bo), at, span))
+                }
+                if !num_at || at != bt {
+                    return Err(self.op_err(op, at, bt, span))
+                }
+            }
+            AddWrap | SubWrap | MulWrap | And | Or | Xor => {
+                let bitwise = match op {
+                    And | Or | Xor => true
+                    _ => false
+                }
+                let bools = at == types.BOOL && bitwise && bt == types.BOOL
+                if !bools && (!self.types.is_int(at) || at != bt) {
+                    return Err(self.op_err(op, at, bt, span))
+                }
+            }
+            Shl | Shr => {
+                if !self.types.is_int(at) || !self.types.is_int(bt) {
+                    return Err(self.op_err(op, at, bt, span))
+                }
+            }
+            Eq | Ne | Lt | Le | Gt | Ge => {
+                let fnptr = match self.types.kind(at) {
+                    FnPtr(_) => true
+                    _ => false
+                }
+                let comparable = num_at || at == types.BOOL || self.types.is_ptr(at) || fnptr
+                if !comparable || at != bt {
+                    return Err(self.op_err(op, at, bt, span))
+                }
+                let eq = match op {
+                    Eq | Ne => true
+                    _ => false
+                }
+                if at == types.BOOL && !eq {
+                    return Err(self.op_err(op, at, bt, span))
+                }
+                rt = types.BOOL
+            }
+            LogAnd | LogOr => panic("unreachable")
+        }
+        let ao = self.operand(&fb, av, span)?
+        var bo = self.operand(&fb, bv, b.span)?
+        if shift && bt != at {
+            let c = self.rvalue(&fb, Rvalue.Cast(bo, at, mir.CastKind.Numeric), at, span)
+            bo = Operand.Copy(self.place_of_val(c))
+        }
+        Ok(self.rvalue(&fb, Rvalue.Bin(op, ao, bo), rt, span))
+    }
+
+    fn op_err(self, op: Op, a: u32, b: u32, span: Span) -> Diag {
+        if a == b {
+            return err(span, ("`" + op.text() + "` is not defined for `" + self.types.show(a).as_str() + "`").as_str())
+        }
+        err(span, ("`" + op.text() + "` needs both sides of the same type, found `" + self.types.show(a).as_str() + "` and `" + self.types.show(b).as_str() + "`").as_str())
+    }
+
+    fn cast(inout self, inout fb: Fb, inner: ast.Expr, to: u32, span: Span) -> Result(Val, Diag) {
+        let num_to = self.types.is_int(to) || self.types.is_float(to)
+        let ex: Option(u32) = if num_to { None } else { Some(to) }
+        let v = self.expr(&fb, inner, ex)?
+        let from = v.ty
+        if from == to {
+            return Ok(v)
+        }
+        let fk = self.types.kind(from).clone()
+        let tk = self.types.kind(to).clone()
+        let fnum = match fk.clone() {
+            Int(_) | Float(_) => true
+            _ => false
+        }
+        let tnum = match tk.clone() {
+            Int(_) | Float(_) => true
+            _ => false
+        }
+        let fptr = match fk.clone() {
+            Ptr(_) => true
+            _ => false
+        }
+        let tptr = match tk.clone() {
+            Ptr(_) => true
+            _ => false
+        }
+        let ffn = match fk.clone() {
+            FnPtr(_) => true
+            _ => false
+        }
+        let tfn = match tk.clone() {
+            FnPtr(_) => true
+            _ => false
+        }
+        let fint64 = match fk.clone() {
+            Int(i) => i.bits == 64
+            _ => false
+        }
+        let tint64 = match tk.clone() {
+            Int(i) => i.bits == 64
+            _ => false
+        }
+        let tint = match tk.clone() {
+            Int(_) => true
+            _ => false
+        }
+        var kind = mir.CastKind.Numeric
+        if fnum && tnum {
+            kind = mir.CastKind.Numeric
+        } else if from == types.BOOL && tint {
+            kind = mir.CastKind.Numeric
+        } else if fptr && tptr {
+            kind = mir.CastKind.Ptr
+        } else if ((fptr || ffn) && tint64) || (fint64 && (tptr || tfn)) {
+            kind = mir.CastKind.Numeric
+        } else if (fptr && tfn) || (ffn && tptr) {
+            kind = mir.CastKind.Ptr
+        } else {
+            var unit_enum = false
+            match self.types.variants(from) {
+                Some(vs) => {
+                    unit_enum = true
+                    for x in vs {
+                        if x.fields.len() > 0 {
+                            unit_enum = false
+                        }
+                    }
+                }
+                None => {}
+            }
+            if unit_enum && tint {
+                let (p, _) = self.as_place(&fb, v, span)
+                let d = self.rvalue(&fb, Rvalue.Discriminant(p), types.I64, span)
+                let dp = self.place_of_val(d)
+                return Ok(self.rvalue(&fb, Rvalue.Cast(Operand.Copy(dp), to, mir.CastKind.Numeric), to, span))
+            }
+            return Err(err(span, ("cannot convert `" + self.types.show(from).as_str() + "` to `" + self.types.show(to).as_str() + "` with `as`").as_str()))
+        }
+        let o = self.operand(&fb, v, span)?
+        Ok(self.rvalue(&fb, Rvalue.Cast(o, to, kind), to, span))
+    }
+
+    fn if_expr(inout self, inout fb: Fb, c: ast.Expr, then: ast.Block, els: Option(Box(ast.Expr)), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        let cv = self.expr(&fb, c, Some(types.BOOL))?
+        let cv = self.coerce(&fb, cv, types.BOOL, c.span)?
+        let co = self.operand(&fb, cv, c.span)?
+        let tb = fb.new_block()
+        let eb = fb.new_block()
+        let done = fb.new_block()
+        let want = els.is_some() && exp != Some(types.UNIT)
+        // The result goes in a temporary of the statement around the `if`.
+        var result: Option(u32) = None
+        if want {
+            let r = fb.new_local(types.UNIT, None, true, LocalKind.Temp, span)
+            fb.add_temp_local(r)
+            result = Some(r)
+        }
+        fb.term(Term.Switch(co, switch1(0, eb), tb))
+        fb.switch_to(tb)
+        let then_exp: Option(u32) = if want { exp } else { Some(types.UNIT) }
+        let tv = self.block(&fb, then, then_exp, want)?
+        var rty: Option(u32) = if tv.ty == types.NEVER { None } else { Some(tv.ty) }
+        match result {
+            Some(r) => {
+                if tv.ty != types.NEVER && tv.ty != types.UNIT {
+                    fb.body.locals[r as i64].ty = tv.ty
+                    let o = self.operand(&fb, tv, then.span)?
+                    fb.assign(Place.local(r), Rvalue.Use(o), span)
+                }
+            }
+            None => {}
+        }
+        fb.goto(done)
+        fb.switch_to(eb)
+        var ety: Option(u32) = None
+        match els {
+            Some(e) => {
+                var else_exp: Option(u32) = Some(types.UNIT)
+                if want {
+                    else_exp = match rty {
+                        Some(t) => Some(t)
+                        None => exp
+                    }
+                }
+                let ev = self.expr(&fb, e.deref(), else_exp)?
+                var ev = ev
+                if want {
+                    match rty {
+                        Some(t) => ev = self.coerce(&fb, ev, t, e.span)?
+                        None => {}
+                    }
+                }
+                ety = if ev.ty == types.NEVER { None } else { Some(ev.ty) }
+                match result {
+                    Some(r) => {
+                        if ev.ty != types.NEVER && ev.ty != types.UNIT {
+                            fb.body.locals[r as i64].ty = ev.ty
+                            let o = self.operand(&fb, ev, e.span)?
+                            fb.assign(Place.local(r), Rvalue.Use(o), span)
+                        }
+                    }
+                    None => self.discard(&fb, ev, e.span)?
+                }
+            }
+            None => {}
+        }
+        fb.goto(done)
+        if rty.is_none() {
+            rty = ety
+        }
+        let r = match result {
+            Some(r) => r
+            None => {
+                if els.is_some() && rty.is_none() {
+                    return Ok(val_never())
+                }
+                return Ok(val_unit())
+            }
+        }
+        let t = match rty {
+            Some(t) => t
+            None => return Ok(val_never())
+        }
+        if t == types.UNIT {
+            return Ok(val_unit())
+        }
+        // Register the result where the statement's temporaries are.
+        fb.body.locals[r as i64].ty = t
+        Ok(Val { vk: VK.Place(Place.local(r)), ty: t, temp: true })
+    }
+
+    // ---- calls ----
+
+    fn call_expr(inout self, inout fb: Fb, callee: ast.Expr, args: Vec(ast.Expr), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        let env = fb.env.clone()
+        match callee.kind {
+            Name(n) => {
+                match fb.lookup(n.as_str()) {
+                    Some(v) => {
+                        let p = self.var_place(fb, v)
+                        let t = self.place_ty(fb, p)
+                        return self.call_value(&fb, val_place(p, t), args, span)
+                    }
+                    None => {}
+                }
+                for c in self.comptime_closures {
+                    if c.id == fb.id && c.name == n {
+                        return Err(not_ported(span, "compile-time closures"))
+                    }
+                }
+                if env.get(n.as_str()).is_some() {
+                    return Err(err(callee.span, ("`" + n.as_str() + "` is not a function").as_str()))
+                }
+                match self.lookup(env.module, n.as_str()) {
+                    Some(s) => match s {
+                        Fn(f) => return self.call_decl(&fb, f, Vec(CVal).new(), None, args, span, exp)
+                        Adt(_) => return Err(err(span, ("`" + n.as_str() + "(...)` is a type; build a value with `" + n.as_str() + " { ... }` or call one of its functions").as_str()))
+                        _ => return Err(err(callee.span, ("`" + n.as_str() + "` is not a function").as_str()))
+                    }
+                    None => {}
+                }
+                Err(not_ported(span, "builtins and variants"))
+            }
+            Field(_, _) => {
+                match sema.expr_path(callee) {
+                    Some(p) => {
+                        if p.len() > 1 && fb.lookup(p[0].as_str()).is_none() && env.get(p[0].as_str()).is_none() {
+                            match self.lookup_path(env.module, p) {
+                                Some((Fn(f), _)) => return self.call_decl(&fb, f, Vec(CVal).new(), None, args, span, exp)
+                                _ => {}
+                            }
+                        }
+                    }
+                    None => {}
+                }
+                Err(not_ported(span, "method calls"))
+            }
+            _ => {
+                if self.try_expr_ty(callee, env)?.is_some() {
+                    let t = self.try_expr_ty(callee, env)?.unwrap()
+                    return Err(err(span, ("`" + self.types.show(t).as_str() + "` is a type, not a function").as_str()))
+                }
+                let v = self.expr(&fb, callee, None)?
+                self.call_value(&fb, v, args, span)
+            }
+        }
+    }
+
+    // Calls a value: a `fnptr` or a closure.
+    fn call_value(inout self, inout fb: Fb, sink v: Val, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+        var closure = false
+        let sig = match self.types.kind(v.ty) {
+            FnPtr(s) => s.clone()
+            Closure(s) => {
+                closure = true
+                s.clone()
+            }
+            _ => return Err(err(span, ("`" + self.types.show(v.ty).as_str() + "` is not a function").as_str()))
+        }
+        if sig.params.len() != args.len() {
+            var m = String.from("this function takes ")
+            sig.params.len().show(&m)
+            m.push_str(" argument(s), ")
+            args.len().show(&m)
+            m.push_str(" given")
+            return Err(err(span, m.as_str()))
+        }
+        var ops = Vec(Operand).new()
+        let callee_op = self.operand(&fb, v, span)?
+        let ct = self.types.intern(if closure { TyKind.Closure(sig.clone()) } else { TyKind.FnPtr(sig.clone()) })
+        let cl = self.operand_local(&fb, callee_op, ct, span)
+        for i, a in args {
+            ops.push(self.arg_for_local_ty(&fb, a, sig.params[i])?)
+        }
+        let callee = if closure { mir.Callee.Closure(copy_of(cl)) } else { mir.Callee.Ptr(copy_of(cl)) }
+        self.emit_call(&fb, callee, ops, sig.ret, span)
+    }
+
+    // An argument for a parameter whose lowered type is known (closures).
+    fn arg_for_local_ty(inout self, inout fb: Fb, a: ast.Expr, pt: u32) -> Result(Operand, Diag) {
+        match self.types.kind(pt).clone() {
+            RefMut(inner) => {
+                let (p, t) = self.mut_place(&fb, a)?
+                if t != inner {
+                    return Err(err(a.span, self.expected_found(inner, t).as_str()))
+                }
+                Ok(self.borrow_op(&fb, p, true, pt, a.span))
+            }
+            Ref(inner) => {
+                let v = self.expr(&fb, a, Some(inner))?
+                let v = self.coerce(&fb, v, inner, a.span)?
+                let (p, _) = self.as_place(&fb, v, a.span)
+                Ok(self.borrow_op(&fb, p, false, pt, a.span))
+            }
+            _ => {
+                let v = self.expr(&fb, a, Some(pt))?
+                let v = self.coerce(&fb, v, pt, a.span)?
+                self.operand(&fb, v, a.span)
+            }
+        }
+    }
+
+    // Puts an operand in a local, so it can be used twice.
+    pub fn operand_local(inout self, inout fb: Fb, sink o: Operand, t: u32, span: Span) -> u32 {
+        match o.clone() {
+            Copy(p) => {
+                if p.proj.len() == 0 && !fb.body.locals[p.local as i64].mutable {
+                    return p.local
+                }
+            }
+            _ => {}
+        }
+        let l = fb.temp(t, span)
+        fb.assign(Place.local(l), Rvalue.Use(o), span)
+        l
+    }
+
+    pub fn borrow_op(inout self, inout fb: Fb, sink p: Place, mutable: bool, rt: u32, span: Span) -> Operand {
+        // Borrowing through a borrow local hands on the same reference.
+        if p.proj.len() == 1 && p.proj[0] == Proj.Deref && fb.ty_of(p.local) == rt && !mutable {
+            return copy_of(p.local)
+        }
+        let t = fb.temp(rt, span)
+        fb.assign(Place.local(t), if mutable { Rvalue.RefMut(p) } else { Rvalue.Ref(p) }, span)
+        if mutable { Operand.Move(Place.local(t)) } else { copy_of(t) }
+    }
+
+    pub fn emit_call(inout self, inout fb: Fb, sink callee: mir.Callee, sink args: Vec(Operand), ret: u32, span: Span) -> Result(Val, Diag) {
+        var projection = true
+        match callee.clone() {
+            Fn(f) => projection = self.out[f as i64].returns_ref
+            _ => {}
+        }
+        let dest = fb.temp(ret, span)
+        let next = fb.new_block()
+        fb.term(Term.Call(callee, args, Place.local(dest), next, span))
+        fb.switch_to(next)
+        if ret == types.NEVER {
+            fb.term(Term.Unreachable)
+            return Ok(val_never())
+        }
+        // A function declared `-> ref T` or `-> inout T` returns a place; one
+        // whose type parameter is a borrow returns that borrow as a value.
+        if projection && self.types.is_ref(ret) {
+            return Ok(val_place(Place.deref(dest), self.types.pointee(ret).unwrap()))
+        }
+        Ok(Val { vk: VK.Place(Place.local(dest)), ty: ret, temp: true })
+    }
+
+    // A call of a declared function: infers its compile-time arguments,
+    // makes the instance, and passes each argument as its parameter
+    // says.
+    pub fn call_decl(inout self, inout fb: Fb, fid: u32, iargs: Vec(CVal), sink recv: Option(Val), args: Vec(ast.Expr), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+        let info_module = self.fns[fid as i64].module
+        let decl = sema.at(self.fns[fid as i64].decl)
+        let module = info_module
+        if !self.fns[fid as i64].public && !self.same_package(module, fb.env.module) && !self.same_owner_module(fid, fb.env.module) {
+            return Err(err(span, ("`" + decl.name.as_str() + "` is private").as_str()))
+        }
+        if decl.is_unsafe && fb.unsafe_depth == 0 {
+            return Err(err(span, ("`" + decl.name.as_str() + "` is an unsafe function; call it in `unsafe` code").as_str()))
+        }
+        let is_extern = match decl.kind {
+            Extern => true
+            _ => false
+        }
+        if is_extern && fb.unsafe_depth == 0 {
+            return Err(err(span, ("`" + decl.name.as_str() + "` is a C function; call it in `unsafe` code").as_str()))
+        }
+        let params = decl.params
+        let has_self = params.len() > 0 && params[0].name == "self"
+        let has_recv = recv.is_some()
+        let nrecv = if has_recv { 1 } else { 0 }
+        let nargs0 = args.len() + nrecv
+        if has_recv && !has_self {
+            return Err(err(span, ("`" + decl.name.as_str() + "` is not a method (it has no `self`); call it as `Type." + decl.name.as_str() + "(...)`").as_str()))
+        }
+        var ncomptime = 0
+        var nct_all = 0
+        for p in params {
+            if p.mode == ast.Mode.Comptime {
+                nct_all += 1
+                if !self.is_closure_param(p) {
+                    ncomptime += 1
+                }
+            }
+        }
+        let explicit_ct = nargs0 == params.len() && ncomptime > 0
+        // The variable arguments of a C function.
+        var nextra = 0
+        if decl.variadic && nargs0 > params.len() {
+            nextra = nargs0 - params.len()
+        }
+        let nargs = nargs0 - nextra
+        if nargs != params.len() && nargs != params.len() - ncomptime {
+            let want = params.len() - ncomptime - nrecv
+            var m = "`" + decl.name.as_str() + "` takes "
+            want.show(&m)
+            m.push_str(" argument(s), ")
+            (nargs - nrecv).show(&m)
+            m.push_str(" given")
+            return Err(err(span, m.as_str()))
+        }
+        // A function of a generic type named without its arguments
+        // (`Vec.new()`, `Box.new(x)`): the impl's parameters are inferred
+        // with the function's own.
+        let owner = self.fns[fid as i64].owner
+        var impl_params = Vec(ast.Param).new()
+        var impl_self: Option(ast.Ty) = None
+        match owner {
+            Impl(imp) => {
+                if iargs.len() == 0 {
+                    impl_params = sema.at(self.impls[imp as i64].decl).params.clone()
+                    if impl_params.len() > 0 {
+                        impl_self = Some(sema.at(self.impls[imp as i64].decl).self_ty.clone())
+                    }
+                }
+            }
+            _ => {}
+        }
+        let nimpl = impl_params.len()
+        var env = Env.new(module)
+        if nimpl == 0 {
+            let (var e, _) = self.fn_env(fid, iargs)
+            self.fn_self_ty(fid, &e)?
+            env = e
+        }
+        var cargs = Vec(Option(CVal)).new()
+        for _ in 0..nimpl + nct_all {
+            cargs.push(None)
+        }
+        var ct_names = Vec(String).new()
+        var ct_params = Vec(ast.Param).new()
+        for p in impl_params {
+            ct_names.push(p.name.clone())
+            ct_params.push(p.clone())
+        }
+        for p in params {
+            if p.mode == ast.Mode.Comptime {
+                ct_names.push(p.name.clone())
+                ct_params.push(p.clone())
+            }
+        }
+        // The expected result can decide the impl's parameters first.
+        if nimpl > 0 {
+            match exp {
+                Some(e) => match decl.ret {
+                    Some(rt) => {
+                        var pat = rt.clone()
+                        if is_self_path(rt) {
+                            pat = impl_self.clone().unwrap()
+                        }
+                        var binds = cargs.clone()
+                        if self.match_ty_env(pat, e, ct_params, env, &binds)? {
+                            cargs = binds
+                        }
+                    }
+                    None => {}
+                }
+                None => {}
+            }
+        }
+        // Lower the runtime arguments, in order, binding compile-time
+        // parameters as their types are seen.
+        var vals = Vec(Option(Val)).new()
+        var spans = Vec(Span).new()
+        var ai = 0
+        var ci = nimpl
+        var recv = recv
+        for p in params {
+            if p.mode == ast.Mode.Comptime && self.is_closure_param(p) {
+                return Err(not_ported(span, "compile-time closure arguments"))
+            }
+            if p.mode == ast.Mode.Comptime {
+                if explicit_ct {
+                    if ai >= args.len() {
+                        return Err(err(span, "compile-time arguments must be written"))
+                    }
+                    let fenv = fb.env.clone()
+                    let cv = self.comptime_arg(p, module, args[ai], fenv)?
+                    ai += 1
+                    env.push(p.name.as_str(), cv.clone())
+                    cargs[ci] = Some(cv)
+                }
+                ci += 1
+                vals.push(None)
+                spans.push(span)
+                continue
+            }
+            if p.name == "self" && recv.is_some() {
+                match recv {
+                    Some(r) => vals.push(Some(r.clone()))
+                    None => {}
+                }
+                recv = None
+                spans.push(span)
+                continue
+            }
+            // The parameter's type, if the compile-time arguments so far
+            // decide it.
+            let known = self.partial_env_self(env, ct_names, cargs, nimpl, impl_self)
+            var pty: Option(u32) = None
+            match p.ty {
+                Some(t) => pty = self.resolve_ty(t, known).ok()
+                None => pty = known.self_ty
+            }
+            if ai >= args.len() {
+                return Err(not_ported(span, "calls with lowered arguments"))
+            }
+            let a = args[ai]
+            ai += 1
+            let sp = a.span
+            var v = val_unit()
+            if p.mode == ast.Mode.Inout {
+                let (pl, t) = self.mut_place(&fb, a)?
+                v = val_place(pl, t)
+            } else {
+                v = self.expr(&fb, a, pty)?
+                var lent_str = false
+                if p.mode == ast.Mode.Let && v.ty == types.STR && pty.is_some() {
+                    lent_str = pty == self.string_ty()
+                }
+                match pty {
+                    Some(t) => {
+                        if !lent_str {
+                            v = self.coerce(&fb, v, t, sp)?
+                        }
+                    }
+                    None => {}
+                }
+            }
+            if pty.is_none() {
+                match p.ty {
+                    Some(t) => {
+                        var binds = cargs.clone()
+                        var pat = t.clone()
+                        if is_self_path(t) && impl_self.is_some() {
+                            pat = impl_self.clone().unwrap()
+                        }
+                        if !self.match_ty_env(pat, v.ty, ct_params, env, &binds)? {
+                            return Err(err(sp, ("this argument has type `" + self.types.show(v.ty).as_str() + "`, which does not fit the parameter's type").as_str()))
+                        }
+                        cargs = binds
+                    }
+                    None => {}
+                }
+            }
+            vals.push(Some(v))
+            spans.push(sp)
+        }
+        for i, p in impl_params {
+            if cargs[i].is_none() {
+                return Err(err(span, ("cannot infer `" + p.name.as_str() + "` of `" + decl.name.as_str() + "`; write the type's arguments").as_str()))
+            }
+        }
+        var ci = nimpl
+        for p in params {
+            if p.mode != ast.Mode.Comptime {
+                continue
+            }
+            if cargs[ci].is_none() {
+                // Not inferable: maybe from the expected result type.
+                match decl.ret {
+                    Some(rt) => match exp {
+                        Some(e) => {
+                            var binds = cargs.clone()
+                            if self.match_ty_env(rt, e, ct_params, env, &binds)? {
+                                cargs = binds
+                            }
+                        }
+                        None => {}
+                    }
+                    None => {}
+                }
+            }
+            if cargs[ci].is_none() {
+                return Err(err(span, ("cannot infer the compile-time argument `" + p.name.as_str() + "` of `" + decl.name.as_str() + "`; pass it explicitly").as_str()))
+            }
+            ci += 1
+        }
+        var all = iargs.clone()
+        if nimpl > 0 {
+            var ia = Vec(CVal).new()
+            for i in 0..nimpl {
+                ia.push(cargs[i].clone().unwrap())
+            }
+            let imp = match owner {
+                Impl(i) => i
+                _ => 0
+            }
+            let imodule = self.impls[imp as i64].module
+            for i, p in impl_params {
+                match ia[i] {
+                    Type(t) => {
+                        for bnd in self.param_bounds(p, imodule)? {
+                            if !self.implements(bnd, t)? {
+                                return Err(err(span, ("`" + self.types.show(t).as_str() + "` does not implement `" + self.traits[bnd as i64].name.as_str() + "`").as_str()))
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            all = ia
+        }
+        let trait_owned = match owner {
+            Trait(_) => true
+            _ => false
+        }
+        if trait_owned && all.len() == 0 {
+            all.push(CVal.Type(env.self_ty.unwrap()))
+        }
+        // Bounds.
+        var ci = nimpl
+        for p in params {
+            if p.mode != ast.Mode.Comptime {
+                continue
+            }
+            let cv = cargs[ci].clone().unwrap()
+            match cv {
+                Type(t) => {
+                    for b in self.param_bounds(p, module)? {
+                        if !self.implements(b, t)? {
+                            return Err(err(span, ("`" + self.types.show(t).as_str() + "` does not implement `" + self.traits[b as i64].name.as_str() + "`, which `" + decl.name.as_str() + "` requires of `" + p.name.as_str() + "`").as_str()))
+                        }
+                    }
+                }
+                _ => {}
+            }
+            all.push(cv)
+            ci += 1
+        }
+        let id = self.instance(fid, all, span)?
+        let fsig = self.out[id as i64].sig.clone()
+        let pass = self.out[id as i64].pass.clone()
+        // Pass each argument.
+        var ops = Vec(Operand).new()
+        var li = 0
+        for pi, p in params {
+            if p.mode == ast.Mode.Comptime {
+                continue
+            }
+            let sp = spans[pi]
+            var v = vals[pi].clone().unwrap()
+            let lt = fsig.params[li]
+            let borrow = pass[li] == mir.ParamPass.Borrow
+            // Now that the parameter's type is known, convert to it.
+            if p.mode != ast.Mode.Inout {
+                let vt = if borrow { self.types.pointee(lt).unwrap() } else { lt }
+                // A `str` lent where a `String` is borrowed: a `String`
+                // over the same bytes, without copying (`map.get("key")`).
+                if borrow && v.ty == types.STR && self.string_ty() == Some(vt) {
+                    return Err(not_ported(sp, "a `str` lent as a `String`"))
+                }
+                v = self.coerce(&fb, v, vt, sp)?
+            }
+            var op = copy_of(0)
+            if p.mode == ast.Mode.Inout {
+                let pl = match v.vk.clone() {
+                    Place(pl) => pl
+                    Op(_) => return Err(err(sp, "expected a place"))
+                }
+                if !self.place_mutable(fb, pl) {
+                    return Err(err(sp, self.not_mutable_msg(fb, pl).as_str()))
+                }
+                if v.temp && p.name != "self" {
+                    return Err(err(sp, "an `inout` argument must be a place, not a temporary value"))
+                }
+                op = self.borrow_op(&fb, pl, true, lt, sp)
+            } else if borrow {
+                let (pl, _) = self.as_place(&fb, v, sp)
+                op = self.borrow_op(&fb, pl, false, lt, sp)
+            } else if p.mode == ast.Mode.Let {
+                // By value: plain. A view of a non-plain place: copy the bits.
+                var done = false
+                match v.vk.clone() {
+                    Place(pl) => {
+                        if !self.types.is_plain(v.ty) {
+                            op = Operand.Copy(pl)
+                            done = true
+                        }
+                    }
+                    Op(_) => {}
+                }
+                if !done {
+                    op = self.operand(&fb, v, sp)?
+                }
+            } else {
+                op = self.operand(&fb, v, sp)?
+            }
+            ops.push(op)
+            li += 1
+        }
+        if nextra > 0 {
+            return Err(not_ported(span, "C variadic arguments"))
+        }
+        self.emit_call(&fb, mir.Callee.Fn(id), ops, fsig.ret, span)
+    }
+
+    fn same_owner_module(self, fid: u32, module: u32) -> bool {
+        // Impl functions are visible where the type is.
+        match self.fns[fid as i64].owner {
+            Impl(i) => self.impls[i as i64].module == module
+            _ => false
+        }
+    }
+
+    fn partial_env_self(inout self, env: Env, names: Vec(String), vals: Vec(Option(CVal)), nimpl: i64, impl_self: Option(ast.Ty)) -> Env {
+        var e = partial_env(env, names, vals)
+        if nimpl > 0 && e.self_ty.is_none() {
+            var all = true
+            for i in 0..nimpl {
+                if vals[i].is_none() {
+                    all = false
+                }
+            }
+            if all {
+                match impl_self {
+                    Some(t) => match self.resolve_ty(t, e) {
+                        Ok(st) => e.self_ty = Some(st)
+                        Err(_) => {}
+                    }
+                    None => {}
+                }
+            }
+        }
+        e
+    }
+
+    // Matches a parameter type against an argument's type, binding the
+    // compile-time parameters it mentions.
+    fn match_ty_env(inout self, pat: ast.Ty, t: u32, params: Vec(ast.Param), env: Env, inout binds: Vec(Option(CVal))) -> Result(bool, Diag) {
+        let k = self.types.kind(t).clone()
+        match pat.kind {
+            Path(p, None) => {
+                if p.len() == 1 {
+                    for i, q in params {
+                        if q.name == p[0] {
+                            let v = CVal.Type(t)
+                            match binds[i] {
+                                Some(old) => return Ok(old == v)
+                                None => {}
+                            }
+                            binds[i] = Some(v)
+                            return Ok(true)
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        match pat.kind {
+            Ptr(inner) => match k {
+                Ptr(x) => return self.match_ty_env(inner.deref(), x, params, env, &binds)
+                _ => {}
+            }
+            Ref(inner, m) => match k {
+                Ref(x) => {
+                    if !m {
+                        return self.match_ty_env(inner.deref(), x, params, env, &binds)
+                    }
+                }
+                RefMut(x) => {
+                    if m {
+                        return self.match_ty_env(inner.deref(), x, params, env, &binds)
+                    }
+                }
+                _ => {}
+            }
+            Slice(inner) => match k {
+                Slice(x) => return self.match_ty_env(inner.deref(), x, params, env, &binds)
+                Array(x, _) => return self.match_ty_env(inner.deref(), x, params, env, &binds)
+                Adt(_) => return Err(not_ported(pat.span, "a library type where a slice is expected"))
+                _ => {}
+            }
+            Tuple(ps) => match k {
+                Tuple(xs) => {
+                    if ps.len() != xs.len() {
+                        return Ok(false)
+                    }
+                    for i, p in ps {
+                        if !self.match_ty_env(p, xs[i], params, env, &binds)? {
+                            return Ok(false)
+                        }
+                    }
+                    return Ok(true)
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        // No unknown inside: resolve it and compare.
+        var known = env.clone()
+        for i, q in params {
+            match binds[i] {
+                Some(b) => known.push(q.name.as_str(), b.clone())
+                None => {}
+            }
+        }
+        match self.resolve_ty(pat, known) {
+            Ok(pt) => Ok(pt == t || self.coercible(t, pt))
+            Err(_) => Ok(false)
+        }
+    }
+
+    fn coercible(inout self, from: u32, to: u32) -> bool {
+        if from == types.NEVER {
+            return true
+        }
+        if self.string_ty() == Some(to) && from == types.STR {
+            return true
+        }
+        match self.types.kind(from) {
+            Array(a, _) => match self.types.kind(to) {
+                Slice(b) => a == b
+                _ => false
+            }
+            _ => false
+        }
+    }
+
+    pub fn is_closure_param(self, p: ast.Param) -> bool {
+        match p.ty {
+            Some(t) => match t.kind {
+                Fn(_, _) => true
+                _ => false
+            }
+            None => false
+        }
+    }
+}
+
+fn partial_env(env: Env, names: Vec(String), vals: Vec(Option(CVal))) -> Env {
+    var e = env.clone()
+    for i, n in names {
+        match vals[i] {
+            Some(v) => e.push(n.as_str(), v.clone())
+            None => {}
+        }
+    }
+    e
+}
+
+fn is_self_path(t: ast.Ty) -> bool {
+    match t.kind {
+        Path(p, None) => p.len() == 1 && p[0] == "Self"
+        _ => false
+    }
+}
+
+fn is_literal(e: ast.Expr) -> bool {
+    match e.kind {
+        Int(_) | Float(_) | Char(_) => true
+        _ => false
+    }
+}
+
+fn block_reached(fb: Fb, b: u32) -> bool {
+    for blk in fb.body.blocks {
+        match blk.term {
+            Goto(t) => {
+                if t == b {
+                    return true
+                }
+            }
+            Switch(_, targets, otherwise) => {
+                if otherwise == b {
+                    return true
+                }
+                for x in targets {
+                    if x.block == b {
+                        return true
+                    }
+                }
+            }
+            Call(_, _, _, next, _) => {
+                if next == b {
+                    return true
+                }
+            }
+            Assert(_, _, next, _) => {
+                if next == b {
+                    return true
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}

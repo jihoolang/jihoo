@@ -38,7 +38,7 @@ same way.
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh` (with the MIR printer), `sema.jh` (`mod.rs` and `consts.rs`; bodies next) |
+| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh`, `sema.jh` (`mod.rs`, `consts.rs`), `body.jh` (functions, statements, operators, control flow, calls); `emit-mir` agrees on `tests/selfhost/sema/` |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
@@ -50,7 +50,10 @@ ported. Until then the comparison runs on small programs in
 `tests/selfhost/sema/` compiled with `--no-prelude` (an option for this
 only, in both compilers), and grows feature by feature: functions and
 integers, control flow, structs and enums, patterns, generics, traits,
-closures. Then the standard library, then everything.
+closures. Then the standard library, then everything. Until elaboration is
+ported too, the comparison is of MIR before it (`JIHOO_NO_ELAB=1`). The
+parts of `body.rs` not ported yet stop with "the compiler in jihoo cannot
+lower ... yet".
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
@@ -127,11 +130,12 @@ far, each fixed in stage 0 with a test:
 - Language gaps filled while porting `sema/mod.rs`, each with tests and
   documentation: patterns see through `ref`/`inout` values
   (`Some(Circle(r))` on an `Option(ref Shape)`; `tests/run/ref_patterns.jh`);
-  a `ref T` value can be passed where a `T` is borrowed; `for` loops over
-  a `ref Vec(T)` field; a generic function whose type parameter is a
-  borrow (`mem.replace` in `Map(K, ref V).insert`) returns it as a value
-  instead of a place; and a value that is not a view (a number, a raw
-  pointer) no longer carries the loans of the container it was read from.
+  a `ref T` value can be passed where a `T` is borrowed; a `ref Vec(T)`
+  value can be looped over and indexed; a generic function whose type
+  parameter is a borrow (`mem.replace` in `Map(K, ref V).insert`) returns
+  it as a value instead of a place; and a value that is not a view (a
+  number, a raw pointer) no longer carries the loans of the container it
+  was read from.
 - Left as they are, and documented in
   [Coming from Rust](../language/from-rust.md): a `match` arm cannot hand
   out a borrowed part as its value, and `None` alone in an `if` arm needs

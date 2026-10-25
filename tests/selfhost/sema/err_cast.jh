@@ -1,0 +1,4 @@
+// load-args: --no-prelude
+fn main() {
+    let x = true as f64
+}

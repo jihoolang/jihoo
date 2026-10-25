@@ -1674,7 +1674,8 @@ impl<'a> Sema<'a> {
 
     fn index_expr(&mut self, fb: &mut Fb, base: &ast::Expr, idx: &ast::Expr, span: Span, write: bool) -> R<Val> {
         let bv = if write { self.expr_mut(fb, base)? } else { self.expr(fb, base, None)? };
-        let bv = self.auto_deref_ref(bv);
+        // A borrow held as a value (`ref Vec(T)`): what it points to.
+        let bv = if self.types.is_ref(bv.ty) { self.auto_deref(fb, bv, span)? } else { bv };
         // Slicing: `xs[a..b]`.
         if let E::Range(lo, hi) = &idx.kind {
             return self.slice_expr(fb, bv, lo.as_deref(), hi.as_deref(), span);
@@ -1741,10 +1742,6 @@ impl<'a> Sema<'a> {
 
     fn place_of_view_len(&mut self, _fb: &mut Fb, _span: Span, _il: Local, bp: &Place) -> Place {
         bp.with(Proj::Field(1))
-    }
-
-    fn auto_deref_ref(&self, v: Val) -> Val {
-        v
     }
 
     /// Puts an operand in a local, so it can be used twice.

@@ -1,0 +1,24 @@
+// load-args: --no-prelude
+const N: i64 = 4 * 2
+const BIG: u64 = 1 << 40
+
+fn tuple(a: i64) -> (i64, bool) {
+    (a, a > N)
+}
+
+fn main() {
+    let t = tuple(3)
+    let first = t.0
+    let arr = [1, 2, 3]
+    let rep = [0 as u8; 8]
+    let u = 300 as u8
+    let f = 3 as f64
+    let s = "hi"
+    let l = s.len
+    let blk = {
+        let q = 2
+        q * 3
+    }
+    let k = comptime N + 1
+    let m = BIG
+}
