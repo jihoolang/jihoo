@@ -1,7 +1,9 @@
 # Self-hosting
 
-The compiler is being rewritten in jihoo, in `compiler/`, so that jihoo
-compiles itself. This page is the plan and where it stands.
+The compiler has been rewritten in jihoo, in `compiler/`, and jihoo
+compiles itself: the compiler in jihoo, built by itself, writes the same
+LLVM IR as the Rust compiler for every program in the repository. This
+page is how it got there and how it stays there.
 
 ## Stages
 
@@ -10,8 +12,11 @@ compiles itself. This page is the plan and where it stands.
 - **Stage 2** is `compiler/main.jh` compiled by stage 1.
 
 jihoo is self-hosted when stage 1 can build stage 2 and the two agree: for
-every program, stage 2 writes the same LLVM IR as stage 1. After that the
-Rust compiler is only needed to bootstrap a machine that has no jihoo yet.
+every program, stage 2 writes the same LLVM IR as stage 1. That holds now.
+For `compiler/main.jh` itself, stages 0, 1 and 2 all write the same IR: a
+fixed point. The Rust compiler is still where the language changes first
+(see below); in the end it is only needed to bootstrap a machine that has
+no jihoo yet.
 
 ## Pass by pass, compared all the way
 
@@ -20,7 +25,9 @@ pass gets a command that prints what it makes, in both compilers, in the
 same format; `crates/jihoo/tests/selfhost.rs` builds stage 1 and runs both
 compilers on every `.jh` file in the repository (`lib/`, `tests/`,
 `examples/`, `compiler/`), comparing output, errors and exit status byte for
-byte:
+byte. It also runs the programs of `tests/run` and `examples` built by each
+compiler, and builds stage 2 and compares its `emit-llvm` with stage 1's on
+every file:
 
 ```sh
 cargo test --test selfhost
@@ -29,7 +36,8 @@ cargo test --test selfhost
 Error messages are part of the comparison, so stage 1 gives the same
 errors, at the same places, as stage 0. Inputs meant to exercise one pass
 live in `tests/selfhost/<pass>/`. A `// load-args: ...` line in a file gives
-`emit-program` more options (`-I dir`, `--target aarch64`). Both compilers
+the commands that load a program more options (`-I dir`, `--target
+aarch64`). Both compilers
 find the standard library through `JIHOO_PATH`, so they name its files the
 same way.
 
@@ -40,8 +48,8 @@ same way.
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
 | 4 | `types.jh`, `mir.jh`, `sema.jh`, `body.jh`, `pat.jh`, `builtins.jh` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | done |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | done |
-| 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
-| 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
+| 6 | `llvm.jh`, `main.jh` (the driver) | `llvm.rs`, `main.rs` | `emit-llvm` for both targets; `run` of `tests/run` and `examples` | done |
+| 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | done |
 
 Sema (step 4) is half of the compiler, about 6,000 of its 12,000 lines:
 `sema/mod.rs` and `consts.rs` became `sema.jh`, `body.rs` `body.jh`,
@@ -59,6 +67,13 @@ compared twice, before elaboration (`JIHOO_NO_ELAB=1`, which shows a
 difference in sema alone) and after it, with borrows checked, so the
 errors of `tests/fail` agree too. Inputs for drop flags and moved values
 are in `tests/selfhost/elab/`.
+
+The code generator (step 6) is compared by `emit-llvm`, on the host target
+and on aarch64, and the driver by building and running the test programs
+with each compiler. The driver in jihoo runs clang through `std.process`;
+it cannot capture another program's output yet, so clang's messages go
+straight to standard error instead of being filtered, as the Rust driver
+does. With both done, stage 1 builds stage 2 (step 7).
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
@@ -92,6 +107,12 @@ better way the port takes it and says so in a comment; so far:
 - Types are interned by a short text spelling the kind out
   (`types.kind_key`), where Rust hashes the `TyKind` with a derived
   `Hash`; jihoo has no `derive` yet.
+- The code generator's many `format!` lines become `fmt.f`, which fills
+  `{}` in a template from a slice of `str`s. Its `Gen` owns the program
+  (Rust's borrows it), and takes a function's body out while writing it,
+  since writing reads the rest of the program and adds types. The label
+  of the block being written is kept as blocks start, where Rust finds it
+  in the text written so far.
 
 While both compilers exist, a language change has to be made in both:
 stage 0 must compile `compiler/`, and stage 1 must agree with stage 0.
@@ -152,6 +173,16 @@ far, each fixed in stage 0 with a test:
   (`tests/fail/clone_of_ref_value.jh`). Porting the rest of sema found no
   compiler bugs; it used `|` patterns that bind names (not supported) and
   `==` on a payload-free enum (needs `Eq`), both documented already.
+- The Rust code generator wrote its declarations of external functions in
+  `HashMap` order, so its IR differed from run to run; they are now in the
+  order first needed, in both compilers.
+- A module named `llvm` could not be compiled: its functions' symbols
+  began with `llvm.`, which LLVM keeps for intrinsics (the code generator
+  in jihoo is `llvm.jh`). Such symbols now get a `_` in front
+  (`tests/run/module_llvm.jh`).
+- Writing the code generator also met two limits, left as they are:
+  string literals cannot span lines (long texts use `\n`), and `Map` has
+  no `clone`.
 
 And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and
@@ -183,3 +214,6 @@ also found that a shift ignored the type its context expected:
   its own stack slot; built at `-O1` or more it needs about 4 MiB. The Rust
   compiler runs on a thread with a large stack for the same reason; stage
   1 will need the same once it has threads, or a smaller depth limit.
+- The driver in jihoo cannot capture clang's output, so a failed link
+  shows clang's own messages, warnings included, then "error: clang
+  failed".

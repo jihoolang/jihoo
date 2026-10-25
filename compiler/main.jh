@@ -1,10 +1,11 @@
-// The jihoo compiler, written in jihoo. It is being ported from the Rust
+// The jihoo compiler, written in jihoo. It was ported from the Rust
 // compiler (`crates/jihoo`) one pass at a time; each pass has a command that
 // prints what it makes, in the same format as the Rust compiler, so the two
 // can be compared (docs/internals/self-hosting.md).
 
 import std.env
 import std.fs
+import std.process
 import std.sys
 import astdump
 import diag
@@ -19,9 +20,12 @@ import body
 import builtins
 import check
 import elab
+import fmt
+import llvm
+import os
 import pat
 
-const USAGE = "usage:\n  jihoo emit-tokens <file.jh>    print the tokens of one file\n  jihoo emit-ast <file.jh>       print the syntax tree of one file\n  jihoo emit-program <file.jh>   print every module a program loads\n  jihoo emit-mir <file.jh>       print MIR\n\noptions:\n  --target <t>   x86_64 or aarch64 (Linux)\n  -I <dir>       also look for modules in <dir>"
+const USAGE = "usage:\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --keep-ll         keep the LLVM IR next to the output"
 
 fn main() {
     let args = env.args()
@@ -30,13 +34,31 @@ fn main() {
     }
     let cmd = args[1]
     var file: Option(str) = None
+    var out: Option(str) = None
+    var opt = "-O2"
     var search = Vec(String).new()
     var tgt = target.Target.host()
+    var checked = true
+    var link = Vec(str).new()
+    var prog_args = Vec(str).new()
+    var keep_ll = false
+    // Without the standard library: for comparing sema between the two
+    // compilers on small programs (not in the usage).
     var no_prelude = false
     var i = 2
     while i < args.len() {
         let a = args[i]
-        if a == "-I" {
+        if a == "--" {
+            for j in i + 1..args.len() {
+                prog_args.push(args[j])
+            }
+            break
+        } else if a == "-o" {
+            i += 1
+            if i < args.len() {
+                out = Some(args[i])
+            }
+        } else if a == "-I" {
             i += 1
             if i < args.len() {
                 search.push(args[i].to_string())
@@ -51,15 +73,23 @@ fn main() {
                 Some(t) => tgt = t
                 None => fail("error: unknown target; use x86_64 or aarch64", 2)
             }
+        } else if a == "--release" {
+            checked = false
+        } else if a == "--keep-ll" {
+            keep_ll = true
         } else if a == "--no-prelude" {
             no_prelude = true
+        } else if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" {
+            opt = a
         } else if a == "-h" || a == "--help" {
             println(USAGE)
             return
         } else if a.ends_with(".jh") && file.is_none() {
             file = Some(a)
-        } else {
+        } else if a.starts_with("-") && !a.starts_with("-l") && !a.starts_with("-L") {
             fail("error: unknown option `" + a + "`\n\n" + USAGE, 2)
+        } else {
+            link.push(a)
         }
         i += 1
     }
@@ -69,43 +99,170 @@ fn main() {
     }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
         emit_syntax(file, cmd == "emit-ast")
-    } else if cmd == "emit-program" {
-        var sources = diag.Sources.new()
+        return
+    }
+    var sources = diag.Sources.new()
+    if cmd == "emit-program" {
         match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
             Ok(p) => print(astdump.program(p))
             Err(d) => fail(sources.render(d).as_str(), 1)
         }
-    } else if cmd == "emit-mir" {
-        // MIR checked and with drops elaborated; before elaboration with
-        // `JIHOO_NO_ELAB` set.
-        var sources = diag.Sources.new()
-        let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
-            Ok(a) => a
-            Err(d) => fail(sources.render(d).as_str(), 1)
+        return
+    }
+    // Source to MIR, checked and with drops elaborated (before elaboration
+    // with `JIHOO_NO_ELAB` set).
+    let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
+        Ok(a) => a
+        Err(d) => fail(sources.render(d).as_str(), 1)
+    }
+    var prog = match sema.compile(a, tgt, checked) {
+        Ok(p) => p
+        Err(d) => fail(sources.render(d).as_str(), 1)
+    }
+    if env.get("JIHOO_NO_ELAB").is_none() {
+        for i in 0..prog.fns.len() {
+            match elab.run(&prog.fns[i]) {
+                Ok(_) => {}
+                Err(d) => fail(sources.render(d).as_str(), 1)
+            }
+            match check.run(prog.types, prog.fns[i]) {
+                Ok(_) => {}
+                Err(d) => fail(sources.render(d).as_str(), 1)
+            }
         }
-        var prog = match sema.compile(a, tgt, true) {
-            Ok(p) => p
-            Err(d) => fail(sources.render(d).as_str(), 1)
+    }
+    if cmd == "emit-mir" {
+        var text = String.new()
+        for f in prog.fns {
+            text.push_str(mir.show_function(prog, f).as_str())
         }
-        if env.get("JIHOO_NO_ELAB").is_none() {
-            for i in 0..prog.fns.len() {
-                match elab.run(&prog.fns[i]) {
-                    Ok(_) => {}
-                    Err(d) => fail(sources.render(d).as_str(), 1)
-                }
-                match check.run(prog.types, prog.fns[i]) {
-                    Ok(_) => {}
-                    Err(d) => fail(sources.render(d).as_str(), 1)
+        print(text)
+    } else if cmd == "emit-llvm" {
+        let ll = llvm.emit(prog)
+        match out {
+            Some(o) => match fs.write_file(o, ll.as_str()) {
+                Ok(_) => {}
+                Err(e) => fail(("error: cannot write " + o + ": " + e.as_str()).as_str(), 1)
+            }
+            None => print(ll)
+        }
+    } else if cmd == "build" || cmd == "run" {
+        let freestanding = prog.freestanding
+        let ll = llvm.emit(prog)
+        var exe = String.new()
+        match out {
+            Some(o) => exe = String.from(o)
+            None => {
+                if cmd == "build" {
+                    exe = String.from(file_stem(file))
+                } else {
+                    exe = os.join(os.temp_dir().as_str(), ("jihoo-run-" + fmt.n(os.pid() as i128).as_str()).as_str())
                 }
             }
         }
-        var out = String.new()
-        for f in prog.fns {
-            out.push_str(mir.show_function(prog, f).as_str())
+        match link_exe(ll.as_str(), exe.as_str(), opt, tgt, freestanding, link, keep_ll) {
+            Ok(_) => {}
+            Err(e) => fail(("error: " + e.as_str()).as_str(), 1)
         }
-        print(out)
+        if cmd == "run" {
+            let status = process.run(exe.as_str(), prog_args.as_slice())
+            if out.is_none() {
+                os.remove(exe.as_str())
+            }
+            match status {
+                Ok(s) => match s {
+                    Code(c) => sys.exit(c)
+                    Signal(sig) => sys.exit(128 + sig)
+                }
+                Err(e) => fail(("error: cannot run " + exe.as_str() + ": " + e.as_str()).as_str(), 1)
+            }
+        }
     } else {
         fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
+    }
+}
+
+// Where the file name starts in a path.
+fn name_start(path: str) -> i64 {
+    var start = 0
+    for i in 0..path.len {
+        if path[i] == '/' {
+            start = i + 1
+        }
+    }
+    start
+}
+
+// The file name without its directory and extension (Rust's `file_stem`).
+fn file_stem(path: str) -> str {
+    let name = path[name_start(path)..path.len]
+    var end = name.len
+    for i in 1..name.len {
+        if name[i] == '.' {
+            end = i
+        }
+    }
+    name[0..end]
+}
+
+// The path with its extension replaced (Rust's `with_extension`).
+fn with_extension(path: str, ext: str) -> String {
+    path[0..name_start(path)] + file_stem(path) + "." + ext
+}
+
+// Writes the IR and has clang (`JIHOO_CC`) optimize and link it. Unlike the
+// Rust compiler, clang's messages go straight to standard error: there is
+// no way yet to capture another program's output.
+fn link_exe(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool, link: Vec(str), keep: bool) -> Result((), String) {
+    var ll_path = String.new()
+    if keep {
+        ll_path = with_extension(exe, "ll")
+    } else {
+        let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" + exe[name_start(exe)..exe.len] + ".ll"
+        ll_path = os.join(os.temp_dir().as_str(), name.as_str())
+    }
+    match fs.write_file(ll_path.as_str(), ll) {
+        Ok(_) => {}
+        Err(e) => return Err("cannot write " + ll_path.as_str() + ": " + e.as_str())
+    }
+    let cc = match env.get("JIHOO_CC") {
+        Some(c) => c
+        None => "clang"
+    }
+    var c = Vec(str).new()
+    c.push(opt)
+    c.push("-w")
+    c.push("-target")
+    c.push(tgt.triple())
+    c.push("-x")
+    c.push("ir")
+    c.push(ll_path.as_str())
+    c.push("-x")
+    c.push("none")
+    if freestanding {
+        // sections per function, so that unused ones (the 128-bit helpers of
+        // std.rt) are left out
+        c.push("-nostdlib")
+        c.push("-static")
+        c.push("-fuse-ld=lld")
+        c.push("-ffunction-sections")
+        c.push("-Wl,--gc-sections")
+    }
+    for l in link {
+        c.push(l)
+    }
+    if !freestanding {
+        c.push("-lm")
+    }
+    c.push("-o")
+    c.push(exe)
+    let r = process.run(cc, c.as_slice())
+    if !keep {
+        os.remove(ll_path.as_str())
+    }
+    match r {
+        Ok(s) => if s.success() { Ok(()) } else { Err(cc + " failed") }
+        Err(e) => Err("cannot run " + cc + ": " + e.as_str() + " (set JIHOO_CC to clang)")
     }
 }
 

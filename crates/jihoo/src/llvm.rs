@@ -10,7 +10,7 @@ use crate::lex::Op;
 use crate::mir::*;
 use crate::target::Target;
 use crate::types::{self, TyId, TyKind, Types};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 pub struct Gen<'p> {
@@ -23,7 +23,11 @@ pub struct Gen<'p> {
     nstr: usize,
     /// User `Drop` impls, by type.
     pub drop_impls: HashMap<TyId, FnId>,
-    declared: HashMap<String, String>,
+    /// Declarations of functions defined elsewhere, in the order first
+    /// needed (so that the output is the same on every run), and their
+    /// names.
+    declared: Vec<String>,
+    declared_names: HashSet<String>,
 }
 
 /// An operand's value: a scalar in a register, or an aggregate in memory.
@@ -68,8 +72,16 @@ pub fn esc(bytes: &[u8]) -> String {
     s
 }
 
+/// A global's name. LLVM keeps names starting `llvm.` for its intrinsics;
+/// only the functions of a module named `llvm` get such a symbol (source
+/// names have no dots), and they get a `_` in front.
 fn sym(s: &str) -> String {
-    format!("@\"{}\"", s.replace('"', "_"))
+    let s = s.replace('"', "_");
+    if s.starts_with("llvm.") {
+        format!("@\"_{}\"", s)
+    } else {
+        format!("@\"{}\"", s)
+    }
 }
 
 impl<'p> Gen<'p> {
@@ -84,7 +96,8 @@ impl<'p> Gen<'p> {
             glue_todo: Vec::new(),
             nstr: 0,
             drop_impls,
-            declared: HashMap::new(),
+            declared: Vec::new(),
+            declared_names: HashSet::new(),
         }
     }
 
@@ -160,7 +173,7 @@ impl<'p> Gen<'p> {
         self.entry();
         self.runtime();
         let mut decls = String::new();
-        for d in self.declared.values() {
+        for d in &self.declared {
             decls.push_str(d);
             decls.push('\n');
         }
@@ -168,7 +181,9 @@ impl<'p> Gen<'p> {
     }
 
     fn declare(&mut self, name: &str, decl: &str) {
-        self.declared.entry(name.to_string()).or_insert_with(|| decl.to_string());
+        if self.declared_names.insert(name.to_string()) {
+            self.declared.push(decl.to_string());
+        }
     }
 
     // ---- signatures ----

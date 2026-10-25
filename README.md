@@ -103,6 +103,10 @@ that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions, system calls and atomics; the standard library,
 including running other programs.
 
-Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo
-([in progress](docs/internals/self-hosting.md): the lexer, the parser, the loader, sema and the borrow checker),
-compile-time evaluation, `derive`, dynamic dispatch, threads.
+The compiler is also written in jihoo, in `compiler/`, and
+[self-hosted](docs/internals/self-hosting.md): it builds itself, and writes
+the same LLVM IR as the Rust compiler for every program.
+
+Next ([roadmap](docs/internals/roadmap.md)): making the compiler in jihoo
+the one that is used, compile-time evaluation, `derive`, dynamic dispatch,
+threads.

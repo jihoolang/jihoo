@@ -1,0 +1,1660 @@
+// Code generation: MIR to LLVM IR text, which clang compiles. The Rust
+// compiler's `llvm.rs`.
+//
+// Simple on purpose: every local is an alloca, every field a byte offset,
+// every aggregate copy a memcpy; mem2reg and SROA turn that into registers.
+// Aggregates are passed by pointer and returned through `sret`. Borrows
+// are pointers marked `noalias` (an `inout` parameter cannot alias anything:
+// the checker made sure).
+
+import std.mem
+import fmt
+import lex
+import mir
+import target
+import types
+
+type Op = lex.Op
+type Target = target.Target
+type TyKind = types.TyKind
+type Types = types.Types
+type Body = mir.Body
+type Place = mir.Place
+type Proj = mir.Proj
+type Operand = mir.Operand
+type Rvalue = mir.Rvalue
+type Const = mir.Const
+type Stmt = mir.Stmt
+type Term = mir.Term
+type Callee = mir.Callee
+type Intrinsic = mir.Intrinsic
+type ParamPass = mir.ParamPass
+
+pub struct Gen {
+    p: mir.Program
+    out: String
+    globals: String
+    strs: Map(String, i64)
+    drop_glue: Map(u32, String)
+    glue_todo: Vec(u32)
+    nstr: i64
+    // Declarations of functions defined elsewhere, in the order first
+    // needed, and their names.
+    declared: Vec(String)
+    declared_names: Map(String, bool)
+}
+
+// An operand's value: a scalar in a register, or an aggregate in memory.
+enum V {
+    Imm(String)
+    Mem(String)
+    Zst
+    // All zero bytes (aggregates).
+    Zero
+}
+
+impl Clone for V {
+    fn clone(self) -> V {
+        match self {
+            Imm(x) => V.Imm(x.clone())
+            Mem(x) => V.Mem(x.clone())
+            Zst => V.Zst
+            Zero => V.Zero
+        }
+    }
+}
+
+// (Rust's `FnCx` also has a trap block, which nothing sets.)
+struct FnCx {
+    body: String
+    tmp: i64
+    locals: Vec(String)
+    sret: Option(String)
+    // The label of the block being written (for phis): Rust's
+    // `label_block` finds it in the text.
+    label: String
+}
+
+impl FnCx {
+    fn new(tmp: i64) -> FnCx {
+        FnCx { body: String.new(), tmp: tmp, locals: Vec(String).new(), sret: None, label: String.from("entry") }
+    }
+
+    fn t(inout self) -> String {
+        self.tmp += 1
+        "%t" + fmt.n(self.tmp as i128)
+    }
+
+    fn line(inout self, s: str) {
+        self.body.push_str("  ")
+        self.body.push_str(s)
+        self.body.push('\n')
+    }
+
+    // Starts a block.
+    fn block(inout self, l: str) {
+        self.body.push_str(l)
+        self.body.push_str(":\n")
+        self.label = String.from(l)
+    }
+
+    // A fresh name for labels: a temporary's number.
+    fn id(inout self) -> String {
+        let t = self.t()
+        String.from(t.as_str()[1..t.len()])
+    }
+}
+
+pub fn esc(s: str) -> String {
+    var out = String.new()
+    for b in s {
+        if b > ' ' && b <= '~' && b != '"' && b != '\\' || b == ' ' {
+            out.push(b)
+        } else {
+            out.push('\\')
+            push_hex(&out, b as u64, 2)
+        }
+    }
+    out
+}
+
+// `v` in `digits` uppercase hexadecimal digits.
+fn push_hex(inout out: String, v: u64, digits: i64) {
+    var i = digits
+    while i > 0 {
+        i -= 1
+        let d = ((v >> ((i * 4) as u64)) & 15) as u8
+        out.push(if d < 10 { '0' + d } else { 'A' + d - 10 })
+    }
+}
+
+// A global's name. LLVM keeps names starting `llvm.` for its intrinsics;
+// only the functions of a module named `llvm` get such a symbol (source
+// names have no dots), and they get a `_` in front.
+fn sym(s: str) -> String {
+    var out = String.from("@\"")
+    if s.starts_with("llvm.") {
+        out.push('_')
+    }
+    for b in s {
+        out.push(if b == '"' { '_' } else { b })
+    }
+    out.push('"')
+    out
+}
+
+fn join(xs: Vec(String), sep: str) -> String {
+    var s = String.new()
+    for i, x in xs {
+        if i > 0 {
+            s.push_str(sep)
+        }
+        s.push_str(x.as_str())
+    }
+    s
+}
+
+fn is_internal(l: mir.Linkage) -> bool {
+    match l {
+        Internal => true
+        _ => false
+    }
+}
+
+fn is_borrow(p: ParamPass) -> bool {
+    p == ParamPass.Borrow
+}
+
+pub fn emit(sink p: mir.Program) -> String {
+    var g = Gen {
+        p: p
+        out: String.new()
+        globals: String.new()
+        strs: Map(String, i64).new()
+        drop_glue: Map(u32, String).new()
+        glue_todo: Vec(u32).new()
+        nstr: 0
+        declared: Vec(String).new()
+        declared_names: Map(String, bool).new()
+    }
+    g.emit()
+}
+
+impl Gen {
+    // The LLVM type of a scalar in a register.
+    fn scalar(self, t: u32) -> String {
+        match self.p.types.kind(t) {
+            Bool => String.from("i1")
+            Int(i) => "i" + fmt.n(i.bits as i128)
+            Float(b) => String.from(if b == 32 { "float" } else { "double" })
+            Ptr(_) | Ref(_) | RefMut(_) | FnPtr(_) => String.from("ptr")
+            _ => panic("not a scalar")
+        }
+    }
+
+    // The LLVM type of a scalar in memory (bools are bytes).
+    fn mem_scalar(self, t: u32) -> String {
+        if t == types.BOOL { String.from("i8") } else { self.scalar(t) }
+    }
+
+    fn is_scalar(self, t: u32) -> bool {
+        self.p.types.is_scalar(t)
+    }
+
+    fn size(inout self, t: u32) -> u64 {
+        self.p.types.layout(t).size
+    }
+
+    fn align(inout self, t: u32) -> u64 {
+        self.p.types.layout(t).align
+    }
+
+    fn is_zst(inout self, t: u32) -> bool {
+        self.p.types.is_zst(t)
+    }
+
+    fn emit(inout self) -> String {
+        let triple = self.p.target.triple()
+        var head = String.from("; jihoo\n")
+        head.push_str(fmt.f("target triple = \"{}\"\n\n", [triple]).as_str())
+        self.globals.push_str("@jihoo.argc = internal global i64 0\n@jihoo.argv = internal global ptr null\n")
+        for i in 0..self.p.statics.len() {
+            let name = self.p.statics[i].symbol.clone()
+            let t = self.p.statics[i].ty
+            let c = self.p.statics[i].value.clone()
+            if name.len() == 0 {
+                continue
+            }
+            var size = self.size(t)
+            if size == 0 {
+                size = 1
+            }
+            let align = self.align(t)
+            let scalar = self.is_scalar(t)
+            let zeros = fmt.f("[{} x i8] zeroinitializer", [fmt.n(size as i128).as_str()])
+            let init = match c.clone() {
+                Zeroed(_) | Zst(_) => zeros
+                Null(_) => String.from("ptr null")
+                Int(v, _) => if scalar { self.mem_scalar(t) + " " + fmt.n(v) } else { zeros }
+                Bool(b) => if scalar { "i8 " + (if b { "1" } else { "0" }) } else { zeros }
+                Float(_, _) => if scalar {
+                    match self.constant(c) {
+                        Imm(x) => self.scalar(t) + " " + x
+                        _ => panic("float constant")
+                    }
+                } else {
+                    zeros
+                }
+                _ => zeros
+            }
+            self.globals.push_str(fmt.f("{} = internal global {}, align {}\n", [sym(name.as_str()).as_str(), init.as_str(), fmt.n(align as i128).as_str()]).as_str())
+        }
+        for i in 0..self.p.fns.len() {
+            self.function(i as u32)
+        }
+        while self.glue_todo.len() > 0 {
+            let t = self.glue_todo.pop().unwrap()
+            self.glue(t)
+        }
+        self.entry()
+        self.runtime()
+        var decls = String.new()
+        for d in self.declared {
+            decls.push_str(d.as_str())
+            decls.push('\n')
+        }
+        head + self.globals.as_str() + "\n" + decls.as_str() + "\n" + self.out.as_str()
+    }
+
+    fn declare(inout self, name: str, decl: str) {
+        if !self.declared_names.contains(String.from(name)) {
+            self.declared_names.insert(String.from(name), true)
+            self.declared.push(String.from(decl))
+        }
+    }
+
+    // ---- signatures ----
+
+    // The LLVM parameter list and return type of a function.
+    fn signature(inout self, f: u32) -> (String, Vec(String), bool) {
+        let c_abi = !is_internal(self.p.fns[f as i64].linkage)
+        let sig = self.p.fns[f as i64].sig.clone()
+        let pass = self.p.fns[f as i64].pass.clone()
+        let ret = sig.ret
+        var params = Vec(String).new()
+        var sret = false
+        var rty = String.from("void")
+        if ret == types.NEVER || self.is_zst(ret) {
+            rty = String.from("void")
+        } else if self.is_scalar(ret) {
+            rty = if c_abi && ret == types.BOOL { String.from("zeroext i1") } else { self.scalar(ret) }
+        } else {
+            sret = true
+            let s = fmt.n(self.size(ret) as i128)
+            let a = fmt.n(self.align(ret) as i128)
+            params.push(fmt.f("ptr noalias sret([{} x i8]) align {} dereferenceable({})", [s.as_str(), a.as_str(), s.as_str()]))
+        }
+        for i, t in sig.params {
+            let pp = if i < pass.len() { pass[i] } else { ParamPass.Value }
+            params.push(self.param_ty(t, pp, c_abi))
+        }
+        (rty, params, sret)
+    }
+
+    fn param_ty(inout self, t: u32, pass: ParamPass, c_abi: bool) -> String {
+        if !self.is_scalar(t) {
+            // Aggregates (and values without bytes) go by pointer.
+            return String.from("ptr")
+        }
+        var s = self.scalar(t)
+        if c_abi && t == types.BOOL {
+            s = String.from("zeroext i1")
+        }
+        if is_borrow(pass) {
+            let inner = self.p.types.pointee(t).unwrap()
+            let size = self.size(inner)
+            let align = self.align(inner)
+            let ro = match self.p.types.kind(t) {
+                Ref(_) => " readonly"
+                _ => ""
+            }
+            var deref = String.new()
+            if size > 0 {
+                deref = fmt.f(" dereferenceable({})", [fmt.n(size as i128).as_str()])
+            }
+            s = fmt.f("ptr noalias{} align {}{}", [ro, fmt.n(align as i128).as_str(), deref.as_str()])
+        }
+        s
+    }
+
+    // ---- functions ----
+
+    fn function(inout self, f: u32) {
+        let (rty, params, sret) = self.signature(f)
+        let symbol = self.p.fns[f as i64].symbol.clone()
+        if self.p.fns[f as i64].body.is_none() {
+            // An extern declaration.
+            var ps = params.clone()
+            if self.p.fns[f as i64].variadic {
+                ps.push(String.from("..."))
+            }
+            self.declare(symbol.as_str(), fmt.f("declare {} {}({})", [rty.as_str(), sym(symbol.as_str()).as_str(), join(ps, ", ").as_str()]).as_str())
+            return
+        }
+        // The body is taken out while the function is written, which reads
+        // the rest of the program and adds types.
+        let body = mem.replace(&self.p.fns[f as i64].body, None).unwrap()
+        let pass = self.p.fns[f as i64].pass.clone()
+        let linkage = if is_internal(self.p.fns[f as i64].linkage) { "internal " } else { "" }
+        // A function that never returns is a way out of the program (a
+        // panic): keep it out of the hot path.
+        let attrs = if self.p.fns[f as i64].sig.ret == types.NEVER { " cold noreturn" } else { "" }
+        var cx = FnCx.new(0)
+        var names = Vec(String).new()
+        if sret {
+            names.push(String.from("ptr %sret"))
+            cx.sret = Some(String.from("%sret"))
+        }
+        var pi = 0
+        for k, p in params {
+            if sret && k == 0 {
+                continue
+            }
+            names.push(fmt.f("{} %p{}", [p.as_str(), fmt.n(pi as i128).as_str()]))
+            pi += 1
+        }
+        self.out.push_str(fmt.f("define {}{} {}({}){} {\n", [linkage, rty.as_str(), sym(symbol.as_str()).as_str(), join(names, ", ").as_str(), attrs]).as_str())
+        self.out.push_str("entry:\n")
+        // Allocas.
+        for i, l in body.locals {
+            let t = l.ty
+            if i == 0 && sret {
+                cx.locals.push(String.from("%sret"))
+                continue
+            }
+            let is_arg = l.kind == mir.LocalKind.Arg
+            let arg_idx = i - 1
+            if is_arg && !self.is_scalar(t) && arg_idx >= 0 && arg_idx < pass.len() && pass[arg_idx] == ParamPass.Owned {
+                cx.locals.push("%p" + fmt.n(arg_idx as i128))
+                continue
+            }
+            var size = self.size(t)
+            if size == 0 {
+                size = 1
+            }
+            let align = self.align(t)
+            let name = "%l" + fmt.n(i as i128)
+            cx.line(fmt.f("{} = alloca [{} x i8], align {}", [name.as_str(), fmt.n(size as i128).as_str(), fmt.n(align as i128).as_str()]).as_str())
+            cx.locals.push(name)
+        }
+        // Store incoming arguments.
+        for i, l in body.locals {
+            if l.kind != mir.LocalKind.Arg {
+                continue
+            }
+            let arg_idx = i - 1
+            let t = l.ty
+            let pa = "%p" + fmt.n(arg_idx as i128)
+            if self.is_scalar(t) {
+                let dst = cx.locals[i].clone()
+                self.store_scalar(&cx, t, pa.as_str(), dst.as_str())
+            } else {
+                let owned = arg_idx < pass.len() && pass[arg_idx] == ParamPass.Owned
+                if !owned && !self.is_zst(t) {
+                    let s = fmt.n(self.size(t) as i128)
+                    let a = fmt.n(self.align(t) as i128)
+                    let dst = cx.locals[i].clone()
+                    cx.line(fmt.f("call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)", [a.as_str(), dst.as_str(), a.as_str(), pa.as_str(), s.as_str()]).as_str())
+                }
+            }
+        }
+        cx.line("br label %bb0")
+        for bi, b in body.blocks {
+            cx.block(("bb" + fmt.n(bi as i128)).as_str())
+            for s in b.stmts {
+                self.stmt(&cx, body, s)
+            }
+            self.term(&cx, f, body, b.term)
+        }
+        self.out.push_str(cx.body.as_str())
+        self.out.push_str("}\n\n")
+        self.p.fns[f as i64].body = Some(body)
+    }
+
+    fn store_scalar(inout self, inout cx: FnCx, t: u32, v: str, ptr: str) {
+        if t == types.BOOL {
+            let z = cx.t()
+            cx.line(fmt.f("{} = zext i1 {} to i8", [z.as_str(), v]).as_str())
+            cx.line(fmt.f("store i8 {}, ptr {}", [z.as_str(), ptr]).as_str())
+        } else {
+            let lt = self.scalar(t)
+            cx.line(fmt.f("store {} {}, ptr {}", [lt.as_str(), v, ptr]).as_str())
+        }
+    }
+
+    fn load_scalar(inout self, inout cx: FnCx, t: u32, ptr: str) -> String {
+        if t == types.BOOL {
+            let b = cx.t()
+            cx.line(fmt.f("{} = load i8, ptr {}", [b.as_str(), ptr]).as_str())
+            let r = cx.t()
+            cx.line(fmt.f("{} = trunc i8 {} to i1", [r.as_str(), b.as_str()]).as_str())
+            r
+        } else {
+            let lt = self.scalar(t)
+            let r = cx.t()
+            cx.line(fmt.f("{} = load {}, ptr {}", [r.as_str(), lt.as_str(), ptr]).as_str())
+            r
+        }
+    }
+
+    fn gep(inout self, inout cx: FnCx, ptr: str, off: u64) -> String {
+        if off == 0 {
+            return String.from(ptr)
+        }
+        let r = cx.t()
+        cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [r.as_str(), ptr, fmt.n(off as i128).as_str()]).as_str())
+        r
+    }
+
+    // The type of field `i` of a value of type `t` (not a variant's).
+    fn field_ty(inout self, t: u32, i: u32) -> u32 {
+        match self.p.types.kind(t).clone() {
+            Slice(e) => if i == 0 { self.p.types.ptr(e) } else { types.I64 }
+            Str => if i == 0 { self.p.types.ptr(types.U8) } else { types.I64 }
+            Closure(_) => self.p.types.ptr(types.U8)
+            _ => self.p.types.field_tys(t)[i as i64]
+        }
+    }
+
+    fn variant_field_ty(self, t: u32, v: u32, i: u32) -> u32 {
+        self.p.types.variants(t).unwrap()[v as i64].fields[i as i64]
+    }
+
+    // The address of a place, and its type.
+    fn place(inout self, inout cx: FnCx, body: Body, p: Place) -> (String, u32) {
+        var ptr = cx.locals[p.local as i64].clone()
+        var t = body.locals[p.local as i64].ty
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => {
+                    let r = cx.t()
+                    cx.line(fmt.f("{} = load ptr, ptr {}", [r.as_str(), ptr.as_str()]).as_str())
+                    ptr = r
+                    t = self.p.types.pointee(t).unwrap()
+                }
+                Variant(v) => variant = Some(v)
+                Field(i) => {
+                    match variant {
+                        Some(v) => {
+                            variant = None
+                            let (_, el) = self.p.types.enum_layout(t)
+                            let off = el.fields[v as i64][i as i64]
+                            let ft = self.variant_field_ty(t, v, i)
+                            ptr = self.gep(&cx, ptr.as_str(), off)
+                            t = ft
+                        }
+                        None => {
+                            let offs = self.p.types.field_offsets(t)
+                            let off = offs[i as i64]
+                            let ft = self.field_ty(t, i)
+                            ptr = self.gep(&cx, ptr.as_str(), off)
+                            t = ft
+                        }
+                    }
+                }
+                Index(l) => {
+                    let e = match self.p.types.kind(t) {
+                        Array(e, _) => e
+                        _ => panic("index of non-array")
+                    }
+                    let es = self.size(e)
+                    let ip = cx.locals[l as i64].clone()
+                    let it = body.locals[l as i64].ty
+                    let iv = self.load_scalar(&cx, it, ip.as_str())
+                    let iv64 = self.widen_i64(&cx, iv.as_str(), it)
+                    let off = cx.t()
+                    cx.line(fmt.f("{} = mul i64 {}, {}", [off.as_str(), iv64.as_str(), fmt.n(es as i128).as_str()]).as_str())
+                    let r = cx.t()
+                    cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [r.as_str(), ptr.as_str(), off.as_str()]).as_str())
+                    ptr = r
+                    t = e
+                }
+            }
+        }
+        (ptr, t)
+    }
+
+    fn widen_i64(inout self, inout cx: FnCx, v: str, t: u32) -> String {
+        let i = match self.p.types.int(t) {
+            Some(i) => i
+            None => return String.from(v)
+        }
+        if i.bits == 64 {
+            return String.from(v)
+        }
+        let r = cx.t()
+        cx.line(fmt.f("{} = {} i{} {} to i64", [r.as_str(), if i.signed { "sext" } else { "zext" }, fmt.n(i.bits as i128).as_str(), v]).as_str())
+        r
+    }
+
+    fn operand_ty(inout self, body: Body, o: Operand) -> u32 {
+        match o {
+            Copy(p) => self.place_ty(body, p)
+            Move(p) => self.place_ty(body, p)
+            Const(c) => match c {
+                Int(_, t) => t
+                Float(_, t) => t
+                Zst(t) => t
+                Null(t) => t
+                Zeroed(t) => t
+                Bytes(_, t) => t
+                Static(_, t) => t
+                Bool(_) => types.BOOL
+                Str(_) => types.STR
+                Fn(f) => {
+                    let sig = self.p.fns[f as i64].sig.clone()
+                    self.p.types.intern(TyKind.FnPtr(sig))
+                }
+            }
+        }
+    }
+
+    fn place_ty(inout self, body: Body, p: Place) -> u32 {
+        var t = body.locals[p.local as i64].ty
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => t = self.p.types.pointee(t).unwrap()
+                Variant(v) => variant = Some(v)
+                Field(i) => match variant {
+                    Some(v) => {
+                        variant = None
+                        t = self.variant_field_ty(t, v, i)
+                    }
+                    None => t = self.field_ty(t, i)
+                }
+                Index(_) => match self.p.types.kind(t) {
+                    Array(e, _) => t = e
+                    _ => panic("index of non-array")
+                }
+            }
+        }
+        t
+    }
+
+    fn str_global(inout self, s: str) -> (String, i64) {
+        match self.strs.get(String.from(s)) {
+            Some(n) => return ("@.str." + fmt.n(n as i128), s.len)
+            None => {}
+        }
+        let n = self.nstr
+        self.nstr += 1
+        let ns = fmt.n(n as i128)
+        // A zero after the bytes, so that a literal is also a C string.
+        self.globals.push_str(fmt.f("@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1\n", [ns.as_str(), fmt.n((s.len + 1) as i128).as_str(), esc(s).as_str()]).as_str())
+        self.globals.push_str(fmt.f("@.strv.{} = private unnamed_addr constant { ptr, i64 } { ptr @.str.{}, i64 {} }, align 8\n", [ns.as_str(), ns.as_str(), fmt.n(s.len as i128).as_str()]).as_str())
+        self.strs.insert(String.from(s), n)
+        ("@.str." + ns.as_str(), s.len)
+    }
+
+    fn operand(inout self, inout cx: FnCx, body: Body, o: Operand) -> V {
+        let p = match o {
+            Copy(p) => p.clone()
+            Move(p) => p.clone()
+            Const(c) => return self.constant(c)
+        }
+        let (ptr, t) = self.place(&cx, body, p)
+        if self.is_zst(t) {
+            V.Zst
+        } else if self.is_scalar(t) {
+            V.Imm(self.load_scalar(&cx, t, ptr.as_str()))
+        } else {
+            V.Mem(ptr)
+        }
+    }
+
+    fn constant(inout self, c: Const) -> V {
+        match c {
+            Int(v, _) => V.Imm(fmt.n(v))
+            Float(f, t) => {
+                // LLVM wants a double's bits in hex, also for floats.
+                var x = f
+                if t == types.F32 {
+                    x = (f as f32) as f64
+                }
+                let bits = unsafe { read(&x as *u64) }
+                var s = String.from("0x")
+                push_hex(&s, bits, 16)
+                V.Imm(s)
+            }
+            Bool(b) => V.Imm(String.from(if b { "true" } else { "false" }))
+            Zst(_) => V.Zst
+            Str(s) => {
+                self.str_global(s.as_str())
+                let n = match self.strs.get(s.clone()) {
+                    Some(n) => n
+                    None => 0
+                }
+                V.Mem("@.strv." + fmt.n(n as i128))
+            }
+            Fn(f) => V.Imm(sym(self.p.fns[f as i64].symbol.as_str()))
+            Null(_) => V.Imm(String.from("null"))
+            Zeroed(t) => {
+                if self.is_scalar(t) {
+                    V.Imm(String.from(match self.p.types.kind(t) {
+                        Float(_) => "0.0"
+                        Bool => "false"
+                        Int(_) => "0"
+                        _ => "null"
+                    }))
+                } else {
+                    V.Zero
+                }
+            }
+            Static(i, _) => V.Imm(sym(self.p.statics[i as i64].symbol.as_str()))
+            Bytes(b, _) => {
+                let n = fmt.n(self.nstr as i128)
+                self.nstr += 1
+                let bs = b.as_slice()
+                let s = unsafe { make_str(bs.ptr, bs.len) }
+                self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
+                V.Mem("@.bytes." + n.as_str())
+            }
+        }
+    }
+
+    // Stores a value into memory of type t.
+    fn store(inout self, inout cx: FnCx, t: u32, sink v: V, dst: str) {
+        match v {
+            Zst => {}
+            Imm(x) => self.store_scalar(&cx, t, x.as_str(), dst)
+            Mem(src) => {
+                if src == dst {
+                    return
+                }
+                let s = fmt.n(self.size(t) as i128)
+                let a = fmt.n(self.align(t) as i128)
+                cx.line(fmt.f("call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)", [a.as_str(), dst, a.as_str(), src.as_str(), s.as_str()]).as_str())
+            }
+            Zero => {
+                let s = fmt.n(self.size(t) as i128)
+                let a = fmt.n(self.align(t) as i128)
+                cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr align {} {}, i8 0, i64 {}, i1 false)", [a.as_str(), dst, s.as_str()]).as_str())
+            }
+        }
+    }
+
+    fn imm(inout self, inout cx: FnCx, sink v: V, t: u32) -> String {
+        match v {
+            Imm(x) => x.clone()
+            Mem(p) => self.load_scalar(&cx, t, p.as_str())
+            Zero => String.from("0")
+            Zst => String.from("undef")
+        }
+    }
+
+    fn panic_msg(inout self, inout cx: FnCx, msg: str) {
+        let (g, n) = self.str_global(msg)
+        cx.line(fmt.f("call void @jihoo.panic(ptr {}, i64 {})", [g.as_str(), fmt.n(n as i128).as_str()]).as_str())
+        cx.line("unreachable")
+    }
+
+    fn stmt(inout self, inout cx: FnCx, body: Body, s: Stmt) {
+        match s {
+            Assign(p, r, _) => self.assign(&cx, body, p, r)
+            Drop(p, _) => {
+                let (ptr, t) = self.place(&cx, body, p)
+                self.call_drop(&cx, t, ptr.as_str())
+            }
+            _ => {}
+        }
+    }
+
+    fn call_drop(inout self, inout cx: FnCx, t: u32, ptr: str) {
+        if !self.p.types.needs_drop(t) {
+            return
+        }
+        let g = self.glue_name(t)
+        cx.line(fmt.f("call void {}(ptr {})", [g.as_str(), ptr]).as_str())
+    }
+
+    fn glue_name(inout self, t: u32) -> String {
+        match self.drop_glue.get(t) {
+            Some(g) => return g.clone()
+            None => {}
+        }
+        let g = fmt.f("@\"drop.{}\"", [fmt.n(self.drop_glue.len() as i128).as_str()])
+        self.drop_glue.insert(t, g.clone())
+        self.glue_todo.push(t)
+        g
+    }
+
+    // A function that drops a value of type t at a pointer: the user's
+    // `drop`, then the parts.
+    fn glue(inout self, t: u32) {
+        let g = self.glue_name(t)
+        var cx = FnCx.new(0)
+        // The user's `Drop` impl (the program owns them; Rust copies them).
+        match self.p.drop_impls.get(t) {
+            Some(f) => {
+                let s = sym(self.p.fns[f as i64].symbol.as_str())
+                cx.line(fmt.f("call void {}(ptr %p)", [s.as_str()]).as_str())
+            }
+            None => {}
+        }
+        match self.p.types.kind(t).clone() {
+            Tuple(ts) => {
+                let offs = self.p.types.field_offsets(t)
+                for i, ft in ts {
+                    let p = self.gep(&cx, "%p", offs[i])
+                    self.call_drop(&cx, ft, p.as_str())
+                }
+            }
+            Array(e, n) => {
+                let es = self.size(e)
+                for i in 0..n {
+                    let p = self.gep(&cx, "%p", i * es)
+                    self.call_drop(&cx, e, p.as_str())
+                }
+            }
+            Adt(_) => {
+                if self.p.types.variants(t).is_some() {
+                    let vs = self.p.types.variants(t).unwrap()
+                    let vs = vs.clone()
+                    let (_, el) = self.p.types.enum_layout(t)
+                    let tb = fmt.n(el.tag_bits as i128)
+                    let tag = cx.t()
+                    cx.line(fmt.f("{} = load i{}, ptr %p", [tag.as_str(), tb.as_str()]).as_str())
+                    var cases = String.new()
+                    var blocks = String.new()
+                    for vi, v in vs {
+                        var inner = FnCx.new(cx.tmp + 1000 * (vi + 1))
+                        var any = false
+                        for fi, ft in v.fields {
+                            if self.p.types.needs_drop(ft) {
+                                any = true
+                                let p = self.gep(&inner, "%p", el.fields[vi][fi])
+                                self.call_drop(&inner, ft, p.as_str())
+                            }
+                        }
+                        if any {
+                            let vn = fmt.n(vi as i128)
+                            cases.push_str(fmt.f(" i{} {}, label %v{}", [tb.as_str(), vn.as_str(), vn.as_str()]).as_str())
+                            blocks.push_str(fmt.f("v{}:\n", [vn.as_str()]).as_str())
+                            blocks.push_str(inner.body.as_str())
+                            blocks.push_str("  br label %done\n")
+                        }
+                    }
+                    cx.line(fmt.f("switch i{} {}, label %done [{} ]", [tb.as_str(), tag.as_str(), cases.as_str()]).as_str())
+                    cx.body.push_str(blocks.as_str())
+                    cx.body.push_str("done:\n")
+                } else {
+                    let offs = self.p.types.field_offsets(t)
+                    for i, ft in self.p.types.field_tys(t) {
+                        let p = self.gep(&cx, "%p", offs[i])
+                        self.call_drop(&cx, ft, p.as_str())
+                    }
+                }
+            }
+            _ => {}
+        }
+        cx.line("ret void")
+        self.out.push_str(fmt.f("define internal void {}(ptr %p) {\nentry:\n{}}\n\n", [g.as_str(), cx.body.as_str()]).as_str())
+    }
+
+    fn assign(inout self, inout cx: FnCx, body: Body, p: Place, r: Rvalue) {
+        let (dst, t) = self.place(&cx, body, p)
+        match r {
+            Use(o) => {
+                let v = self.operand(&cx, body, o)
+                self.store(&cx, t, v, dst.as_str())
+            }
+            Bin(op, a, b) => {
+                let at = self.operand_ty(body, a)
+                let av = self.operand(&cx, body, a)
+                let bv = self.operand(&cx, body, b)
+                let av = self.imm(&cx, av, at)
+                let bt = self.operand_ty(body, b)
+                let bv = self.imm(&cx, bv, bt)
+                let r = self.binop(&cx, op, at, av.as_str(), bv.as_str())
+                self.store_scalar(&cx, t, r.as_str(), dst.as_str())
+            }
+            Un(op, a) => {
+                let at = self.operand_ty(body, a)
+                let av = self.operand(&cx, body, a)
+                let av = self.imm(&cx, av, at)
+                let lt = self.scalar(at)
+                let r = cx.t()
+                let is_float = self.p.types.is_float(at)
+                match op {
+                    Neg => {
+                        if is_float {
+                            cx.line(fmt.f("{} = fneg {} {}", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                        } else {
+                            cx.line(fmt.f("{} = sub {} 0, {}", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                        }
+                    }
+                    Not => {
+                        if at == types.BOOL {
+                            cx.line(fmt.f("{} = xor i1 {}, true", [r.as_str(), av.as_str()]).as_str())
+                        } else {
+                            cx.line(fmt.f("{} = xor {} {}, -1", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                        }
+                    }
+                }
+                self.store_scalar(&cx, t, r.as_str(), dst.as_str())
+            }
+            Cast(a, to, _) => {
+                let at = self.operand_ty(body, a)
+                let av = self.operand(&cx, body, a)
+                let av = self.imm(&cx, av, at)
+                let r = self.cast(&cx, av.as_str(), at, to)
+                self.store_scalar(&cx, t, r.as_str(), dst.as_str())
+            }
+            Ref(q) => self.store_addr(&cx, body, q, dst.as_str())
+            RefMut(q) => self.store_addr(&cx, body, q, dst.as_str())
+            Addr(q) => self.store_addr(&cx, body, q, dst.as_str())
+            Aggregate(kind, ops) => self.aggregate(&cx, body, kind, ops, dst.as_str(), t)
+            Discriminant(q) => {
+                let (qp, qt) = self.place(&cx, body, q)
+                let (_, el) = self.p.types.enum_layout(qt)
+                let tb = fmt.n(el.tag_bits as i128)
+                let tag = cx.t()
+                cx.line(fmt.f("{} = load i{}, ptr {}", [tag.as_str(), tb.as_str(), qp.as_str()]).as_str())
+                let lt = self.scalar(t)
+                var bits: u32 = 64
+                match self.p.types.int(t) {
+                    Some(i) => bits = i.bits
+                    None => {}
+                }
+                var r = tag.clone()
+                if bits > el.tag_bits {
+                    r = cx.t()
+                    cx.line(fmt.f("{} = zext i{} {} to {}", [r.as_str(), tb.as_str(), tag.as_str(), lt.as_str()]).as_str())
+                }
+                self.store_scalar(&cx, t, r.as_str(), dst.as_str())
+            }
+            Offset(a, b) => {
+                let at = self.operand_ty(body, a)
+                let bt = self.operand_ty(body, b)
+                let av = self.operand(&cx, body, a)
+                let av = self.imm(&cx, av, at)
+                let bv = self.operand(&cx, body, b)
+                let bv = self.imm(&cx, bv, bt)
+                let e = self.p.types.pointee(at).unwrap()
+                let es = self.size(e)
+                let r = cx.t()
+                if es == 0 {
+                    cx.line(fmt.f("{} = getelementptr i8, ptr {}, i64 0", [r.as_str(), av.as_str()]).as_str())
+                } else {
+                    cx.line(fmt.f("{} = getelementptr inbounds [{} x i8], ptr {}, i64 {}", [r.as_str(), fmt.n(es as i128).as_str(), av.as_str(), bv.as_str()]).as_str())
+                }
+                cx.line(fmt.f("store ptr {}, ptr {}", [r.as_str(), dst.as_str()]).as_str())
+            }
+            Repeat(o, n) => self.repeat(&cx, body, o, n, dst.as_str(), t)
+        }
+    }
+
+    // A borrow or address of a place, stored.
+    fn store_addr(inout self, inout cx: FnCx, body: Body, q: Place, dst: str) {
+        let (qp, _) = self.place(&cx, body, q)
+        cx.line(fmt.f("store ptr {}, ptr {}", [qp.as_str(), dst]).as_str())
+    }
+
+    fn repeat(inout self, inout cx: FnCx, body: Body, o: Operand, n: u64, dst: str, t: u32) {
+        let e = match self.p.types.kind(t) {
+            Array(e, _) => e
+            _ => panic("repeat of non-array")
+        }
+        let es = self.size(e)
+        let v = self.operand(&cx, body, o)
+        if n == 0 || es == 0 {
+            return
+        }
+        if is_zero_imm(v) && !self.p.types.is_float(e) {
+            let s = fmt.n(self.size(t) as i128)
+            cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr {}, i8 0, i64 {}, i1 false)", [dst, s.as_str()]).as_str())
+            return
+        }
+        if n <= 16 {
+            for i in 0..n {
+                let p = self.gep(&cx, dst, i * es)
+                self.store(&cx, e, v.clone(), p.as_str())
+            }
+            return
+        }
+        // A loop.
+        let id = cx.id()
+        let i = cx.t()
+        let inext = cx.t()
+        let cur = cx.label.clone()
+        cx.line(fmt.f("br label %{}.head", [id.as_str()]).as_str())
+        cx.block((id.as_str() + ".head").as_str())
+        cx.line(fmt.f("{} = phi i64 [ 0, %{} ], [ {}, %{}.head ]", [i.as_str(), cur.as_str(), inext.as_str(), id.as_str()]).as_str())
+        let off = cx.t()
+        cx.line(fmt.f("{} = mul i64 {}, {}", [off.as_str(), i.as_str(), fmt.n(es as i128).as_str()]).as_str())
+        let p = cx.t()
+        cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [p.as_str(), dst, off.as_str()]).as_str())
+        self.store(&cx, e, v, p.as_str())
+        cx.line(fmt.f("{} = add i64 {}, 1", [inext.as_str(), i.as_str()]).as_str())
+        let c = cx.t()
+        cx.line(fmt.f("{} = icmp ult i64 {}, {}", [c.as_str(), inext.as_str(), fmt.n(n as i128).as_str()]).as_str())
+        cx.line(fmt.f("br i1 {}, label %{}.head, label %{}.done", [c.as_str(), id.as_str(), id.as_str()]).as_str())
+        cx.block((id.as_str() + ".done").as_str())
+    }
+
+    fn aggregate(inout self, inout cx: FnCx, body: Body, kind: mir.Agg, ops: Vec(Operand), dst: str, t: u32) {
+        match kind {
+            Struct(_) => {
+                let offs = self.p.types.field_offsets(t)
+                let fts = self.p.types.field_tys(t)
+                for i, o in ops {
+                    let v = self.operand(&cx, body, o)
+                    let p = self.gep(&cx, dst, offs[i])
+                    self.store(&cx, fts[i], v, p.as_str())
+                }
+            }
+            Variant(_, vi) => {
+                let (_, el) = self.p.types.enum_layout(t)
+                cx.line(fmt.f("store i{} {}, ptr {}", [fmt.n(el.tag_bits as i128).as_str(), fmt.n(vi as i128).as_str(), dst]).as_str())
+                let fts = self.p.types.variants(t).unwrap()[vi as i64].fields.clone()
+                for i, o in ops {
+                    let v = self.operand(&cx, body, o)
+                    let p = self.gep(&cx, dst, el.fields[vi as i64][i])
+                    self.store(&cx, fts[i], v, p.as_str())
+                }
+            }
+            Array(_) => {
+                let e = match self.p.types.kind(t) {
+                    Array(e, _) => e
+                    _ => panic("array aggregate of non-array")
+                }
+                let es = self.size(e)
+                for i, o in ops {
+                    let v = self.operand(&cx, body, o)
+                    let p = self.gep(&cx, dst, i as u64 * es)
+                    self.store(&cx, e, v, p.as_str())
+                }
+            }
+            View(_) | Closure(_) => {
+                let is_view = match kind {
+                    View(_) => true
+                    _ => false
+                }
+                let pv = self.operand(&cx, body, ops[0])
+                let pt = self.operand_ty(body, ops[0])
+                let pv = self.imm(&cx, pv, pt)
+                cx.line(fmt.f("store ptr {}, ptr {}", [pv.as_str(), dst]).as_str())
+                let lv = self.operand(&cx, body, ops[1])
+                let lt = self.operand_ty(body, ops[1])
+                let lv = self.imm(&cx, lv, lt)
+                let p2 = self.gep(&cx, dst, 8)
+                cx.line(fmt.f("store {} {}, ptr {}", [if is_view { "i64" } else { "ptr" }, lv.as_str(), p2.as_str()]).as_str())
+            }
+        }
+    }
+
+    fn binop(inout self, inout cx: FnCx, op: Op, t: u32, a: str, b: str) -> String {
+        let lt = self.scalar(t)
+        let r = cx.t()
+        match self.p.types.kind(t).clone() {
+            Float(_) => {
+                let inst = match op {
+                    Add => "fadd"
+                    Sub => "fsub"
+                    Mul => "fmul"
+                    Div => "fdiv"
+                    Rem => "frem"
+                    Eq => "fcmp oeq"
+                    Ne => "fcmp une"
+                    Lt => "fcmp olt"
+                    Le => "fcmp ole"
+                    Gt => "fcmp ogt"
+                    Ge => "fcmp oge"
+                    _ => panic("float op")
+                }
+                cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), inst, lt.as_str(), a, b]).as_str())
+                r
+            }
+            Int(i) => self.int_binop(&cx, op, i, lt.as_str(), r, a, b)
+            Bool => {
+                let inst = match op {
+                    Eq => "icmp eq"
+                    Ne | Xor => "icmp ne"
+                    And | LogAnd => "and"
+                    Or | LogOr => "or"
+                    _ => panic("bool op")
+                }
+                cx.line(fmt.f("{} = {} i1 {}, {}", [r.as_str(), inst, a, b]).as_str())
+                r
+            }
+            _ => {
+                // Pointers and function pointers: comparisons.
+                cx.line(fmt.f("{} = icmp {} ptr {}, {}", [r.as_str(), icmp(op, false), a, b]).as_str())
+                r
+            }
+        }
+    }
+
+    fn int_binop(inout self, inout cx: FnCx, op: Op, i: types.IntTy, lt: str, sink r: String, a: str, b: str) -> String {
+        let s = i.signed
+        let checked = (op == Op.Add || op == Op.Sub || op == Op.Mul) && self.p.checked
+        if checked {
+            let name = if op == Op.Add { "add" } else if op == Op.Sub { "sub" } else { "mul" }
+            let f = fmt.f("llvm.{}{}.with.overflow.{}", [if s { "s" } else { "u" }, name, lt])
+            self.declare(f.as_str(), fmt.f("declare { {}, i1 } @{}({}, {})", [lt, f.as_str(), lt, lt]).as_str())
+            let pair = cx.t()
+            cx.line(fmt.f("{} = call { {}, i1 } @{}({} {}, {} {})", [pair.as_str(), lt, f.as_str(), lt, a, lt, b]).as_str())
+            cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 0", [r.as_str(), lt, pair.as_str()]).as_str())
+            let o = cx.t()
+            cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 1", [o.as_str(), lt, pair.as_str()]).as_str())
+            self.check(&cx, o.as_str(), true, "integer overflow")
+            return r
+        }
+        var simple = ""
+        match op {
+            Add | AddWrap => simple = "add"
+            Sub | SubWrap => simple = "sub"
+            Mul | MulWrap => simple = "mul"
+            And => simple = "and"
+            Or => simple = "or"
+            Xor => simple = "xor"
+            _ => {}
+        }
+        if simple.len > 0 {
+            cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), simple, lt, a, b]).as_str())
+            return r
+        }
+        match op {
+            Div | Rem => {
+                let div = op == Op.Div
+                let z = cx.t()
+                cx.line(fmt.f("{} = icmp eq {} {}, 0", [z.as_str(), lt, b]).as_str())
+                self.check(&cx, z.as_str(), true, "division by zero")
+                if s {
+                    // MIN / -1 wraps to MIN, and MIN % -1 is 0.
+                    let m1 = cx.t()
+                    cx.line(fmt.f("{} = icmp eq {} {}, -1", [m1.as_str(), lt, b]).as_str())
+                    let safe_b = cx.t()
+                    cx.line(fmt.f("{} = select i1 {}, {} 1, {} {}", [safe_b.as_str(), m1.as_str(), lt, lt, b]).as_str())
+                    let q = cx.t()
+                    cx.line(fmt.f("{} = {} {} {}, {}", [q.as_str(), if div { "sdiv" } else { "srem" }, lt, a, safe_b.as_str()]).as_str())
+                    let alt = cx.t()
+                    if div {
+                        cx.line(fmt.f("{} = sub {} 0, {}", [alt.as_str(), lt, a]).as_str())
+                    } else {
+                        cx.line(fmt.f("{} = add {} 0, 0", [alt.as_str(), lt]).as_str())
+                    }
+                    cx.line(fmt.f("{} = select i1 {}, {} {}, {} {}", [r.as_str(), m1.as_str(), lt, alt.as_str(), lt, q.as_str()]).as_str())
+                } else {
+                    cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), if div { "udiv" } else { "urem" }, lt, a, b]).as_str())
+                }
+                r
+            }
+            Shl | Shr => {
+                let m = cx.t()
+                cx.line(fmt.f("{} = and {} {}, {}", [m.as_str(), lt, b, fmt.n((i.bits - 1) as i128).as_str()]).as_str())
+                let inst = if op == Op.Shl { "shl" } else if s { "ashr" } else { "lshr" }
+                cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), inst, lt, a, m.as_str()]).as_str())
+                r
+            }
+            Eq | Ne | Lt | Le | Gt | Ge => {
+                cx.line(fmt.f("{} = icmp {} {} {}, {}", [r.as_str(), icmp(op, s), lt, a, b]).as_str())
+                r
+            }
+            _ => panic("logic op in codegen")
+        }
+    }
+
+    // Stops the program with a message when `cond` is `bad`.
+    fn check(inout self, inout cx: FnCx, cond: str, bad: bool, msg: str) {
+        let id = cx.id()
+        let ok = id.as_str() + ".ok"
+        let fail = id.as_str() + ".fail"
+        if bad {
+            cx.line(fmt.f("br i1 {}, label %{}, label %{}", [cond, fail.as_str(), ok.as_str()]).as_str())
+        } else {
+            cx.line(fmt.f("br i1 {}, label %{}, label %{}", [cond, ok.as_str(), fail.as_str()]).as_str())
+        }
+        cx.block(fail.as_str())
+        self.panic_msg(&cx, msg)
+        cx.block(ok.as_str())
+    }
+
+    fn cast(inout self, inout cx: FnCx, v: str, from: u32, to: u32) -> String {
+        let fk = self.p.types.kind(from).clone()
+        let tk = self.p.types.kind(to).clone()
+        let ft = self.scalar(from)
+        let tt = self.scalar(to)
+        let r = cx.t()
+        let from_int = self.p.types.is_int(from)
+        let to_int = self.p.types.is_int(to)
+        match fk {
+            Int(a) => match tk {
+                Int(b) => {
+                    if a.bits == b.bits {
+                        return String.from(v)
+                    }
+                    let inst = if b.bits < a.bits { "trunc" } else if a.signed { "sext" } else { "zext" }
+                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), inst, ft.as_str(), v, tt.as_str()]).as_str())
+                    return r
+                }
+                Float(_) => {
+                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), if a.signed { "sitofp" } else { "uitofp" }, ft.as_str(), v, tt.as_str()]).as_str())
+                    return r
+                }
+                _ => {}
+            }
+            Bool => match tk {
+                Int(_) => {
+                    cx.line(fmt.f("{} = zext i1 {} to {}", [r.as_str(), v, tt.as_str()]).as_str())
+                    return r
+                }
+                _ => {}
+            }
+            Float(a) => match tk {
+                Int(b) => {
+                    // Saturating: NaN is 0, out of range is the nearest end.
+                    let f = fmt.f("llvm.fpto{}i.sat.{}.{}", [if b.signed { "s" } else { "u" }, tt.as_str(), ft.as_str()])
+                    self.declare(f.as_str(), fmt.f("declare {} @{}({})", [tt.as_str(), f.as_str(), ft.as_str()]).as_str())
+                    cx.line(fmt.f("{} = call {} @{}({} {})", [r.as_str(), tt.as_str(), f.as_str(), ft.as_str(), v]).as_str())
+                    return r
+                }
+                Float(b) => {
+                    if a == b {
+                        return String.from(v)
+                    }
+                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), if b > a { "fpext" } else { "fptrunc" }, ft.as_str(), v, tt.as_str()]).as_str())
+                    return r
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        if from_int && tt == "ptr" {
+            cx.line(fmt.f("{} = inttoptr {} {} to ptr", [r.as_str(), ft.as_str(), v]).as_str())
+            return r
+        }
+        if to_int && ft == "ptr" {
+            cx.line(fmt.f("{} = ptrtoint ptr {} to {}", [r.as_str(), v, tt.as_str()]).as_str())
+            return r
+        }
+        String.from(v)
+    }
+
+    fn term(inout self, inout cx: FnCx, f: u32, body: Body, t: Term) {
+        match t {
+            Goto(b) => cx.line(("br label %bb" + fmt.n(b as i128)).as_str())
+            Switch(discr, targets, otherwise) => {
+                let dt = self.operand_ty(body, discr)
+                let dv = self.operand(&cx, body, discr)
+                let dv = self.imm(&cx, dv, dt)
+                let lt = self.scalar(dt)
+                let ob = fmt.n(otherwise as i128)
+                if dt == types.BOOL && targets.len() == 1 && targets[0].value == 0 {
+                    cx.line(fmt.f("br i1 {}, label %bb{}, label %bb{}", [dv.as_str(), ob.as_str(), fmt.n(targets[0].block as i128).as_str()]).as_str())
+                    return
+                }
+                var cases = String.new()
+                for x in targets {
+                    let v = if dt == types.BOOL { String.from(if x.value != 0 { "true" } else { "false" }) } else { fmt.n(x.value) }
+                    cases.push_str(fmt.f(" {} {}, label %bb{}", [lt.as_str(), v.as_str(), fmt.n(x.block as i128).as_str()]).as_str())
+                }
+                cx.line(fmt.f("switch {} {}, label %bb{} [{} ]", [lt.as_str(), dv.as_str(), ob.as_str(), cases.as_str()]).as_str())
+            }
+            Return => {
+                let ret = self.p.fns[f as i64].sig.ret
+                if cx.sret.is_some() || ret == types.NEVER || self.is_zst(ret) {
+                    cx.line("ret void")
+                } else {
+                    let p = cx.locals[0].clone()
+                    let v = self.load_scalar(&cx, ret, p.as_str())
+                    let lt = self.scalar(ret)
+                    cx.line(fmt.f("ret {} {}", [lt.as_str(), v.as_str()]).as_str())
+                }
+            }
+            Unreachable | Pending => cx.line("unreachable")
+            Assert(cond, msg, next, _) => {
+                let ct = self.operand_ty(body, cond)
+                let cv = self.operand(&cx, body, cond)
+                let cv = self.imm(&cx, cv, ct)
+                let id = cx.id()
+                cx.line(fmt.f("br i1 {}, label %bb{}, label %{}.fail", [cv.as_str(), fmt.n(next as i128).as_str(), id.as_str()]).as_str())
+                cx.block((id.as_str() + ".fail").as_str())
+                self.panic_msg(&cx, msg.as_str())
+            }
+            Call(callee, args, dest, next, _) => {
+                self.call(&cx, body, callee, args, dest)
+                cx.line(("br label %bb" + fmt.n(next as i128)).as_str())
+            }
+        }
+    }
+
+    fn value_passes(self, sig: types.Sig) -> Vec(ParamPass) {
+        var pass = Vec(ParamPass).new()
+        for t in sig.params {
+            pass.push(if self.p.types.is_ref(t) { ParamPass.Borrow } else { ParamPass.Value })
+        }
+        pass
+    }
+
+    fn call(inout self, inout cx: FnCx, body: Body, callee: Callee, args: Vec(Operand), dest: Place) {
+        let (dptr, dt) = self.place(&cx, body, dest)
+        match callee {
+            Fn(f) => {
+                let c_abi = !is_internal(self.p.fns[f as i64].linkage)
+                let sig = self.p.fns[f as i64].sig.clone()
+                let pass = self.p.fns[f as i64].pass.clone()
+                let target = sym(self.p.fns[f as i64].symbol.as_str())
+                let variadic = self.p.fns[f as i64].variadic
+                self.emit_call_inst(&cx, body, sig, pass, target.as_str(), c_abi, variadic, None, args, dptr.as_str(), dt)
+            }
+            Ptr(o) => {
+                let ot = self.operand_ty(body, o)
+                let sig = match self.p.types.kind(ot) {
+                    FnPtr(s) => s.clone()
+                    _ => panic("call of a non-fnptr")
+                }
+                let v = self.operand(&cx, body, o)
+                let fp = self.imm(&cx, v, ot)
+                let pass = self.value_passes(sig)
+                self.emit_call_inst(&cx, body, sig, pass, fp.as_str(), false, false, None, args, dptr.as_str(), dt)
+            }
+            Closure(o) => {
+                let ot = self.operand_ty(body, o)
+                let sig = match self.p.types.kind(ot) {
+                    Closure(s) => s.clone()
+                    _ => panic("call of a non-closure")
+                }
+                let cp = match o {
+                    Copy(p) => p.clone()
+                    Move(p) => p.clone()
+                    Const(_) => panic("closure constant")
+                }
+                let (cptr, _) = self.place(&cx, body, cp)
+                let fp = cx.t()
+                cx.line(fmt.f("{} = load ptr, ptr {}", [fp.as_str(), cptr.as_str()]).as_str())
+                let ep = self.gep(&cx, cptr.as_str(), 8)
+                let env = cx.t()
+                cx.line(fmt.f("{} = load ptr, ptr {}", [env.as_str(), ep.as_str()]).as_str())
+                var params = Vec(u32).new()
+                params.push(self.p.types.ptr(types.U8))
+                for t in sig.params {
+                    params.push(t)
+                }
+                var pass = Vec(ParamPass).new()
+                pass.push(ParamPass.Value)
+                for x in self.value_passes(sig) {
+                    pass.push(x)
+                }
+                let s2 = types.Sig { params: params, ret: sig.ret }
+                // The environment goes first.
+                self.emit_call_inst(&cx, body, s2, pass, fp.as_str(), false, false, Some(env), args, dptr.as_str(), dt)
+            }
+            Intrinsic(i) => self.intrinsic(&cx, body, i, args, dptr.as_str(), dt)
+        }
+    }
+
+    fn emit_call_inst(inout self, inout cx: FnCx, body: Body, sig: types.Sig, pass: Vec(ParamPass), target: str, c_abi: bool, variadic: bool, sink env: Option(String), args: Vec(Operand), dptr: str, dt: u32) {
+        let ret = sig.ret
+        var actual = Vec(String).new()
+        let sret = ret != types.NEVER && !self.is_zst(ret) && !self.is_scalar(ret)
+        if sret {
+            actual.push("ptr " + dptr)
+        }
+        var pi = 0
+        var param_tys = Vec(String).new()
+        if sret {
+            param_tys.push(String.from("ptr"))
+        }
+        match env {
+            Some(e) => {
+                actual.push("ptr " + e.as_str())
+                param_tys.push(String.from("ptr"))
+                pi = 1
+            }
+            None => {}
+        }
+        for ai, o in args {
+            let idx = ai + pi
+            let pt = if idx < sig.params.len() { sig.params[idx] } else { self.operand_ty(body, o) }
+            let pp = if idx < pass.len() { pass[idx] } else { ParamPass.Value }
+            let v = self.operand(&cx, body, o)
+            if self.is_scalar(pt) {
+                let x = self.imm(&cx, v, pt)
+                let ty = if c_abi && pt == types.BOOL { String.from("zeroext i1") } else { self.scalar(pt) }
+                actual.push(ty.as_str() + " " + x.as_str())
+                param_tys.push(ty)
+            } else {
+                // Aggregates by pointer; a callee that owns the value gets
+                // its own copy unless the value was moved.
+                let moved = match o {
+                    Move(_) => true
+                    _ => false
+                }
+                var direct: Option(String) = None
+                if pp == ParamPass.Value || pp == ParamPass.Owned && moved {
+                    direct = mem_of(v)
+                }
+                let p = match direct {
+                    Some(m) => m
+                    None => {
+                        var s = self.size(pt)
+                        if s == 0 {
+                            s = 1
+                        }
+                        let a = self.align(pt)
+                        let tmp = cx.t()
+                        cx.line(fmt.f("{} = alloca [{} x i8], align {}", [tmp.as_str(), fmt.n(s as i128).as_str(), fmt.n(a as i128).as_str()]).as_str())
+                        self.store(&cx, pt, v, tmp.as_str())
+                        tmp
+                    }
+                }
+                actual.push("ptr " + p.as_str())
+                param_tys.push(String.from("ptr"))
+            }
+        }
+        var rty = String.from("void")
+        if ret == types.NEVER || self.is_zst(ret) || sret {
+            rty = String.from("void")
+        } else if c_abi && ret == types.BOOL {
+            rty = String.from("zeroext i1")
+        } else {
+            rty = self.scalar(ret)
+        }
+        var fnty = rty.clone()
+        if variadic {
+            var fixed = Vec(String).new()
+            let nfixed = sig.params.len() + (if sret { 1 } else { 0 })
+            for i, x in param_tys {
+                if i < nfixed {
+                    fixed.push(x.clone())
+                }
+            }
+            fnty = fmt.f("{} ({}, ...)", [rty.as_str(), join(fixed, ", ").as_str()])
+        }
+        if rty == "void" {
+            cx.line(fmt.f("call {} {}({})", [fnty.as_str(), target, join(actual, ", ").as_str()]).as_str())
+        } else {
+            let r = cx.t()
+            cx.line(fmt.f("{} = call {} {}({})", [r.as_str(), fnty.as_str(), target, join(actual, ", ").as_str()]).as_str())
+            self.store_scalar(&cx, dt, r.as_str(), dptr)
+        }
+        if ret == types.NEVER {
+            cx.line("unreachable")
+            let id = cx.id()
+            cx.block((id.as_str() + ".dead").as_str())
+        }
+    }
+
+    fn intrinsic(inout self, inout cx: FnCx, body: Body, i: Intrinsic, args: Vec(Operand), dptr: str, dt: u32) {
+        var vals = Vec(String).new()
+        for o in args {
+            let t = self.operand_ty(body, o)
+            let v = self.operand(&cx, body, o)
+            let x = if self.is_scalar(t) { self.imm(&cx, v, t) } else { String.new() }
+            vals.push(x)
+        }
+        match i {
+            Trap => {
+                cx.line(trap_call(self.p.target))
+                cx.line("unreachable")
+                let id = cx.id()
+                cx.block((id.as_str() + ".dead").as_str())
+            }
+            Syscall => {
+                let (asm, cons) = syscall_asm(self.p.target, vals.len())
+                var argl = Vec(String).new()
+                for v in vals {
+                    argl.push("i64 " + v.as_str())
+                }
+                let r = cx.t()
+                cx.line(fmt.f("{} = call i64 asm sideeffect \"{}\", \"{}\"({})", [r.as_str(), asm.as_str(), cons.as_str(), join(argl, ", ").as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            Copy(e) => {
+                let es = self.size(e)
+                let n = cx.t()
+                cx.line(fmt.f("{} = mul i64 {}, {}", [n.as_str(), vals[2].as_str(), fmt.n(es as i128).as_str()]).as_str())
+                cx.line(fmt.f("call void @llvm.memmove.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", [vals[0].as_str(), vals[1].as_str(), n.as_str()]).as_str())
+            }
+            Fill => cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", [vals[0].as_str(), vals[1].as_str(), vals[2].as_str()]).as_str())
+            Sqrt(t) => self.math(&cx, "sqrt", t, vals, dptr, dt)
+            Floor(t) => self.math(&cx, "floor", t, vals, dptr, dt)
+            Ceil(t) => self.math(&cx, "ceil", t, vals, dptr, dt)
+            Trunc(t) => self.math(&cx, "trunc", t, vals, dptr, dt)
+            Round(t) => self.math(&cx, "round", t, vals, dptr, dt)
+            Abs(t) => self.math(&cx, "fabs", t, vals, dptr, dt)
+            Copysign(t) => {
+                let lt = self.scalar(t)
+                let suffix = if lt == "float" { "f32" } else { "f64" }
+                let f = "llvm.copysign." + suffix
+                self.declare(f.as_str(), fmt.f("declare {} @{}({}, {})", [lt.as_str(), f.as_str(), lt.as_str(), lt.as_str()]).as_str())
+                let r = cx.t()
+                cx.line(fmt.f("{} = call {} @{}({} {}, {} {})", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str(), lt.as_str(), vals[1].as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            Argc => {
+                let r = cx.t()
+                cx.line(fmt.f("{} = load i64, ptr @jihoo.argc", [r.as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            Argv => {
+                let r = cx.t()
+                cx.line(fmt.f("{} = load ptr, ptr @jihoo.argv", [r.as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            AtomicLoad(t) => {
+                let lt = self.mem_scalar(t)
+                let a = fmt.n(self.align(t) as i128)
+                var r = cx.t()
+                cx.line(fmt.f("{} = load atomic {}, ptr {} seq_cst, align {}", [r.as_str(), lt.as_str(), vals[0].as_str(), a.as_str()]).as_str())
+                if t == types.BOOL {
+                    let b = cx.t()
+                    cx.line(fmt.f("{} = trunc i8 {} to i1", [b.as_str(), r.as_str()]).as_str())
+                    r = b
+                }
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            AtomicStore(t) => {
+                let lt = self.mem_scalar(t)
+                let a = fmt.n(self.align(t) as i128)
+                let v = self.widen_bool(&cx, t, vals[1].as_str())
+                cx.line(fmt.f("store atomic {} {}, ptr {} seq_cst, align {}", [lt.as_str(), v.as_str(), vals[0].as_str(), a.as_str()]).as_str())
+            }
+            AtomicRmw(op, t) => {
+                let lt = self.mem_scalar(t)
+                let v = self.widen_bool(&cx, t, vals[1].as_str())
+                var r = cx.t()
+                let o = if op == "swap" { "xchg" } else { op.as_str() }
+                cx.line(fmt.f("{} = atomicrmw {} ptr {}, {} {} seq_cst", [r.as_str(), o, vals[0].as_str(), lt.as_str(), v.as_str()]).as_str())
+                if t == types.BOOL {
+                    let b = cx.t()
+                    cx.line(fmt.f("{} = trunc i8 {} to i1", [b.as_str(), r.as_str()]).as_str())
+                    r = b
+                }
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            AtomicCas(t) => {
+                let lt = self.mem_scalar(t)
+                let e = self.widen_bool(&cx, t, vals[1].as_str())
+                let n = self.widen_bool(&cx, t, vals[2].as_str())
+                let pair = cx.t()
+                cx.line(fmt.f("{} = cmpxchg ptr {}, {} {}, {} {} seq_cst seq_cst", [pair.as_str(), vals[0].as_str(), lt.as_str(), e.as_str(), lt.as_str(), n.as_str()]).as_str())
+                let r = cx.t()
+                cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 1", [r.as_str(), lt.as_str(), pair.as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            Fence => cx.line("fence seq_cst")
+            Asm(_, _, _) => {}
+        }
+    }
+
+    // `sqrt` and friends; `abs` of an integer.
+    fn math(inout self, inout cx: FnCx, name: str, t: u32, vals: Vec(String), dptr: str, dt: u32) {
+        let lt = self.scalar(t)
+        let r = cx.t()
+        if self.p.types.is_int(t) {
+            let f = "llvm.abs." + lt.as_str()
+            self.declare(f.as_str(), fmt.f("declare {} @{}({}, i1)", [lt.as_str(), f.as_str(), lt.as_str()]).as_str())
+            cx.line(fmt.f("{} = call {} @{}({} {}, i1 false)", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]).as_str())
+        } else {
+            let suffix = if lt == "float" { "f32" } else { "f64" }
+            let f = fmt.f("llvm.{}.{}", [name, suffix])
+            self.declare(f.as_str(), fmt.f("declare {} @{}({})", [lt.as_str(), f.as_str(), lt.as_str()]).as_str())
+            cx.line(fmt.f("{} = call {} @{}({} {})", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]).as_str())
+        }
+        self.store_scalar(&cx, dt, r.as_str(), dptr)
+    }
+
+    fn widen_bool(inout self, inout cx: FnCx, t: u32, v: str) -> String {
+        if t != types.BOOL {
+            return String.from(v)
+        }
+        let r = cx.t()
+        cx.line(fmt.f("{} = zext i1 {} to i8", [r.as_str(), v]).as_str())
+        r
+    }
+
+    // ---- the program's entry and runtime pieces ----
+
+    fn entry(inout self) {
+        let main = match self.p.entry {
+            Some(m) => m
+            None => return
+        }
+        let ret = self.p.fns[main as i64].sig.ret
+        let s = sym(self.p.fns[main as i64].symbol.as_str())
+        // Calls main and leaves its exit status, as an i32, in %code.
+        var call = String.new()
+        if self.is_zst(ret) || ret == types.NEVER {
+            call.push_str(fmt.f("  call void {}()\n", [s.as_str()]).as_str())
+            call.push_str("  %code = add i32 0, 0\n")
+        } else {
+            let lt = self.scalar(ret)
+            call.push_str(fmt.f("  %r = call {} {}()\n", [lt.as_str(), s.as_str()]).as_str())
+            let conv = match self.p.types.kind(ret) {
+                Int(i) => {
+                    if i.bits == 32 {
+                        String.from("%code = add i32 %r, 0")
+                    } else if i.bits > 32 {
+                        fmt.f("%code = trunc {} %r to i32", [lt.as_str()])
+                    } else {
+                        fmt.f("%code = {} {} %r to i32", [if i.signed { "sext" } else { "zext" }, lt.as_str()])
+                    }
+                }
+                Bool => String.from("%code = zext i1 %r to i32")
+                _ => String.from("%code = add i32 0, 0")
+            }
+            call.push_str(fmt.f("  {}\n", [conv.as_str()]).as_str())
+        }
+        if self.p.freestanding {
+            // `_start`: the stack holds argc, then argv.
+            self.out.push_str(fmt.f("module asm \"{}\"\n\n", [start_asm(self.p.target)]).as_str())
+            let (exit_asm, cons) = syscall_asm(self.p.target, 2)
+            let exit_no = match self.p.target {
+                X86_64 => "231"
+                Aarch64 => "94"
+            }
+            self.out.push_str(fmt.f("define void @jihoo.start(ptr %sp) {\nentry:\n  %argc = load i64, ptr %sp\n  store i64 %argc, ptr @jihoo.argc\n  %argv = getelementptr i8, ptr %sp, i64 8\n  store ptr %argv, ptr @jihoo.argv\n{}  %c64 = sext i32 %code to i64\n  %x = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 %c64)\n  unreachable\n}\n\n", [call.as_str(), exit_asm.as_str(), cons.as_str(), exit_no]).as_str())
+            self.out.push_str(MEM_FUNCTIONS)
+        } else {
+            self.out.push_str(fmt.f("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %a = sext i32 %argc to i64\n  store i64 %a, ptr @jihoo.argc\n  store ptr %argv, ptr @jihoo.argv\n{}  ret i32 %code\n}\n\n", [call.as_str()]).as_str())
+        }
+    }
+
+    // `jihoo.panic(msg, len)`: writes the message to standard error and
+    // stops. Uses the system call directly, so it works without libc.
+    fn runtime(inout self) {
+        let (wasm, wcons) = syscall_asm(self.p.target, 4)
+        let (prefix, plen) = self.str_global("panic: ")
+        let (nl, _) = self.str_global("\n")
+        let write_no = match self.p.target {
+            X86_64 => "1"
+            Aarch64 => "64"
+        }
+        let w = wasm.as_str()
+        let c = wcons.as_str()
+        self.out.push_str(fmt.f("define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {\nentry:\n  %a = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 {})\n  %b = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr %m, i64 %n)\n  %d = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 1)\n  {}\n  unreachable\n}\n\n", [w, c, write_no, prefix.as_str(), fmt.n(plen as i128).as_str(), w, c, write_no, w, c, write_no, nl.as_str(), trap_call(self.p.target)]).as_str())
+        self.declare("llvm.memcpy.p0.p0.i64", "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)")
+        self.declare("llvm.memmove.p0.p0.i64", "declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1)")
+        self.declare("llvm.memset.p0.i64", "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)")
+        self.declare("llvm.trap", "declare void @llvm.trap() cold noreturn nounwind")
+    }
+}
+
+fn mem_of(v: V) -> Option(String) {
+    match v {
+        Mem(m) => Some(m.clone())
+        _ => None
+    }
+}
+
+fn is_zero_imm(v: V) -> bool {
+    match v {
+        Imm(x) => x == "0" || x == "false" || x == "null"
+        _ => false
+    }
+}
+
+fn icmp(op: Op, signed: bool) -> str {
+    match op {
+        Eq => "eq"
+        Ne => "ne"
+        Lt => if signed { "slt" } else { "ult" }
+        Le => if signed { "sle" } else { "ule" }
+        Gt => if signed { "sgt" } else { "ugt" }
+        Ge => if signed { "sge" } else { "uge" }
+        _ => panic("not a comparison")
+    }
+}
+
+// The instruction that stops the program on a trap. `llvm.trap` is `ud2`
+// (SIGILL) on x86_64 but `brk` (SIGTRAP) on aarch64; `udf` gives SIGILL
+// there too, so a trap exits with 132 on every target.
+fn trap_call(t: Target) -> str {
+    match t {
+        X86_64 => "call void @llvm.trap()"
+        Aarch64 => "call void asm sideeffect \"udf #0\", \"\"()"
+    }
+}
+
+// Inline assembly for a system call with `n` operands (the number first).
+fn syscall_asm(t: Target, n: i64) -> (String, String) {
+    var regs = Vec(str).new()
+    match t {
+        X86_64 => {
+            for r in ["{rax}", "{rdi}", "{rsi}", "{rdx}", "{r10}", "{r8}", "{r9}"] {
+                regs.push(r)
+            }
+        }
+        Aarch64 => {
+            for r in ["{x8}", "{x0}", "{x1}", "{x2}", "{x3}", "{x4}", "{x5}"] {
+                regs.push(r)
+            }
+        }
+    }
+    var ins = String.new()
+    for i in 0..n {
+        if i > 0 {
+            ins.push(',')
+        }
+        ins.push_str(regs[i])
+    }
+    match t {
+        X86_64 => (String.from("syscall"), "={rax}," + ins.as_str() + ",~{rcx},~{r11},~{memory}")
+        Aarch64 => (String.from("svc #0"), "={x0}," + ins.as_str() + ",~{memory}")
+    }
+}
+
+fn start_asm(t: Target) -> str {
+    match t {
+        X86_64 => ".globl _start\\0A_start:\\0A  xor %rbp, %rbp\\0A  mov %rsp, %rdi\\0A  and $-16, %rsp\\0A  call jihoo.start\\0A  hlt\\0A"
+        Aarch64 => ".globl _start\\0A_start:\\0A  mov x29, #0\\0A  mov x30, #0\\0A  mov x0, sp\\0A  bl jihoo.start\\0A  brk #0\\0A"
+    }
+}
+
+// Without libc, LLVM's calls to `memcpy` and friends need definitions;
+// "no-builtins" keeps LLVM from turning their loops back into calls.
+const MEM_FUNCTIONS = "define weak ptr @memcpy(ptr %d, ptr %s, i64 %n) \"no-builtins\" {\nentry:\n  br label %head\nhead:\n  %i = phi i64 [ 0, %entry ], [ %i1, %body ]\n  %c = icmp ult i64 %i, %n\n  br i1 %c, label %body, label %done\nbody:\n  %sp = getelementptr i8, ptr %s, i64 %i\n  %dp = getelementptr i8, ptr %d, i64 %i\n  %b = load i8, ptr %sp\n  store i8 %b, ptr %dp\n  %i1 = add i64 %i, 1\n  br label %head\ndone:\n  ret ptr %d\n}\n\ndefine weak ptr @memmove(ptr %d, ptr %s, i64 %n) \"no-builtins\" {\nentry:\n  %fwd = icmp ule ptr %d, %s\n  br i1 %fwd, label %f.head, label %b.head\nf.head:\n  %i = phi i64 [ 0, %entry ], [ %i1, %f.body ]\n  %c = icmp ult i64 %i, %n\n  br i1 %c, label %f.body, label %done\nf.body:\n  %sp = getelementptr i8, ptr %s, i64 %i\n  %dp = getelementptr i8, ptr %d, i64 %i\n  %b = load i8, ptr %sp\n  store i8 %b, ptr %dp\n  %i1 = add i64 %i, 1\n  br label %f.head\nb.head:\n  %j = phi i64 [ %n, %entry ], [ %j1, %b.body ]\n  %cj = icmp ugt i64 %j, 0\n  br i1 %cj, label %b.body, label %done\nb.body:\n  %j1 = sub i64 %j, 1\n  %sq = getelementptr i8, ptr %s, i64 %j1\n  %dq = getelementptr i8, ptr %d, i64 %j1\n  %bq = load i8, ptr %sq\n  store i8 %bq, ptr %dq\n  br label %b.head\ndone:\n  ret ptr %d\n}\n\ndefine weak ptr @memset(ptr %d, i32 %v, i64 %n) \"no-builtins\" {\nentry:\n  %b = trunc i32 %v to i8\n  br label %head\nhead:\n  %i = phi i64 [ 0, %entry ], [ %i1, %body ]\n  %c = icmp ult i64 %i, %n\n  br i1 %c, label %body, label %done\nbody:\n  %dp = getelementptr i8, ptr %d, i64 %i\n  store i8 %b, ptr %dp\n  %i1 = add i64 %i, 1\n  br label %head\ndone:\n  ret ptr %d\n}\n\ndefine weak i32 @memcmp(ptr %a, ptr %b, i64 %n) \"no-builtins\" {\nentry:\n  br label %head\nhead:\n  %i = phi i64 [ 0, %entry ], [ %i1, %next ]\n  %c = icmp ult i64 %i, %n\n  br i1 %c, label %body, label %same\nbody:\n  %ap = getelementptr i8, ptr %a, i64 %i\n  %bp = getelementptr i8, ptr %b, i64 %i\n  %x = load i8, ptr %ap\n  %y = load i8, ptr %bp\n  %eq = icmp eq i8 %x, %y\n  br i1 %eq, label %next, label %diff\nnext:\n  %i1 = add i64 %i, 1\n  br label %head\ndiff:\n  %xz = zext i8 %x to i32\n  %yz = zext i8 %y to i32\n  %d = sub i32 %xz, %yz\n  ret i32 %d\nsame:\n  ret i32 0\n}\n\n"

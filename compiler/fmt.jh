@@ -62,3 +62,29 @@ pub fn push_f64(inout out: String, f: f64) {
         out.push_str(d)
     }
 }
+
+// `t` with each `{}` replaced by the next argument, as Rust's `format!`
+// with plain `{}` (the code generator writes many lines this way).
+pub fn f(t: str, args: [str]) -> String {
+    var out = String.new()
+    var k = 0
+    var i = 0
+    while i < t.len {
+        if t[i] == '{' && i + 1 < t.len && t[i + 1] == '}' {
+            out.push_str(args[k])
+            k += 1
+            i += 2
+        } else {
+            out.push(t[i])
+            i += 1
+        }
+    }
+    out
+}
+
+// A number as text.
+pub fn n(v: i128) -> String {
+    var s = String.new()
+    v.show(&s)
+    s
+}

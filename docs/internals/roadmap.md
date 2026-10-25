@@ -32,7 +32,7 @@ Done ([design](redesign.md)):
 
 - **The compiler in jihoo.** The first goal after 0.1: port
   `crates/jihoo` to jihoo, then build it with itself
-  ([plan and progress](self-hosting.md)). The lexer, the parser, the loader, sema, elaboration and the borrow kernel are done (for sema, jihoo gained `i128` and `u128`); next is the code generator.
+  ([plan and progress](self-hosting.md)). Done: every pass is ported, and the compiler in jihoo builds itself (stage 2) and writes the same LLVM IR as the Rust compiler for every program. Next: making the compiler in jihoo the one that is used (its driver cannot capture clang's output yet), and then retiring the Rust compiler to a bootstrap.
 - **Compile-time evaluation**: an interpreter of MIR with the target's
   memory layout, for `const` items, `comptime` expressions and compile-time
   arguments beyond the arithmetic sema folds today.

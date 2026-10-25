@@ -1,0 +1,8 @@
+// Functions of a module named `llvm` get symbols starting `llvm.`, which
+// LLVM keeps for its intrinsics; the code generator renames them.
+import llvm
+
+fn main() {
+    println(llvm.twice(21))
+    //> 42
+}

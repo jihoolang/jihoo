@@ -1,13 +1,17 @@
 // What the compiler asks of the system beyond `std`: whether files exist,
-// canonical paths, where the compiler itself is, and the system's reasons
-// for failing, worded as Rust's `io::Error` words them.
+// canonical paths, where the compiler itself is, its process id, removing
+// files, and the system's reasons for failing, worded as Rust's
+// `io::Error` words them.
 
+import std.env
 import std.libc
 
 extern fn realpath(path: *u8, resolved: *u8) -> *u8
 extern fn readlink(path: *u8, buf: *u8, n: i64) -> i64
 extern fn strerror(e: i32) -> *u8
 extern fn __errno_location() -> *i32
+extern fn getpid() -> i32
+extern fn unlink(path: *u8) -> i32
 
 // `s` as a C string: its bytes and a 0.
 fn c_str(s: str) -> String {
@@ -117,4 +121,24 @@ pub fn join(dir: str, rel: str) -> String {
     }
     s.push_str(rel)
     s
+}
+
+// This process's id.
+pub fn pid() -> i32 {
+    unsafe { getpid() }
+}
+
+// Removes a file; whether it went is not reported.
+pub fn remove(path: str) {
+    let c = c_str(path)
+    unsafe { unlink(c.as_str().ptr) }
+}
+
+// Where temporary files go: `TMPDIR`, else `/tmp` (as Rust's
+// `env::temp_dir`).
+pub fn temp_dir() -> String {
+    match env.get("TMPDIR") {
+        Some(d) => String.from(d)
+        None => String.from("/tmp")
+    }
 }

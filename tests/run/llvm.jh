@@ -1,0 +1,10 @@
+// A module named `llvm`: its symbols must not look like LLVM's intrinsics
+// (`tests/run/module_llvm.jh` imports it).
+pub fn twice(x: i64) -> i64 {
+    x * 2
+}
+
+fn main() {
+    println(twice(2))
+    //> 4
+}
