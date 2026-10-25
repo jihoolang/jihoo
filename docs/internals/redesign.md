@@ -277,7 +277,7 @@ write the compiler.
    and `str`, `for` over iterators, `?`. Done; `derive` is left.
 4. The interpreter: `const`, `comptime`, value parameters. Left.
 5. The library: `Map`, files, arguments, atomics; freestanding programs.
-   Done; formatting, processes and threads are left.
+   Done, and processes; formatting and threads are left.
 6. Documentation, the website, examples; remove v0. Done.
 
 ## Measurements

@@ -16,3 +16,8 @@ pub extern fn memcmp(a: *u8, b: *u8, n: i64) -> i32
 pub extern fn printf(fmt: *u8, ...) -> i32
 pub extern fn snprintf(buf: *u8, n: i64, fmt: *u8, ...) -> i32
 pub extern fn strtod(s: *u8, end: **u8) -> f64
+pub extern fn fork() -> i32
+pub extern fn execve(path: *u8, argv: **u8, envp: **u8) -> i32
+pub extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32
+pub extern fn _exit(code: i32) -> never
+pub extern fn access(path: *u8, mode: i32) -> i32

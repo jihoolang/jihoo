@@ -21,7 +21,8 @@ Done ([design](redesign.md)):
 8. `unsafe`: raw pointers, `static` globals, `extern fn` (with `...`),
    `export fn`, system calls, atomics.
 9. The standard library in jihoo: `Vec`, `String`, `Map`, `Box`, sorting,
-   files, arguments, printing; native and freestanding.
+   files, arguments, the environment, running other programs
+   (`std.process`), printing; native and freestanding.
 10. x86_64 and aarch64 Linux.
 11. Speed: on the benchmarks (recursion, a sieve, matrix multiplication,
     n-body), within measurement noise of C compiled by clang at `-O2`, with

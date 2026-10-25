@@ -1,0 +1,22 @@
+#![freestanding]
+import std.process
+import std.env
+
+fn main() {
+    let r = process.run("sh", ["-c", "exit 3"]).unwrap()
+    match r {
+        Code(c) => println(c)
+        Signal(s) => println(s)
+    }
+    println(process.run("true", []).unwrap().success())
+    println(process.run("sh", ["-c", "kill -9 $$"]).unwrap().success())
+    println(process.run("no-such-program-xyz", []).is_err())
+    println(env.get("PATH").is_some())
+    println(env.get("NO_SUCH_VARIABLE_XYZ").is_none())
+}
+//> 3
+//> true
+//> false
+//> true
+//> true
+//> true

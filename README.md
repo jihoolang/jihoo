@@ -14,7 +14,7 @@ lifetime annotations or a garbage collector.
 - **Generics at compile time**, as in Zig: `comptime T: type` parameters,
   inferred at calls, with traits as bounds.
 - **A standard library written in jihoo** (`Vec`, `String`, `Map`, `Box`,
-  sorting, files), with or without libc.
+  sorting, files, processes), with or without libc.
 
 Documentation: **<https://jihoo12.github.io/jihoo/>**, built from
 [docs/](docs) and [examples/](examples).
@@ -100,7 +100,8 @@ kernel; structs, enums, tuples, arrays, slices; `match` with exhaustiveness;
 generics with inference; traits with default methods and generic impls;
 closures that borrow, and `comptime` closures that inline; `Option`,
 `Result` and `?`; `unsafe` pointers, `static` globals, C functions, system
-calls and atomics; the standard library.
+calls and atomics; the standard library, including running other
+programs.
 
 Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo,
 compile-time evaluation, `derive`, dynamic dispatch, threads.

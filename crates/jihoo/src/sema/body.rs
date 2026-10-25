@@ -1089,9 +1089,16 @@ impl<'a> Sema<'a> {
             }
             E::Array(items) => {
                 let ee = match exp.map(|t| self.types.kind(t).clone()) {
-                    Some(TyKind::Array(e, _)) => Some(e),
+                    Some(TyKind::Array(e, _)) | Some(TyKind::Slice(e)) => Some(e),
                     _ => None,
                 };
+                // `[]` where a slice is expected: an empty view.
+                if let (true, Some(TyKind::Slice(e))) = (items.is_empty(), exp.map(|t| self.types.kind(t).clone())) {
+                    let vt = self.view_ty(TyKind::Slice(e));
+                    let pt = self.types.ptr(e);
+                    let ops = vec![Operand::Const(Const::Null(pt)), Operand::Const(Const::Int(0, types::I64))];
+                    return Ok(self.rvalue(fb, Rvalue::Aggregate(Agg::View(vt), ops), vt, span));
+                }
                 if items.is_empty() {
                     let Some(et) = ee else { return ty_err(span, "the type of an empty array must be known: write `let a: [T; 0] = []`") };
                     let t = self.types.intern(TyKind::Array(et, 0));

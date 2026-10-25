@@ -140,3 +140,27 @@ pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
     free_bytes(p)
     q
 }
+
+// Starts a program in a new process; the child's pid, or -1.
+pub unsafe fn spawn(path: *u8, argv: **u8, envp: **u8) -> i32 {
+    // clone(SIGCHLD): a fork.
+    let pid = syscall(sysno.CLONE, 17, 0, 0, 0, 0)
+    if pid == 0 {
+        syscall(sysno.EXECVE, path, argv, envp)
+        syscall(sysno.EXIT_GROUP, 127)
+    }
+    if pid < 0 { -1 } else { pid as i32 }
+}
+
+// Waits for a child; its raw wait status, or -1.
+pub fn wait(pid: i32) -> i32 {
+    var status: i32 = 0
+    let r = unsafe { syscall(sysno.WAIT4, pid as i64, &status, 0, 0) }
+    if r < 0 { -1 } else { status }
+}
+
+pub fn is_executable(path: str) -> bool {
+    let p = c_path(path)
+    // faccessat(AT_FDCWD, path, X_OK, 0)
+    unsafe { syscall(sysno.FACCESSAT, CWD, p.ptr, 1, 0) == 0 }
+}

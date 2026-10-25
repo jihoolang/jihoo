@@ -1,0 +1,88 @@
+// Running other programs.
+
+import std.sys
+import std.env
+
+// How a program ended.
+pub enum Exit {
+    // It returned this status.
+    Code(i32)
+    // A signal stopped it.
+    Signal(i32)
+}
+
+impl Exit {
+    pub fn success(self) -> bool {
+        match self {
+            Code(c) => c == 0
+            Signal(_) => false
+        }
+    }
+}
+
+// Runs a program with arguments and waits for it to end. A name without a
+// `/` is looked for in the directories of `PATH`. The program inherits the
+// environment and the standard streams.
+pub fn run(program: str, args: [str]) -> Result(Exit, String) {
+    let path = match find(program) {
+        Some(p) => p
+        None => return Err("cannot find " + program)
+    }
+    // C strings for the program, its arguments and argv.
+    var strings = Vec(Vec(u8)).new()
+    strings.push(c_string(path.as_str()))
+    strings.push(c_string(program))
+    for a in args {
+        strings.push(c_string(a))
+    }
+    var argv = Vec(*u8).with_capacity(strings.len())
+    for i in 1..strings.len() {
+        argv.push(strings[i].ptr)
+    }
+    argv.push(null)
+    let pid = unsafe { sys.spawn(strings[0].ptr, argv.ptr, env.environ()) }
+    if pid < 0 {
+        return Err("cannot start " + program)
+    }
+    let status = sys.wait(pid)
+    if status < 0 {
+        return Err("cannot wait for " + program)
+    }
+    if status & 0x7f == 0 {
+        Ok(Exit.Code((status >> 8) & 0xff))
+    } else {
+        Ok(Exit.Signal(status & 0x7f))
+    }
+}
+
+// The file a program name stands for.
+pub fn find(program: str) -> Option(String) {
+    if program.contains("/") {
+        return Some(program.to_string())
+    }
+    let dirs = match env.get("PATH") {
+        Some(p) => p
+        None => "/usr/bin:/bin"
+    }
+    for d in dirs.split(":") {
+        if d.len == 0 {
+            continue
+        }
+        var full = d.to_string()
+        full.push('/')
+        full.push_str(program)
+        if sys.is_executable(full.as_str()) {
+            return Some(full)
+        }
+    }
+    None
+}
+
+fn c_string(s: str) -> Vec(u8) {
+    var v = Vec(u8).with_capacity(s.len + 1)
+    for b in s {
+        v.push(b)
+    }
+    v.push(0)
+    v
+}

@@ -7,3 +7,7 @@ pub const MMAP: i64 = 222
 pub const MUNMAP: i64 = 215
 pub const OPENAT: i64 = 56
 pub const EXIT_GROUP: i64 = 94
+pub const CLONE: i64 = 220
+pub const EXECVE: i64 = 221
+pub const WAIT4: i64 = 260
+pub const FACCESSAT: i64 = 48
