@@ -17,7 +17,7 @@ everywhere; the others are imported (`import std.fs`).
 | `assert(cond, msg)` | panics when `cond` is false |
 | `drop(x)` | destroys `x` now |
 | `min(a, b)`, `max(a, b)` | by `Ord` |
-| `print(x)`, `println(x)`, `eprintln(x)` | anything with `Show`, to standard output (error) |
+| `print(x)`, `println(x)`, `eprintln(x)` | anything with `Show` (integers, `bool`, `str`, `String`; not floats or `Vec` yet), to standard output (error) |
 | `sort(&v)`, `sort_by(&v, less)` | a stable merge sort of a `Vec` |
 | `is_space`, `is_digit`, `is_alpha` | on bytes |
 
@@ -40,7 +40,8 @@ without copying.
 `push(byte)`, `push_str`, `clear`, `into_bytes`; `+` and `+=` with a `str`;
 `==` and `<` with other strings.
 
-`str`: `len`, `ptr`, `s[i]` (a byte), `s[a..b]` (a part), `to_string`,
+`str` (and slices) have the fields `len` and `ptr`, not methods: `s.len`.
+`str`: `s[i]` (a byte), `s[a..b]` (a part), `to_string`,
 `starts_with`, `ends_with`, `find`, `contains`, `trim`, `split`, `lines`,
 `parse_int`, `+`; `for b in s` gives bytes.
 

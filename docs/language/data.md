@@ -68,6 +68,9 @@ ranges `1..=9`, alternatives `A | B` (which may not bind names), tuples,
 variants `Some(x)`, and structs `Point { x, y: 0.0 }` or `Point { x, .. }`.
 Patterns see through `Box`: `Add(Num(a), b)`.
 
+A range pattern includes its end however it is written: `1..9` and `1..=9`
+both match 9, while the range `0..n` of a `for` loop stops before `n`.
+
 How bindings get their values:
 
 - On a new value (a call's result), bindings take its parts, moving them.

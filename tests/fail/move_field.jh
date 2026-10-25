@@ -1,0 +1,11 @@
+// Only a whole variable moves; a field is taken with mem.replace or clone.
+// error: cannot move a part of `a` out of its place
+struct A {
+    s: String
+}
+
+fn main() {
+    let a = A { s: "x" }
+    var t = a.s
+    println(t)
+}

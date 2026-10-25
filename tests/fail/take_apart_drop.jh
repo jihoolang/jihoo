@@ -1,0 +1,16 @@
+// A value with a destructor cannot be taken apart by a pattern.
+// error: cannot take apart a `F`: it has a `Drop` impl
+struct F {
+    fd: i32
+}
+
+impl Drop for F {
+    fn drop(inout self) {}
+}
+
+fn main() {
+    let f = F { fd: 1 }
+    match f {
+        F { fd } => println(fd)
+    }
+}

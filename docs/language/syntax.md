@@ -1,5 +1,9 @@
 # Syntax
 
+This page explains the syntax with examples; [Grammar](../reference/grammar.md)
+is the exact version, and [Coming from Rust](from-rust.md) lists where jihoo
+differs from what Rust would suggest.
+
 ## Files and items
 
 A file is a module: imports, then items in any order. Items are `fn`,

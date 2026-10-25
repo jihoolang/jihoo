@@ -1,0 +1,119 @@
+// What docs/language/from-rust.md and docs/reference/grammar.md say works.
+import std.mem
+
+struct A {
+    s: String
+}
+
+enum Tok {
+    Eq
+    Num(i64)
+}
+
+fn count_words(text: str) -> Map(String, i64) {
+    var counts = Map(String, i64).new()
+    for w in text.split(" ") {
+        if w.len == 0 {
+            continue
+        }
+        match counts.get_mut(w) {
+            Some(n) => n += 1
+            None => {
+                counts.insert(w.to_string(), 1)
+            }
+        }
+    }
+    counts
+}
+
+fn digit(c: u8) -> bool {
+    match c {
+        '0'..'9' => true
+        _ => false
+    }
+}
+
+fn digit_eq(c: u8) -> bool {
+    match c {
+        '0'..='9' => true
+        _ => false
+    }
+}
+
+// `a` is borrowed, so `+` copies its text.
+fn shout(a: String) -> String {
+    a + "!"
+}
+
+fn is_eq(t: Tok) -> bool {
+    match t {
+        Eq => true
+        Num(_) => false
+    }
+}
+
+fn main() {
+    let counts = count_words("a b  a")
+    println(counts["a"])
+    //> 2
+    println(counts["b"])
+    //> 1
+
+    println(digit('9') && digit_eq('9'))
+    //> true
+
+    let a = String.from("x")
+    let b = a.as_str() + "y"
+    println(a)
+    //> x
+    println(b)
+    //> xy
+    println(shout(a))
+    //> x!
+    println(a == "x" && "x" == a)
+    //> true
+
+    var r = A { s: "old" }
+    let t = mem.replace(&r.s, String.new())
+    println(t)
+    //> old
+
+    println(is_eq(Tok.Eq))
+    //> true
+
+    let c: u8 = 97
+    println(c as i64 * 2)
+    //> 194
+    println(6 & 1 == 0)
+    //> true
+    println(1 << 2 + 1)
+    //> 8
+    let n: u8 = 7
+    println(0 -% n)
+    //> 249
+
+    let pair = ((1, 2), 3)
+    println(pair.0.1)
+    //> 2
+
+    let total = 1 +
+        2
+    let s = "  hi  "
+        .trim()
+    println(total)
+    //> 3
+    println(s)
+    //> hi
+
+    if (A { s: "p" }).s == "p" {
+        println("paren")
+        //> paren
+    }
+
+    var x = 0
+    for i in 0..3 + 1 {
+        x += i
+    }
+    println(x)
+    //> 6
+}

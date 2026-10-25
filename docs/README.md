@@ -12,6 +12,7 @@ same on GitHub.
 
 - [A tour](language/tour.md)
 - [Syntax](language/syntax.md)
+- [Coming from Rust](language/from-rust.md)
 - [Types](language/types.md)
 - [Modules](language/modules.md)
 
@@ -35,6 +36,7 @@ same on GitHub.
 ## Reference
 
 - [Standard library](reference/standard-library.md)
+- [Grammar](reference/grammar.md)
 - [Builtins](reference/builtins.md)
 - [Command line](reference/command-line.md)
 

@@ -11,6 +11,18 @@ and freestanding (`#![freestanding]`: syscalls, static binary). Targets are
 x86_64 and aarch64 Linux. Version 0.1 is a rewrite; `docs/internals/redesign.md`
 says why.
 
+## Writing jihoo code
+
+jihoo looks like Rust but differs in ways that are easy to get wrong
+(`Vec(T)` not `Vec<T>`, `.` not `::`, `let x = place` borrows, no `if let`,
+newlines end statements, range patterns include their end). Before writing or
+reviewing `.jh` code, read `docs/language/from-rust.md` (the differences) and
+`docs/reference/grammar.md` (the exact syntax, from `parse.rs`); `lib/std/` is
+the largest body of idiomatic jihoo. When unsure whether something works,
+compile a small program with `jihoo run` rather than guessing, and when you
+find a difference the docs do not mention, add it to `from-rust.md` and a
+test (`tests/run/from_rust.jh`).
+
 ## Environment and build
 
 Everything comes from `flake.nix` (Rust, clang, lld from LLVM 21). Work inside
