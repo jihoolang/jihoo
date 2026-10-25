@@ -1,0 +1,6 @@
+// A negative literal is not a u128.
+// error: -1 does not fit in `u128`
+
+fn main() {
+    let x: u128 = -1
+}

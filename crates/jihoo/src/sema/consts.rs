@@ -16,8 +16,14 @@ impl<'a> Sema<'a> {
         }
     }
 
+    /// Whether `v` is a value of `t`. A 128-bit constant is its value's bit
+    /// pattern (a `u128` past `i128::MAX` is negative here); every such
+    /// pattern fits, except a negative literal for a `u128`.
     pub fn int_fits(&self, v: i128, t: TyId) -> bool {
         let Some(i) = self.types.int(t) else { return false };
+        if i.bits == 128 {
+            return i.signed || v >= 0;
+        }
         if i.signed {
             let lim = 1i128 << (i.bits - 1);
             v >= -lim && v < lim
@@ -187,6 +193,9 @@ impl<'a> Sema<'a> {
             (Const::Int(x, _), Const::Int(y, _)) => {
                 let signed = self.types.int(t).map(|i| i.signed).unwrap_or(true);
                 let bits = self.types.int(t).map(|i| i.bits).unwrap_or(64);
+                if bits == 128 {
+                    return fold_128(op, x, y, signed, t, span);
+                }
                 let arith = |v: i128, me: &Self| -> R<(Const, TyId)> {
                     if matches!(op, Op::Add | Op::Sub | Op::Mul) && !me.int_fits(v, t) {
                         return ty_err(span, "the result overflows its type");
@@ -251,15 +260,61 @@ impl<'a> Sema<'a> {
     pub fn const_cast(&mut self, c: Const, to: TyId, span: crate::diag::Span) -> R<Const> {
         Ok(match (c, self.types.kind(to).clone()) {
             (Const::Int(v, _), TyKind::Int(_)) => Const::Int(self.wrap_int(v, to), to),
-            (Const::Int(v, _), TyKind::Float(_)) => Const::Float(v as f64, to),
+            (Const::Int(v, from), TyKind::Float(_)) => {
+                let unsigned_128 = self.types.int(from).map(|i| i.bits == 128 && !i.signed).unwrap_or(false);
+                Const::Float(if unsigned_128 { v as u128 as f64 } else { v as f64 }, to)
+            }
             (Const::Float(v, _), TyKind::Float(32)) => Const::Float(v as f32 as f64, to),
             (Const::Float(v, _), TyKind::Float(_)) => Const::Float(v, to),
             (Const::Float(v, _), TyKind::Int(i)) => {
-                let x = if i.signed { v as i64 as i128 } else { v as u64 as i128 };
+                let x = match (i.signed, i.bits) {
+                    (true, 128) => v as i128,
+                    (false, 128) => v as u128 as i128,
+                    (true, _) => v as i64 as i128,
+                    (false, _) => v as u64 as i128,
+                };
                 Const::Int(self.wrap_int(x, to), to)
             }
             (Const::Bool(b), TyKind::Int(_)) => Const::Int(b as i128, to),
             _ => return ty_err(span, "this conversion cannot be done while compiling"),
         })
+    }
+}
+
+/// Arithmetic on 128-bit constants, which are bit patterns in an `i128`:
+/// at that width, as the program would do it.
+fn fold_128(op: Op, x: i128, y: i128, signed: bool, t: TyId, span: crate::diag::Span) -> R<(Const, TyId)> {
+    let overflow = || ty_err(span, "the result overflows its type");
+    let int = |v: i128| Ok((Const::Int(v, t), t));
+    let (ux, uy) = (x as u128, y as u128);
+    let n = (y as u32) % 128;
+    match op {
+        Op::Add if signed => x.checked_add(y).map_or_else(overflow, int),
+        Op::Sub if signed => x.checked_sub(y).map_or_else(overflow, int),
+        Op::Mul if signed => x.checked_mul(y).map_or_else(overflow, int),
+        Op::Add => ux.checked_add(uy).map_or_else(overflow, |v| int(v as i128)),
+        Op::Sub => ux.checked_sub(uy).map_or_else(overflow, |v| int(v as i128)),
+        Op::Mul => ux.checked_mul(uy).map_or_else(overflow, |v| int(v as i128)),
+        Op::AddWrap => int(x.wrapping_add(y)),
+        Op::SubWrap => int(x.wrapping_sub(y)),
+        Op::MulWrap => int(x.wrapping_mul(y)),
+        Op::Div | Op::Rem if y == 0 => ty_err(span, "division by zero"),
+        Op::Div if signed => x.checked_div(y).map_or_else(overflow, int),
+        Op::Rem if signed => x.checked_rem(y).map_or_else(overflow, int),
+        Op::Div => int((ux / uy) as i128),
+        Op::Rem => int((ux % uy) as i128),
+        Op::And => int(x & y),
+        Op::Or => int(x | y),
+        Op::Xor => int(x ^ y),
+        Op::Shl => int(x << n),
+        Op::Shr if signed => int(x >> n),
+        Op::Shr => int((ux >> n) as i128),
+        Op::Eq => Ok((Const::Bool(x == y), types::BOOL)),
+        Op::Ne => Ok((Const::Bool(x != y), types::BOOL)),
+        Op::Lt => Ok((Const::Bool(if signed { x < y } else { ux < uy }), types::BOOL)),
+        Op::Le => Ok((Const::Bool(if signed { x <= y } else { ux <= uy }), types::BOOL)),
+        Op::Gt => Ok((Const::Bool(if signed { x > y } else { ux > uy }), types::BOOL)),
+        Op::Ge => Ok((Const::Bool(if signed { x >= y } else { ux >= uy }), types::BOOL)),
+        _ => ty_err(span, "not an integer operator"),
     }
 }

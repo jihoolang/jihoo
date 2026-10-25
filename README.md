@@ -96,12 +96,12 @@ libc, static) programs for x86_64 and aarch64 Linux.
 
 Done: ownership with moves, destructors and drop flags; borrowing with
 parameter conventions, projections and views, checked by a separate borrow
-kernel; structs, enums, tuples, arrays, slices; `match` with exhaustiveness;
-generics with inference; traits with default methods and generic impls;
-closures that borrow, and `comptime` closures that inline; `Option`,
-`Result` and `?`; `unsafe` pointers, `static` globals, C functions, system
-calls and atomics; the standard library, including running other
-programs.
+kernel; integers up to 128 bits; structs, enums, tuples, arrays, slices;
+`match` with exhaustiveness; generics with inference; traits with default
+methods and generic impls; closures that borrow, and `comptime` closures
+that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
+globals, C functions, system calls and atomics; the standard library,
+including running other programs.
 
 Next ([roadmap](docs/internals/roadmap.md)): the compiler written in jihoo
 ([in progress](docs/internals/self-hosting.md): the lexer, the parser and the loader),

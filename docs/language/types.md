@@ -3,8 +3,8 @@
 | type | values |
 |------|--------|
 | `bool` | `true`, `false` |
-| `i8` `i16` `i32` `i64` | signed integers; `int` is `i64` |
-| `u8` `u16` `u32` `u64` | unsigned integers |
+| `i8` `i16` `i32` `i64` `i128` | signed integers; `int` is `i64` |
+| `u8` `u16` `u32` `u64` `u128` | unsigned integers |
 | `f32` `f64` | IEEE 754 floats |
 | `()` | the value of a function that returns nothing |
 | `(A, B)` | tuples |
@@ -24,7 +24,9 @@ library types ([Standard library](../reference/standard-library.md)).
 ## Integers
 
 Integer types never mix implicitly: convert with `as`. A literal takes the
-type its context expects.
+type its context expects. A literal is at most 64 bits
+(`0xffff_ffff_ffff_ffff`); build wider values with shifts and `|`:
+`(hi as u128) << 64 | lo as u128`.
 
 - `+`, `-` and `*` **trap on overflow** in debug builds (the default) and
   wrap in release builds (`--release`). `+%`, `-%` and `*%` always wrap.
@@ -32,6 +34,10 @@ type its context expects.
   `MIN / -1` wraps to `MIN`.
 - Shifts use the shift amount modulo the width.
 - Lengths and indices are `i64`.
+- `i128` and `u128` are 16 bytes, aligned to 16, as C's `__int128` on
+  both targets. LLVM calls helpers for their division and their conversions
+  to and from floats: libgcc's in native programs, the standard library's
+  (`std/rt.freestanding.jh`) in freestanding ones.
 
 ## Floats
 

@@ -1,0 +1,8 @@
+// Constants are 128-bit arithmetic too, and overflow is an error.
+// error: the result overflows its type
+
+const X: u128 = (1 << 127) * 2
+
+fn main() {
+    println(X)
+}

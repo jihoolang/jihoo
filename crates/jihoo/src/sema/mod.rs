@@ -527,6 +527,8 @@ impl<'a> Sema<'a> {
             "u16" => types::U16,
             "u32" => types::U32,
             "u64" => types::U64,
+            "i128" => types::I128,
+            "u128" => types::U128,
             "f32" => types::F32,
             "f64" => types::F64,
             "str" => types::STR,

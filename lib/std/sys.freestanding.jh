@@ -1,6 +1,8 @@
 // The operating system, through Linux system calls (no libc).
 
 import std.sysno
+// 128-bit division and float conversions, which LLVM calls
+import std.rt
 
 pub fn write_fd(fd: i32, s: str) -> i64 {
     var done = 0

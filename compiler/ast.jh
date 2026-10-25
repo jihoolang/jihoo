@@ -289,13 +289,6 @@ pub struct Pat {
     pub span: Span
 }
 
-// An integer in a pattern: `-` and a `u64`, so that both `-5` and
-// `0xffffffffffffffff` fit. (The Rust compiler uses an `i128`.)
-pub struct PatInt {
-    pub neg: bool
-    pub mag: u64
-}
-
 pub struct FieldPat {
     pub name: String
     pub pat: Pat
@@ -306,7 +299,8 @@ pub enum PatKind {
     // A name: binds, unless it names a variant without payload. `var x`
     // (true) makes the binding mutable.
     Name(String, bool)
-    Int(PatInt)
+    // `i128`, so that both `-5` and `0xffffffffffffffff` fit
+    Int(i128)
     Char(u8)
     Bool(bool)
     Str(String)
@@ -316,5 +310,5 @@ pub enum PatKind {
     // `P { a, b: x, .. }`: the path, the fields, whether `..` ends it.
     Struct(Vec(String), Vec(FieldPat), bool)
     Or(Vec(Pat))
-    Range(PatInt, PatInt)
+    Range(i128, i128)
 }

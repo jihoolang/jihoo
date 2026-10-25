@@ -109,12 +109,21 @@ impl(T: Number) Ord for T {
 
 impl(T: Int) Hash for T {
     fn hash(self) -> u64 {
-        // A 64-bit mix (from SplitMix64).
-        var x = self as u64
-        x = (x ^ (x >> 30)) *% 0xbf58476d1ce4e5b9
-        x = (x ^ (x >> 27)) *% 0x94d049bb133111eb
-        x ^ (x >> 31)
+        if size_of(T) == 16 {
+            // both halves
+            let x = self as u128
+            return mix64((x as u64) ^ mix64((x >> 64) as u64))
+        }
+        mix64(self as u64)
     }
+}
+
+// A 64-bit mix (from SplitMix64).
+fn mix64(v: u64) -> u64 {
+    var x = v
+    x = (x ^ (x >> 30)) *% 0xbf58476d1ce4e5b9
+    x = (x ^ (x >> 27)) *% 0x94d049bb133111eb
+    x ^ (x >> 31)
 }
 
 impl(T: Number) Default for T {

@@ -124,6 +124,10 @@ impl Show for bool {
 
 impl(T: Int) Show for T {
     fn show(self, inout out: String) {
+        if size_of(T) == 16 {
+            show_128(self < (0 as T), self as u128, &out)
+            return
+        }
         var buf = [0 as u8; 24]
         var i = 24
         let neg = self < (0 as T)
@@ -143,6 +147,32 @@ impl(T: Int) Show for T {
             buf[i] = '-'
         }
         out.push_str(unsafe { make_str(&buf[i], 24 - i) })
+    }
+}
+
+// A 128-bit integer given as its bits and whether it is negative: in
+// pieces of 19 digits, so that only two divisions are 128-bit.
+fn show_128(neg: bool, bits: u128, inout out: String) {
+    var n = if neg { 0 -% bits } else { bits }
+    let piece: u128 = 10000000000000000000
+    var parts = [0 as u64; 3]
+    var k = 0
+    while n >= piece {
+        parts[k] = (n % piece) as u64
+        n = n / piece
+        k += 1
+    }
+    if neg {
+        out.push('-')
+    }
+    (n as u64).show(&out)
+    while k > 0 {
+        k -= 1
+        let s = parts[k].to_string()
+        for _ in 0..19 - s.len() {
+            out.push('0')
+        }
+        out.push_str(s.as_str())
     }
 }
 

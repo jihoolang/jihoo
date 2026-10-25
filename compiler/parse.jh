@@ -35,7 +35,6 @@ type LambdaParam = ast.LambdaParam
 type FieldInit = ast.FieldInit
 type Pat = ast.Pat
 type PatKind = ast.PatKind
-type PatInt = ast.PatInt
 type FieldPat = ast.FieldPat
 
 const MAX_DEPTH = 500
@@ -1112,7 +1111,7 @@ impl Parser {
     }
 
     // An integer or a byte, maybe after `-`.
-    fn pat_int(inout self) -> Option(PatInt) {
+    fn pat_int(inout self) -> Option(i128) {
         let neg = self.at(Tok.Minus)
         let save = self.i
         if neg {
@@ -1122,9 +1121,9 @@ impl Parser {
             self.i = save
             return None
         }
-        let v = self.toks[self.i].int
+        let v = self.toks[self.i].int as i128
         self.bump()
-        Some(PatInt { neg: neg && v != 0, mag: v })
+        Some(if neg { -v } else { v })
     }
 
     fn single_pattern(inout self) -> Result(Pat, Diag) {
@@ -1140,7 +1139,7 @@ impl Parser {
                         None => return Err(self.error("expected the end of the range"))
                     }
                 }
-                let kind = if is_char { PatKind.Char(v.mag as u8) } else { PatKind.Int(v) }
+                let kind = if is_char { PatKind.Char(v as u8) } else { PatKind.Int(v) }
                 return Ok(Pat { kind: kind, span: start.to(self.prev_span()) })
             }
             None => {}

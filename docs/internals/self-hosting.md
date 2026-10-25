@@ -38,7 +38,7 @@ same way.
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | needs `i128` (below) |
+| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | next |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
@@ -61,8 +61,6 @@ better way the port takes it and says so in a comment; so far:
 - Enum variants with named fields (`StmtKind::Let { .. }` in Rust) become
   variants holding a struct.
 - `format!` becomes `String` building with `push_str` and `show`.
-- Pattern literals (`i128` in Rust) are a sign and a `u64` (`ast.PatInt`)
-  until jihoo has `i128`.
 - Rust's `Display` for floats, which messages use, is `fmt.push_f64`
   (the shortest `%e` that reads back exactly, through libc).
 - What `std` does not offer yet (whether a file exists, canonical paths,
@@ -105,11 +103,16 @@ And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and
 `match` using up a whole owned variable on every path.
 
-## Next: `i128`
+## `i128` and `u128`
 
 Sema folds constants in `i128` (a `u64` and a negative number both fit) and
-MIR keeps integer constants that way. Before step 4, jihoo gets `i128` and
-`u128`, which LLVM has already.
+MIR keeps integer constants that way, so jihoo gained `i128` and `u128`
+before step 4. A 128-bit constant is held as its bit pattern and folded at
+that width (`fold_128` in `consts.rs`); freestanding programs get LLVM's
+128-bit helpers from `std/rt.freestanding.jh`, tested against libgcc's on
+both targets. Literals stay at most 64 bits for now. Adding `i128`
+also found that a shift ignored the type its context expected:
+`let b: u8 = 1 << 3` was an error (`tests/run/int128.jh`).
 
 ## Known issues
 

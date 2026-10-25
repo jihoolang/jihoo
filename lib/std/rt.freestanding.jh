@@ -1,0 +1,154 @@
+// What LLVM calls for 128-bit integers that the machine cannot do in a few
+// instructions: division, remainder and conversions to and from floats. A
+// native program gets these from the C runtime (libgcc); a freestanding one
+// from here. They use no 128-bit division or 128-bit float conversion
+// themselves, which would call back into them.
+
+const TWO_64: f64 = 18446744073709551616.0
+
+fn f64_bits(x: f64) -> u64 {
+    var v = x
+    unsafe { *(&v as *u64) }
+}
+
+fn f64_of_bits(b: u64) -> f64 {
+    var v = b
+    unsafe { *(&v as *f64) }
+}
+
+// 2^k, exactly, for 0 <= k < 1024.
+fn pow2(k: i64) -> f64 {
+    f64_of_bits(((1023 + k) as u64) << 52)
+}
+
+// The number of bits `a` needs.
+fn width(a: u128) -> i64 {
+    var n = 0
+    var x = a
+    while x != 0 {
+        x = x >> 1
+        n += 1
+    }
+    n
+}
+
+fn udivmod(n: u128, d: u128) -> (u128, u128) {
+    if n >> 64 == 0 && d >> 64 == 0 {
+        let a = n as u64
+        let b = d as u64
+        return ((a / b) as u128, (a % b) as u128)
+    }
+    var q: u128 = 0
+    var r: u128 = 0
+    var i = width(n) - 1
+    while i >= 0 {
+        r = (r << 1) | ((n >> i) & 1)
+        if r >= d {
+            r = r -% d
+            q = q | (1 << i)
+        }
+        i -= 1
+    }
+    (q, r)
+}
+
+fn abs(a: i128) -> u128 {
+    if a < 0 { 0 -% (a as u128) } else { a as u128 }
+}
+
+export fn __udivti3(n: u128, d: u128) -> u128 {
+    udivmod(n, d).0
+}
+
+export fn __umodti3(n: u128, d: u128) -> u128 {
+    udivmod(n, d).1
+}
+
+export fn __divti3(a: i128, b: i128) -> i128 {
+    let q = udivmod(abs(a), abs(b)).0
+    if (a < 0) != (b < 0) { (0 -% q) as i128 } else { q as i128 }
+}
+
+// The remainder has the sign of the dividend, as in C.
+export fn __modti3(a: i128, b: i128) -> i128 {
+    let r = udivmod(abs(a), abs(b)).1
+    if a < 0 { (0 -% r) as i128 } else { r as i128 }
+}
+
+// `a` rounded to a float: its top 64 bits, with a sticky bit for the rest
+// so that the machine's 64-bit conversion rounds as the whole value would,
+// then scaled exactly.
+fn top64(a: u128) -> (u64, i64) {
+    let k = width(a) - 64
+    if k <= 0 {
+        return (a as u64, 0)
+    }
+    var m = (a >> k) as u64
+    if a & ((1 << k) - 1) != 0 {
+        m = m | 1
+    }
+    (m, k)
+}
+
+export fn __floatuntidf(a: u128) -> f64 {
+    let (m, k) = top64(a)
+    (m as f64) * pow2(k)
+}
+
+export fn __floattidf(a: i128) -> f64 {
+    let f = __floatuntidf(abs(a))
+    if a < 0 { 0.0 - f } else { f }
+}
+
+export fn __floatuntisf(a: u128) -> f32 {
+    let (m, k) = top64(a)
+    (m as f32) * (pow2(k) as f32)
+}
+
+export fn __floattisf(a: i128) -> f32 {
+    let f = __floatuntisf(abs(a))
+    if a < 0 { 0.0 - f } else { f }
+}
+
+// The integer part of `x`, saturated to [0, 2^128).
+export fn __fixunsdfti(x: f64) -> u128 {
+    if !(x >= 1.0) {
+        return 0
+    }
+    if x >= TWO_64 * TWO_64 {
+        return 0 -% (1 as u128)
+    }
+    let b = f64_bits(x)
+    let e = ((b >> 52) & 0x7ff) as i64 - 1075
+    let m = ((b & 0xfffffffffffff) | 0x10000000000000) as u128
+    if e >= 0 { m << e } else { m >> (0 - e) }
+}
+
+// The integer part of `x`, saturated to [-2^127, 2^127).
+export fn __fixdfti(x: f64) -> i128 {
+    let lim = TWO_64 * TWO_64 / 2.0
+    if x != x {
+        return 0
+    }
+    let top: u128 = 1 << 127
+    if x >= lim {
+        return (top - 1) as i128
+    }
+    if x <= 0.0 - lim {
+        return top as i128
+    }
+    if x < 0.0 {
+        let u = __fixunsdfti(0.0 - x)
+        (0 -% u) as i128
+    } else {
+        __fixunsdfti(x) as i128
+    }
+}
+
+export fn __fixunssfti(x: f32) -> u128 {
+    __fixunsdfti(x as f64)
+}
+
+export fn __fixsfti(x: f32) -> i128 {
+    __fixdfti(x as f64)
+}

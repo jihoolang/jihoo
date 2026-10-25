@@ -178,7 +178,9 @@ fn link_exe(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool,
     let mut c = Command::new(&cc);
     c.arg(opt).arg("-w").arg("-target").arg(target.triple()).arg("-x").arg("ir").arg(&ll_path).arg("-x").arg("none");
     if freestanding {
-        c.args(["-nostdlib", "-static", "-fuse-ld=lld"]);
+        // sections per function, so that unused ones (the 128-bit helpers of
+        // std.rt) are left out
+        c.args(["-nostdlib", "-static", "-fuse-ld=lld", "-ffunction-sections", "-Wl,--gc-sections"]);
     }
     for l in link {
         c.arg(l);

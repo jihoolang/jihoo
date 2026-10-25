@@ -1039,10 +1039,13 @@ impl<'a> Sema<'a> {
                 if matches!(op, Op::LogAnd | Op::LogOr) {
                     return self.logic(fb, *op, a, b, span);
                 }
-                let ea = if op.is_compare() || matches!(op, Op::Shl | Op::Shr) { None } else { exp };
+                // A shift has its left side's type, so `let b: u8 = 1 << 3`
+                // makes the `1` a `u8`.
+                let ea = if op.is_compare() { None } else { exp };
                 let mut av = self.expr(fb, a, ea)?;
-                // `1 + x`: let the literal take the other side's type.
-                if matches!(a.kind, E::Int(_) | E::Float(_) | E::Char(_)) && ea.is_none() && !matches!(b.kind, E::Int(_) | E::Float(_) | E::Char(_)) {
+                // `1 + x`: let the literal take the other side's type (not for
+                // a shift, whose sides may differ).
+                if matches!(a.kind, E::Int(_) | E::Float(_) | E::Char(_)) && ea.is_none() && !matches!(op, Op::Shl | Op::Shr) &&!matches!(b.kind, E::Int(_) | E::Float(_) | E::Char(_)) {
                     let probe = self.peek_type(fb, b);
                     if let Some(bt) = probe {
                         if self.types.is_int(bt) || self.types.is_float(bt) {

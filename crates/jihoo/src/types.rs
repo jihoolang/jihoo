@@ -118,6 +118,8 @@ pub const F32: TyId = 11;
 pub const F64: TyId = 12;
 pub const STR: TyId = 13;
 pub const TYPE: TyId = 14;
+pub const I128: TyId = 15;
+pub const U128: TyId = 16;
 
 impl Types {
     pub fn new() -> Types {
@@ -146,6 +148,8 @@ impl Types {
             TyKind::Float(64),
             TyKind::Str,
             TyKind::Type,
+            int(true, 128),
+            int(false, 128),
         ] {
             t.intern(k);
         }

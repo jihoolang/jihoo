@@ -22,7 +22,9 @@ fn main() {
 
 A freestanding program starts at `_start`, which the compiler writes: it
 records the arguments for `env.args()`, calls `main` and exits with its
-result.
+result. What the C runtime would provide, LLVM's helpers for 128-bit
+division and float conversion, comes from `std/rt.freestanding.jh`;
+functions nothing calls are left out of the executable.
 
 ## Targets
 

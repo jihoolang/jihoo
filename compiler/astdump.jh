@@ -647,9 +647,9 @@ impl Dump {
         self.s(")")
     }
 
-    fn pat_int(inout self, v: ast.PatInt) {
-        self.s(if v.neg { " -" } else { " " })
-        v.mag.show(&self.out)
+    fn pat_int(inout self, v: i128) {
+        self.s(" ")
+        v.show(&self.out)
     }
 
     fn pat(inout self, p: ast.Pat) {

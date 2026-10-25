@@ -136,6 +136,11 @@ fn main() {
     // a `match` that binds parts of a whole owned variable uses it up
     println(first_name(Named.One("y".to_string())))
     //> y
+
+    // no 128-bit literals: build the value
+    let max = 0 -% (1 as u128)
+    println(max)
+    //> 340282366920938463463374607431768211455
 }
 
 enum Named {

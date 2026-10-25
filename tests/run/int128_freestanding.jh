@@ -1,0 +1,38 @@
+#![freestanding]
+// 128-bit division and float conversions without libc, through
+// std/rt.freestanding.jh. The operands come from the arguments so that they
+// are not folded away.
+
+import std.env
+
+fn arg(i: i64) -> i128 {
+    env.args()[i].parse_int().unwrap() as i128
+}
+
+fn main() {
+    let a = arg(1) << 100
+    let b = arg(2)
+    println(a / b)
+    //> 181092942889747057356671886482
+    println(a % b)
+    //> 2
+    println(0 - a / b)
+    //> -181092942889747057356671886482
+    println((0 - a) % b)
+    //> -2
+    let u = a as u128
+    println(u / (b as u128))
+    //> 181092942889747057356671886482
+    println(u % (b as u128))
+    //> 2
+    let f = a as f64
+    println(f as i128)
+    //> 1267650600228229401496703205376
+    println((0.0 - f) as i128)
+    //> -1267650600228229401496703205376
+    println((u as f32) as u128)
+    //> 1267650600228229401496703205376
+    println((1e40 as u128) == 0 -% (1 as u128))
+    //> true
+}
+// args: 1 7
