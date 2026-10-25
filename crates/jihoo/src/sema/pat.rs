@@ -216,6 +216,12 @@ impl<'a> Sema<'a> {
     /// The place a `Box` (or anything with `deref`) points to, when a
     /// pattern looks inside it.
     fn deref_for_pat(&mut self, fb: &mut Fb, pat: &ast::Pat, place: Place, ty: TyId, span: Span) -> R<Option<(Place, TyId)>> {
+        // Through a borrow held as a value (`Option(ref T)`'s payload): what
+        // it points to. A name binds the borrow itself, unless it names a
+        // variant.
+        if let Some(inner) = self.pat_through_ref(fb, pat, ty) {
+            return Ok(Some((place.with(Proj::Deref), inner)));
+        }
         let structural = matches!(pat.kind, PatKind::Variant(..) | PatKind::Struct(..) | PatKind::Tuple(..));
         let fits = match (&pat.kind, self.types.kind(ty)) {
             (PatKind::Tuple(_), TyKind::Tuple(_)) => true,
@@ -230,6 +236,20 @@ impl<'a> Sema<'a> {
         let t = v.ty;
         let VK::Place(p) = v.vk else { return Ok(None) };
         Ok(Some((p, t)))
+    }
+
+    /// The type a pattern sees through a `ref`/`inout` type, if it looks
+    /// inside (anything but `_`, a binding name, or `|`).
+    fn pat_through_ref(&self, fb: &Fb, pat: &ast::Pat, ty: TyId) -> Option<TyId> {
+        if !self.types.is_ref(ty) {
+            return None;
+        }
+        let inner = self.types.pointee(ty)?;
+        match &pat.kind {
+            PatKind::Wild | PatKind::Or(_) => None,
+            PatKind::Name(n, _) if !self.names_variant(fb, n, inner) => None,
+            _ => Some(inner),
+        }
     }
 
     /// Jumps to `fail` unless the place matches the pattern.
@@ -392,8 +412,14 @@ impl<'a> Sema<'a> {
     fn bind(&mut self, fb: &mut Fb, pat: &ast::Pat, place: Place, ty: TyId, mode: BindMode) -> R<()> {
         let span = pat.span;
         if let Some((p, t)) = self.deref_for_pat(fb, pat, place.clone(), ty, span)? {
-            // Inside a box, bindings borrow.
-            let m = if mode == BindMode::Owned { BindMode::Borrow } else { mode };
+            // Inside a box or a borrow, bindings borrow; through an `inout`
+            // one, mutably.
+            let through_mut = matches!(self.types.kind(ty), TyKind::RefMut(_));
+            let m = match mode {
+                BindMode::Owned | BindMode::Auto if through_mut => BindMode::BorrowMut,
+                BindMode::Owned => BindMode::Borrow,
+                m => m,
+            };
             return self.bind(fb, pat, p, t, m);
         }
         match &pat.kind {
@@ -555,6 +581,11 @@ impl<'a> Sema<'a> {
 
     fn reduce(&mut self, fb: &mut Fb, pat: &ast::Pat, ty: TyId) -> R<P> {
         let span = pat.span;
+        // Looking through a borrow: one constructor around what it points to.
+        if let Some(inner) = self.pat_through_ref(fb, pat, ty) {
+            let p = self.reduce(fb, pat, inner)?;
+            return Ok(P::Ctor(0, vec![p]));
+        }
         // Looking inside a box.
         let structural = matches!(pat.kind, PatKind::Variant(..) | PatKind::Struct(..) | PatKind::Tuple(..));
         if structural {
@@ -661,6 +692,7 @@ impl<'a> Sema<'a> {
         Ok(match self.types.kind(ty).clone() {
             TyKind::Bool => Some(vec![(0, vec![]), (1, vec![])]),
             TyKind::Tuple(ts) => Some(vec![(0, ts)]),
+            TyKind::Ref(t) | TyKind::RefMut(t) => Some(vec![(0, vec![t])]),
             TyKind::Adt(_) => {
                 if let Some(vs) = self.types.variants(ty) {
                     Some(vs.iter().enumerate().map(|(i, v)| (i as u32, v.fields.clone())).collect())
@@ -788,6 +820,7 @@ impl<'a> Sema<'a> {
                 let kind = self.types.kind(ty).clone();
                 match kind {
                     TyKind::Bool => (*c == 1).to_string(),
+                    TyKind::Ref(t) | TyKind::RefMut(t) => self.show_witness(&fs[0], t),
                     TyKind::Tuple(ts) => {
                         let parts: Vec<String> = fs.iter().zip(ts).map(|(f, t)| self.show_witness(f, t)).collect();
                         format!("({})", parts.join(", "))

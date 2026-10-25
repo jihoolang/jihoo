@@ -1,0 +1,2580 @@
+// Sema: names, types, generic instances, and lowering to MIR, in one pass
+// over each function instance. Generic code is checked per instance, as in
+// Zig: an instance is a declaration and its compile-time arguments.
+//
+// The Rust compiler's `sema/mod.rs` and `sema/consts.rs`. Where Rust's
+// `Sema<'a>` borrows the syntax tree, this one points into it (see `at`).
+// Maps keyed by compile-time arguments use a text key (`inst_key`), where
+// Rust hashes them.
+
+import ast
+import diag
+import lex
+import load
+import mir
+import target
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Op = lex.Op
+type Types = types.Types
+type TyKind = types.TyKind
+type Const = mir.Const
+
+// Impl numbers that stand for impls the compiler provides: of marker
+// traits (`Plain`, `Int`, ...), and `#[derive]`d ones.
+pub const BUILTIN_IMPL: u32 = 4294967294
+pub const DERIVED_IMPL: u32 = 4294967295
+
+// A compile-time value: a generic argument or a constant.
+pub enum CVal {
+    Type(u32)
+    Int(i128)
+    Bool(bool)
+    // A closure passed to a `comptime` parameter: its lifted function and
+    // its environment's type.
+    Lambda(u32, u32)
+}
+
+impl Clone for CVal {
+    fn clone(self) -> CVal {
+        match self {
+            Type(t) => CVal.Type(t)
+            Int(i) => CVal.Int(i)
+            Bool(b) => CVal.Bool(b)
+            Lambda(f, t) => CVal.Lambda(f, t)
+        }
+    }
+}
+
+impl Eq for CVal {
+    fn eq(self, other: CVal) -> bool {
+        cval_key(self) == cval_key(other)
+    }
+}
+
+pub fn cval_key(c: CVal) -> String {
+    var s = String.new()
+    match c {
+        Type(t) => {
+            s.push('t')
+            t.show(&s)
+        }
+        Int(i) => {
+            s.push('i')
+            i.show(&s)
+        }
+        Bool(b) => s.push_str(if b { "b1" } else { "b0" })
+        Lambda(f, t) => {
+            s.push('l')
+            f.show(&s)
+            s.push(',')
+            t.show(&s)
+        }
+    }
+    s
+}
+
+// The key of a declaration and its compile-time arguments.
+fn inst_key(decl: u32, args: Vec(CVal)) -> String {
+    var s = String.new()
+    decl.show(&s)
+    for a in args {
+        s.push('|')
+        s.push_str(cval_key(a).as_str())
+    }
+    s
+}
+
+pub enum Sym {
+    Fn(u32)
+    Adt(u32)
+    Trait(u32)
+    Const(u32)
+    Module(u32)
+    Alias(u32)
+    Static(u32)
+}
+
+impl Eq for Sym {
+    fn eq(self, other: Sym) -> bool {
+        let a = sym_parts(self)
+        let b = sym_parts(other)
+        a.0 == b.0 && a.1 == b.1
+    }
+}
+
+fn sym_parts(s: Sym) -> (i64, u32) {
+    match s {
+        Fn(i) => (0, i)
+        Adt(i) => (1, i)
+        Trait(i) => (2, i)
+        Const(i) => (3, i)
+        Module(i) => (4, i)
+        Alias(i) => (5, i)
+        Static(i) => (6, i)
+    }
+}
+
+pub struct SymEntry {
+    pub sym: Sym
+    pub public: bool
+}
+
+pub struct ModScope {
+    pub names: Map(String, SymEntry)
+    // Modules whose public names this one sees too (the prelude's).
+    pub globs: Vec(u32)
+}
+
+pub enum AdtKind {
+    Struct(*ast.StructDecl)
+    Enum(*ast.EnumDecl)
+}
+
+pub struct AdtDecl {
+    pub module: u32
+    pub name: String
+    pub kind: AdtKind
+    pub span: Span
+    pub derives: Vec(String)
+    pub impls: Vec(u32)
+    // `#[view]`: holds borrows through raw pointers.
+    pub is_view: bool
+}
+
+impl AdtDecl {
+    // The compile-time parameters (a copy).
+    pub fn params(self) -> Vec(ast.Param) {
+        match self.kind {
+            Struct(s) => at(s).params.clone()
+            Enum(e) => at(e).params.clone()
+        }
+    }
+}
+
+pub enum Owner {
+    Free
+    Impl(u32)
+    Trait(u32)
+}
+
+pub struct FnDeclInfo {
+    pub module: u32
+    pub decl: *ast.FnDecl
+    pub span: Span
+    pub public: bool
+    pub owner: Owner
+}
+
+pub struct ImplInfo {
+    pub module: u32
+    pub decl: *ast.ImplDecl
+    pub span: Span
+    pub fns: Map(String, u32)
+    pub assoc: Map(String, *ast.Ty)
+    pub trait_id: Option(u32)
+}
+
+pub struct TraitInfo {
+    pub module: u32
+    pub name: String
+    pub decl: *ast.TraitDecl
+    pub fns: Map(String, u32)
+    pub impls: Vec(u32)
+}
+
+pub struct TypedConst {
+    pub c: Const
+    pub ty: u32
+}
+
+impl Clone for TypedConst {
+    fn clone(self) -> TypedConst {
+        TypedConst { c: self.c.clone(), ty: self.ty }
+    }
+}
+
+pub struct ConstInfo {
+    pub module: u32
+    pub decl: *ast.ConstDecl
+    pub span: Span
+    pub value: Option(TypedConst)
+    pub busy: bool
+}
+
+pub struct StaticInfo {
+    pub module: u32
+    pub decl: *ast.ConstDecl
+    pub span: Span
+    // Its type and first value, once needed.
+    pub done: Option(TypedConst)
+}
+
+pub struct AliasInfo {
+    pub module: u32
+    pub ty: *ast.Ty
+}
+
+pub struct EnvName {
+    pub name: String
+    pub val: CVal
+}
+
+impl Clone for EnvName {
+    fn clone(self) -> EnvName {
+        EnvName { name: self.name.clone(), val: self.val.clone() }
+    }
+}
+
+// The names a piece of code sees besides its module's: compile-time
+// parameters, `Self`.
+pub struct Env {
+    pub module: u32
+    pub names: Vec(EnvName)
+    pub self_ty: Option(u32)
+}
+
+impl Clone for Env {
+    fn clone(self) -> Env {
+        Env { module: self.module, names: self.names.clone(), self_ty: self.self_ty }
+    }
+}
+
+impl Env {
+    pub fn new(module: u32) -> Env {
+        Env { module: module, names: Vec(EnvName).new(), self_ty: None }
+    }
+
+    pub fn get(self, n: str) -> Option(CVal) {
+        var i = self.names.len()
+        while i > 0 {
+            i -= 1
+            if self.names[i].name == n {
+                return Some(self.names[i].val.clone())
+            }
+        }
+        None
+    }
+
+    pub fn push(inout self, n: str, v: CVal) {
+        self.names.push(EnvName { name: n.to_string(), val: v })
+    }
+}
+
+// A function instance whose body is still to be lowered.
+struct Pending {
+    id: u32
+    decl: u32
+    env: Env
+}
+
+// Where an instance came from, for error notes.
+pub struct InstInfo {
+    pub decl: u32
+    pub env: Env
+}
+
+pub struct Lang {
+    pub drop: Option(u32)
+    pub clone: Option(u32)
+    pub option: Option(u32)
+    pub result: Option(u32)
+    pub string: Option(u32)
+    pub iterator: Option(u32)
+    pub eq: Option(u32)
+    pub ord: Option(u32)
+    pub hash: Option(u32)
+    pub show: Option(u32)
+}
+
+// An impl found for a type: the impl, and the arguments of its parameters.
+pub struct ImplHit {
+    pub imp: u32
+    pub args: Vec(CVal)
+}
+
+impl Clone for ImplHit {
+    fn clone(self) -> ImplHit {
+        ImplHit { imp: self.imp, args: self.args.clone() }
+    }
+}
+
+// A compile-time closure parameter of an instance being lowered: the
+// instance, the name, its local, the closure's function.
+pub struct ComptimeClosure {
+    pub id: u32
+    pub name: String
+    pub local: u32
+    pub lambda: u32
+}
+
+pub struct Sema {
+    pub ast: *load.Ast
+    pub types: Types
+    pub mods: Vec(ModScope)
+    pub adts: Vec(AdtDecl)
+    pub fns: Vec(FnDeclInfo)
+    pub impls: Vec(ImplInfo)
+    pub traits: Vec(TraitInfo)
+    pub consts: Vec(ConstInfo)
+    pub aliases: Vec(AliasInfo)
+    pub statics: Vec(StaticInfo)
+    // Impls whose type is not a declared struct or enum (`impl str`).
+    pub other_impls: Vec(u32)
+    adt_insts: Map(String, u32)
+    fn_insts: Map(String, u32)
+    impl_cache: Map(String, Option(ImplHit))
+    pub out: Vec(mir.Function)
+    pub inst_info: Vec(Option(InstInfo))
+    queue: Vec(Pending)
+    queue_head: i64
+    pub lang: Lang
+    pub freestanding: bool
+    pub target: target.Target
+    pub checked: bool
+    lambda_count: u32
+    // Instances being lowered, for "required by" notes.
+    stack: Vec(u32)
+    pub comptime_closures: Vec(ComptimeClosure)
+    pub last_lambda: Option((u32, u32))
+    pub adt_args_of: Map(u32, Vec(CVal))
+}
+
+pub fn ty_err(span: Span, msg: str) -> Diag {
+    Diag.new(span, msg)
+}
+
+fn no_span() -> Span {
+    Span.new(0, 0, 0)
+}
+
+impl Sema {
+    pub fn new(a: load.Ast, tgt: target.Target, checked: bool) -> Sema {
+        var freestanding = false
+        for at in a.modules[a.root as i64].ast.attrs {
+            if at == "freestanding" {
+                freestanding = true
+            }
+        }
+        Sema {
+            ast: &a
+            types: Types.new()
+            mods: Vec(ModScope).new()
+            adts: Vec(AdtDecl).new()
+            fns: Vec(FnDeclInfo).new()
+            impls: Vec(ImplInfo).new()
+            traits: Vec(TraitInfo).new()
+            consts: Vec(ConstInfo).new()
+            aliases: Vec(AliasInfo).new()
+            statics: Vec(StaticInfo).new()
+            other_impls: Vec(u32).new()
+            adt_insts: Map(String, u32).new()
+            fn_insts: Map(String, u32).new()
+            impl_cache: Map(String, Option(ImplHit)).new()
+            out: Vec(mir.Function).new()
+            inst_info: Vec(Option(InstInfo)).new()
+            queue: Vec(Pending).new()
+            queue_head: 0
+            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, iterator: None, eq: None, ord: None, hash: None, show: None }
+            freestanding: freestanding
+            target: tgt
+            checked: checked
+            lambda_count: 0
+            stack: Vec(u32).new()
+            comptime_closures: Vec(ComptimeClosure).new()
+            last_lambda: None
+            adt_args_of: Map(u32, Vec(CVal)).new()
+        }
+    }
+
+    // ---- collecting declarations ----
+
+    pub fn collect(inout self) -> Result((), Diag) {
+        let a = at(self.ast)
+        for mi, m in a.modules {
+            let mi = mi as u32
+            var scope = ModScope { names: Map(String, SymEntry).new(), globs: Vec(u32).new() }
+            match a.prelude {
+                Some(p) => {
+                    if p != mi {
+                        scope.globs.push(p)
+                    }
+                }
+                None => {}
+            }
+            for im in m.imports {
+                if scope.names.contains(im.alias) {
+                    return Err(ty_err(im.span, ("`" + im.alias.as_str() + "` is defined twice").as_str()))
+                }
+                scope.names.insert(im.alias.clone(), SymEntry { sym: Sym.Module(im.module), public: false })
+            }
+            self.mods.push(scope)
+            for item in m.ast.items {
+                self.collect_item(mi, item)?
+            }
+        }
+        // The prelude's `pub import`s put those modules' names in every scope.
+        match a.prelude {
+            Some(p) => {
+                var globs = Vec(u32).new()
+                for im in a.modules[p as i64].imports {
+                    if im.public {
+                        globs.push(im.module)
+                    }
+                }
+                for mi in 0..self.mods.len() {
+                    for g in globs {
+                        if mi as u32 == p || g != mi as u32 {
+                            self.mods[mi].globs.push(g)
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
+        // Impls: attach to their type and trait.
+        for i in 0..self.impls.len() {
+            let module = self.impls[i].module
+            let decl = at(self.impls[i].decl)
+            match decl.trait_ {
+                Some(tr) => {
+                    let t = self.resolve_trait(module, tr)?
+                    self.impls[i].trait_id = Some(t)
+                    self.traits[t as i64].impls.push(i as u32)
+                }
+                None => {}
+            }
+            let head = self.impl_head(module, decl.self_ty, decl.params)
+            if decl.trait_.is_none() {
+                match head {
+                    Some(adt) => self.adts[adt as i64].impls.push(i as u32)
+                    None => self.other_impls.push(i as u32)
+                }
+            }
+        }
+        // Blanket impls (`impl(T: Int) Show for T`) are tried last.
+        for t in 0..self.traits.len() {
+            var first = Vec(u32).new()
+            var last = Vec(u32).new()
+            for i in self.traits[t].impls {
+                if is_blanket(at(self.impls[i as i64].decl)) {
+                    last.push(i)
+                } else {
+                    first.push(i)
+                }
+            }
+            first.extend(last)
+            self.traits[t].impls = first
+        }
+        self.find_lang()
+        Ok(())
+    }
+
+    fn find_lang(inout self) {
+        let p = match at(self.ast).prelude {
+            Some(p) => p
+            None => return
+        }
+        self.lang.drop = self.lang_trait(p, "Drop")
+        self.lang.clone = self.lang_trait(p, "Clone")
+        self.lang.iterator = self.lang_trait(p, "Iterator")
+        self.lang.eq = self.lang_trait(p, "Eq")
+        self.lang.ord = self.lang_trait(p, "Ord")
+        self.lang.hash = self.lang_trait(p, "Hash")
+        self.lang.show = self.lang_trait(p, "Show")
+        self.lang.option = self.lang_adt(p, "Option")
+        self.lang.result = self.lang_adt(p, "Result")
+        self.lang.string = self.lang_adt(p, "String")
+    }
+
+    fn lang_trait(self, p: u32, n: str) -> Option(u32) {
+        match self.lookup(p, n) {
+            Some(Trait(t)) => Some(t)
+            _ => None
+        }
+    }
+
+    fn lang_adt(self, p: u32, n: str) -> Option(u32) {
+        match self.lookup(p, n) {
+            Some(Adt(t)) => Some(t)
+            _ => None
+        }
+    }
+
+    // The struct or enum an impl is for, when its type names one.
+    fn impl_head(self, module: u32, t: ast.Ty, params: Vec(ast.Param)) -> Option(u32) {
+        match t.kind {
+            Path(p, _) => {
+                if p.len() == 1 && names_param(params, p[0].as_str()) {
+                    return None
+                }
+                match self.lookup_path(module, p) {
+                    Some((Adt(a), _)) => return Some(a)
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn define(inout self, module: u32, name: str, sym: Sym, public: bool, span: Span) -> Result((), Diag) {
+        if self.mods[module as i64].names.contains(name) {
+            return Err(ty_err(span, ("`" + name + "` is defined twice").as_str()))
+        }
+        self.mods[module as i64].names.insert(name.to_string(), SymEntry { sym: sym, public: public })
+        Ok(())
+    }
+
+    fn collect_item(inout self, module: u32, item: ref ast.Item) -> Result((), Diag) {
+        match item.kind {
+            Import(_) => {}
+            Fn(f) => {
+                let id = self.fns.len() as u32
+                self.fns.push(FnDeclInfo { module: module, decl: &f, span: item.span, public: item.public, owner: Owner.Free })
+                self.define(module, f.name.as_str(), Sym.Fn(id), item.public, f.name_span)?
+            }
+            Struct(s) => {
+                let id = self.adts.len() as u32
+                self.adts.push(AdtDecl {
+                    module: module
+                    name: s.name.clone()
+                    kind: AdtKind.Struct(&s)
+                    span: item.span
+                    derives: derives(item)
+                    impls: Vec(u32).new()
+                    is_view: has_attr(item, "view")
+                })
+                self.define(module, s.name.as_str(), Sym.Adt(id), item.public, item.span)?
+            }
+            Enum(e) => {
+                let id = self.adts.len() as u32
+                self.adts.push(AdtDecl {
+                    module: module
+                    name: e.name.clone()
+                    kind: AdtKind.Enum(&e)
+                    span: item.span
+                    derives: derives(item)
+                    impls: Vec(u32).new()
+                    is_view: has_attr(item, "view")
+                })
+                self.define(module, e.name.as_str(), Sym.Adt(id), item.public, item.span)?
+            }
+            Const(c) => {
+                let id = self.consts.len() as u32
+                self.consts.push(ConstInfo { module: module, decl: &c, span: item.span, value: None, busy: false })
+                self.define(module, c.name.as_str(), Sym.Const(id), item.public, item.span)?
+            }
+            Static(c) => {
+                let id = self.statics.len() as u32
+                self.statics.push(StaticInfo { module: module, decl: &c, span: item.span, done: None })
+                self.define(module, c.name.as_str(), Sym.Static(id), item.public, item.span)?
+            }
+            TypeAlias(name, t) => match t {
+                Some(t) => {
+                    let id = self.aliases.len() as u32
+                    self.aliases.push(AliasInfo { module: module, ty: &t })
+                    self.define(module, name.as_str(), Sym.Alias(id), item.public, item.span)?
+                }
+                None => return Err(ty_err(item.span, "a type alias needs `= type`"))
+            }
+            Trait(t) => {
+                let id = self.traits.len() as u32
+                var fns = Map(String, u32).new()
+                for sub in t.items {
+                    match sub.kind {
+                        Fn(f) => {
+                            let fid = self.fns.len() as u32
+                            self.fns.push(FnDeclInfo { module: module, decl: &f, span: sub.span, public: true, owner: Owner.Trait(id) })
+                            fns.insert(f.name.clone(), fid);
+                        }
+                        TypeAlias(_, _) => {}
+                        _ => return Err(ty_err(sub.span, "a trait holds functions and associated types"))
+                    }
+                }
+                self.traits.push(TraitInfo { module: module, name: t.name.clone(), decl: &t, fns: fns, impls: Vec(u32).new() })
+                self.define(module, t.name.as_str(), Sym.Trait(id), item.public, item.span)?
+            }
+            Impl(im) => {
+                let id = self.impls.len() as u32
+                var fns = Map(String, u32).new()
+                var assoc = Map(String, *ast.Ty).new()
+                for sub in im.items {
+                    match sub.kind {
+                        Fn(f) => {
+                            let fid = self.fns.len() as u32
+                            self.fns.push(FnDeclInfo { module: module, decl: &f, span: sub.span, public: sub.public || im.trait_.is_some(), owner: Owner.Impl(id) })
+                            if fns.contains(f.name) {
+                                return Err(ty_err(f.name_span, ("`" + f.name.as_str() + "` is defined twice in this impl").as_str()))
+                            }
+                            fns.insert(f.name.clone(), fid);
+                        }
+                        TypeAlias(n, t) => match t {
+                            Some(t) => {
+                                assoc.insert(n.clone(), &t);
+                            }
+                            None => return Err(ty_err(sub.span, "an impl holds functions and associated types"))
+                        }
+                        _ => return Err(ty_err(sub.span, "an impl holds functions and associated types"))
+                    }
+                }
+                self.impls.push(ImplInfo { module: module, decl: &im, span: item.span, fns: fns, assoc: assoc, trait_id: None })
+            }
+        }
+        Ok(())
+    }
+
+    // ---- names ----
+
+    pub fn lookup_in_module(self, module: u32, name: str, from_outside: bool) -> Option(SymEntry) {
+        match self.mods[module as i64].names.get(name) {
+            Some(e) => {
+                if !from_outside || e.public {
+                    match e.sym {
+                        Module(_) => {
+                            if from_outside {
+                                return None
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Some(SymEntry { sym: e.sym, public: e.public })
+                }
+            }
+            None => {}
+        }
+        None
+    }
+
+    // A name as seen from inside a module: its own items, then the globs.
+    pub fn lookup(self, module: u32, name: str) -> Option(Sym) {
+        match self.mods[module as i64].names.get(name) {
+            Some(e) => return Some(e.sym)
+            None => {}
+        }
+        for g in self.mods[module as i64].globs {
+            match self.lookup_in_module(g, name, true) {
+                Some(e) => return Some(e.sym)
+                None => {}
+            }
+        }
+        None
+    }
+
+    pub fn lookup_path(self, module: u32, path: Vec(String)) -> Option((Sym, u32)) {
+        var s = match self.lookup(module, path[0].as_str()) {
+            Some(s) => s
+            None => return None
+        }
+        var m = module
+        for i in 1..path.len() {
+            let mm = match s {
+                Module(mm) => mm
+                _ => return None
+            }
+            m = mm
+            s = match self.lookup_in_module(mm, path[i].as_str(), true) {
+                Some(e) => e.sym
+                None => return None
+            }
+        }
+        Some((s, m))
+    }
+
+    pub fn resolve_trait(inout self, module: u32, t: ast.Ty) -> Result(u32, Diag) {
+        match t.kind {
+            Path(p, _) => match self.lookup_path(module, p) {
+                Some((Trait(id), _)) => return Ok(id)
+                _ => {}
+            }
+            _ => {}
+        }
+        Err(ty_err(t.span, "expected a trait"))
+    }
+
+    // Private items are seen by their own module, and the standard
+    // library's modules see each other's.
+    pub fn same_package(self, a: u32, b: u32) -> bool {
+        a == b || (self.module_name(a).starts_with("std.") && self.module_name(b).starts_with("std."))
+    }
+
+    // A static's type and first value (a constant, or zeroed).
+    pub fn static_info(inout self, id: u32) -> Result(TypedConst, Diag) {
+        match self.statics[id as i64].done {
+            Some(d) => return Ok(d.clone())
+            None => {}
+        }
+        let decl = at(self.statics[id as i64].decl)
+        let env = Env.new(self.statics[id as i64].module)
+        if decl.ty.is_none() {
+            return Err(ty_err(self.statics[id as i64].span, "a static needs its type written"))
+        }
+        let t = match decl.ty {
+            Some(tyx) => self.resolve_ty(tyx, env)?
+            None => types.UNIT
+        }
+        var c = Const.Zeroed(t)
+        if !is_zeroed_call(decl.value) {
+            let r = self.const_expr(decl.value, env, Some(t))?
+            if r.ty != t {
+                return Err(ty_err(decl.value.span, self.expected_found(t, r.ty).as_str()))
+            }
+            c = r.c.clone()
+        }
+        let done = TypedConst { c: c, ty: t }
+        self.statics[id as i64].done = Some(done.clone())
+        Ok(done)
+    }
+
+    pub fn module_name(self, m: u32) -> str {
+        at(self.ast).modules[m as i64].name.as_str()
+    }
+
+    // "expected `T`, found `U`"
+    pub fn expected_found(self, t: u32, u: u32) -> String {
+        "expected `" + self.types.show(t).as_str() + "`, found `" + self.types.show(u).as_str() + "`"
+    }
+
+    // ---- types ----
+
+    pub fn builtin_ty(name: str) -> Option(u32) {
+        if name == "bool" { return Some(types.BOOL) }
+        if name == "i8" { return Some(types.I8) }
+        if name == "i16" { return Some(types.I16) }
+        if name == "i32" { return Some(types.I32) }
+        if name == "i64" || name == "int" { return Some(types.I64) }
+        if name == "u8" { return Some(types.U8) }
+        if name == "u16" { return Some(types.U16) }
+        if name == "u32" { return Some(types.U32) }
+        if name == "u64" { return Some(types.U64) }
+        if name == "i128" { return Some(types.I128) }
+        if name == "u128" { return Some(types.U128) }
+        if name == "f32" { return Some(types.F32) }
+        if name == "f64" { return Some(types.F64) }
+        if name == "str" { return Some(types.STR) }
+        if name == "type" { return Some(types.TYPE) }
+        if name == "never" { return Some(types.NEVER) }
+        None
+    }
+
+    pub fn resolve_ty(inout self, t: ast.Ty, env: Env) -> Result(u32, Diag) {
+        match t.kind {
+            Path(p, args) => self.resolve_path_ty(p, args, env, t.span)
+            Ptr(inner) => {
+                let i = self.resolve_ty(inner.deref(), env)?
+                Ok(self.types.ptr(i))
+            }
+            Ref(inner, m) => {
+                let i = self.resolve_ty(inner.deref(), env)?
+                Ok(if m { self.types.refmut(i) } else { self.types.refty(i) })
+            }
+            Array(e, n) => {
+                let et = self.resolve_ty(e.deref(), env)?
+                let n = self.const_int(n.deref(), env)?
+                if n < 0 {
+                    return Err(ty_err(t.span, "an array's length cannot be negative"))
+                }
+                Ok(self.types.intern(TyKind.Array(et, n as u64)))
+            }
+            Slice(e) => {
+                let et = self.resolve_ty(e.deref(), env)?
+                Ok(self.types.intern(TyKind.Slice(et)))
+            }
+            Tuple(ts) => {
+                var v = Vec(u32).new()
+                for x in ts {
+                    v.push(self.resolve_ty(x, env)?)
+                }
+                Ok(self.types.tuple(v))
+            }
+            Fn(ps, r) => self.resolve_fn_ty(ps, r, env, true)
+            FnPtr(ps, r) => self.resolve_fn_ty(ps, r, env, false)
+        }
+    }
+
+    fn resolve_fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty)), env: Env, closure: bool) -> Result(u32, Diag) {
+        var params = Vec(u32).new()
+        for x in ps {
+            let pt = self.resolve_ty(x.ty, env)?
+            params.push(self.param_local_ty(x.mode, pt).0)
+        }
+        let ret = match r {
+            Some(r) => self.resolve_ty(r.deref(), env)?
+            None => types.UNIT
+        }
+        let sig = types.Sig { params: params, ret: ret }
+        Ok(self.types.intern(if closure { TyKind.Closure(sig) } else { TyKind.FnPtr(sig) }))
+    }
+
+    fn resolve_path_ty(inout self, p: Vec(String), args: Option(Vec(ast.Expr)), env: Env, span: Span) -> Result(u32, Diag) {
+        let no_args = args.is_none()
+        if p.len() == 1 && no_args {
+            match env.get(p[0].as_str()) {
+                Some(v) => return match v {
+                    Type(t) => Ok(t)
+                    _ => Err(ty_err(span, ("`" + p[0].as_str() + "` is a value, not a type").as_str()))
+                }
+                None => {}
+            }
+            if p[0] == "Self" {
+                return match env.self_ty {
+                    Some(t) => Ok(t)
+                    None => Err(ty_err(span, "`Self` is only defined in impls and traits"))
+                }
+            }
+            match Sema.builtin_ty(p[0].as_str()) {
+                Some(t) => {
+                    if self.lookup(env.module, p[0].as_str()).is_none() {
+                        return Ok(t)
+                    }
+                }
+                None => {}
+            }
+        }
+        // `T.Item`, `Self.Item`: an associated type.
+        if p.len() == 2 && no_args {
+            var base: Option(u32) = None
+            if p[0] == "Self" {
+                base = env.self_ty
+            } else {
+                match env.get(p[0].as_str()) {
+                    Some(Type(t)) => base = Some(t)
+                    _ => {}
+                }
+            }
+            match base {
+                Some(b) => return self.assoc_ty(b, p[1].as_str(), span)
+                None => {}
+            }
+        }
+        let sym = match self.lookup_path(env.module, p) {
+            Some((s, _)) => s
+            None => return Err(ty_err(span, ("unknown type `" + join_path(p).as_str() + "`").as_str()))
+        }
+        match sym {
+            Adt(a) => {
+                let nparams = self.adts[a as i64].params().len()
+                let given = match args {
+                    Some(x) => x.len()
+                    None => 0
+                }
+                if nparams != given {
+                    var m = "`" + join_path(p).as_str() + "` takes "
+                    nparams.show(&m)
+                    m.push_str(" argument(s), ")
+                    given.show(&m)
+                    m.push_str(" given")
+                    return Err(ty_err(span, m.as_str()))
+                }
+                var cargs = Vec(CVal).new()
+                match args {
+                    Some(args) => {
+                        let params = self.adts[a as i64].params()
+                        let pm = self.adts[a as i64].module
+                        for i, prm in params {
+                            cargs.push(self.comptime_arg(prm, pm, args[i], env)?)
+                        }
+                    }
+                    None => {}
+                }
+                self.adt_instance(a, cargs, span)
+            }
+            Alias(i) => {
+                let e = Env.new(self.aliases[i as i64].module)
+                let t = at(self.aliases[i as i64].ty)
+                self.resolve_ty(t, e)
+            }
+            _ => Err(ty_err(span, ("`" + join_path(p).as_str() + "` is not a type").as_str()))
+        }
+    }
+
+    // Evaluates the argument for a compile-time parameter declared in
+    // module `pm`.
+    pub fn comptime_arg(inout self, prm: ast.Param, pm: u32, arg: ast.Expr, env: Env) -> Result(CVal, Diag) {
+        if self.param_is_type(prm, pm) {
+            return Ok(CVal.Type(self.expr_ty(arg, env)?))
+        }
+        let pty = match prm.ty {
+            Some(t) => self.resolve_ty(t, Env.new(pm))?
+            None => types.I64
+        }
+        let r = self.const_expr(arg, env, Some(pty))?
+        match r.c {
+            Int(v, _) => Ok(CVal.Int(v))
+            Bool(b) => Ok(CVal.Bool(b))
+            _ => Err(ty_err(arg.span, "a compile-time argument must be an integer, a bool or a type"))
+        }
+    }
+
+    // `comptime T: type` and `comptime T: Ord` take types.
+    pub fn param_is_type(self, prm: ast.Param, module: u32) -> bool {
+        match prm.ty {
+            Some(t) => match t.kind {
+                Path(p, None) => {
+                    if p.len() == 1 && p[0] == "type" {
+                        return true
+                    }
+                    match self.lookup_path(module, p) {
+                        Some((Trait(_), _)) => true
+                        _ => false
+                    }
+                }
+                _ => false
+            }
+            None => false
+        }
+    }
+
+    // Bounds of a type parameter: the traits named as its type and after.
+    pub fn param_bounds(inout self, prm: ast.Param, module: u32) -> Result(Vec(u32), Diag) {
+        var out = Vec(u32).new()
+        match prm.ty {
+            Some(t) => match t.kind {
+                Path(p, None) => match self.lookup_path(module, p) {
+                    Some((Trait(id), _)) => out.push(id)
+                    _ => {}
+                }
+                _ => {}
+            }
+            None => {}
+        }
+        for b in prm.bounds {
+            out.push(self.resolve_trait(module, b)?)
+        }
+        Ok(out)
+    }
+
+    // A type written as an expression: `Vec(i64)`, `*u8`, `[i64; 4]`.
+    pub fn expr_ty(inout self, e: ast.Expr, env: Env) -> Result(u32, Diag) {
+        match self.try_expr_ty(e, env)? {
+            Some(t) => Ok(t)
+            None => Err(ty_err(e.span, "expected a type"))
+        }
+    }
+
+    pub fn try_expr_ty(inout self, e: ast.Expr, env: Env) -> Result(Option(u32), Diag) {
+        let t = match e.kind {
+            Type(t) => self.resolve_ty(t, env)?
+            Unit => types.UNIT
+            Name(_) | Field(_, _) => {
+                let p = match expr_path(e) {
+                    Some(p) => p
+                    None => return Ok(None)
+                }
+                if !self.path_is_type(p, env) {
+                    return Ok(None)
+                }
+                self.resolve_path_ty(p, None, env, e.span)?
+            }
+            Call(callee, args) => {
+                let p = match expr_path(callee.deref()) {
+                    Some(p) => p
+                    None => return Ok(None)
+                }
+                match self.lookup_path(env.module, p) {
+                    Some((Adt(_), _)) => {
+                        if env.get(p[0].as_str()).is_some() {
+                            return Ok(None)
+                        }
+                        self.resolve_path_ty(p, Some(args.clone()), env, e.span)?
+                    }
+                    _ => return Ok(None)
+                }
+            }
+            Unary(op, inner) => match op {
+                Deref => {
+                    let t = match self.try_expr_ty(inner.deref(), env)? {
+                        Some(t) => t
+                        None => return Ok(None)
+                    }
+                    self.types.ptr(t)
+                }
+                _ => return Ok(None)
+            }
+            ArrayRepeat(el, n) => {
+                let t = match self.try_expr_ty(el.deref(), env)? {
+                    Some(t) => t
+                    None => return Ok(None)
+                }
+                let n = self.const_int(n.deref(), env)?
+                self.types.intern(TyKind.Array(t, n as u64))
+            }
+            Array(items) => {
+                if items.len() != 1 {
+                    return Ok(None)
+                }
+                let t = match self.try_expr_ty(items[0], env)? {
+                    Some(t) => t
+                    None => return Ok(None)
+                }
+                self.types.intern(TyKind.Slice(t))
+            }
+            Tuple(items) => {
+                var v = Vec(u32).new()
+                for i in items {
+                    match self.try_expr_ty(i, env)? {
+                        Some(t) => v.push(t)
+                        None => return Ok(None)
+                    }
+                }
+                self.types.tuple(v)
+            }
+            _ => return Ok(None)
+        }
+        Ok(Some(t))
+    }
+
+    // Whether a path names a type (and not a value) in this environment.
+    pub fn path_is_type(self, p: Vec(String), env: Env) -> bool {
+        if p.len() == 1 {
+            match env.get(p[0].as_str()) {
+                Some(v) => return match v {
+                    Type(_) => true
+                    _ => false
+                }
+                None => {}
+            }
+            if p[0] == "Self" {
+                return env.self_ty.is_some()
+            }
+            if Sema.builtin_ty(p[0].as_str()).is_some() && self.lookup(env.module, p[0].as_str()).is_none() {
+                return true
+            }
+        }
+        if p.len() == 2 {
+            if p[0] == "Self" {
+                return true
+            }
+            match env.get(p[0].as_str()) {
+                Some(Type(_)) => return true
+                _ => {}
+            }
+        }
+        match self.lookup_path(env.module, p) {
+            Some((Adt(_), _)) | Some((Alias(_), _)) => true
+            _ => false
+        }
+    }
+
+    pub fn adt_instance(inout self, decl: u32, args: Vec(CVal), span: Span) -> Result(u32, Diag) {
+        let key = inst_key(decl, args)
+        match self.adt_insts.get(key) {
+            Some(t) => return Ok(t)
+            None => {}
+        }
+        let module = self.adts[decl as i64].module
+        let params = self.adts[decl as i64].params()
+        let kind = self.adts[decl as i64].kind
+        var name = self.adts[decl as i64].name.clone()
+        let is_std = self.module_name(module).starts_with("std.")
+        if module != at(self.ast).root && at(self.ast).prelude != Some(module) && !is_std {
+            name = self.module_name(module) + "." + name.as_str()
+        }
+        if args.len() > 0 {
+            var n = name.clone()
+            n.push('(')
+            for i, a in args {
+                if i > 0 {
+                    n.push_str(", ")
+                }
+                n.push_str(self.show_cval(a).as_str())
+            }
+            n.push(')')
+            name = n
+        }
+        let t = self.types.new_adt(name, decl)
+        self.adt_insts.insert(key, t)
+        self.adt_args_of.insert(t, args.clone())
+        var env = Env { module: module, names: Vec(EnvName).new(), self_ty: Some(t) }
+        for i, p in params {
+            if i < args.len() {
+                env.push(p.name.as_str(), args[i].clone())
+            }
+        }
+        let body = match kind {
+            Struct(s) => {
+                var fs = Vec(types.FieldDef).new()
+                for f in at(s).fields {
+                    let ft = self.resolve_ty(f.ty, env)?
+                    self.check_storable(ft, f.ty.span)?
+                    fs.push(types.FieldDef { name: f.name.clone(), ty: ft, public: f.public || module == at(self.ast).root })
+                }
+                types.AdtBody.Struct(fs)
+            }
+            Enum(e) => {
+                var vs = Vec(types.VariantDef).new()
+                for v in at(e).variants {
+                    var fs = Vec(u32).new()
+                    for f in v.fields {
+                        let ft = self.resolve_ty(f, env)?
+                        self.check_storable(ft, f.span)?
+                        fs.push(ft)
+                    }
+                    vs.push(types.VariantDef { name: v.name.clone(), fields: fs })
+                }
+                types.AdtBody.Enum(vs)
+            }
+        }
+        let idx = self.types.adt_index(t).unwrap() as i64
+        self.types.adts[idx].body = body
+        var marked = self.adts[decl as i64].is_view
+        for d in self.adts[decl as i64].derives {
+            if d == "view" {
+                marked = true
+            }
+        }
+        var view_arg = false
+        for a in args {
+            match a {
+                Type(x) => {
+                    if self.types.is_view(x) {
+                        view_arg = true
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.types.adts[idx].view = marked || view_arg
+        // A value's own type contains itself only through a pointer.
+        if self.contains_inline(t, t) {
+            return Err(ty_err(span, ("`" + self.types.show(t).as_str() + "` contains itself; put the inner one in a `Box`").as_str()))
+        }
+        match self.lang.drop {
+            Some(dr) => {
+                if self.find_impl(dr, t)?.is_some() {
+                    self.types.adts[idx].has_drop = true
+                }
+            }
+            None => {}
+        }
+        self.types.reset_drop_cache()
+        Ok(t)
+    }
+
+    fn contains_inline(self, t: u32, target: u32) -> bool {
+        var stack = Vec(u32).new()
+        stack.push(t)
+        var seen = Map(u32, bool).new()
+        var first = true
+        loop {
+            let x = match stack.pop() {
+                Some(x) => x
+                None => break
+            }
+            if !first && x == target {
+                return true
+            }
+            first = false
+            if seen.contains(x) {
+                continue
+            }
+            seen.insert(x, true)
+            match self.types.kind(x) {
+                Tuple(ts) => {
+                    for y in ts {
+                        stack.push(y)
+                    }
+                }
+                Array(e, _) => stack.push(e)
+                Adt(i) => match self.types.adts[i as i64].body {
+                    Struct(fs) => {
+                        for f in fs {
+                            stack.push(f.ty)
+                        }
+                    }
+                    Enum(vs) => {
+                        for v in vs {
+                            for y in v.fields {
+                                stack.push(y)
+                            }
+                        }
+                    }
+                    Pending => {}
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    // Types exist only while compiling, and cannot be stored.
+    pub fn check_storable(inout self, t: u32, span: Span) -> Result((), Diag) {
+        match self.types.kind(t) {
+            Type => Err(ty_err(span, "types exist only while compiling and cannot be stored"))
+            _ => Ok(())
+        }
+    }
+
+    pub fn show_cval(self, c: CVal) -> String {
+        match c {
+            Type(t) => self.types.show(t)
+            Int(i) => i.to_string()
+            Bool(b) => (if b { "true" } else { "false" }).to_string()
+            Lambda(f, _) => {
+                var s = String.from("closure#")
+                f.show(&s)
+                s
+            }
+        }
+    }
+
+    pub fn assoc_ty(inout self, base: u32, name: str, span: Span) -> Result(u32, Diag) {
+        // Search every trait the type implements for an associated type of
+        // that name.
+        for tr in 0..self.traits.len() {
+            var has = false
+            for i in at(self.traits[tr].decl).items {
+                match i.kind {
+                    TypeAlias(n, _) => {
+                        if n == name {
+                            has = true
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !has {
+                continue
+            }
+            match self.find_impl(tr as u32, base)? {
+                Some(hit) => {
+                    if hit.imp >= BUILTIN_IMPL {
+                        continue
+                    }
+                    let t = match self.impls[hit.imp as i64].assoc.get(name) {
+                        Some(t) => t
+                        None => continue
+                    }
+                    let env = self.impl_env(hit.imp, hit.args, base)
+                    return self.resolve_ty(at(t), env)
+                }
+                None => {}
+            }
+        }
+        Err(ty_err(span, ("`" + self.types.show(base).as_str() + "` has no associated type `" + name + "`").as_str()))
+    }
+
+    pub fn impl_env(self, imp: u32, args: Vec(CVal), self_ty: u32) -> Env {
+        let ii = self.impls[imp as i64]
+        var env = Env { module: ii.module, names: Vec(EnvName).new(), self_ty: Some(self_ty) }
+        for i, p in at(ii.decl).params {
+            if i < args.len() {
+                env.push(p.name.as_str(), args[i].clone())
+            }
+        }
+        env
+    }
+
+    // ---- impls ----
+
+    // Matches an impl's type against a concrete type, binding the impl's
+    // parameters.
+    pub fn match_impl(inout self, imp: u32, t: u32) -> Result(Option(Vec(CVal)), Diag) {
+        let module = self.impls[imp as i64].module
+        let decl = at(self.impls[imp as i64].decl)
+        var binds = Vec(Option(CVal)).new()
+        for _ in 0..decl.params.len() {
+            binds.push(None)
+        }
+        if !self.match_ty(decl.self_ty, t, decl.params, module, &binds)? {
+            return Ok(None)
+        }
+        var args = Vec(CVal).new()
+        for i, b in binds {
+            match b {
+                Some(v) => args.push(v.clone())
+                None => return Err(ty_err(decl.params[i].span, "this impl parameter does not appear in the impl's type"))
+            }
+        }
+        // Bounds on the parameters.
+        for i, p in decl.params {
+            match args[i] {
+                Type(at) => {
+                    for b in self.param_bounds(p, module)? {
+                        if self.find_impl(b, at)?.is_none() {
+                            return Ok(None)
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(Some(args))
+    }
+
+    fn match_ty(inout self, pat: ast.Ty, t: u32, params: Vec(ast.Param), module: u32, inout binds: Vec(Option(CVal))) -> Result(bool, Diag) {
+        let k = self.types.kind(t).clone()
+        match pat.kind {
+            Path(p, None) => {
+                if p.len() == 1 {
+                    match param_index(params, p[0].as_str()) {
+                        Some(i) => return Ok(bind_once(&binds, i, CVal.Type(t)))
+                        None => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        match pat.kind {
+            Ptr(inner) => match k {
+                Ptr(x) => return self.match_ty(inner.deref(), x, params, module, &binds)
+                _ => {}
+            }
+            Ref(inner, m) => match k {
+                Ref(x) => {
+                    if !m {
+                        return self.match_ty(inner.deref(), x, params, module, &binds)
+                    }
+                }
+                RefMut(x) => {
+                    if m {
+                        return self.match_ty(inner.deref(), x, params, module, &binds)
+                    }
+                }
+                _ => {}
+            }
+            Slice(inner) => match k {
+                Slice(x) => return self.match_ty(inner.deref(), x, params, module, &binds)
+                _ => {}
+            }
+            Array(inner, n) => match k {
+                Array(x, len) => {
+                    if !self.match_ty(inner.deref(), x, params, module, &binds)? {
+                        return Ok(false)
+                    }
+                    return self.match_val(n.deref(), CVal.Int(len as i128), params, module, &binds)
+                }
+                _ => {}
+            }
+            Tuple(ps) => match k {
+                Tuple(xs) => {
+                    if ps.len() != xs.len() {
+                        return Ok(false)
+                    }
+                    for i, p in ps {
+                        if !self.match_ty(p, xs[i], params, module, &binds)? {
+                            return Ok(false)
+                        }
+                    }
+                    return Ok(true)
+                }
+                _ => {}
+            }
+            Path(p, args) => match k {
+                Adt(i) => {
+                    let decl = self.types.adts[i as i64].decl
+                    match self.lookup_path(module, p) {
+                        Some((Adt(d), _)) => {
+                            if d != decl {
+                                return Ok(false)
+                            }
+                        }
+                        _ => return Ok(false)
+                    }
+                    var concrete = Vec(CVal).new()
+                    match self.adt_args_of.get(t) {
+                        Some(c) => concrete = c.clone()
+                        None => {}
+                    }
+                    var given = Vec(ast.Expr).new()
+                    match args {
+                        Some(a) => given = a.clone()
+                        None => {}
+                    }
+                    if given.len() != concrete.len() {
+                        return Ok(false)
+                    }
+                    for j, a in given {
+                        match concrete[j] {
+                            Type(ct) => {
+                                let at = match expr_as_ty(a) {
+                                    Some(at) => at
+                                    None => return Ok(false)
+                                }
+                                if !self.match_ty(at, ct, params, module, &binds)? {
+                                    return Ok(false)
+                                }
+                            }
+                            v => {
+                                if !self.match_val(a, v.clone(), params, module, &binds)? {
+                                    return Ok(false)
+                                }
+                            }
+                        }
+                    }
+                    return Ok(true)
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        match self.resolve_ty(pat, Env.new(module)) {
+            Ok(pt) => Ok(pt == t)
+            Err(_) => Ok(false)
+        }
+    }
+
+    fn match_val(inout self, e: ast.Expr, v: CVal, params: Vec(ast.Param), module: u32, inout binds: Vec(Option(CVal))) -> Result(bool, Diag) {
+        match e.kind {
+            Name(n) => match param_index(params, n.as_str()) {
+                Some(i) => return Ok(bind_once(&binds, i, v))
+                None => {}
+            }
+            _ => {}
+        }
+        let r = self.const_expr(e, Env.new(module), None)?
+        Ok(match r.c {
+            Int(a, _) => match v {
+                Int(b) => a == b
+                _ => false
+            }
+            Bool(a) => match v {
+                Bool(b) => a == b
+                _ => false
+            }
+            _ => false
+        })
+    }
+
+    // The impl of a trait for a type, with the impl's arguments.
+    pub fn find_impl(inout self, tr: u32, t: u32) -> Result(Option(ImplHit), Diag) {
+        var key = String.new()
+        tr.show(&key)
+        key.push(',')
+        t.show(&key)
+        match self.impl_cache.get(key) {
+            Some(r) => return Ok(r.clone())
+            None => {}
+        }
+        // Marker traits the compiler implements.
+        let prelude = match at(self.ast).prelude {
+            Some(p) => p
+            None => 4294967295
+        }
+        if self.traits[tr as i64].module == prelude {
+            var known = true
+            var b = false
+            let name = self.traits[tr as i64].name.as_str()
+            let k = self.types.kind(t).clone()
+            if name == "Plain" {
+                let ty = match k {
+                    Type => true
+                    _ => false
+                }
+                b = self.types.is_plain(t) && !ty
+            } else if name == "Int" {
+                b = match k {
+                    Int(_) => true
+                    _ => false
+                }
+            } else if name == "Signed" {
+                b = match k {
+                    Int(i) => i.signed
+                    _ => false
+                }
+            } else if name == "Unsigned" {
+                b = match k {
+                    Int(i) => !i.signed
+                    _ => false
+                }
+            } else if name == "Float" {
+                b = match k {
+                    Float(_) => true
+                    _ => false
+                }
+            } else if name == "Number" {
+                b = match k {
+                    Int(_) | Float(_) => true
+                    _ => false
+                }
+            } else {
+                known = false
+            }
+            if known {
+                var r: Option(ImplHit) = None
+                if b {
+                    r = Some(ImplHit { imp: BUILTIN_IMPL, args: Vec(CVal).new() })
+                }
+                self.impl_cache.insert(key, r.clone())
+                return Ok(r)
+            }
+        }
+        self.impl_cache.insert(key.clone(), None)
+        var found: Option(ImplHit) = None
+        let impls = self.traits[tr as i64].impls.clone()
+        for imp in impls {
+            match self.match_impl(imp, t)? {
+                Some(args) => {
+                    found = Some(ImplHit { imp: imp, args: args })
+                    break
+                }
+                None => {}
+            }
+        }
+        if found.is_none() {
+            found = self.derived_impl(tr, t)
+        }
+        self.impl_cache.insert(key, found.clone())
+        Ok(found)
+    }
+
+    // `#[derive(...)]` impls are written by the compiler; they are
+    // recorded as impl `DERIVED_IMPL`.
+    fn derived_impl(self, tr: u32, t: u32) -> Option(ImplHit) {
+        let a = match self.types.adt_index(t) {
+            Some(a) => a
+            None => return None
+        }
+        let decl = self.types.adts[a as i64].decl
+        for d in self.adts[decl as i64].derives {
+            if d == self.traits[tr as i64].name {
+                return Some(ImplHit { imp: DERIVED_IMPL, args: Vec(CVal).new() })
+            }
+        }
+        None
+    }
+
+    pub fn implements(inout self, tr: u32, t: u32) -> Result(bool, Diag) {
+        Ok(self.find_impl(tr, t)?.is_some())
+    }
+
+    // A method by name: inherent impls first, then traits the type
+    // implements. Returns the function declaration and its impl arguments
+    // (for a trait's default body: `Self`).
+    pub fn find_method(inout self, t: u32, name: str) -> Result(Option(ImplHit), Diag) {
+        let candidates = match self.types.adt_index(t) {
+            Some(a) => {
+                let decl = self.types.adts[a as i64].decl
+                self.adts[decl as i64].impls.clone()
+            }
+            None => self.other_impls.clone()
+        }
+        for imp in candidates {
+            let fid = match self.impls[imp as i64].fns.get(name) {
+                Some(f) => f
+                None => continue
+            }
+            match self.match_impl(imp, t)? {
+                Some(args) => return Ok(Some(ImplHit { imp: fid, args: args }))
+                None => {}
+            }
+        }
+        for tr in 0..self.traits.len() {
+            let default_fid = match self.traits[tr].fns.get(name) {
+                Some(f) => f
+                None => continue
+            }
+            let hit = match self.find_impl(tr as u32, t)? {
+                Some(h) => h
+                None => continue
+            }
+            if hit.imp == BUILTIN_IMPL {
+                continue
+            }
+            if hit.imp != DERIVED_IMPL {
+                match self.impls[hit.imp as i64].fns.get(name) {
+                    Some(fid) => return Ok(Some(ImplHit { imp: fid, args: hit.args.clone() }))
+                    None => {}
+                }
+            }
+            var a = Vec(CVal).new()
+            a.push(CVal.Type(t))
+            return Ok(Some(ImplHit { imp: default_fid, args: a }))
+        }
+        Ok(None)
+    }
+
+    // ---- instances ----
+
+    // The environment of a function declaration given all its compile-time
+    // arguments: the impl's (or `Self` for a trait's) then its own. Also
+    // how many of the arguments that used.
+    pub fn fn_env(self, fid: u32, args: Vec(CVal)) -> (Env, i64) {
+        let info = self.fns[fid as i64]
+        var env = Env.new(info.module)
+        var used = 0
+        match info.owner {
+            Free => {}
+            Impl(imp) => {
+                for p in at(self.impls[imp as i64].decl).params {
+                    env.push(p.name.as_str(), args[used].clone())
+                    used += 1
+                }
+            }
+            Trait(_) => {
+                match args.first() {
+                    Some(Type(t)) => env.self_ty = Some(t)
+                    _ => {}
+                }
+                used = 1
+            }
+        }
+        (env, used)
+    }
+
+    pub fn fn_self_ty(inout self, fid: u32, inout env: Env) -> Result((), Diag) {
+        match self.fns[fid as i64].owner {
+            Impl(imp) => {
+                let t = at(self.impls[imp as i64].decl).self_ty
+                let st = self.resolve_ty(t, env)?
+                env.self_ty = Some(st)
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // The instance of a function for its compile-time arguments; its body
+    // is lowered later.
+    pub fn instance(inout self, fid: u32, args: Vec(CVal), span: Span) -> Result(u32, Diag) {
+        let key = inst_key(fid, args)
+        match self.fn_insts.get(key) {
+            Some(id) => return Ok(id)
+            None => {}
+        }
+        if self.fn_insts.len() > 20000 {
+            return Err(ty_err(span, "too many instances of generic functions; does one instantiate itself forever?"))
+        }
+        let (var env, var used) = self.fn_env(fid, args)
+        self.fn_self_ty(fid, &env)?
+        let decl = at(self.fns[fid as i64].decl)
+        let module = self.fns[fid as i64].module
+        for p in decl.params {
+            if p.mode == ast.Mode.Comptime {
+                if used >= args.len() {
+                    return Err(ty_err(span, "missing compile-time argument"))
+                }
+                env.push(p.name.as_str(), args[used].clone())
+                used += 1
+            }
+        }
+        var params = Vec(u32).new()
+        var pass = Vec(mir.ParamPass).new()
+        for p in decl.params {
+            if p.mode == ast.Mode.Comptime {
+                // A closure argument still passes its environment.
+                match env.get(p.name.as_str()) {
+                    Some(Lambda(_, _)) => {
+                        let ct = match p.ty {
+                            Some(pt) => self.resolve_ty(pt, env)?
+                            None => return Err(ty_err(p.span, "a closure parameter needs its type"))
+                        }
+                        params.push(ct)
+                        pass.push(mir.ParamPass.Value)
+                    }
+                    _ => {}
+                }
+                continue
+            }
+            let t = match p.ty {
+                Some(t) => self.resolve_ty(t, env)?
+                None => match env.self_ty {
+                    Some(t) => t
+                    None => return Err(ty_err(p.span, "`self` outside an impl"))
+                }
+            }
+            let lp = self.param_local_ty(p.mode, t)
+            params.push(lp.0)
+            pass.push(lp.1)
+        }
+        let ret_t = match decl.ret {
+            Some(t) => self.resolve_ty(t, env)?
+            None => types.UNIT
+        }
+        let ret = match decl.ret_mode {
+            Value => ret_t
+            Ref => self.types.refty(ret_t)
+            Inout => self.types.refmut(ret_t)
+        }
+        let id = self.out.len() as u32
+        let mname = self.module_name(module).to_string()
+        let owner = self.fns[fid as i64].owner
+        var name = match owner {
+            Free => decl.name.clone()
+            _ => {
+                var n = String.new()
+                match env.self_ty {
+                    Some(t) => n.push_str(self.types.show(t).as_str())
+                    None => {}
+                }
+                n.push('.')
+                n.push_str(decl.name.as_str())
+                n
+            }
+        }
+        let skip = match owner {
+            Free => 0
+            Impl(imp) => at(self.impls[imp as i64].decl).params.len()
+            Trait(_) => 1
+        }
+        if args.len() > skip {
+            name.push('(')
+            for i in skip..args.len() {
+                if i > skip {
+                    name.push_str(", ")
+                }
+                name.push_str(self.show_cval(args[i]).as_str())
+            }
+            name.push(')')
+        }
+        var linkage = mir.Linkage.Internal
+        var symbol = String.new()
+        match decl.kind {
+            Extern => {
+                linkage = mir.Linkage.Extern
+                symbol = decl.name.clone()
+            }
+            Export => {
+                linkage = mir.Linkage.Export
+                symbol = decl.name.clone()
+            }
+            Normal => {
+                symbol = mname + "." + sanitize(name.as_str()).as_str() + "."
+                id.show(&symbol)
+            }
+        }
+        let normal = match decl.kind {
+            Normal => true
+            _ => false
+        }
+        if !normal && args.len() > 0 {
+            return Err(ty_err(decl.name_span, "extern and export functions cannot be generic"))
+        }
+        let returns_ref = match decl.ret_mode {
+            Value => false
+            _ => true
+        }
+        self.out.push(mir.Function {
+            symbol: symbol
+            name: name
+            sig: types.Sig { params: params, ret: ret }
+            pass: pass
+            body: None
+            linkage: linkage
+            variadic: decl.variadic
+            returns_ref: returns_ref
+            span: decl.name_span
+        })
+        self.inst_info.push(Some(InstInfo { decl: fid, env: env.clone() }))
+        self.fn_insts.insert(key, id)
+        let is_extern = match decl.kind {
+            Extern => true
+            _ => false
+        }
+        if !is_extern {
+            if decl.body.is_none() {
+                return Err(ty_err(decl.name_span, "this function needs a body"))
+            }
+            self.queue.push(Pending { id: id, decl: fid, env: env })
+        }
+        Ok(id)
+    }
+
+    // How a parameter is held in the callee: by value, owned, or borrowed.
+    pub fn param_local_ty(inout self, mode: ast.Mode, t: u32) -> (u32, mir.ParamPass) {
+        match mode {
+            Let => {
+                let view = match self.types.kind(t) {
+                    Str | Slice(_) | Closure(_) => true
+                    _ => false
+                }
+                if self.types.is_scalar(t) || view {
+                    (t, mir.ParamPass.Value)
+                } else {
+                    (self.types.refty(t), mir.ParamPass.Borrow)
+                }
+            }
+            Inout => (self.types.refmut(t), mir.ParamPass.Borrow)
+            Sink => {
+                if self.types.is_scalar(t) {
+                    (t, mir.ParamPass.Value)
+                } else {
+                    (t, mir.ParamPass.Owned)
+                }
+            }
+            Comptime => (t, mir.ParamPass.Value)
+        }
+    }
+
+    pub fn next_lambda(inout self) -> u32 {
+        self.lambda_count += 1
+        self.lambda_count
+    }
+
+    pub fn run(inout self) -> Result((), Diag) {
+        while self.queue_head < self.queue.len() {
+            let i = self.queue_head
+            self.queue_head += 1
+            let id = self.queue[i].id
+            let decl = self.queue[i].decl
+            let env = self.queue[i].env.clone()
+            self.stack.push(id)
+            let r = self.lower_fn(id, decl, env)
+            self.stack.pop()
+            match r {
+                Ok(_) => {}
+                Err(d) => return Err(self.with_origin(d, id))
+            }
+        }
+        Ok(())
+    }
+
+    // The body of a function instance, lowered to MIR. (Not ported yet.)
+    pub fn lower_fn(inout self, id: u32, decl: u32, env: Env) -> Result((), Diag) {
+        Err(ty_err(at(self.fns[decl as i64].decl).name_span, "the compiler in jihoo cannot lower function bodies yet"))
+    }
+
+    fn with_origin(self, sink d: Diag, id: u32) -> Diag {
+        if (id as i64) < self.inst_info.len() {
+            match self.inst_info[id as i64] {
+                Some(info) => {
+                    if info.env.names.len() > 0 {
+                        let msg = "in the instance `" + self.out[id as i64].name.as_str() + "`"
+                        return d.note(None, msg.as_str())
+                    }
+                }
+                None => {}
+            }
+        }
+        d
+    }
+
+    // ---- compile-time values (consts.rs) ----
+
+    pub fn const_int(inout self, e: ast.Expr, env: Env) -> Result(i128, Diag) {
+        let r = self.const_expr(e, env, Some(types.I64))?
+        match r.c {
+            Int(v, _) => Ok(v)
+            _ => Err(ty_err(e.span, "expected a compile-time integer"))
+        }
+    }
+
+    // Whether `v` is a value of `t`. A 128-bit constant is its value's bit
+    // pattern (a `u128` past `i128::MAX` is negative here); every such
+    // pattern fits, except a negative literal for a `u128`.
+    pub fn int_fits(self, v: i128, t: u32) -> bool {
+        let i = match self.types.int(t) {
+            Some(i) => i
+            None => return false
+        }
+        if i.bits == 128 {
+            return i.signed || v >= 0
+        }
+        let one: i128 = 1
+        if i.signed {
+            let lim = one << (i.bits - 1)
+            v >= 0 - lim && v < lim
+        } else {
+            v >= 0 && v < (one << i.bits)
+        }
+    }
+
+    // Wraps an integer to its type's width, sign-extending signed types.
+    pub fn wrap_int(self, v: i128, t: u32) -> i128 {
+        let i = match self.types.int(t) {
+            Some(i) => i
+            None => return v
+        }
+        let one: i128 = 1
+        let m = if i.bits == 128 { v } else { v & ((one << i.bits) - 1) }
+        if i.signed && i.bits < 128 && (m >> (i.bits - 1)) & 1 == 1 {
+            m - (one << i.bits)
+        } else {
+            m
+        }
+    }
+
+    pub fn const_value(inout self, id: u32) -> Result(TypedConst, Diag) {
+        match self.consts[id as i64].value {
+            Some(v) => return Ok(v.clone())
+            None => {}
+        }
+        if self.consts[id as i64].busy {
+            return Err(ty_err(self.consts[id as i64].span, "this constant's value depends on itself"))
+        }
+        let decl = at(self.consts[id as i64].decl)
+        let env = Env.new(self.consts[id as i64].module)
+        self.consts[id as i64].busy = true
+        var exp: Option(u32) = None
+        match decl.ty {
+            Some(t) => exp = Some(self.resolve_ty(t, env)?)
+            None => {}
+        }
+        let v = self.const_expr(decl.value, env, exp)?
+        match exp {
+            Some(t) => {
+                if v.ty != t {
+                    return Err(ty_err(decl.value.span, self.expected_found(t, v.ty).as_str()))
+                }
+            }
+            None => {}
+        }
+        self.consts[id as i64].busy = false
+        self.consts[id as i64].value = Some(v.clone())
+        Ok(v)
+    }
+
+    pub fn const_expr(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(TypedConst, Diag) {
+        var exp_int: Option(u32) = None
+        var exp_float: Option(u32) = None
+        match exp {
+            Some(t) => {
+                if self.types.is_int(t) {
+                    exp_int = Some(t)
+                }
+                if self.types.is_float(t) {
+                    exp_float = Some(t)
+                }
+            }
+            None => {}
+        }
+        match e.kind {
+            Int(v) => {
+                match exp_float {
+                    Some(t) => return Ok(TypedConst { c: Const.Float(v as f64, t), ty: t })
+                    None => {}
+                }
+                let t = exp_int.unwrap_or(types.I64)
+                if !self.int_fits(v as i128, t) {
+                    var m = String.new()
+                    v.show(&m)
+                    m.push_str(" does not fit in `")
+                    m.push_str(self.types.show(t).as_str())
+                    m.push('`')
+                    return Err(ty_err(e.span, m.as_str()))
+                }
+                Ok(TypedConst { c: Const.Int(v as i128, t), ty: t })
+            }
+            Char(c) => {
+                let t = exp_int.unwrap_or(types.U8)
+                Ok(TypedConst { c: Const.Int(c as i128, t), ty: t })
+            }
+            Float(f) => {
+                let t = exp_float.unwrap_or(types.F64)
+                let v = if t == types.F32 { f as f32 as f64 } else { f }
+                Ok(TypedConst { c: Const.Float(v, t), ty: t })
+            }
+            Bool(b) => Ok(TypedConst { c: Const.Bool(b), ty: types.BOOL })
+            Str(s) => Ok(TypedConst { c: Const.Str(s.clone()), ty: types.STR })
+            Unit => Ok(TypedConst { c: Const.Zst(types.UNIT), ty: types.UNIT })
+            Name(n) => {
+                if n == "null" && env.get(n.as_str()).is_none() {
+                    match exp {
+                        Some(t) => {
+                            if self.types.is_ptr(t) {
+                                return Ok(TypedConst { c: Const.Null(t), ty: t })
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                match env.get(n.as_str()) {
+                    Some(v) => return match v {
+                        Int(i) => {
+                            let t = exp_int.unwrap_or(types.I64)
+                            Ok(TypedConst { c: Const.Int(i, t), ty: t })
+                        }
+                        Bool(b) => Ok(TypedConst { c: Const.Bool(b), ty: types.BOOL })
+                        _ => Err(ty_err(e.span, ("`" + n.as_str() + "` is not a constant value").as_str()))
+                    }
+                    None => {}
+                }
+                match self.lookup(env.module, n.as_str()) {
+                    Some(Const(c)) => self.const_value(c)
+                    _ => Err(ty_err(e.span, ("`" + n.as_str() + "` is not a compile-time constant").as_str()))
+                }
+            }
+            Field(_, _) => {
+                let p = match expr_path(e) {
+                    Some(p) => p
+                    None => return Err(ty_err(e.span, "not a constant"))
+                }
+                match self.lookup_path(env.module, p) {
+                    Some((Const(c), _)) => self.const_value(c)
+                    _ => Err(ty_err(e.span, "not a compile-time constant"))
+                }
+            }
+            Unary(op, inner) => match op {
+                Neg => {
+                    let r = self.const_expr(inner.deref(), env, exp)?
+                    match r.c {
+                        Int(v, t) => {
+                            let signed = match self.types.int(t) {
+                                Some(i) => i.signed
+                                None => false
+                            }
+                            if !signed {
+                                return Err(ty_err(e.span, "only signed integers can be negated"))
+                            }
+                            Ok(TypedConst { c: Const.Int(self.wrap_int(0 - v, t), t), ty: t })
+                        }
+                        Float(v, t) => Ok(TypedConst { c: Const.Float(0.0 - v, t), ty: t })
+                        _ => Err(ty_err(e.span, "cannot negate this"))
+                    }
+                }
+                Not => {
+                    let r = self.const_expr(inner.deref(), env, exp)?
+                    match r.c {
+                        Int(v, t) => Ok(TypedConst { c: Const.Int(self.wrap_int(!v, t), t), ty: t })
+                        Bool(b) => Ok(TypedConst { c: Const.Bool(!b), ty: r.ty })
+                        _ => Err(ty_err(e.span, "cannot apply `!` to this"))
+                    }
+                }
+                _ => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+            }
+            Binary(op, a, b) => {
+                let ea: Option(u32) = if op.is_compare() { None } else { exp }
+                let ra = self.const_expr(a.deref(), env, ea)?
+                let rb = self.const_expr(b.deref(), env, Some(ra.ty))?
+                let shift = match op {
+                    Shl | Shr => true
+                    _ => false
+                }
+                if ra.ty != rb.ty && !shift {
+                    let m = "`" + op.text() + "` on `" + self.types.show(ra.ty).as_str() + "` and `" + self.types.show(rb.ty).as_str() + "`"
+                    return Err(ty_err(e.span, m.as_str()))
+                }
+                self.fold_bin(op, ra.c, rb.c, ra.ty, e.span)
+            }
+            Cast(inner, t) => {
+                let to = self.resolve_ty(t, env)?
+                let r = self.const_expr(inner.deref(), env, None)?
+                Ok(TypedConst { c: self.const_cast(r.c, r.ty, to, e.span)?, ty: to })
+            }
+            Call(callee, args) => {
+                if args.len() != 1 {
+                    return Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                }
+                let name = match callee.kind {
+                    Name(n) => n.clone()
+                    _ => String.new()
+                }
+                if name == "size_of" || name == "align_of" {
+                    let t = self.expr_ty(args[0], env)?
+                    match self.types.kind(t) {
+                        Type => return Err(ty_err(e.span, "types have no size"))
+                        _ => {}
+                    }
+                    let l = self.types.layout(t)
+                    let v = if name == "size_of" { l.size } else { l.align }
+                    let rt = exp_int.unwrap_or(types.I64)
+                    return Ok(TypedConst { c: Const.Int(v as i128, rt), ty: rt })
+                }
+                Err(ty_err(e.span, "this call cannot be evaluated while compiling yet"))
+            }
+            Block(b) => {
+                if b.stmts.len() > 0 {
+                    return Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                }
+                match b.tail {
+                    Some(t) => self.const_expr(t.deref(), env, exp)
+                    None => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                }
+            }
+            If(c, then, els) => {
+                let rc = self.const_expr(c.deref(), env, Some(types.BOOL))?
+                let cv = match rc.c {
+                    Bool(b) => b
+                    _ => return Err(ty_err(c.span, "expected a bool"))
+                }
+                if cv {
+                    if then.stmts.len() == 0 {
+                        match then.tail {
+                            Some(t) => return self.const_expr(t.deref(), env, exp)
+                            None => {}
+                        }
+                    }
+                    Err(ty_err(e.span, "not a constant"))
+                } else {
+                    match els {
+                        Some(x) => self.const_expr(x.deref(), env, exp)
+                        None => Err(ty_err(e.span, "not a constant"))
+                    }
+                }
+            }
+            _ => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+        }
+    }
+
+    fn fold_bin(inout self, op: Op, a: Const, b: Const, t: u32, span: Span) -> Result(TypedConst, Diag) {
+        match a {
+            Int(x, _) => match b {
+                Int(y, _) => return self.fold_int(op, x, y, t, span)
+                _ => {}
+            }
+            Float(x, _) => match b {
+                Float(y, _) => {
+                    let r32 = t == types.F32
+                    let fl = fn(v: f64) -> TypedConst { TypedConst { c: Const.Float(if r32 { v as f32 as f64 } else { v }, t), ty: t } }
+                    return match op {
+                        Add => Ok(fl(x + y))
+                        Sub => Ok(fl(x - y))
+                        Mul => Ok(fl(x * y))
+                        Div => Ok(fl(x / y))
+                        Eq => Ok(cbool(x == y))
+                        Ne => Ok(cbool(x != y))
+                        Lt => Ok(cbool(x < y))
+                        Le => Ok(cbool(x <= y))
+                        Gt => Ok(cbool(x > y))
+                        Ge => Ok(cbool(x >= y))
+                        _ => Err(ty_err(span, "not a float operator"))
+                    }
+                }
+                _ => {}
+            }
+            Bool(x) => match b {
+                Bool(y) => {
+                    return match op {
+                        LogAnd | And => Ok(cbool(x && y))
+                        LogOr | Or => Ok(cbool(x || y))
+                        Eq => Ok(cbool(x == y))
+                        Ne | Xor => Ok(cbool(x != y))
+                        _ => Err(ty_err(span, "not a bool operator"))
+                    }
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+        Err(ty_err(span, "cannot evaluate this while compiling yet"))
+    }
+
+    fn fold_int(inout self, op: Op, x: i128, y: i128, t: u32, span: Span) -> Result(TypedConst, Diag) {
+        var signed = true
+        var bits: u32 = 64
+        match self.types.int(t) {
+            Some(i) => {
+                signed = i.signed
+                bits = i.bits
+            }
+            None => {}
+        }
+        if bits == 128 {
+            return fold_128(op, x, y, signed, t, span)
+        }
+        let int = fn(v: i128) -> TypedConst { TypedConst { c: Const.Int(v, t), ty: t } }
+        match op {
+            Add | AddWrap | Sub | SubWrap | Mul | MulWrap => {
+                let v = match op {
+                    Add | AddWrap => x + y
+                    Sub | SubWrap => x - y
+                    _ => x *% y
+                }
+                let checked = match op {
+                    Add | Sub | Mul => true
+                    _ => false
+                }
+                if checked && !self.int_fits(v, t) {
+                    return Err(ty_err(span, "the result overflows its type"))
+                }
+                Ok(int(self.wrap_int(v, t)))
+            }
+            Div | Rem => {
+                if y == 0 {
+                    return Err(ty_err(span, "division by zero"))
+                }
+                let v = match op {
+                    Div => x / y
+                    _ => x % y
+                }
+                Ok(int(self.wrap_int(v, t)))
+            }
+            And => Ok(int(x & y))
+            Or => Ok(int(x | y))
+            Xor => Ok(int(self.wrap_int(x ^ y, t)))
+            Shl => Ok(int(self.wrap_int(x << ((y as u32) % bits), t)))
+            Shr => {
+                let one: i128 = 1
+                let ux = if signed { x } else { x & ((one << bits) - 1) }
+                Ok(int(ux >> ((y as u32) % bits)))
+            }
+            Eq => Ok(cbool(x == y))
+            Ne => Ok(cbool(x != y))
+            Lt => Ok(cbool(x < y))
+            Le => Ok(cbool(x <= y))
+            Gt => Ok(cbool(x > y))
+            Ge => Ok(cbool(x >= y))
+            _ => Err(ty_err(span, "not an integer operator"))
+        }
+    }
+
+    // A constant converted with `as`; `from` is its type.
+    pub fn const_cast(inout self, c: Const, from: u32, to: u32, span: Span) -> Result(Const, Diag) {
+        let tk = self.types.kind(to).clone()
+        match c {
+            Int(v, _) => match tk {
+                Int(_) => return Ok(Const.Int(self.wrap_int(v, to), to))
+                Float(_) => {
+                    let unsigned_128 = match self.types.int(from) {
+                        Some(i) => i.bits == 128 && !i.signed
+                        None => false
+                    }
+                    return Ok(Const.Float(if unsigned_128 { v as u128 as f64 } else { v as f64 }, to))
+                }
+                _ => {}
+            }
+            Float(v, _) => match tk {
+                Float(b) => return Ok(Const.Float(if b == 32 { v as f32 as f64 } else { v }, to))
+                Int(i) => {
+                    var x: i128 = 0
+                    if i.bits == 128 {
+                        x = if i.signed { v as i128 } else { v as u128 as i128 }
+                    } else {
+                        x = if i.signed { v as i64 as i128 } else { v as u64 as i128 }
+                    }
+                    return Ok(Const.Int(self.wrap_int(x, to), to))
+                }
+                _ => {}
+            }
+            Bool(b) => match tk {
+                Int(_) => return Ok(Const.Int(if b { 1 } else { 0 }, to))
+                _ => {}
+            }
+            _ => {}
+        }
+        Err(ty_err(span, "this conversion cannot be done while compiling"))
+    }
+}
+
+fn cbool(b: bool) -> TypedConst {
+    TypedConst { c: Const.Bool(b), ty: types.BOOL }
+}
+
+// Arithmetic on 128-bit constants, which are bit patterns in an `i128`:
+// at that width, as the program would do it.
+fn fold_128(op: Op, x: i128, y: i128, signed: bool, t: u32, span: Span) -> Result(TypedConst, Diag) {
+    let int = fn(v: i128) -> Result(TypedConst, Diag) { Ok(TypedConst { c: Const.Int(v, t), ty: t }) }
+    let ux = x as u128
+    let uy = y as u128
+    let n = (y as u32) % 128
+    let top: u128 = 1 << 127
+    match op {
+        Add | Sub | Mul => {
+            // checked: the exact result must fit
+            if signed {
+                let v = match op {
+                    Add => x +% y
+                    Sub => x -% y
+                    _ => x *% y
+                }
+                let over = match op {
+                    Add => (x >= 0) == (y >= 0) && (v >= 0) != (x >= 0)
+                    Sub => (x >= 0) != (y >= 0) && (v >= 0) != (x >= 0)
+                    _ => x != 0 && (v / x != y || (x == -1 && y as u128 == top))
+                }
+                if over {
+                    return Err(ty_err(span, "the result overflows its type"))
+                }
+                return int(v)
+            }
+            let v = match op {
+                Add => ux +% uy
+                Sub => ux -% uy
+                _ => ux *% uy
+            }
+            let over = match op {
+                Add => v < ux
+                Sub => uy > ux
+                _ => ux != 0 && v / ux != uy
+            }
+            if over {
+                return Err(ty_err(span, "the result overflows its type"))
+            }
+            int(v as i128)
+        }
+        AddWrap => int(x +% y)
+        SubWrap => int(x -% y)
+        MulWrap => int(x *% y)
+        Div | Rem => {
+            if y == 0 {
+                return Err(ty_err(span, "division by zero"))
+            }
+            if signed {
+                if x as u128 == top && y == -1 {
+                    return Err(ty_err(span, "the result overflows its type"))
+                }
+                return int(if op == Op.Div { x / y } else { x % y })
+            }
+            int((if op == Op.Div { ux / uy } else { ux % uy }) as i128)
+        }
+        And => int(x & y)
+        Or => int(x | y)
+        Xor => int(x ^ y)
+        Shl => int(x << n)
+        Shr => if signed { int(x >> n) } else { int((ux >> n) as i128) }
+        Eq => Ok(cbool(x == y))
+        Ne => Ok(cbool(x != y))
+        Lt => Ok(cbool(if signed { x < y } else { ux < uy }))
+        Le => Ok(cbool(if signed { x <= y } else { ux <= uy }))
+        Gt => Ok(cbool(if signed { x > y } else { ux > uy }))
+        Ge => Ok(cbool(if signed { x >= y } else { ux >= uy }))
+        _ => Err(ty_err(span, "not an integer operator"))
+    }
+}
+
+// ---- helpers ----
+
+fn names_param(params: Vec(ast.Param), n: str) -> bool {
+    param_index(params, n).is_some()
+}
+
+fn param_index(params: Vec(ast.Param), n: str) -> Option(i64) {
+    for i, q in params {
+        if q.name == n {
+            return Some(i)
+        }
+    }
+    None
+}
+
+// Binds slot `i` to `v`, or checks that it already holds `v`.
+fn bind_once(inout binds: Vec(Option(CVal)), i: i64, v: CVal) -> bool {
+    match binds[i] {
+        Some(old) => return old == v
+        None => {}
+    }
+    binds[i] = Some(v)
+    true
+}
+
+// `impl(T: ...) Trait for T`: an impl for every type.
+fn is_blanket(d: ast.ImplDecl) -> bool {
+    match d.self_ty.kind {
+        Path(p, None) => p.len() == 1 && names_param(d.params, p[0].as_str())
+        _ => false
+    }
+}
+
+fn is_zeroed_call(e: ast.Expr) -> bool {
+    match e.kind {
+        Call(f, args) => {
+            if args.len() != 1 {
+                return false
+            }
+            match f.kind {
+                Name(n) => n == "zeroed"
+                _ => false
+            }
+        }
+        _ => false
+    }
+}
+
+fn has_attr(item: ast.Item, name: str) -> bool {
+    for a in item.attrs {
+        if a.name == name {
+            return true
+        }
+    }
+    false
+}
+
+fn derives(item: ast.Item) -> Vec(String) {
+    var out = Vec(String).new()
+    for a in item.attrs {
+        if a.name == "derive" {
+            for x in a.args {
+                out.push(x.clone())
+            }
+        }
+    }
+    out
+}
+
+pub fn join_path(p: Vec(String)) -> String {
+    var s = String.new()
+    for i, x in p {
+        if i > 0 {
+            s.push('.')
+        }
+        s.push_str(x.as_str())
+    }
+    s
+}
+
+// A name usable in a symbol: other characters become `_`, one per
+// character.
+pub fn sanitize(s: str) -> String {
+    var out = String.new()
+    var i = 0
+    while i < s.len {
+        let c = s[i]
+        if is_alpha(c) || is_digit(c) || c == '_' || c == '.' {
+            out.push(c)
+            i += 1
+        } else {
+            out.push('_')
+            let n = diag.utf8_at(s, i)
+            i += if n > 0 { n } else { 0 - n }
+        }
+    }
+    out
+}
+
+// `a.b.c` as a path, if the expression is one.
+pub fn expr_path(e: ast.Expr) -> Option(Vec(String)) {
+    match e.kind {
+        Name(n) => {
+            var v = Vec(String).new()
+            v.push(n.clone())
+            Some(v)
+        }
+        Field(b, n) => {
+            var p = match expr_path(b.deref()) {
+                Some(p) => p
+                None => return None
+            }
+            p.push(n.clone())
+            Some(p)
+        }
+        _ => None
+    }
+}
+
+// An expression read as a type pattern (in impl heads).
+pub fn expr_as_ty(e: ast.Expr) -> Option(ast.Ty) {
+    let kind = match e.kind {
+        Type(t) => return Some(t.clone())
+        Name(_) | Field(_, _) => ast.TyKind.Path(expr_path(e)?, None)
+        Call(c, args) => ast.TyKind.Path(expr_path(c.deref())?, Some(args.clone()))
+        Unary(op, i) => match op {
+            Deref => ast.TyKind.Ptr(Box.new(expr_as_ty(i.deref())?))
+            _ => return None
+        }
+        ArrayRepeat(el, n) => ast.TyKind.Array(Box.new(expr_as_ty(el.deref())?), n.clone())
+        Array(items) => {
+            if items.len() != 1 {
+                return None
+            }
+            ast.TyKind.Slice(Box.new(expr_as_ty(items[0])?))
+        }
+        Tuple(items) => {
+            var ts = Vec(ast.Ty).new()
+            for i in items {
+                ts.push(expr_as_ty(i)?)
+            }
+            ast.TyKind.Tuple(ts)
+        }
+        Unit => ast.TyKind.Tuple(Vec(ast.Ty).new())
+        _ => return None
+    }
+    Some(ast.Ty { kind: kind, span: e.span })
+}
+
+pub fn compile(a: load.Ast, tgt: target.Target, checked: bool) -> Result(mir.Program, Diag) {
+    var s = Sema.new(a, tgt, checked)
+    s.collect()?
+    let root = a.root
+    var entry: Option(u32) = None
+    match s.lookup(root, "main") {
+        Some(Fn(f)) => {
+            if s.fns[f as i64].module == root {
+                entry = Some(s.instance(f, Vec(CVal).new(), no_span())?)
+            }
+        }
+        _ => {}
+    }
+    // Exported functions are compiled whether or not anything calls them,
+    // and so is every function of the program that is not generic, so that
+    // it is checked.
+    for fid in 0..s.fns.len() {
+        let decl = at(s.fns[fid].decl)
+        var generic = false
+        for p in decl.params {
+            if p.mode == ast.Mode.Comptime {
+                generic = true
+            }
+        }
+        match s.fns[fid].owner {
+            Free => {}
+            Impl(i) => {
+                if at(s.impls[i as i64].decl).params.len() > 0 {
+                    generic = true
+                }
+            }
+            Trait(_) => generic = true
+        }
+        let user = !s.module_name(s.fns[fid].module).starts_with("std.")
+        let exported = match decl.kind {
+            Export => true
+            _ => false
+        }
+        let normal = match decl.kind {
+            Normal => true
+            _ => false
+        }
+        if exported || (user && !generic && normal) {
+            s.instance(fid as u32, Vec(CVal).new(), no_span())?
+        }
+    }
+    s.run()?
+    // Destructors of every type that has one, until no new types appear.
+    var drop_impls = Map(u32, u32).new()
+    match s.lang.drop {
+        Some(dr) => {
+            loop {
+                var new = false
+                for i in 0..s.types.adts.len() {
+                    if !s.types.adts[i].has_drop {
+                        continue
+                    }
+                    let t = s.types.intern(TyKind.Adt(i as u32))
+                    if drop_impls.contains(t) {
+                        continue
+                    }
+                    let hit = match s.find_impl(dr, t)? {
+                        Some(h) => h
+                        None => continue
+                    }
+                    let fid = match s.impls[hit.imp as i64].fns.get("drop") {
+                        Some(f) => f
+                        None => return Err(ty_err(s.impls[hit.imp as i64].span, "a `Drop` impl needs `fn drop(inout self)`"))
+                    }
+                    let id = s.instance(fid, hit.args, no_span())?
+                    drop_impls.insert(t, id)
+                    new = true
+                }
+                s.run()?
+                if !new {
+                    break
+                }
+            }
+        }
+        None => {}
+    }
+    if entry.is_none() {
+        return Err(ty_err(Span.new(a.modules[root as i64].ast.file, 0, 0), "the program has no `main` function"))
+    }
+    var statics = Vec(mir.StaticDef).new()
+    for i, st in s.statics {
+        match st.done {
+            Some(d) => {
+                var sym = s.module_name(st.module) + "." + at(st.decl).name.as_str() + ".static"
+                i.show(&sym)
+                statics.push(mir.StaticDef { symbol: sym, ty: d.ty, value: d.c.clone() })
+            }
+            None => statics.push(mir.StaticDef { symbol: String.new(), ty: types.UNIT, value: Const.Zst(types.UNIT) })
+        }
+    }
+    match s {
+        Sema { out, types, freestanding, .. } => Ok(mir.Program {
+            fns: out
+            types: types
+            entry: entry
+            freestanding: freestanding
+            checked: checked
+            statics: statics
+            drop_impls: drop_impls
+            target: tgt
+        })
+    }
+}
+
+// What a pointer into the syntax tree points to. Sema's tables point into
+// the tree, which outlives sema and never changes (in Rust, `&'a` borrows);
+// as raw pointers they do not hold `self` borrowed while sema changes.
+pub fn at(comptime T: type, p: *T) -> ref T {
+    unsafe { *p }
+}

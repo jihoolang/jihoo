@@ -79,6 +79,10 @@ How bindings get their values:
 - Otherwise bindings borrow (plain values are copied).
 - `match &x` borrows `x` mutably when it can change, so arms can change
   what they bind.
+- Patterns look through a borrow held as a value: on an `Option(ref T)`
+  (from `v.first()`, `map.get(k)`), `Some(Circle(r))` matches inside the
+  `T`, and bindings borrow; on an `Option(inout T)` (`map.get_mut(k)`) they
+  can change. A plain name binds the borrow itself.
 
 `let` destructures too, with a pattern that must always match:
 `let (a, b) = pair`.
@@ -96,4 +100,5 @@ loop { ... break }
 `for` borrows a collection and gives each element (borrowed, or copied if
 plain). A type with `next(inout self) -> Option(T)` is an iterator and is
 used up by the loop; a type with `iter()` gives one. To own the elements of
-a `Vec`, loop over `v.into_iter()`.
+a `Vec`, loop over `v.into_iter()`. A borrow held as a value (a field of
+type `ref Vec(T)`) is looped over as what it points to.

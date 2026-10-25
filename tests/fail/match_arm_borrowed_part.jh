@@ -1,0 +1,12 @@
+// A match arm cannot hand out a borrowed part as the match's value.
+// error: cannot move
+
+fn first_name(o: Option(String)) -> String {
+    let s = match o {
+        Some(s) => s
+        None => return String.new()
+    }
+    s
+}
+
+fn main() {}

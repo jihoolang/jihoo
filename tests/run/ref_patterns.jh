@@ -1,0 +1,50 @@
+// Patterns look through borrows held as values: `Option(ref T)` from
+// `first`, `Option(inout T)` from `get_mut` (whose bindings can change).
+
+enum Shape {
+    Circle(i64)
+    Square(i64, i64)
+    Dot
+}
+
+struct Counter {
+    n: i64
+}
+
+fn area(o: Option(ref Shape)) -> i64 {
+    match o {
+        Some(Circle(r)) => r * r * 3
+        Some(Square(w, h)) => w * h
+        Some(Dot) => 1
+        None => 0
+    }
+}
+
+fn main() {
+    var shapes = Vec(Shape).new()
+    shapes.push(Shape.Square(2, 3))
+    shapes.push(Shape.Circle(2))
+    shapes.push(Shape.Dot)
+    println(area(shapes.first()))
+    println(area(shapes.last()))
+    println(area(None))
+    var counts = Map(String, Counter).new()
+    counts.insert("a".to_string(), Counter { n: 1 })
+    match counts.get_mut("a") {
+        Some(Counter { n }) => n += 10
+        None => {}
+    }
+    println(counts["a"].n)
+    var nums = Vec(i64).new()
+    nums.push(7)
+    match nums.first() {
+        Some(7) => println("seven")
+        Some(_) => println("other")
+        None => println("none")
+    }
+}
+//> 6
+//> 1
+//> 0
+//> 11
+//> seven

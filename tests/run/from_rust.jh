@@ -141,6 +141,20 @@ fn main() {
     let max = 0 -% (1 as u128)
     println(max)
     //> 340282366920938463463374607431768211455
+
+    // patterns see through `ref` values
+    var names = Vec(Named).new()
+    names.push(Named.Two("p".to_string(), "q".to_string()))
+    match names.first() {
+        Some(Two(a, _)) => println(a)
+        _ => {}
+    }
+    //> p
+
+    // `None` alone in an `if` arm needs the type written
+    let picked: Option(i64) = if names.len() > 5 { None } else { Some(1) }
+    println(picked.is_some())
+    //> true
 }
 
 enum Named {

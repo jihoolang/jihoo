@@ -312,3 +312,225 @@ pub enum PatKind {
     Or(Vec(Pat))
     Range(i128, i128)
 }
+
+// ---- copies (the Rust compiler derives `Clone`) ----
+
+impl Clone for Attr {
+    fn clone(self) -> Attr {
+        Attr { name: self.name.clone(), args: self.args.clone(), span: self.span }
+    }
+}
+
+impl Clone for Item {
+    fn clone(self) -> Item {
+        Item { span: self.span, public: self.public, attrs: self.attrs.clone(), kind: self.kind.clone() }
+    }
+}
+
+impl Clone for ItemKind {
+    fn clone(self) -> ItemKind {
+        match self {
+            Import(i) => ItemKind.Import(Import { path: i.path.clone(), alias: i.alias.clone() })
+            Fn(f) => ItemKind.Fn(f.clone())
+            Struct(s) => ItemKind.Struct(StructDecl { name: s.name.clone(), params: s.params.clone(), fields: s.fields.clone() })
+            Enum(e) => ItemKind.Enum(EnumDecl { name: e.name.clone(), params: e.params.clone(), variants: e.variants.clone() })
+            Impl(i) => ItemKind.Impl(ImplDecl { params: i.params.clone(), trait_: i.trait_.clone(), self_ty: i.self_ty.clone(), items: i.items.clone() })
+            Trait(t) => ItemKind.Trait(TraitDecl { name: t.name.clone(), params: t.params.clone(), supertraits: t.supertraits.clone(), items: t.items.clone() })
+            Const(c) => ItemKind.Const(c.clone())
+            Static(c) => ItemKind.Static(c.clone())
+            TypeAlias(n, t) => ItemKind.TypeAlias(n.clone(), t.clone())
+        }
+    }
+}
+
+impl Clone for ConstDecl {
+    fn clone(self) -> ConstDecl {
+        ConstDecl { name: self.name.clone(), ty: self.ty.clone(), value: self.value.clone() }
+    }
+}
+
+impl Clone for Field {
+    fn clone(self) -> Field {
+        Field { name: self.name.clone(), ty: self.ty.clone(), public: self.public, span: self.span }
+    }
+}
+
+impl Clone for Variant {
+    fn clone(self) -> Variant {
+        Variant { name: self.name.clone(), fields: self.fields.clone(), span: self.span }
+    }
+}
+
+impl Clone for Param {
+    fn clone(self) -> Param {
+        Param { name: self.name.clone(), mode: self.mode, ty: self.ty.clone(), bounds: self.bounds.clone(), span: self.span }
+    }
+}
+
+impl Clone for FnDecl {
+    fn clone(self) -> FnDecl {
+        FnDecl {
+            name: self.name.clone()
+            name_span: self.name_span
+            params: self.params.clone()
+            ret: self.ret.clone()
+            ret_mode: self.ret_mode
+            body: self.body.clone()
+            kind: self.kind
+            variadic: self.variadic
+            is_unsafe: self.is_unsafe
+        }
+    }
+}
+
+impl Clone for Ty {
+    fn clone(self) -> Ty {
+        Ty { kind: self.kind.clone(), span: self.span }
+    }
+}
+
+impl Clone for TyKind {
+    fn clone(self) -> TyKind {
+        match self {
+            Path(p, args) => TyKind.Path(p.clone(), args.clone())
+            Ptr(t) => TyKind.Ptr(t.clone())
+            Ref(t, m) => TyKind.Ref(t.clone(), m)
+            Array(t, n) => TyKind.Array(t.clone(), n.clone())
+            Slice(t) => TyKind.Slice(t.clone())
+            Tuple(ts) => TyKind.Tuple(ts.clone())
+            Fn(ps, r) => TyKind.Fn(ps.clone(), r.clone())
+            FnPtr(ps, r) => TyKind.FnPtr(ps.clone(), r.clone())
+        }
+    }
+}
+
+impl Clone for FnTyParam {
+    fn clone(self) -> FnTyParam {
+        FnTyParam { mode: self.mode, ty: self.ty.clone() }
+    }
+}
+
+impl Clone for Block {
+    fn clone(self) -> Block {
+        Block { stmts: self.stmts.clone(), tail: self.tail.clone(), span: self.span }
+    }
+}
+
+impl Clone for Stmt {
+    fn clone(self) -> Stmt {
+        Stmt { kind: self.kind.clone(), span: self.span }
+    }
+}
+
+impl Clone for StmtKind {
+    fn clone(self) -> StmtKind {
+        match self {
+            Let(l) => StmtKind.Let(LetStmt { kind: l.kind, pat: l.pat.clone(), ty: l.ty.clone(), value: l.value.clone() })
+            Assign(a, b) => StmtKind.Assign(a.clone(), b.clone())
+            OpAssign(op, a, b) => StmtKind.OpAssign(op, a.clone(), b.clone())
+            Expr(e) => StmtKind.Expr(e.clone())
+        }
+    }
+}
+
+impl Clone for Expr {
+    fn clone(self) -> Expr {
+        Expr { kind: self.kind.clone(), span: self.span }
+    }
+}
+
+impl Clone for Arm {
+    fn clone(self) -> Arm {
+        Arm { pat: self.pat.clone(), guard: self.guard.clone(), body: self.body.clone(), span: self.span }
+    }
+}
+
+impl Clone for LambdaParam {
+    fn clone(self) -> LambdaParam {
+        LambdaParam { name: self.name.clone(), ty: self.ty.clone(), span: self.span }
+    }
+}
+
+impl Clone for FieldInit {
+    fn clone(self) -> FieldInit {
+        FieldInit { name: self.name.clone(), value: self.value.clone(), span: self.span }
+    }
+}
+
+impl Clone for ExprKind {
+    fn clone(self) -> ExprKind {
+        match self {
+            Int(n) => ExprKind.Int(n)
+            Float(f) => ExprKind.Float(f)
+            Str(s) => ExprKind.Str(s.clone())
+            Char(c) => ExprKind.Char(c)
+            Bool(b) => ExprKind.Bool(b)
+            Unit => ExprKind.Unit
+            Name(n) => ExprKind.Name(n.clone())
+            Field(e, n) => ExprKind.Field(e.clone(), n.clone())
+            TupleField(e, i) => ExprKind.TupleField(e.clone(), i)
+            Call(f, args) => ExprKind.Call(f.clone(), args.clone())
+            Index(a, b) => ExprKind.Index(a.clone(), b.clone())
+            Unary(op, e) => ExprKind.Unary(op, e.clone())
+            Binary(op, a, b) => ExprKind.Binary(op, a.clone(), b.clone())
+            Cast(e, t) => ExprKind.Cast(e.clone(), t.clone())
+            Try(e) => ExprKind.Try(e.clone())
+            Move(e) => ExprKind.Move(e.clone())
+            StructLit(p, fs) => ExprKind.StructLit(p.clone(), fs.clone())
+            Tuple(es) => ExprKind.Tuple(es.clone())
+            Array(es) => ExprKind.Array(es.clone())
+            ArrayRepeat(a, b) => ExprKind.ArrayRepeat(a.clone(), b.clone())
+            Block(b) => ExprKind.Block(b.clone())
+            Unsafe(b) => ExprKind.Unsafe(b.clone())
+            Comptime(e) => ExprKind.Comptime(e.clone())
+            If(c, t, e) => ExprKind.If(c.clone(), t.clone(), e.clone())
+            Match(e, arms) => ExprKind.Match(e.clone(), arms.clone())
+            While(c, b) => ExprKind.While(c.clone(), b.clone())
+            Loop(b) => ExprKind.Loop(b.clone())
+            For(i, p, e, b) => {
+                var ix: Option(ForIndex) = None
+                match i {
+                    Some(x) => ix = Some(ForIndex { name: x.name.clone(), span: x.span })
+                    None => {}
+                }
+                ExprKind.For(ix, p.clone(), e.clone(), b.clone())
+            }
+            Lambda(ps, r, b) => ExprKind.Lambda(ps.clone(), r.clone(), b.clone())
+            Return(e) => ExprKind.Return(e.clone())
+            Break => ExprKind.Break
+            Continue => ExprKind.Continue
+            Range(a, b) => ExprKind.Range(a.clone(), b.clone())
+            Type(t) => ExprKind.Type(t.clone())
+        }
+    }
+}
+
+impl Clone for Pat {
+    fn clone(self) -> Pat {
+        Pat { kind: self.kind.clone(), span: self.span }
+    }
+}
+
+impl Clone for FieldPat {
+    fn clone(self) -> FieldPat {
+        FieldPat { name: self.name.clone(), pat: self.pat.clone() }
+    }
+}
+
+impl Clone for PatKind {
+    fn clone(self) -> PatKind {
+        match self {
+            Wild => PatKind.Wild
+            Name(n, v) => PatKind.Name(n.clone(), v)
+            Int(v) => PatKind.Int(v)
+            Char(c) => PatKind.Char(c)
+            Bool(b) => PatKind.Bool(b)
+            Str(s) => PatKind.Str(s.clone())
+            Tuple(ps) => PatKind.Tuple(ps.clone())
+            Variant(p, ps) => PatKind.Variant(p.clone(), ps.clone())
+            Struct(p, fs, rest) => PatKind.Struct(p.clone(), fs.clone(), rest)
+            Or(ps) => PatKind.Or(ps.clone())
+            Range(a, b) => PatKind.Range(a, b)
+        }
+    }
+}

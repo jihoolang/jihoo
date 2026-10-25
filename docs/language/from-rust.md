@@ -126,6 +126,14 @@ Rust struct with a lifetime parameter, without the annotation
   `if is_expr(s) { match s { ... } } else { keep(s) }`.
 - `let (a, b) = pair` borrows the parts when `pair` is a variable (like
   every `let x = place`); to take a value apart, `match` it.
+- An arm cannot hand out a borrowed part as the `match`'s value:
+  `let t = match o { Some(t) => t, None => return }` tries to move `t`
+  when `o` is borrowed. Use `t` inside the arm, or check first
+  (`if o.is_none() { return }`).
+- Patterns see through `ref` and `inout` values, as Rust's default binding
+  modes do: `Some(Circle(r))` matches an `Option(ref Shape)`.
+- `None` (or another variant) alone as one arm of an `if` takes no type
+  from the other arm: `let x: Option(u32) = if c { None } else { y }`.
 
 ## Equality and printing
 

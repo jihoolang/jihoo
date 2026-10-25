@@ -38,7 +38,7 @@ same way.
 | 1 | `diag.jh`, `lex.jh` | `diag.rs`, `lex.rs` | `emit-tokens` | done |
 | 2 | `ast.jh`, `parse.jh` | `ast.rs`, `parse.rs` | `emit-ast` (`astdump.rs`, `astdump.jh`) | done |
 | 3 | `load.jh`, `target.jh`, `os.jh` | `load.rs`, `target.rs` | `emit-program` (every module, its file and imports, then its tree) | done |
-| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh` (with the MIR printer) |
+| 4 | `types.jh`, `mir.jh`, `sema/` | `types.rs`, `mir.rs`, `sema/` | `emit-mir` before elaboration (`JIHOO_NO_ELAB=1`), and the errors of `tests/fail` | in progress: `types.jh`, `mir.jh` (with the MIR printer), `sema.jh` (`mod.rs` and `consts.rs`; bodies next) |
 | 5 | `elab.jh`, `check.jh` | `elab.rs`, `check.rs` | `emit-mir`, `tests/fail` | |
 | 6 | `llvm.jh`, the driver | `llvm.rs`, `main.rs` | `emit-llvm`; then `build` and `run` through `std.process` | |
 | 7 | stage 2 | | stage 2's `emit-llvm` against stage 1's, on everything | |
@@ -53,8 +53,12 @@ integers, control flow, structs and enums, patterns, generics, traits,
 closures. Then the standard library, then everything.
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
-In jihoo such a struct is a view, which may live as a local but whose
-fields are `ref T`; the port keeps that shape.
+In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the
+borrow of the table, since there are no lifetimes to say that it points
+elsewhere; changing `self` while holding it is then an error. The port
+keeps raw pointers into the tree instead (`*ast.FnDecl`), read through
+`sema.at`: the tree outlives sema and never changes, which is what Rust's
+`'a` says.
 
 ## How the port is written
 
@@ -120,6 +124,18 @@ far, each fixed in stage 0 with a test:
   internal error: the rest of the temporary was dropped whole. Its other
   parts are now dropped when the part moves out (`tests/run/temp_parts.jh`,
   `tests/fail/move_part_of_drop.jh`).
+- Language gaps filled while porting `sema/mod.rs`, each with tests and
+  documentation: patterns see through `ref`/`inout` values
+  (`Some(Circle(r))` on an `Option(ref Shape)`; `tests/run/ref_patterns.jh`);
+  a `ref T` value can be passed where a `T` is borrowed; `for` loops over
+  a `ref Vec(T)` field; a generic function whose type parameter is a
+  borrow (`mem.replace` in `Map(K, ref V).insert`) returns it as a value
+  instead of a place; and a value that is not a view (a number, a raw
+  pointer) no longer carries the loans of the container it was read from.
+- Left as they are, and documented in
+  [Coming from Rust](../language/from-rust.md): a `match` arm cannot hand
+  out a borrowed part as its value, and `None` alone in an `if` arm needs
+  the type written.
 
 And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and

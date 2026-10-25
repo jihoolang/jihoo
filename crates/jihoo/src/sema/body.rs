@@ -844,6 +844,13 @@ impl<'a> Sema<'a> {
                 return Ok(Val::op(Operand::Const(Const::Float(*x as f64, to)), to));
             }
         }
+        // A borrow held as a value (`ref T`) where a `T` is expected: what it
+        // points to, lent on (moving out of it is still an error).
+        if let TyKind::Ref(inner) | TyKind::RefMut(inner) = self.types.kind(from).clone() {
+            if inner == to {
+                return self.auto_deref(fb, v, span);
+            }
+        }
         // A place where a borrow of it is expected.
         if let TyKind::Ref(inner) | TyKind::RefMut(inner) = self.types.kind(to).clone() {
             if inner == from {
@@ -2409,6 +2416,10 @@ impl<'a> Sema<'a> {
     }
 
     pub fn emit_call(&mut self, fb: &mut Fb, callee: Callee, args: Vec<Operand>, ret: TyId, span: Span) -> R<Val> {
+        let callee_kind = match &callee {
+            Callee::Fn(f) => Some(*f),
+            _ => None,
+        };
         let dest = fb.temp(ret, span);
         let next = fb.new_block();
         fb.term(Term::Call { callee, args, dest: Place::local(dest), next, span });
@@ -2417,9 +2428,17 @@ impl<'a> Sema<'a> {
             fb.term(Term::Unreachable);
             return Ok(Val::never());
         }
-        // A function returning a borrow returns a place.
+        // A function declared `-> ref T` or `-> inout T` returns a place; one
+        // whose type parameter is a borrow (`mem.replace` of a `ref T`)
+        // returns that borrow as a value.
+        let projection = match &callee_kind {
+            Some(f) => self.out[*f as usize].returns_ref,
+            None => true,
+        };
         if let TyKind::Ref(inner) | TyKind::RefMut(inner) = self.types.kind(ret).clone() {
-            return Ok(Val::place(Place::deref(dest), inner));
+            if projection {
+                return Ok(Val::place(Place::deref(dest), inner));
+            }
         }
         Ok(Val { vk: VK::Place(Place::local(dest)), ty: ret, temp: true })
     }
@@ -3071,6 +3090,8 @@ impl<'a> Sema<'a> {
             return Ok(Val::unit());
         }
         let v = self.expr(fb, it, None)?;
+        // A borrow held as a value (a `ref Vec(T)` field): what it points to.
+        let v = if self.types.is_ref(v.ty) { self.auto_deref(fb, v, it.span)? } else { v };
         // Arrays, slices and strings: by index.
         let vt = v.ty;
         let mut v = v;

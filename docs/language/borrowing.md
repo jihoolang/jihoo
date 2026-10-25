@@ -104,6 +104,8 @@ library type that holds borrows through raw pointers says so with
 Views can be passed, returned, stored in other views and kept in local
 variables. The compiler follows what each one borrows:
 
+- A borrow held as a value (`ref T`, from a field or an `Option(ref T)`)
+  can be passed where a `T` is borrowed; it is lent on.
 - A function returning a view returns something its arguments point to,
   and the caller counts the result as borrowing those arguments.
 - A function given an `inout` view may store the other arguments' views

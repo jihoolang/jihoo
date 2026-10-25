@@ -38,10 +38,15 @@ fn main() {
         None => {}
     }
     loop_elements_outlive_iteration()
+    borrows_as_values()
 }
 
 struct Named {
     name: String
+}
+
+struct Shelf {
+    items: ref Vec(Named)
 }
 
 struct Entry {
@@ -71,7 +76,42 @@ fn loop_elements_outlive_iteration() {
         entries.push(Entry { of: n })
     }
     println(entries[0].of.name)
+    // a loop over a `ref Vec` held in a struct
+    let shelf = Shelf { items: named }
+    for n in shelf.items {
+        println(n.name)
+    }
 }
+
+struct Holder {
+    p: *i64
+}
+
+fn name_len(n: Named) -> i64 {
+    n.name.len()
+}
+
+// A `ref T` value lent where a `T` is borrowed; a `Map` whose values are
+// borrows (its `insert` returns the old one as a value); a raw pointer read
+// out of a `Vec`, which borrows nothing, kept while the `Vec` grows.
+fn borrows_as_values() {
+    var named = Vec(Named).new()
+    named.push(Named { name: "dd".to_string() })
+    let e = Entry { of: named[0] }
+    println(name_len(e.of))
+    var by_name = Map(String, ref Named).new()
+    by_name.insert("x".to_string(), named[0])
+    match by_name.insert("x".to_string(), named[0]) {
+        Some(old) => println(old.name)
+        None => println("none")
+    }
+    var holders = Vec(Holder).new()
+    holders.push(Holder { p: null })
+    let p = holders[0].p
+    holders.push(Holder { p: null })
+    println(p == null)
+}
+
 //> 2
 //> hello
 //> abc
@@ -82,3 +122,7 @@ fn loop_elements_outlive_iteration() {
 //> b
 //> 2
 //> c
+//> c
+//> 2
+//> dd
+//> true

@@ -124,7 +124,7 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
             }
             let mut held = held_in[b].clone();
             for (i, s) in body.blocks[b].stmts.iter().enumerate() {
-                stmt_loans(s, &mut held, &is_view, &rooted, loan_at.get(&(b, i)).copied(), lw);
+                stmt_loans(s, &mut held, &is_view, &rooted, types, body, loan_at.get(&(b, i)).copied(), lw);
             }
             term_loans(&body.blocks[b].term, &mut held, &is_view, &rooted, types, body, lw);
             for s in succs(&body.blocks[b].term) {
@@ -167,7 +167,7 @@ pub fn run(types: &Types, f: &Function) -> Result<(), Diag> {
         for (i, s) in blk.stmts.iter().enumerate() {
             let active = active_loans(&held, &after[i], n, lw);
             check_stmt(types, body, s, &active, &held, &loans)?;
-            stmt_loans(s, &mut held, &is_view, &rooted, loan_at.get(&(b, i)).copied(), lw);
+            stmt_loans(s, &mut held, &is_view, &rooted, types, body, loan_at.get(&(b, i)).copied(), lw);
         }
         let active = active_loans(&held, &after[blk.stmts.len()], n, lw);
         check_term(types, body, &blk.term, &active, &held, &loans, f)?;
@@ -293,11 +293,44 @@ fn term_live(t: &Term, live: &mut Bits) {
     }
 }
 
+/// Whether the value at a place is a view. A value that is not (a number,
+/// a raw pointer) borrows nothing, even when it is read through a borrow.
+fn place_is_view(types: &Types, body: &Body, p: &Place) -> bool {
+    let mut t = body.locals[p.local as usize].ty;
+    let mut variant = None;
+    for pr in &p.proj {
+        match pr {
+            Proj::Deref => match types.pointee(t) {
+                Some(x) => t = x,
+                None => return true,
+            },
+            Proj::Variant(v) => variant = Some(*v),
+            Proj::Field(i) => {
+                t = if let Some(v) = variant.take() {
+                    types.variants(t).unwrap()[v as usize].fields[*i as usize]
+                } else {
+                    match types.kind(t) {
+                        // a view's pointer and length
+                        TyKind::Slice(_) | TyKind::Str | TyKind::Closure(_) => return false,
+                        _ => types.field_tys(t)[*i as usize],
+                    }
+                }
+            }
+            Proj::Index(_) => {
+                if let TyKind::Array(e, _) = types.kind(t) {
+                    t = *e;
+                }
+            }
+        }
+    }
+    types.is_view(t)
+}
+
 /// The loans an operand carries: those of the local it reads, if a view,
 /// but not the local's loans on itself.
-fn op_loans(o: &Operand, held: &[Bits], is_view: &[bool], rooted: &[Bits], lw: usize) -> Bits {
+fn op_loans(o: &Operand, held: &[Bits], is_view: &[bool], rooted: &[Bits], types: &Types, body: &Body, lw: usize) -> Bits {
     match o {
-        Operand::Copy(p) | Operand::Move(p) if is_view[p.local as usize] || p.proj.iter().any(|x| matches!(x, Proj::Deref)) => {
+        Operand::Copy(p) | Operand::Move(p) if (is_view[p.local as usize] || p.proj.iter().any(|x| matches!(x, Proj::Deref))) && place_is_view(types, body, p) => {
             let l = p.local as usize;
             held[l].iter().zip(&rooted[l]).map(|(h, r)| h & !r).collect()
         }
@@ -305,12 +338,12 @@ fn op_loans(o: &Operand, held: &[Bits], is_view: &[bool], rooted: &[Bits], lw: u
     }
 }
 
-fn stmt_loans(s: &Stmt, held: &mut [Bits], is_view: &[bool], rooted: &[Bits], new: Option<usize>, lw: usize) {
+fn stmt_loans(s: &Stmt, held: &mut [Bits], is_view: &[bool], rooted: &[Bits], types: &Types, body: &Body, new: Option<usize>, lw: usize) {
     match s {
         Stmt::Assign(p, r, _) => {
             let mut gained = vec![0u64; lw];
             for o in rvalue_operands(r) {
-                union(&mut gained, &op_loans(o, held, is_view, rooted, lw));
+                union(&mut gained, &op_loans(o, held, is_view, rooted, types, body, lw));
             }
             if let Rvalue::Ref(q) | Rvalue::RefMut(q) = r {
                 // A reborrow through a borrow, or a borrow of a view (a
@@ -383,7 +416,7 @@ fn term_loans(t: &Term, held: &mut [Bits], is_view: &[bool], rooted: &[Bits], ty
     if let Term::Call { args, dest, .. } = t {
         let mut all = vec![0u64; lw];
         for a in args {
-            union(&mut all, &op_loans(a, held, is_view, rooted, lw));
+            union(&mut all, &op_loans(a, held, is_view, rooted, types, body, lw));
         }
         // What a call is given can end up in its `inout` arguments that
         // are views (`v.push(s.as_str())` with `v: Vec(str)`).

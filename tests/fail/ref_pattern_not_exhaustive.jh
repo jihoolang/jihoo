@@ -1,0 +1,16 @@
+// Exhaustiveness looks through borrows too.
+// error: this `match` does not cover `Some(B)`
+
+enum E {
+    A
+    B
+}
+
+fn f(o: Option(ref E)) -> i64 {
+    match o {
+        Some(A) => 1
+        None => 0
+    }
+}
+
+fn main() {}
