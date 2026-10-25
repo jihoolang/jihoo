@@ -301,7 +301,7 @@ impl<'p> Gen<'p> {
         }
         if let Some(tb) = cx.trap_block.clone() {
             cx.body.push_str(&format!("{}:\n", &tb[1..]));
-            cx.line("call void @llvm.trap()");
+            cx.line(trap_call(self.p.target));
             cx.line("unreachable");
         }
         self.out.push_str(&cx.body);
@@ -1212,7 +1212,7 @@ impl<'p> Gen<'p> {
         }
         match i {
             Intrinsic::Trap => {
-                cx.line("call void @llvm.trap()");
+                cx.line(trap_call(self.p.target));
                 cx.line("unreachable");
                 let id = cx.t().replace('%', "");
                 cx.body.push_str(&format!("{}.dead:\n", id));
@@ -1495,13 +1495,14 @@ same:
         };
         let _ = writeln!(
             self.out,
-            "define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {{\nentry:\n  %a = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr {p}, i64 {pl})\n  %b = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr %m, i64 %n)\n  %d = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr {nl}, i64 1)\n  call void @llvm.trap()\n  unreachable\n}}\n",
+            "define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {{\nentry:\n  %a = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr {p}, i64 {pl})\n  %b = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr %m, i64 %n)\n  %d = call i64 asm sideeffect \"{w}\", \"{c}\"(i64 {no}, i64 2, ptr {nl}, i64 1)\n  {t}\n  unreachable\n}}\n",
             w = wasm,
             c = wcons,
             no = write_no,
             p = prefix,
             pl = plen,
-            nl = nl
+            nl = nl,
+            t = trap_call(self.p.target)
         );
         for d in [
             "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)",
@@ -1542,6 +1543,16 @@ fn icmp(op: Op, signed: bool) -> &'static str {
         (Op::Gt, false) => "ugt",
         (Op::Ge, false) => "uge",
         _ => panic!("not a comparison"),
+    }
+}
+
+/// The instruction that stops the program on a trap. `llvm.trap` is `ud2`
+/// (SIGILL) on x86_64 but `brk` (SIGTRAP) on aarch64; `udf` gives SIGILL
+/// there too, so a trap exits with 132 on every target.
+fn trap_call(t: Target) -> &'static str {
+    match t {
+        Target::X86_64 => "call void @llvm.trap()",
+        Target::Aarch64 => "call void asm sideeffect \"udf #0\", \"\"()",
     }
 }
 
