@@ -39,6 +39,9 @@ if you know Rust, and check here when code that "should work" does not. The
 | `unsafe { *p }`, `p.add(n)` | `unsafe { *p }`, `p + n` (in elements) |
 | `std::ptr::null()` | `null`, where a pointer type is expected |
 | `std::mem::take(&mut x)` | `mem.take(&x)` (after `import std.mem`) |
+| `AtomicI64`, `Arc<Mutex<T>>` | `sync.Atomic(i64)`, `sync.Mutex(T)`, borrowed by the threads (no `Arc`) |
+| `*m.lock().unwrap() += 1` | `m.lock(fn(n) { n += 1 })`: the value is lent to the closure |
+| `UnsafeCell<T>` | a `#[interior]` struct |
 | `loop { break 5 }` | not possible: `break` takes no value |
 
 ## What does not exist

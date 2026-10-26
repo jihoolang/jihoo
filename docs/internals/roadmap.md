@@ -106,11 +106,11 @@ with `captures_mut`. Left:
 
 - Threads in a scope (`thread.scope(fn(s) { s.spawn(...) })`), whose
   closures must outlive each statement that starts one.
-- Memory that changes behind a shared borrow (no `readonly`/`noalias`
-  there), and on it atomics, mutexes, channels and once-cells as library
-  code.
-- A `Send`-like rule, once such types exist: which values may cross
-  threads.
+- Done: `#[interior]` memory, which changes behind shared borrows (no
+  `readonly`/`noalias` there), and on it `std.sync.Atomic` and `Mutex`.
+- Channels and once-cells, on the same foundation.
+- A `Send`-like rule, if a type that one thread only may use ever exists.
+  Today `#[interior]` types promise to be safe from several threads.
 - Threads in freestanding programs: a thread-safe allocator, `clone` and
   futexes.
 

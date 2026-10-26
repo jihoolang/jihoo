@@ -334,6 +334,10 @@ impl Gen {
             let inner = self.p.types.pointee(t).unwrap()
             let size = self.size(inner)
             let align = self.align(inner)
+            // Memory changed behind a shared borrow is neither.
+            if self.p.types.is_interior(inner) {
+                return String.from("ptr")
+            }
             let ro = match self.p.types.kind(t) {
                 Ref(_) => " readonly"
                 _ => ""

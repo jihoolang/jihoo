@@ -51,6 +51,31 @@ fn next_id() -> i64 {
 }
 ```
 
+## Changing behind a shared borrow
+
+A shared borrow promises that the value does not change while it lasts, and
+the compiler tells LLVM so (`readonly`, `noalias`). A type whose unsafe code
+changes it anyway, through `&self.field`, says `#[interior]`:
+
+```jihoo
+#[interior]
+pub struct Atomic(T: Int) {
+    value: T
+}
+
+impl(T: Int) Atomic(T) {
+    pub fn add(self, v: T) -> T {
+        unsafe { atomic_add(&self.value, v) }
+    }
+}
+```
+
+Borrows of such a type, or of anything containing one, carry neither
+promise. Such a type is never plain, so it moves instead of copying. Safe
+code can share it between threads (see [Threads](threads.md)), so its
+author must make every change safe when several threads make it at once,
+as `std.sync`'s `Atomic` and `Mutex` do.
+
 ## Calling C
 
 `extern fn` declares a C function; calling it is unsafe. Arguments and

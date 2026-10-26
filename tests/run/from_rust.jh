@@ -1,5 +1,6 @@
 // What docs/language/from-rust.md and docs/reference/grammar.md say works.
 import std.mem
+import std.sync
 
 struct A {
     s: String
@@ -176,6 +177,11 @@ fn main() {
     //> true
     println(w)
     //> Word { text: hi, n: 2 }
+    // Rust's `*m.lock().unwrap() += 1`.
+    let m = sync.Mutex(i64).new(1)
+    m.lock(fn(n) { n += 1 })
+    println(m.into_inner())
+    //> 2
 }
 
 enum Named {

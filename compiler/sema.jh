@@ -142,6 +142,8 @@ pub struct AdtDecl {
     pub impls: Vec(u32)
     // `#[view]`: holds borrows through raw pointers.
     pub is_view: bool
+    // `#[interior]`.
+    pub is_interior: bool
 }
 
 impl AdtDecl {
@@ -557,6 +559,7 @@ impl Sema {
                     derives: derives(item)
                     impls: Vec(u32).new()
                     is_view: has_attr(item, "view")
+                    is_interior: has_attr(item, "interior")
                 })
                 self.define(module, s.name.as_str(), Sym.Adt(id), item.public, item.span)?
             }
@@ -570,6 +573,7 @@ impl Sema {
                     derives: derives(item)
                     impls: Vec(u32).new()
                     is_view: has_attr(item, "view")
+                    is_interior: has_attr(item, "interior")
                 })
                 self.define(module, e.name.as_str(), Sym.Adt(id), item.public, item.span)?
             }
@@ -1148,6 +1152,7 @@ impl Sema {
             }
         }
         self.types.adts[idx].view = marked || view_arg
+        self.types.adts[idx].interior = self.adts[decl as i64].is_interior
         // A value's own type contains itself only through a pointer.
         if self.contains_inline(t, t) {
             return Err(ty_err(span, ("`" + self.types.show(t).as_str() + "` contains itself; put the inner one in a `Box`").as_str()))

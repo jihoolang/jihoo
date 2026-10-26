@@ -1,0 +1,92 @@
+// Values that threads change together: `Atomic(T)` and `Mutex(T)`. Both
+// change behind shared borrows (`#[interior]`), so a closure that runs on
+// several threads may capture them with `let` (see docs/language/threads.md).
+
+import std.sysno
+
+const FUTEX_WAIT_PRIVATE: i64 = 128
+const FUTEX_WAKE_PRIVATE: i64 = 129
+
+// An integer that threads read and change at once. Every operation is
+// sequentially consistent.
+#[interior]
+pub struct Atomic(T: Int) {
+    value: T
+}
+
+impl(T: Int) Atomic(T) {
+    pub fn new(v: T) -> Atomic(T) {
+        Atomic(T) { value: v }
+    }
+
+    pub fn load(self) -> T {
+        unsafe { atomic_load(&self.value) }
+    }
+
+    pub fn store(self, v: T) {
+        unsafe { atomic_store(&self.value, v) }
+    }
+
+    // Each of these returns the value before.
+    pub fn add(self, v: T) -> T {
+        unsafe { atomic_add(&self.value, v) }
+    }
+
+    pub fn sub(self, v: T) -> T {
+        unsafe { atomic_sub(&self.value, v) }
+    }
+
+    pub fn swap(self, v: T) -> T {
+        unsafe { atomic_swap(&self.value, v) }
+    }
+
+    // Stores `new` if the value is `expected`; returns whether it did.
+    pub fn compare_swap(self, expected: T, new: T) -> bool {
+        unsafe { atomic_cas(&self.value, expected, new) }
+    }
+
+    pub fn into_inner(sink self) -> T {
+        self.value
+    }
+}
+
+// A value that one thread at a time may use, through `lock`.
+#[interior]
+pub struct Mutex(T: type) {
+    // 0: free; 1: held; 2: held, and others may be waiting.
+    state: u32
+    value: T
+}
+
+impl(T: type) Mutex(T) {
+    pub fn new(sink v: T) -> Mutex(T) {
+        Mutex(T) { state: 0, value: v }
+    }
+
+    // Calls `f` with the value while no other thread holds it, and returns
+    // what `f` returns. The value is lent only for the call, so no part of
+    // it can be kept past the lock. Locking the same mutex again inside
+    // `f` waits forever.
+    pub fn lock(self, comptime R: type, f: fn(inout T) -> R) -> R {
+        unsafe {
+            let s = &self.state
+            if !atomic_cas(s, 0, 1) {
+                while atomic_swap(s, 2) != 0 {
+                    syscall(sysno.FUTEX, s, FUTEX_WAIT_PRIVATE, 2, 0, 0, 0)
+                }
+            }
+            let p = &self.value
+            let r = f(&p[0])
+            if atomic_swap(s, 0) == 2 {
+                syscall(sysno.FUTEX, s, FUTEX_WAKE_PRIVATE, 1, 0, 0, 0)
+            }
+            r
+        }
+    }
+
+    pub fn into_inner(sink self) -> T {
+        match self {
+            Mutex { value, .. } => value
+        }
+    }
+}
