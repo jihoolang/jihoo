@@ -68,6 +68,10 @@ Since 0.1:
   control flow and fixed aggregates, through a separate MIR interpreter
   that uses the target's layout. `const` items, `comptime` expressions,
   array lengths and compile-time arguments use it.
+- **Compile-time heap**: the interpreter provides the allocator and runs
+  destructors, so `Vec`, `String` and `Map` work in `comptime` code, and
+  `String` and `Vec` results become static `str` and slice constants
+  ([the heap](../language/comptime.md#the-heap)).
 - **Functional composition**: lazy iterator adapters and consumers in
   `std.iter`, with generic callback result inference and capture and
   forwarding of statically known closures.
@@ -136,9 +140,6 @@ uses that made it.
 
 ### Later
 
-- **Compile-time heap**: allocation and destructors in the interpreter, so
-  that `Vec`, `String` and `Map` work in `comptime` code.
-  [Current limits](../language/comptime.md#checks-and-limits).
 - **Contracts** (which v0 had), checked by the kernel and the
   compile-time interpreter where possible.
 - **Dynamic dispatch**: `dyn Trait` values, and closures that own what they

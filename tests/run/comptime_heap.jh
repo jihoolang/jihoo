@@ -1,0 +1,101 @@
+//> fields: x y
+//> 10 29
+//> 0
+//> a=2;b=1;c=1;
+//> 3
+//> 5
+//> 120
+import std.sort
+
+struct Point { x: i64, y: i64 }
+
+// Reflection that builds a string.
+fn describe(comptime T: type) -> String {
+    var s = String.from("fields:")
+    inline for i in 0..field_count(T) {
+        s.push(' ')
+        s.push_str(field_name(T, i))
+    }
+    s
+}
+
+fn primes(n: i64) -> Vec(i64) {
+    var out = Vec(i64).new()
+    var k = 2
+    while out.len() < n {
+        var prime = true
+        for p in out {
+            if k % p == 0 {
+                prime = false
+                break
+            }
+        }
+        if prime { out.push(k) }
+        k += 1
+    }
+    out
+}
+
+fn counts() -> String {
+    var m = Map(String, i64).new()
+    var keys = Vec(String).new()
+    for w in ["b", "a", "c", "a"] {
+        let k = String.from(w)
+        let n = match m.get(k.clone()) { Some(x) => x, None => 0 }
+        if n == 0 { keys.push(k.clone()) }
+        m.insert(k, n + 1)
+    }
+    sort.sort(&keys)
+    var out = String.new()
+    for k in keys {
+        let n = match m.get(k.clone()) { Some(x) => x, None => 0 }
+        out.push_str(k.as_str())
+        out.push('=')
+        out.push_str(n.to_string().as_str())
+        out.push(';')
+    }
+    out
+}
+
+// Destructors run during evaluation.
+struct Counted { hits: *i64 }
+impl Drop for Counted {
+    fn drop(inout self) { unsafe { *self.hits += 1 } }
+}
+
+fn drops() -> i64 {
+    var hits = 0
+    let p = &hits as *i64
+    var v = Vec(Counted).new()
+    v.push(Counted { hits: p })
+    v.push(Counted { hits: p })
+    let b = Box(Counted).new(Counted { hits: p })
+    drop(v)
+    drop(b)
+    hits
+}
+
+fn sum_boxes() -> i64 {
+    var v = Vec(Box(i64)).new()
+    for i in 0..16 { v.push(Box(i64).new(i)) }
+    var total = 0
+    for b in v { total += *b }
+    total
+}
+
+const DESC: str = describe(Point)
+const PRIMES = primes(10)
+const NONE = primes(0)
+
+fn main() {
+    println(DESC)
+    print(PRIMES.len)
+    print(" ")
+    println(PRIMES[9])
+    println(NONE.len)
+    println(comptime counts())
+    println(comptime drops())
+    let s = comptime String.from("hello")
+    println(s.len)
+    println(comptime sum_boxes())
+}

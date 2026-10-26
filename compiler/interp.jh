@@ -24,6 +24,19 @@ struct Allocation {
     pointers: Vec(bool)
     live: bool
     readonly: bool
+    // From the allocator (`std.sys.alloc_bytes`), so `free_bytes` may
+    // release it.
+    heap: bool
+}
+
+// Where a result keeps its elements, so that they become static bytes:
+// the offsets of its pointer and length, the element type, and the view
+// type of the constant (`str` or a slice).
+pub struct Buffer {
+    pub ptr: u64
+    pub len: u64
+    pub elem: u32
+    pub view: u32
 }
 
 struct Frame {
@@ -34,6 +47,8 @@ pub struct Interpreter {
     memory: Vec(Allocation)
     used: u64
     steps: u64
+    // The `Drop` impl of each type that has one: type -> function.
+    drops: Map(u32, u32)
 }
 
 fn error(span: Span, msg: str) -> Diag {
@@ -117,7 +132,7 @@ fn float_value(v: Value, ty: u32, span: Span) -> Result(f64, Diag) {
 
 impl Interpreter {
     pub fn new() -> Interpreter {
-        Interpreter { memory: Vec(Allocation).new(), used: 0, steps: 0 }
+        Interpreter { memory: Vec(Allocation).new(), used: 0, steps: 0, drops: Map(u32, u32).new() }
     }
 
     fn tick(inout self, span: Span) -> Result((), Diag) {
@@ -134,13 +149,16 @@ impl Interpreter {
         var initialized = Vec(bool).new()
         var pointers = Vec(bool).new()
         for _ in 0..n as i64 { initialized.push(false); pointers.push(false) }
-        self.memory.push(Allocation { bytes: zero(n), initialized: initialized, pointers: pointers, live: true, readonly: readonly })
+        self.memory.push(Allocation { bytes: zero(n), initialized: initialized, pointers: pointers, live: true, readonly: readonly, heap: false })
         Ok((self.memory.len() as u64) << 32)
     }
 
     fn check(self, addr: u64, n: u64, write: bool, span: Span) -> Result((), Diag) {
         let id = (addr >> 32) as i64 - 1
         let off = addr & 0xffffffff
+        // An empty access through a null or dangling pointer, such as an
+        // empty `Vec`'s, touches no memory.
+        if n == 0 && id < 0 { return Ok(()) }
         if id < 0 || id >= self.memory.len() { return Err(error(span, "invalid pointer during compile-time evaluation")) }
         let a = self.memory[id]
         if !a.live { return Err(error(span, "compile-time evaluation accessed a value outside its lifetime")) }
@@ -153,11 +171,13 @@ impl Interpreter {
 
     fn read(self, addr: u64, n: u64, span: Span) -> Result(Value, Diag) {
         self.check(addr, n, false, span)?
+        if n == 0 { return Ok(Value.new()) }
         Ok(part(self.memory[(addr >> 32) as i64 - 1].bytes, addr & 0xffffffff, n))
     }
 
     fn write(inout self, addr: u64, v: Value, span: Span) -> Result((), Diag) {
         self.check(addr, v.len() as u64, true, span)?
+        if v.len() == 0 { return Ok(()) }
         let id = (addr >> 32) as i64 - 1
         let off = (addr & 0xffffffff) as i64
         put(&self.memory[id].bytes, off as u64, v)
@@ -282,6 +302,14 @@ impl Interpreter {
                 for b in integer(s.len() as u128, t.ptr_size) { v.push(b) }
                 v
             }
+            Slice(b, len, _) => {
+                let addr = self.alloc(b.len() as u64, false, span)?
+                self.write(addr, b.clone(), span)?
+                self.memory[(addr >> 32) as i64 - 1].readonly = true
+                var v = integer(addr as u128, t.ptr_size)
+                for x in integer(len as u128, t.ptr_size) { v.push(x) }
+                v
+            }
             Static(_, _) => return Err(error(span, "statics cannot be accessed during compile-time evaluation"))
         })
     }
@@ -368,6 +396,7 @@ impl Interpreter {
                 Null(ty) => ty
                 Zeroed(ty) => ty
                 Bytes(_, ty) => ty
+                Slice(_, _, ty) => ty
                 Static(_, ty) => ty
                 Bool(_) => types.BOOL
                 Str(_) => types.STR
@@ -628,9 +657,93 @@ impl Interpreter {
         }
     }
 
+    // The allocator's three functions work on interpreter memory, in both
+    // profiles: `alloc_bytes` makes an allocation, `realloc_bytes` moves
+    // one, and `free_bytes` ends its lifetime.
+    fn heap(inout self, inout t: Types, op: u8, args: Vec(Value), span: Span) -> Result(Value, Diag) {
+        if op == 2 {
+            let p = bits(args[0], span)? as u64
+            if p == 0 { return Ok(Value.new()) }
+            self.release(p, span)?
+            return Ok(Value.new())
+        }
+        let n = signed(t, bits(args[args.len() - 1], span)?, types.I64)
+        if n < 0 || n as u128 > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+        let addr = self.alloc(n as u64, false, span)?
+        self.memory[(addr >> 32) as i64 - 1].heap = true
+        if op == 1 {
+            let old = bits(args[0], span)? as u64
+            let id = (old >> 32) as i64 - 1
+            self.release(old, span)?
+            let keep = min(n as i64, self.memory[id].bytes.len())
+            let dst = (addr >> 32) as i64 - 1
+            for j in 0..keep {
+                self.memory[dst].bytes[j] = self.memory[id].bytes[j]
+                self.memory[dst].initialized[j] = self.memory[id].initialized[j]
+                self.memory[dst].pointers[j] = self.memory[id].pointers[j]
+            }
+        }
+        Ok(integer(addr as u128, t.ptr_size))
+    }
+
+    fn release(inout self, addr: u64, span: Span) -> Result((), Diag) {
+        let id = (addr >> 32) as i64 - 1
+        if id < 0 || id >= self.memory.len() || addr & 0xffffffff != 0 || !self.memory[id].heap {
+            return Err(error(span, "compile-time evaluation freed memory it did not allocate"))
+        }
+        if !self.memory[id].live { return Err(error(span, "compile-time evaluation freed memory twice")) }
+        self.memory[id].live = false
+        Ok(())
+    }
+
+    // Runs a value's destructor, as the code generator's drop glue does:
+    // the type's `drop`, then its parts.
+    fn drop_value(inout self, inout t: Types, fns: Vec(mir.Function), addr: u64, ty: u32, checked: bool, depth: u32, span: Span) -> Result((), Diag) {
+        if !t.needs_drop(ty) { return Ok(()) }
+        self.tick(span)?
+        var hook: Option(u32) = None
+        match self.drops.get(ty) { Some(f) => hook = Some(f), None => {} }
+        match hook {
+            Some(f) => {
+                var args = Vec(Value).new()
+                args.push(integer(addr as u128, t.ptr_size))
+                let _ = self.call(&t, fns, f, args, checked, depth + 1, span)?
+            }
+            None => {}
+        }
+        let k = t.kind(ty).clone()
+        match k {
+            Array(el, n) => {
+                let stride = t.layout(el).size
+                for i in 0..n as i64 { self.drop_value(&t, fns, addr + i as u64 * stride, el, checked, depth, span)? }
+            }
+            Tuple(ts) => {
+                let offs = t.field_offsets(ty)
+                for i, f in ts { self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)? }
+            }
+            Adt(_) => match t.variants(ty) {
+                Some(vs) => {
+                    let variants = vs.clone()
+                    let layout = t.enum_layout(ty).1
+                    let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
+                    if tag >= variants.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
+                    for i, f in variants[tag as i64].fields { self.drop_value(&t, fns, addr + layout.fields[tag as i64][i], f, checked, depth, span)? }
+                }
+                None => {
+                    let offs = t.field_offsets(ty)
+                    for i, f in t.field_tys(ty) { self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)? }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn call(inout self, inout t: Types, fns: Vec(mir.Function), id: u32, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
         if id as i64 >= fns.len() { return Err(error(span, "invalid compile-time function pointer")) }
         let f = fns[id as i64]
+        let op = heap_op(f.symbol.as_str())
+        if op < 3 { return self.heap(&t, op, args, span) }
         match f.body {
             Some(body) => self.execute(&t, fns, body, args, checked, depth, span)
             None => Err(error(span, ("external function `" + f.name.as_str() + "` cannot be called during compile-time evaluation").as_str()))
@@ -664,7 +777,10 @@ impl Interpreter {
                         }
                     }
                     StorageDead(l) => self.memory[(fr.locals[l as i64] >> 32) as i64 - 1].live = false
-                    Drop(_, sp) => return Err(error(sp, "values with destructors are not supported during compile-time evaluation"))
+                    Drop(p, sp) => {
+                        let (addr, ty) = self.place(&t, body, fr, p, sp)?
+                        self.drop_value(&t, fns, addr, ty, checked, depth, sp)?
+                    }
                     Forget(_) | Nop => {}
                 }
             }
@@ -724,21 +840,21 @@ impl Interpreter {
         }
     }
 
-    pub fn evaluate(inout self, inout t: Types, fns: Vec(mir.Function), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
+    pub fn evaluate(inout self, inout t: Types, fns: Vec(mir.Function), sink drops: Map(u32, u32), buffer: Option(Buffer), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
+        self.drops = drops
         let ty = root.locals[0].ty
         let v = self.execute(&t, fns, root, Vec(Value).new(), checked, 0, span)?
+        match buffer {
+            Some(b) => return self.persist_buffer(&t, v, b, span)
+            None => {}
+        }
+        match t.kind(ty) {
+            Slice(el) => return self.persist_buffer(&t, v, Buffer { ptr: 0, len: t.ptr_size, elem: el, view: ty }, span)
+            Str => return self.persist_buffer(&t, v, Buffer { ptr: 0, len: t.ptr_size, elem: types.U8, view: ty }, span)
+            _ => {}
+        }
         let c = match t.kind(ty) {
             Int(_) | Float(_) | Bool => Interpreter.scalar_const(t, v, ty, span)?
-            Str => {
-                let addr = bits(part(v, 0, t.ptr_size), span)? as u64
-                let len = bits(part(v, t.ptr_size, t.ptr_size), span)?
-                if len > MAX_MEMORY as u128 { return Err(error(span, "invalid compile-time string length")) }
-                for j in 0..len as i64 { self.validate(&t, addr + j as u64, types.U8, span)? }
-                let data = self.read(addr, len as u64, span)?
-                var s = String.new()
-                for b in data { s.push(b) }
-                Const.Str(s)
-            }
             _ => {
                 if !persistable(t, ty) { return Err(error(span, "this compile-time result contains a pointer, borrow or owned value")) }
                 if t.layout(ty).size == 0 { Const.Zst(ty) } else { Const.Bytes(v, ty) }
@@ -746,6 +862,35 @@ impl Interpreter {
         }
         Ok(sema.TypedConst { c: c, ty: ty })
     }
+
+    // The elements a `str`, slice, `String` or `Vec` result refers to,
+    // copied into a constant view. Whether the result still owns them
+    // does not matter: the interpreter's memory is discarded.
+    fn persist_buffer(inout self, inout t: Types, v: Value, b: Buffer, span: Span) -> Result(sema.TypedConst, Diag) {
+        let addr = bits(part(v, b.ptr, t.ptr_size), span)? as u64
+        let len = signed(t, bits(part(v, b.len, t.ptr_size), span)?, types.I64)
+        if len < 0 || len > MAX_MEMORY as i128 { return Err(error(span, "invalid compile-time length")) }
+        if !persistable(t, b.elem) { return Err(error(span, "the elements of this compile-time result contain a pointer, borrow or owned value")) }
+        let size = t.layout(b.elem).size
+        for j in 0..len as i64 { self.validate(&t, addr + j as u64 * size, b.elem, span)? }
+        let data = self.read(addr, len as u64 * size, span)?
+        if b.view == types.STR {
+            var s = String.new()
+            for x in data { s.push(x) }
+            return Ok(sema.TypedConst { c: Const.Str(s), ty: types.STR })
+        }
+        Ok(sema.TypedConst { c: Const.Slice(data, len as i64, b.view), ty: b.view })
+    }
+}
+
+// Which allocator function a symbol names: 0 alloc, 1 realloc, 2 free,
+// 3 none.
+fn heap_op(symbol: str) -> u8 {
+    if !symbol.starts_with("std.sys.") { return 3 }
+    if symbol.starts_with("std.sys.alloc_bytes.") { return 0 }
+    if symbol.starts_with("std.sys.realloc_bytes.") { return 1 }
+    if symbol.starts_with("std.sys.free_bytes.") { return 2 }
+    3
 }
 
 // Bytes can become a runtime constant only when they contain no addresses
@@ -765,6 +910,45 @@ fn persistable(t: Types, ty: u32) -> bool {
         }
         _ => false
     }
+}
+
+// The types with a `Drop` impl that dropping a value of type ty runs:
+// it, and those of its parts.
+fn drop_parts(inout t: Types, ty: u32, inout out: Vec(u32)) {
+    if !t.needs_drop(ty) { return }
+    let k = t.kind(ty).clone()
+    match k {
+        Array(el, _) => drop_parts(&t, el, &out)
+        Tuple(ts) => { for f in ts { drop_parts(&t, f, &out) } }
+        Adt(i) => {
+            if t.adts[i as i64].has_drop {
+                for x in out { if x == ty { return } }
+                out.push(ty)
+            }
+            match t.variants(ty) {
+                Some(vs) => {
+                    let variants = vs.clone()
+                    for v in variants { for f in v.fields { drop_parts(&t, f, &out) } }
+                }
+                None => { for f in t.field_tys(ty) { drop_parts(&t, f, &out) } }
+            }
+        }
+        _ => {}
+    }
+}
+
+// The types whose `Drop` impls the body's drops may run.
+pub fn drop_types(inout t: Types, body: mir.Body) -> Vec(u32) {
+    var out = Vec(u32).new()
+    for bb in body.blocks {
+        for st in bb.stmts {
+            match st {
+                Drop(p, _) => drop_parts(&t, Interpreter.operand_ty(t, body, p), &out)
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 fn operand_functions(o: mir.Operand, inout ids: Vec(u32)) {

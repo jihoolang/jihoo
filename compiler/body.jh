@@ -5001,11 +5001,63 @@ impl sema.Sema {
         result
     }
 
+    // Where a `String` or `Vec(T)` keeps its elements.
+    fn const_buffer(inout self, t: u32) -> Option(interp.Buffer) {
+        let a = match self.types.kind(t) {
+            Adt(a) => a
+            _ => return None
+        }
+        let decl = self.types.adts[a as i64].decl
+        if Some(decl) == self.lang.string {
+            let v = self.types.field_tys(t)[0]
+            let at = self.types.field_offsets(t)[0]
+            let offs = self.types.field_offsets(v)
+            return Some(interp.Buffer { ptr: at + offs[0], len: at + offs[1], elem: types.U8, view: types.STR })
+        }
+        if Some(decl) == self.lang.vec {
+            let el = self.types.pointee(self.types.field_tys(t)[0]).unwrap()
+            let offs = self.types.field_offsets(t)
+            let view = self.types.intern(TyKind.Slice(el))
+            return Some(interp.Buffer { ptr: offs[0], len: offs[1], elem: el, view: view })
+        }
+        None
+    }
+
+    // The `Drop` impls that a body's drops run, made into instances.
+    fn const_drops(inout self, body: mir.Body, inout drops: Map(u32, u32), inout ids: Vec(u32), span: Span) -> Result((), Diag) {
+        let dr = match self.lang.drop {
+            Some(dr) => dr
+            None => return Ok(())
+        }
+        for t in interp.drop_types(&self.types, body) {
+            if drops.contains(t) { continue }
+            let hit = match self.find_impl(dr, t)? {
+                Some(h) => h
+                None => continue
+            }
+            let fid = match self.impls[hit.imp as i64].fns.get("drop") {
+                Some(f) => f
+                None => continue
+            }
+            let id = self.instance(fid, hit.args, span)?
+            drops.insert(t, id)
+            ids.push(id)
+        }
+        Ok(())
+    }
+
     fn eval_const_inner(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(sema.TypedConst, Diag) {
         var fb = Fb.new(4294967295, env.clone(), exp.unwrap_or(types.UNIT), ast.RetMode.Value, e.span)
         fb.push_scope(true)
         let v = self.expr(&fb, e, exp)?
-        let v = match exp { Some(t) => self.coerce(&fb, v, t, e.span)?, None => v }
+        // A `String` or `Vec(T)` result becomes a `str` or `[T]` constant.
+        let buffer = self.const_buffer(v.ty)
+        var view: Option(u32) = None
+        match buffer { Some(b) => view = Some(b.view), None => {} }
+        let v = match exp {
+            Some(t) => if view == Some(t) { v } else { self.coerce(&fb, v, t, e.span)? }
+            None => v
+        }
         let ty = if v.ty == types.NEVER { exp.unwrap_or(types.UNIT) } else { v.ty }
         fb.body.locals[0].ty = ty
         if v.ty != types.NEVER {
@@ -5028,7 +5080,16 @@ impl sema.Sema {
         // Lower only the functions reachable from this expression. Draining
         // the global queue here could try to lower its enclosing function
         // a second time, or falsely make an unrelated constant cyclic.
-        var ids = match root.body { Some(body) => interp.function_ids(body), None => Vec(u32).new() }
+        // Destructors the evaluation may run are reachable too.
+        var ids = Vec(u32).new()
+        var drops = Map(u32, u32).new()
+        match root.body {
+            Some(body) => {
+                ids = interp.function_ids(body)
+                self.const_drops(body, &drops, &ids, e.span)?
+            }
+            None => {}
+        }
         var seen = Map(u32, bool).new()
         var i = 0
         while i < ids.len() {
@@ -5037,8 +5098,12 @@ impl sema.Sema {
             if seen.contains(id) { continue }
             seen.insert(id, true)
             self.prepare_const_fn(id, e.span)?
-            match self.out[id as i64].body {
-                Some(body) => { for f in interp.function_ids(body) { ids.push(f) } }
+            let lowered = self.out[id as i64].body.clone()
+            match lowered {
+                Some(body) => {
+                    for f in interp.function_ids(body) { ids.push(f) }
+                    self.const_drops(body, &drops, &ids, e.span)?
+                }
                 None => {}
             }
         }
@@ -5057,7 +5122,7 @@ impl sema.Sema {
         }
         var interpreter = interp.Interpreter.new()
         match root.body {
-            Some(body) => interpreter.evaluate(&self.types, functions, body, self.checked, e.span)
+            Some(body) => interpreter.evaluate(&self.types, functions, drops, buffer, body, self.checked, e.span)
             None => Err(err(e.span, "compile-time expression has no body"))
         }
     }

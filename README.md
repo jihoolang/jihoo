@@ -113,8 +113,9 @@ including running other programs.
 [Compile-time evaluation](docs/language/comptime.md) runs ordinary functions
 and blocks in a separate MIR interpreter for `const` values, `comptime`
 expressions, array lengths and compile-time arguments. It supports loops,
-recursion and fixed aggregates; external calls and heap allocation remain
-unavailable during evaluation.
+recursion, aggregates and the heap: `Vec`, `String`, `Map` and destructors
+work, and a `String` or `Vec` result becomes a static `str` or slice.
+External calls remain unavailable during evaluation.
 
 [Reflection](docs/language/reflection.md): `inline for` and `inline if`
 unroll and select code at compile time, and builtins name a type's fields

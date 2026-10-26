@@ -109,6 +109,9 @@ pub enum Const {
     Zeroed(u32)
     // Static bytes, laid out as the type says (compile-time results).
     Bytes(Vec(u8), u32)
+    // A slice of the given type over static bytes holding that many
+    // elements (compile-time results).
+    Slice(Vec(u8), i64, u32)
     // The address of a `static`.
     Static(u32, u32)
 }
@@ -125,6 +128,7 @@ impl Clone for Const {
             Null(t) => Const.Null(t)
             Zeroed(t) => Const.Zeroed(t)
             Bytes(b, t) => Const.Bytes(b.clone(), t)
+            Slice(b, n, t) => Const.Slice(b.clone(), n, t)
             Static(i, t) => Const.Static(i, t)
         }
     }
@@ -417,6 +421,15 @@ pub fn show_operand(inout s: String, t: Types, o: Operand) {
             }
             Bytes(b, ty) => {
                 s.push_str("bytes[")
+                b.len().show(&s)
+                s.push_str("](")
+                s.push_str(t.show(ty).as_str())
+                s.push(')')
+            }
+            Slice(b, n, ty) => {
+                s.push_str("slice[")
+                n.show(&s)
+                s.push_str("; ")
                 b.len().show(&s)
                 s.push_str("](")
                 s.push_str(t.show(ty).as_str())

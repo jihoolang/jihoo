@@ -1,0 +1,26 @@
+#![freestanding]
+//> 1,4,9,16
+//> 4
+// The freestanding allocator uses statics, which evaluation cannot touch;
+// the interpreter supplies the allocator in both profiles.
+fn joined(n: i64) -> String {
+    var s = String.new()
+    for i in 1..n + 1 {
+        if i > 1 { s.push(',') }
+        s.push_str((i * i).to_string().as_str())
+    }
+    s
+}
+
+fn evens(n: i64) -> Vec(i64) {
+    var v = Vec(i64).new()
+    for i in 0..n { v.push(2 * i) }
+    v
+}
+
+const EVENS = evens(4)
+
+fn main() {
+    println(comptime joined(4))
+    println(EVENS.len)
+}

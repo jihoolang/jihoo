@@ -66,6 +66,23 @@ These builtins take a type and give compile-time constants, so they work in
 | `field_index(T, "name")` | the index of the field with that name |
 | `type_name(T)`, `size_of(T)`, `needs_drop(T)` | as before ([builtins](../reference/builtins.md)) |
 
+A function that builds a `String` or `Vec` from them can run while
+compiling, and its result is a static `str` or slice
+([the compile-time heap](comptime.md#the-heap)):
+
+```jihoo
+fn header(comptime T: type) -> String {
+    var s = String.new()
+    inline for i in 0..field_count(T) {
+        if i > 0 { s.push(',') }
+        s.push_str(field_name(T, i))
+    }
+    s
+}
+
+const POINT_HEADER: str = header(Point)   // "x,y"
+```
+
 Two builtins name a type, so they go where a type is written:
 
 | builtin | |

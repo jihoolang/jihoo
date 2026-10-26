@@ -1,0 +1,8 @@
+// error: compile-time evaluation freed memory it did not allocate
+import std.mem
+fn local() -> i64 {
+    var x = 0
+    unsafe { mem.dealloc(i64, &x as *i64, 1) }
+    0
+}
+fn main() { let n = comptime local() }

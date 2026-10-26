@@ -573,6 +573,7 @@ impl Gen {
                 Null(t) => t
                 Zeroed(t) => t
                 Bytes(_, t) => t
+                Slice(_, _, t) => t
                 Static(_, t) => t
                 Bool(_) => types.BOOL
                 Str(_) => types.STR
@@ -684,6 +685,15 @@ impl Gen {
                 let s = unsafe { make_str(bs.ptr, bs.len) }
                 self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
                 V.Mem("@.bytes." + n.as_str())
+            }
+            Slice(b, len, _) => {
+                let n = fmt.n(self.nstr as i128)
+                self.nstr += 1
+                let bs = b.as_slice()
+                let s = unsafe { make_str(bs.ptr, bs.len) }
+                self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
+                self.globals.push_str(fmt.f("@.slice.{} = private unnamed_addr constant { ptr, i64 } { ptr @.bytes.{}, i64 {} }, align 8\n", [n.as_str(), n.as_str(), fmt.n(len as i128).as_str()]).as_str())
+                V.Mem("@.slice." + n.as_str())
             }
         }
     }

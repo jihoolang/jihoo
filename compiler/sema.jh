@@ -288,6 +288,7 @@ pub struct Lang {
     pub option: Option(u32)
     pub result: Option(u32)
     pub string: Option(u32)
+    pub vec: Option(u32)
     pub iterator: Option(u32)
     pub eq: Option(u32)
     pub ord: Option(u32)
@@ -390,7 +391,7 @@ impl Sema {
             queue: Vec(Pending).new()
             queue_head: 0
             eval_depth: 0
-            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None }
+            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, vec: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None }
             freestanding: freestanding
             target: tgt
             checked: checked
@@ -501,6 +502,7 @@ impl Sema {
         self.lang.option = self.lang_adt(p, "Option")
         self.lang.result = self.lang_adt(p, "Result")
         self.lang.string = self.lang_adt(p, "String")
+        self.lang.vec = self.lang_adt(p, "Vec")
         match at(self.ast).derive {
             Some(d) => self.lang.derived = self.lang_trait(d, "Derived")
             None => {}

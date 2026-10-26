@@ -1,0 +1,9 @@
+// error: accessed a value outside its lifetime
+fn freed() -> i64 {
+    var v = Vec(i64).new()
+    v.push(1)
+    let p = v.as_slice().ptr
+    drop(v)
+    unsafe { *p }
+}
+fn main() { let n = comptime freed() }

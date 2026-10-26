@@ -1,0 +1,11 @@
+// error: compile-time evaluation freed memory twice
+import std.mem
+fn twice() -> i64 {
+    unsafe {
+        let p = mem.alloc(i64, 4)
+        mem.dealloc(i64, p, 4)
+        mem.dealloc(i64, p, 4)
+    }
+    0
+}
+fn main() { let n = comptime twice() }
