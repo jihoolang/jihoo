@@ -1,0 +1,65 @@
+# Builds the compiler of a tag with Nix on x86_64 and aarch64 Linux and
+# attaches it to the tag's GitHub release, as
+# jihoo-<tag>-<arch>-linux.tar.gz: bin/jihoo and its standard library in
+# share/jihoo/lib. The binary uses the system's dynamic loader, so it runs
+# outside Nix with glibc and LLVM 21 (libLLVM-21.so, clang, ld.lld); the
+# flake bootstraps the compiler from the newest of these (`jihoo-seed`).
+#
+# Pushing a tag `v*` releases it; for an older tag, run the workflow by hand
+# with that tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build and release"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            loader: /lib64/ld-linux-x86-64.so.2
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            loader: /lib/ld-linux-aarch64.so.1
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - uses: cachix/install-nix-action@v31
+      - name: nix build
+        run: nix build -L .#jihoo
+      - name: package
+        run: |
+          name=jihoo-$TAG-${{ matrix.arch }}-linux
+          mkdir -p $name/bin $name/share/jihoo
+          # The compiler itself, not the Nix wrapper that sets its paths.
+          install -m755 result/bin/.jihoo-wrapped $name/bin/jihoo
+          nix shell nixpkgs#patchelf -c patchelf \
+            --set-interpreter ${{ matrix.loader }} --remove-rpath $name/bin/jihoo
+          cp -r result/share/jihoo/lib $name/share/jihoo/lib
+          chmod -R u+w $name
+          cp LICENSE README.md $name/
+          tar -czf $name.tar.gz $name
+          sha256sum $name.tar.gz > $name.tar.gz.sha256
+      - name: upload
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "jihoo $TAG" --notes "jihoo $TAG" || true
+          gh release upload "$TAG" --clobber jihoo-$TAG-${{ matrix.arch }}-linux.tar.gz*
