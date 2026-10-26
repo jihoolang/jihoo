@@ -113,8 +113,9 @@ including running other programs.
 [Compile-time evaluation](docs/language/comptime.md) runs ordinary functions
 and blocks in a separate MIR interpreter for `const` values, `comptime`
 expressions, array lengths and compile-time arguments. It supports loops,
-recursion and fixed aggregates; external calls and heap allocation remain
-unavailable during evaluation.
+recursion, aggregates and the heap: `Vec`, `String`, `Map` and destructors
+work, and a `String` or `Vec` result becomes a static `str` or slice.
+External calls remain unavailable during evaluation.
 
 [Reflection](docs/language/reflection.md): `inline for` and `inline if`
 unroll and select code at compile time, and builtins name a type's fields
@@ -122,13 +123,20 @@ and variants. `#[derive(Clone, Eq, Ord, Hash, Show, Default)]` is library code
 written with them, in `std/derive.jh`, and keeps privacy.
 
 [Threads](docs/language/threads.md): `std.thread.join`, `each`, `map` and
-`each_mut` run work on several threads that borrows what the caller owns.
+`each_mut` run work on several threads that borrows what the caller owns,
+in native and freestanding programs.
 The borrow rules and a compile-time check of the closures rule out data
-races. `std.sync.Atomic` and `Mutex` are shared through plain borrows.
+races. `std.sync.Atomic`, `Mutex`, `Channel` and `Once` are shared through
+plain borrows.
 
 [Data by index](docs/language/data-oriented.md): `std.arena` has typed ids
 and arenas, generational handles and pools, and `Soa(T)`, a
 struct-of-arrays vector that reflection lays out from `T`'s fields.
+
+[Dynamic dispatch](docs/language/dyn.md): `dyn Trait` values own a value of
+any type with the trait and call it through a table of functions;
+`dyn fn` closures own what they capture, so they can be returned and
+stored.
 
 [Iterator pipelines](docs/language/iterators.md) compose `map`, `filter`,
 `take`, `zip` and `fold` without intermediate collections. Callback types
@@ -150,5 +158,5 @@ up to v0.1.1.
 Errors come several per run, in source order, with notes on where a
 moved value went and where a conflicting borrow started.
 
-Next ([roadmap](docs/internals/roadmap.md)): the compile-time heap, channels
-and freestanding threads, `dyn Trait`.
+Next ([roadmap](docs/internals/roadmap.md)): thread scopes, contracts, the C
+ABI for structs.

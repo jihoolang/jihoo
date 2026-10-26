@@ -1,0 +1,5 @@
+// error: a `dyn fn` owns what it captures, so it cannot capture `s`, which holds a borrow
+fn main() {
+    let s = "abc"
+    let f: dyn fn() -> i64 = fn() { s.len }
+}

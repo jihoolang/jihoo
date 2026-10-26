@@ -56,7 +56,8 @@ the body and uses its result to infer `U`. This allows
 
 A trait is a set of functions a type can provide, with optional default
 bodies; `impl Trait for Type` provides them. Calls are resolved at compile
-time: there is no dynamic dispatch.
+time, unless the value is a [`dyn Trait`](dyn.md), whose type is known only
+while the program runs.
 
 ```jihoo
 trait Shape {

@@ -17,3 +17,6 @@ pub const PPOLL: i64 = 73
 pub const GETDENTS64: i64 = 61
 pub const UNLINKAT: i64 = 35
 pub const FUTEX: i64 = 98
+pub const MPROTECT: i64 = 226
+pub const EXIT: i64 = 93
+pub const SCHED_GETAFFINITY: i64 = 123

@@ -1,5 +1,5 @@
-// error: values with destructors are not supported
+// error: contains a pointer, borrow or owned value
 struct Owned { n: i64 }
 impl Drop for Owned { fn drop(inout self) {} }
-fn calculate() -> i64 { let x = Owned { n: 42 }; x.n }
-fn main() { let n = comptime calculate() }
+fn make() -> Owned { Owned { n: 42 } }
+fn main() { let n = comptime make() }

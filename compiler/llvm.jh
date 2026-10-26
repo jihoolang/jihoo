@@ -36,6 +36,8 @@ pub struct Gen {
     globals: String
     strs: Map(String, i64)
     drop_glue: Map(u32, String)
+    // Each table of `dyn` functions, by its functions.
+    vtables: Map(String, String)
     glue_todo: Vec(u32)
     nstr: i64
     // Declarations of functions defined elsewhere, in the order first
@@ -172,6 +174,7 @@ pub fn emit(sink p: mir.Program) -> String {
         globals: String.new()
         strs: Map(String, i64).new()
         drop_glue: Map(u32, String).new()
+        vtables: Map(String, String).new()
         glue_todo: Vec(u32).new()
         nstr: 0
         declared: Vec(String).new()
@@ -573,6 +576,8 @@ impl Gen {
                 Null(t) => t
                 Zeroed(t) => t
                 Bytes(_, t) => t
+                Slice(_, _, t) => t
+                Vtable(_) => types.BYTES
                 Static(_, t) => t
                 Bool(_) => types.BOOL
                 Str(_) => types.STR
@@ -685,6 +690,38 @@ impl Gen {
                 self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
                 V.Mem("@.bytes." + n.as_str())
             }
+            Slice(b, len, _) => {
+                let n = fmt.n(self.nstr as i128)
+                self.nstr += 1
+                let bs = b.as_slice()
+                let s = unsafe { make_str(bs.ptr, bs.len) }
+                self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
+                self.globals.push_str(fmt.f("@.slice.{} = private unnamed_addr constant { ptr, i64 } { ptr @.bytes.{}, i64 {} }, align 8\n", [n.as_str(), n.as_str(), fmt.n(len as i128).as_str()]).as_str())
+                V.Mem("@.slice." + n.as_str())
+            }
+            Vtable(fs) => {
+                var key = String.new()
+                for f in fs {
+                    f.show(&key)
+                    key.push(',')
+                }
+                match self.vtables.get(key.clone()) {
+                    Some(g) => return V.Imm(g.clone())
+                    None => {}
+                }
+                let g = "@.vtable." + fmt.n(self.vtables.len() as i128).as_str()
+                var items = String.new()
+                for i, f in fs {
+                    if i > 0 {
+                        items.push_str(", ")
+                    }
+                    items.push_str("ptr ")
+                    items.push_str(sym(self.p.fns[f as i64].symbol.as_str()).as_str())
+                }
+                self.globals.push_str(fmt.f("{} = private unnamed_addr constant [{} x ptr] [{}], align 8\n", [g.as_str(), fmt.n(fs.len() as i128).as_str(), items.as_str()]).as_str())
+                self.vtables.insert(key, g.clone())
+                V.Imm(g)
+            }
         }
     }
 
@@ -768,6 +805,14 @@ impl Gen {
             None => {}
         }
         match self.p.types.kind(t).clone() {
+            // The table's first function drops the value and frees it.
+            Dyn(_) | DynFn(_) => {
+                cx.line("%data = load ptr, ptr %p")
+                cx.line("%vtp = getelementptr inbounds i8, ptr %p, i64 8")
+                cx.line("%vt = load ptr, ptr %vtp")
+                cx.line("%destroy = load ptr, ptr %vt")
+                cx.line("call void %destroy(ptr %data)")
+            }
             Tuple(ts) => {
                 let offs = self.p.types.field_offsets(t)
                 for i, ft in ts {
@@ -1670,10 +1715,13 @@ fn syscall_asm(t: Target, n: i64) -> (String, String) {
     }
 }
 
+// `_start`, and `jihoo_clone(flags, stack, ptid, ctid, start, arg)` for
+// `std.os_thread`: the `clone` system call, after which the new thread,
+// on its own stack, calls `start(arg)` and exits.
 fn start_asm(t: Target) -> str {
     match t {
-        X86_64 => ".globl _start\\0A_start:\\0A  xor %rbp, %rbp\\0A  mov %rsp, %rdi\\0A  and $-16, %rsp\\0A  call jihoo.start\\0A  hlt\\0A"
-        Aarch64 => ".globl _start\\0A_start:\\0A  mov x29, #0\\0A  mov x30, #0\\0A  mov x0, sp\\0A  bl jihoo.start\\0A  brk #0\\0A"
+        X86_64 => ".globl _start\\0A_start:\\0A  xor %rbp, %rbp\\0A  mov %rsp, %rdi\\0A  and $-16, %rsp\\0A  call jihoo.start\\0A  hlt\\0A.globl jihoo_clone\\0Ajihoo_clone:\\0A  and $-16, %rsi\\0A  sub $16, %rsi\\0A  mov %r9, (%rsi)\\0A  mov %r8, 8(%rsi)\\0A  mov %rcx, %r10\\0A  xor %r8d, %r8d\\0A  mov $56, %eax\\0A  syscall\\0A  test %rax, %rax\\0A  jnz 1f\\0A  xor %ebp, %ebp\\0A  pop %rdi\\0A  pop %rax\\0A  call *%rax\\0A  xor %edi, %edi\\0A  mov $60, %eax\\0A  syscall\\0A  hlt\\0A1:\\0A  ret\\0A"
+        Aarch64 => ".globl _start\\0A_start:\\0A  mov x29, #0\\0A  mov x30, #0\\0A  mov x0, sp\\0A  bl jihoo.start\\0A  brk #0\\0A.globl jihoo_clone\\0Ajihoo_clone:\\0A  and x1, x1, #-16\\0A  stp x5, x4, [x1, #-16]!\\0A  mov x4, x3\\0A  mov x3, xzr\\0A  mov x8, #220\\0A  svc #0\\0A  cbnz x0, 1f\\0A  mov x29, xzr\\0A  mov x30, xzr\\0A  ldp x0, x1, [sp], #16\\0A  blr x1\\0A  mov x0, xzr\\0A  mov x8, #93\\0A  svc #0\\0A  brk #0\\0A1:\\0A  ret\\0A"
     }
 }
 

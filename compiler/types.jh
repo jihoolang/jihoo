@@ -52,6 +52,12 @@ pub enum TyKind {
     FnPtr(Sig)
     // The type of types, at compile time.
     Type
+    // `dyn Trait`: a value of some type with that trait, which it owns on
+    // the heap; a data pointer, then its type's table of functions.
+    Dyn(u32)
+    // `dyn fn(A) -> R`: a closure that owns what it captured, laid out as
+    // `Dyn`.
+    DynFn(Sig)
 }
 
 impl Clone for TyKind {
@@ -72,6 +78,8 @@ impl Clone for TyKind {
             Closure(s) => TyKind.Closure(s.clone())
             FnPtr(s) => TyKind.FnPtr(s.clone())
             Type => TyKind.Type
+            Dyn(t) => TyKind.Dyn(t)
+            DynFn(s) => TyKind.DynFn(s.clone())
         }
     }
 }
@@ -140,6 +148,16 @@ pub fn kind_key(k: TyKind) -> String {
             sig.ret.show(&s)
         }
         Type => s.push('T')
+        Dyn(t) => {
+            s.push('d')
+            t.show(&s)
+        }
+        DynFn(sig) => {
+            s.push('D')
+            ids(&s, sig.params)
+            s.push('>')
+            sig.ret.show(&s)
+        }
     }
     s
 }
@@ -224,6 +242,8 @@ pub struct Types {
     layouts: Map(u32, Layout)
     pub ptr_size: u64
     needs_drop_cache: Map(u32, bool)
+    // The names of the traits of `dyn` types, for messages.
+    pub trait_names: Map(u32, String)
 }
 
 pub const BOOL: u32 = 0
@@ -243,6 +263,8 @@ pub const STR: u32 = 13
 pub const TYPE: u32 = 14
 pub const I128: u32 = 15
 pub const U128: u32 = 16
+// `*u8`: the parts of `dyn` values.
+pub const BYTES: u32 = 17
 
 fn int(signed: bool, bits: u32) -> TyKind {
     TyKind.Int(IntTy { signed: signed, bits: bits })
@@ -257,6 +279,7 @@ impl Types {
             layouts: Map(u32, Layout).new()
             ptr_size: 8
             needs_drop_cache: Map(u32, bool).new()
+            trait_names: Map(u32, String).new()
         }
         t.intern(TyKind.Bool)
         t.intern(TyKind.Tuple(Vec(u32).new()))
@@ -275,6 +298,7 @@ impl Types {
         t.intern(TyKind.Type)
         t.intern(int(true, 128))
         t.intern(int(false, 128))
+        t.intern(TyKind.Ptr(U8))
         t
     }
 
@@ -388,6 +412,7 @@ impl Types {
         self.needs_drop_cache.insert(t, false)
         let k = self.kind(t).clone()
         let b = match k {
+            Dyn(_) | DynFn(_) => true
             Tuple(ts) => self.any_needs_drop(ts)
             Array(e, n) => n > 0 && self.needs_drop(e)
             Adt(i) => {
@@ -579,7 +604,7 @@ impl Types {
             Float(b) => Layout { size: (b / 8) as u64, align: (b / 8) as u64 }
             Never | Type => Layout { size: 0, align: 1 }
             Ptr(_) | Ref(_) | RefMut(_) | FnPtr(_) => Layout { size: p, align: p }
-            Slice(_) | Str | Closure(_) => Layout { size: 2 * p, align: p }
+            Slice(_) | Str | Closure(_) | Dyn(_) | DynFn(_) => Layout { size: 2 * p, align: p }
             Tuple(ts) => self.struct_layout(ts).0
             Array(e, n) => {
                 let el = self.layout(e)
@@ -624,7 +649,7 @@ impl Types {
                     _ => Vec(u64).new()
                 }
             }
-            Slice(_) | Str | Closure(_) => {
+            Slice(_) | Str | Closure(_) | Dyn(_) | DynFn(_) => {
                 var v = Vec(u64).new()
                 v.push(0)
                 v.push(self.ptr_size)
@@ -638,6 +663,12 @@ impl Types {
     pub fn field_tys(self, t: u32) -> Vec(u32) {
         match self.kind(t) {
             Tuple(ts) => ts.clone()
+            Dyn(_) | DynFn(_) => {
+                var v = Vec(u32).new()
+                v.push(BYTES)
+                v.push(BYTES)
+                v
+            }
             Adt(i) => match self.adts[i as i64].body {
                 Struct(fs) => field_types(fs)
                 _ => Vec(u32).new()
@@ -748,6 +779,19 @@ impl Types {
                 self.show_ret(&s, sig.ret)
             }
             Type => s.push_str("type")
+            Dyn(tr) => {
+                s.push_str("dyn ")
+                match self.trait_names.get(tr) {
+                    Some(n) => s.push_str(n.as_str())
+                    None => s.push('?')
+                }
+            }
+            DynFn(sig) => {
+                s.push_str("dyn fn(")
+                self.show_list(&s, sig.params)
+                s.push(')')
+                self.show_ret(&s, sig.ret)
+            }
         }
     }
 

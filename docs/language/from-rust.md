@@ -27,6 +27,8 @@ if you know Rust, and check here when code that "should work" does not. The
 | `\|x\| x + 1` | `fn(x) { x + 1 }` |
 | `impl Fn(i64) -> bool` | `fn(i64) -> bool` (a borrowed closure) |
 | `fn(i64) -> i64` (a pointer) | `fnptr(i64) -> i64` |
+| `Box<dyn Shape>` | `dyn Shape` (owned; the value moves in where one is expected) |
+| `Box<dyn Fn(i64) -> i64>`, `move \|x\| x + n` | `dyn fn(i64) -> i64`, `fn(x) { x + n }` where one is expected |
 | `usize`, `char` | `i64` for lengths and indices; `u8` for bytes (`'a'` is a `u8`) |
 | `0..=n` in a `for` | `0..n + 1` (`..=` exists only in patterns) |
 | `if let Some(x) = o { ... }` | `match o { Some(x) => ..., None => {} }` |
@@ -52,8 +54,9 @@ if you know Rust, and check here when code that "should work" does not. The
 - No string formatting. Build text with `+` and `to_string()`, or call
   `show(&out)` on each part.
 - No items inside function bodies: helper functions go at the top level.
-- No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes,
-  no `dyn`, no trait objects. Traits are resolved at compile time only.
+- No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes.
+  [`dyn Trait`](dyn.md) is always owned: there is no `&dyn Trait`, and a
+  `dyn fn` cannot change what it captured (no `FnMut`).
 - No `Copy` trait to opt into: a type made only of plain parts copies by
   itself ([Values and ownership](ownership.md)).
 - No overloading of `/`, `%` or the bitwise operators. `==`/`!=` call `eq`,
@@ -101,13 +104,12 @@ compiler copies its text instead. Write `a.as_str() + "y"` to keep `a`.
 **A value with a `Drop` impl cannot be taken apart.** `match f { F { fd }
 => ... }` is an error when `F` has `Drop`; read its fields instead.
 
-**A method called on a `ref T` value is looked up on the borrow first.**
-A call returning `ref T` (`v.first().unwrap()`, `map.get(k).unwrap()`)
-gives a value of type `ref T`, and a borrow is plain, so `.clone()` on
-it copies the borrow, not the `T`: the result still borrows `v`. Name the
-value first (`let r = v.first().unwrap()`), and `r.clone()` clones the
-`T`, as a named `ref T` stands for what it points to. Rust's
-auto-deref would pick `T::clone`.
+**A method called on a `ref T` value is that of the `T`.** A call
+returning `ref T` (`v.first().unwrap()`, `map.get(k).unwrap()`) gives a
+borrow as a value; `.clone()`, `.len()` or `.to_string()` on it call the
+`T`'s methods, as Rust's auto-deref does, so `.clone()` gives a `T` that
+no longer borrows `v`. Only a method the `T` lacks is looked up on the
+borrow itself.
 
 **Views are not stored in ordinary data.** `str`, `[T]`, closures, `ref T`
 are views. A struct holding one becomes a view itself: it can be a local

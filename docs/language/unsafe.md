@@ -74,7 +74,7 @@ Borrows of such a type, or of anything containing one, carry neither
 promise. Such a type is never plain, so it moves instead of copying. Safe
 code can share it between threads (see [Threads](threads.md)), so its
 author must make every change safe when several threads make it at once,
-as `std.sync`'s `Atomic` and `Mutex` do.
+as `std.sync`'s `Atomic`, `Mutex`, `Channel` and `Once` do.
 
 ## Calling C
 

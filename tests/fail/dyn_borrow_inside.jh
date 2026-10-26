@@ -1,0 +1,7 @@
+// error: owns its value, and `View` holds a borrow
+trait Len { fn len(self) -> i64 }
+struct View { s: str }
+impl Len for View { fn len(self) -> i64 { self.s.len } }
+fn main() {
+    let v: dyn Len = View { s: "abc" }
+}

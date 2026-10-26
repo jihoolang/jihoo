@@ -22,7 +22,8 @@ fn main() {
 
 A freestanding program starts at `_start`, which the compiler writes: it
 records the arguments for `env.args()`, calls `main` and exits with its
-result. What the C runtime would provide, LLVM's helpers for 128-bit
+result. It also writes `jihoo_clone`, which starts a thread on a new stack
+for [`std.thread`](threads.md#profiles). What the C runtime would provide, LLVM's helpers for 128-bit
 division and float conversion, comes from `std/rt.freestanding.jh`;
 functions nothing calls are left out of the executable.
 

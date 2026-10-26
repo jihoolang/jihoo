@@ -164,6 +164,9 @@ pub enum TyKind {
     Fn(Vec(FnTyParam), Option(Box(Ty)))
     // `fnptr(A) -> R`.
     FnPtr(Vec(FnTyParam), Option(Box(Ty)))
+    // `dyn Trait`, `dyn fn(A) -> R`: owned values whose type is known only
+    // when the program runs.
+    Dyn(Box(Ty))
 }
 
 pub struct FnTyParam {
@@ -404,6 +407,7 @@ impl Clone for TyKind {
             Tuple(ts) => TyKind.Tuple(ts.clone())
             Fn(ps, r) => TyKind.Fn(ps.clone(), r.clone())
             FnPtr(ps, r) => TyKind.FnPtr(ps.clone(), r.clone())
+            Dyn(t) => TyKind.Dyn(t.clone())
         }
     }
 }

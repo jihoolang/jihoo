@@ -48,9 +48,9 @@ short circuit. Arrays, tuples, structs and enums use the selected target's
 layout; slices and borrows can be used inside the calculation.
 
 Results can be integers (including `i128` and `u128`), floats, booleans,
-strings, unit, or aggregates containing only values without addresses or
-destructors. Aggregate results become static bytes; string results become
-static string literals. For example:
+strings, slices, unit, or aggregates containing only values without
+addresses or destructors. Aggregate results become static bytes; string
+results become static string literals. For example:
 
 ```jihoo
 fn squares() -> [i64; 4] {
@@ -63,6 +63,46 @@ fn squares() -> [i64; 4] {
 
 const TABLE = squares()
 ```
+
+## The heap
+
+`Vec`, `String`, `Map`, `Box` and anything else built on the standard
+allocator work during evaluation, in both [profiles](profiles.md). The
+interpreter gives each allocation its own memory, so a use after it is freed
+or a double free is a compile error, not undefined behavior. Destructors
+run where they would at run time, user `Drop` impls included.
+
+A result that owns heap memory cannot keep it: the program's copy is static
+data, which nothing may change or free. So a `String` result becomes a
+`str` constant, and a `Vec(T)` result a `[T]` constant over static bytes,
+when `T` itself has no addresses or destructors:
+
+```jihoo
+fn describe(comptime T: type) -> String {
+    var s = String.from("fields:")
+    inline for i in 0..field_count(T) {
+        s.push(' ')
+        s.push_str(field_name(T, i))
+    }
+    s
+}
+
+fn primes(n: i64) -> Vec(i64) { ... }
+
+const FIELDS: str = describe(Point)   // "fields: x y"
+const PRIMES = primes(10)             // a [i64] of 10 elements
+
+fn main() {
+    let greeting = comptime String.from("hi")   // a str
+    for p in PRIMES { println(p) }
+}
+```
+
+Other owning results, such as a `Map`, a `Box` or a `Vec(String)`, are
+errors: reduce them to such a value inside the calculation. What the
+calculation leaks is discarded with the interpreter's memory.
+
+## What it sees
 
 A compile-time expression sees module constants and its enclosing function's
 compile-time parameters. It cannot read that function's runtime locals,
@@ -87,14 +127,13 @@ Current limitations:
 
 - External functions, system calls, inline assembly, atomics, program
   arguments and statics are unavailable during evaluation. This includes
-  file and network I/O and the standard library's allocator.
-- Values with destructors cannot be dropped by the interpreter yet;
-  `Vec`, `String` and `Box` allocation is therefore unavailable. Fixed
-  arrays and string literals work.
-- Pointer, borrow, slice, closure and function pointer results cannot leave
-  the interpreter. Nonzero pointers cannot be converted to integers or
-  read through a scalar byte reinterpretation. A returned string must
-  refer to live constant bytes, which the compiler copies.
+  file and network I/O. The standard allocator is the exception: the
+  interpreter provides it (see [the heap](#the-heap)).
+- Pointer, borrow, closure and function pointer results cannot leave the
+  interpreter. Nonzero pointers cannot be converted to integers or read
+  through a scalar byte reinterpretation. A returned string or slice must
+  refer to live memory, which the compiler copies; its elements must not
+  contain addresses.
 - Float arithmetic and numeric casts work; the math and atomic intrinsics
   are not implemented in the interpreter. `mem_copy` and `mem_fill` work
   on interpreter memory.

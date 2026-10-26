@@ -1,0 +1,9 @@
+// Sending on a closed channel stops the program.
+import std.sync
+
+fn main() {
+    let ch = sync.Channel(i64).new()
+    ch.close()
+    ch.send(1)
+}
+// exit: 134

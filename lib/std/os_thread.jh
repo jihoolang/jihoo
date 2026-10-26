@@ -1,0 +1,41 @@
+// Starting and waiting for threads, on POSIX threads from libc. `std.thread`
+// builds on these; `os_thread.freestanding.jh` has the same functions
+// without libc.
+
+extern fn pthread_create(t: *u64, attr: *u8, start: fnptr(*u8) -> *u8, arg: *u8) -> i32
+extern fn pthread_join(t: u64, result: **u8) -> i32
+extern fn sysconf(name: i32) -> i64
+
+// `_SC_NPROCESSORS_ONLN` on Linux.
+const SC_NPROCESSORS_ONLN: i32 = 84
+
+// Where a new thread starts: `arg` points to the closure it runs.
+fn thread_main(arg: *u8) -> *u8 {
+    unsafe {
+        let f = read(arg as *fn())
+        f()
+    }
+    null
+}
+
+// Starts `*f` on a new thread. `*f` must stay alive and unchanged until
+// `wait` returns.
+pub unsafe fn start(f: *fn()) -> u64 {
+    var t: u64 = 0
+    if pthread_create(&t, null, thread_main, f as *u8) != 0 {
+        panic("cannot start a thread")
+    }
+    t
+}
+
+pub unsafe fn wait(t: u64) {
+    if pthread_join(t, null) != 0 {
+        panic("cannot join a thread")
+    }
+}
+
+// The number of processors online, at least 1.
+pub fn cpu_count() -> i64 {
+    let n = unsafe { sysconf(SC_NPROCESSORS_ONLN) }
+    if n < 1 { 1 } else { n }
+}

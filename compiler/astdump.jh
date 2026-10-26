@@ -356,6 +356,11 @@ impl Dump {
                 self.open("fnptr", t.span)
                 self.fn_ty(ps, r)
             }
+            Dyn(i) => {
+                self.open("dyn", t.span)
+                self.s(" ")
+                self.ty(i.deref())
+            }
         }
         self.s(")")
     }

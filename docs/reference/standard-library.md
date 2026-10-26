@@ -75,9 +75,10 @@ patterns see through it.
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
 | `std.thread` | `join(a, b)`, `each(lo, hi, f)`, `map(xs, f)`, `each_mut(&v, f)`, `cpu_count()`: work on several threads that borrows from the caller ([threads](../language/threads.md)) |
 | `std.arena` | `Arena(T)` and `Id(T)`, `Pool(T)` and `Handle(T)`, `Soa(T)`: data that refers to data by index ([data by index](../language/data-oriented.md)) |
-| `std.sync` | `Atomic(T)` (`new`, `load`, `store`, `add`, `sub`, `swap`, `compare_swap`, `into_inner`) and `Mutex(T)` (`new`, `lock(f)`, `into_inner`), shared by threads ([threads](../language/threads.md#sharing-changes-atomic-and-mutex)) |
+| `std.sync` | `Atomic(T)` (`new`, `load`, `store`, `add`, `sub`, `swap`, `compare_swap`, `into_inner`), `Mutex(T)` (`new`, `lock(f)`, `into_inner`), `Channel(T)` (`new`, `bounded(n)`, `send`, `recv`, `try_recv`, `close`, `iter`, `len`, `is_closed`) and `Once(T)` (`new`, `get`, `get_or_init(f)`, `into_inner`), shared by threads ([threads](../language/threads.md#sharing-changes-atomic-and-mutex)) |
+| `std.os_thread` | `start`, `wait` (unsafe) and `cpu_count`: the threads `std.thread` uses, POSIX threads or `clone` |
 | `std.derive` | the bodies of `#[derive(...)]`d methods, loaded by the compiler when an item derives a trait ([derive](../language/reflection.md#derive)) |
-| `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at` |
+| `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at`; `dyn_box`, `dyn_drop`, which [`dyn` values](../language/dyn.md) use |
 | `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)`, `remove_file(path)`, `read_dir(path) -> Result(Vec(String), String)` (sorted names) |
 | `std.env` | `args() -> Vec(str)`, `get(name) -> Option(str)`, `environ()` |
 | `std.process` | `run(program, args) -> Result(Exit, String)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, String)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH` |

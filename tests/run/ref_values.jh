@@ -1,0 +1,56 @@
+// A borrow held as a value (`ref T`, from `first()`, `get()`, `keys()`)
+// calls the methods of what it points to.
+
+struct Slot {
+    p: *i64
+}
+
+impl Slot {
+    // A `ref` result through a pointer kept in a variable of the block.
+    fn get(self) -> ref i64 {
+        unsafe {
+            let p = self.p
+            *p
+        }
+    }
+
+    fn get_mut(inout self) -> inout i64 {
+        unsafe {
+            let p = self.p
+            let q = p
+            *q
+        }
+    }
+}
+
+fn main() {
+    // `.clone()` clones the `String`, so `v` is free to change after.
+    var v = Vec(String).new()
+    v.push("a".to_string())
+    let c = v.first().unwrap().clone()
+    v.push("b".to_string())
+    println(c)
+    //> a
+
+    var m = Map(String, i64).new()
+    m.insert(String.from("a"), 1)
+    m.insert(String.from("bb"), 22)
+    println(m.get(String.from("bb")).unwrap().to_string())
+    //> 22
+    var keys = Vec(String).new()
+    var total = 0
+    for k in m.keys() {
+        keys.push(k.clone())
+        total += k.len()
+    }
+    println(keys.len() + total)
+    //> 5
+
+    var x = 5
+    var s = Slot { p: &x as *i64 }
+    println(s.get())
+    //> 5
+    s.get_mut() += 2
+    println(x)
+    //> 7
+}

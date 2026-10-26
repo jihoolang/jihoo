@@ -1,0 +1,9 @@
+// error: this would return a borrow of `y`, which ends with the function
+struct C { v: i64 }
+impl C {
+    fn bad(self) -> ref i64 {
+        let y = self.v + 1
+        y
+    }
+}
+fn main() {}

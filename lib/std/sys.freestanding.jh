@@ -71,6 +71,27 @@ const CHUNK: i64 = 1048576
 static FREE: [*u8; 8] = zeroed([*u8; 8])
 static CUR: *u8 = null
 static END: *u8 = null
+// Threads take turns: 0 free, 1 held, 2 held and others may be waiting.
+static LOCK: u32 = 0
+
+const FUTEX_WAIT_PRIVATE: i64 = 128
+const FUTEX_WAKE_PRIVATE: i64 = 129
+
+unsafe fn lock() {
+    let s = &LOCK as *u32
+    if !atomic_cas(s, 0, 1) {
+        while atomic_swap(s, 2) != 0 {
+            syscall(sysno.FUTEX, s, FUTEX_WAIT_PRIVATE, 2, 0, 0, 0)
+        }
+    }
+}
+
+unsafe fn unlock() {
+    let s = &LOCK as *u32
+    if atomic_swap(s, 0) == 2 {
+        syscall(sysno.FUTEX, s, FUTEX_WAKE_PRIVATE, 1, 0, 0, 0)
+    }
+}
 
 unsafe fn map(n: i64) -> *u8 {
     // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS
@@ -92,7 +113,7 @@ fn class_of(n: i64) -> i64 {
     c
 }
 
-pub unsafe fn alloc_bytes(n: i64) -> *u8 {
+unsafe fn alloc_locked(n: i64) -> *u8 {
     let need = n + 16
     if need > 2048 {
         let total = (need + 4095) / 4096 * 4096
@@ -117,7 +138,7 @@ pub unsafe fn alloc_bytes(n: i64) -> *u8 {
     b + 16
 }
 
-pub unsafe fn free_bytes(p: *u8) {
+unsafe fn free_locked(p: *u8) {
     if p == null {
         return
     }
@@ -131,15 +152,31 @@ pub unsafe fn free_bytes(p: *u8) {
     FREE[c] = p
 }
 
+pub unsafe fn alloc_bytes(n: i64) -> *u8 {
+    lock()
+    let p = alloc_locked(n)
+    unlock()
+    p
+}
+
+pub unsafe fn free_bytes(p: *u8) {
+    lock()
+    free_locked(p)
+    unlock()
+}
+
 pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
+    lock()
     let tag = *((p - 16) as *i64)
     let old = if tag >= 0 { tag - 16 } else { (16 << (-1 - tag)) - 16 }
     if n <= old {
+        unlock()
         return p
     }
-    let q = alloc_bytes(n)
+    let q = alloc_locked(n)
     mem_copy(q, p, old)
-    free_bytes(p)
+    free_locked(p)
+    unlock()
     q
 }
 

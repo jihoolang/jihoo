@@ -1,0 +1,6 @@
+// error: a closure that borrows cannot become a `dyn fn`
+fn main() {
+    let n = 1
+    let c = fn() -> i64 { n }
+    let f: dyn fn() -> i64 = c
+}

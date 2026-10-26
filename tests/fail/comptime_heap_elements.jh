@@ -1,0 +1,7 @@
+// error: the elements of this compile-time result contain a pointer, borrow or owned value
+fn names() -> Vec(String) {
+    var v = Vec(String).new()
+    v.push(String.from("a"))
+    v
+}
+fn main() { let n = comptime names() }

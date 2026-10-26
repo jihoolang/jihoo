@@ -78,7 +78,19 @@ The function identity is known at compile time; its captured values may be
 runtime values. Captures retain the same borrow and lifetime checks. A
 mutable closure variable or an ordinary closure parameter has no statically
 known function identity for specialization; use an ordinary closure parameter
-for those values. Owned, escaping closure environments remain unsupported.
+for those values.
+
+## Closures that own what they capture
+
+A closure borrows, so it cannot outlive the block that made it. To return
+or store one, write it where a `dyn fn(A) -> R` is expected: it then owns
+what it captures, on the heap ([dynamic dispatch](dyn.md#dyn-fn)):
+
+```jihoo
+fn adder(n: i64) -> dyn fn(i64) -> i64 {
+    fn(x) { x + n }
+}
+```
 
 ## Function pointers
 
