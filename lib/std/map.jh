@@ -192,3 +192,9 @@ impl(K: type, V: type) Drop for Map(K, V) {
         }
     }
 }
+
+impl(K: Hash + Eq, V: type) Default for Map(K, V) {
+    fn default() -> Map(K, V) {
+        Map(K, V).new()
+    }
+}

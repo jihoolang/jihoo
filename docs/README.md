@@ -30,6 +30,7 @@ same on GitHub.
 - [Closures](language/closures.md)
 - [Iterator pipelines](language/iterators.md)
 - [Errors](language/errors.md)
+- [Data by index](language/data-oriented.md)
 - [Threads](language/threads.md)
 
 ### Down to the machine

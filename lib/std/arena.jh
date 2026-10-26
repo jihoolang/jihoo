@@ -1,0 +1,345 @@
+// Data that refers to data by index, as jihoo programs do instead of
+// storing references: typed indices and the arenas that hand them out,
+// generational handles that notice a removed value, and struct-of-arrays
+// vectors laid out by reflection (see docs/language/data-oriented.md).
+
+import std.mem
+
+// ---- Id and Arena ----
+
+// The index of a `T` in an `Arena(T)`: 4 bytes, plain, comparable and
+// hashable. An `Id(Node)` cannot index an `Arena(Edge)`.
+pub struct Id(T: type) {
+    index: u32
+}
+
+impl(T: type) Id(T) {
+    // An id from a position, for ids kept outside an arena.
+    pub fn from_index(i: i64) -> Id(T) {
+        if i < 0 || i > 4294967295 {
+            panic("an id is between 0 and 2^32 - 1")
+        }
+        Id(T) { index: i as u32 }
+    }
+
+    // Where it points, as an `i64` for indexing.
+    pub fn to_index(self) -> i64 {
+        self.index as i64
+    }
+}
+
+impl(T: type) Eq for Id(T) {
+    fn eq(self, other: Id(T)) -> bool {
+        self.index == other.index
+    }
+}
+
+impl(T: type) Ord for Id(T) {
+    fn compare(self, other: Id(T)) -> Ordering {
+        self.index.compare(other.index)
+    }
+}
+
+impl(T: type) Hash for Id(T) {
+    fn hash(self) -> u64 {
+        self.index.hash()
+    }
+}
+
+// `#3`.
+impl(T: type) Show for Id(T) {
+    fn show(self, inout out: String) {
+        out.push('#')
+        self.index.show(&out)
+    }
+}
+
+// Values that are added and never removed, each named by its `Id`.
+pub struct Arena(T: type) {
+    items: Vec(T)
+}
+
+impl(T: type) Arena(T) {
+    pub fn new() -> Arena(T) {
+        Arena(T) { items: Vec(T).new() }
+    }
+
+    pub fn len(self) -> i64 {
+        self.items.len()
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.items.len() == 0
+    }
+
+    // Adds `v` and returns its id.
+    pub fn add(inout self, sink v: T) -> Id(T) {
+        let id = Id(T).from_index(self.items.len())
+        self.items.push(v)
+        id
+    }
+
+    pub fn index(self, id: Id(T)) -> ref T {
+        self.items.index(id.index as i64)
+    }
+
+    pub fn index_mut(inout self, id: Id(T)) -> inout T {
+        self.items.index_mut(id.index as i64)
+    }
+
+    // Every id, in the order they were added.
+    pub fn ids(self) -> Ids(T) {
+        Ids(T) { next: 0, end: self.items.len() as u32 }
+    }
+
+    pub fn as_slice(self) -> [T] {
+        self.items.as_slice()
+    }
+}
+
+pub struct Ids(T: type) {
+    next: u32
+    end: u32
+}
+
+impl(T: type) Iterator for Ids(T) {
+    type Item = Id(T)
+    fn next(inout self) -> Option(Id(T)) {
+        if self.next == self.end {
+            return None
+        }
+        self.next += 1
+        Some(Id(T) { index: self.next - 1 })
+    }
+}
+
+// ---- Handle and Pool ----
+
+// A value in a `Pool(T)`: its slot and the slot's generation when it was
+// inserted. Once the value is removed, the handle no longer finds anything,
+// even after the slot is reused.
+pub struct Handle(T: type) {
+    index: u32
+    gen: u32
+}
+
+impl(T: type) Eq for Handle(T) {
+    fn eq(self, other: Handle(T)) -> bool {
+        self.index == other.index && self.gen == other.gen
+    }
+}
+
+impl(T: type) Hash for Handle(T) {
+    fn hash(self) -> u64 {
+        ((self.index as u64) << 32 | self.gen as u64).hash()
+    }
+}
+
+// `#3.1`: slot 3, generation 1.
+impl(T: type) Show for Handle(T) {
+    fn show(self, inout out: String) {
+        out.push('#')
+        self.index.show(&out)
+        out.push('.')
+        self.gen.show(&out)
+    }
+}
+
+// Values that are inserted and removed, each named by a `Handle`. Removed
+// slots are reused. An odd generation means the slot holds a value.
+pub struct Pool(T: type) {
+    gens: Vec(u32)
+    vals: *T
+    cap: i64
+    free: Vec(u32)
+    len: i64
+}
+
+impl(T: type) Pool(T) {
+    pub fn new() -> Pool(T) {
+        Pool(T) { gens: Vec(u32).new(), vals: null, cap: 0, free: Vec(u32).new(), len: 0 }
+    }
+
+    pub fn len(self) -> i64 {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    pub fn insert(inout self, sink v: T) -> Handle(T) {
+        let i = match self.free.pop() {
+            Some(i) => i as i64
+            None => {
+                let i = self.gens.len()
+                if i > 4294967295 {
+                    panic("a pool holds at most 2^32 values")
+                }
+                if i == self.cap {
+                    let n = if self.cap == 0 { 4 } else { self.cap * 2 }
+                    unsafe { self.vals = mem.realloc(T, self.vals, self.cap, n) }
+                    self.cap = n
+                }
+                self.gens.push(0)
+                i
+            }
+        }
+        self.gens[i] = self.gens[i] +% 1
+        unsafe { write(self.vals + i, v) }
+        self.len += 1
+        Handle(T) { index: i as u32, gen: self.gens[i] }
+    }
+
+    // Whether the handle's value is still in the pool.
+    pub fn contains(self, h: Handle(T)) -> bool {
+        let i = h.index as i64
+        i < self.gens.len() && self.gens[i] == h.gen
+    }
+
+    // Takes the value out; None if it was already removed.
+    pub fn remove(inout self, h: Handle(T)) -> Option(T) {
+        if !self.contains(h) {
+            return None
+        }
+        let i = h.index as i64
+        self.gens[i] = self.gens[i] +% 1
+        self.free.push(h.index)
+        self.len -= 1
+        unsafe { Some(read(self.vals + i)) }
+    }
+
+    pub fn get(self, h: Handle(T)) -> Option(ref T) {
+        if !self.contains(h) {
+            return None
+        }
+        unsafe { Some(*(self.vals + h.index as i64)) }
+    }
+
+    pub fn get_mut(inout self, h: Handle(T)) -> Option(inout T) {
+        if !self.contains(h) {
+            return None
+        }
+        unsafe { Some(*(self.vals + h.index as i64)) }
+    }
+
+    pub fn index(self, h: Handle(T)) -> ref T {
+        if !self.contains(h) {
+            panic("a handle used after its value was removed")
+        }
+        unsafe { *(self.vals + h.index as i64) }
+    }
+
+    pub fn index_mut(inout self, h: Handle(T)) -> inout T {
+        if !self.contains(h) {
+            panic("a handle used after its value was removed")
+        }
+        unsafe { *(self.vals + h.index as i64) }
+    }
+
+    // The handles of the values in the pool, by slot.
+    pub fn handles(self) -> Vec(Handle(T)) {
+        var out = Vec(Handle(T)).with_capacity(self.len)
+        for i in 0..self.gens.len() {
+            let g = self.gens[i]
+            if g % 2 == 1 {
+                out.push(Handle(T) { index: i as u32, gen: g })
+            }
+        }
+        out
+    }
+}
+
+impl(T: type) Drop for Pool(T) {
+    fn drop(inout self) {
+        for i in 0..self.gens.len() {
+            if self.gens[i] % 2 == 1 {
+                unsafe { mem.drop_at(T, self.vals + i) }
+            }
+        }
+        unsafe { mem.dealloc(T, self.vals, self.cap) }
+    }
+}
+
+// ---- Soa ----
+
+// A vector of plain structs (or tuples) kept as one array per field, so
+// that a loop over one field reads only that field's memory. Built from
+// `T`'s fields by reflection; they must be visible to this module (`pub`,
+// or in the program's main file).
+pub struct Soa(T: Plain) {
+    cols: [*u8; field_count(T)]
+    len: i64
+    cap: i64
+}
+
+impl(T: Plain) Soa(T) {
+    pub fn new() -> Soa(T) {
+        Soa(T) { cols: [null; field_count(T)], len: 0, cap: 0 }
+    }
+
+    pub fn len(self) -> i64 {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    pub fn push(inout self, v: T) {
+        if self.len == self.cap {
+            let n = if self.cap == 0 { 4 } else { self.cap * 2 }
+            inline for f in 0..field_count(T) {
+                unsafe {
+                    let p = self.cols[f] as *field_type(T, f)
+                    self.cols[f] = mem.realloc(field_type(T, f), p, self.cap, n) as *u8
+                }
+            }
+            self.cap = n
+        }
+        inline for f in 0..field_count(T) {
+            unsafe { write((self.cols[f] as *field_type(T, f)) + self.len, field(v, f)) }
+        }
+        self.len += 1
+    }
+
+    // Element `i`, put together from its fields.
+    pub fn get(self, i: i64) -> T {
+        self.check(i)
+        make(T, fn(f) { unsafe { *((self.cols[f] as *field_type(T, f)) + i) } })
+    }
+
+    pub fn set(inout self, i: i64, v: T) {
+        self.check(i)
+        inline for f in 0..field_count(T) {
+            unsafe { *((self.cols[f] as *field_type(T, f)) + i) = field(v, f) }
+        }
+    }
+
+    // Every element's field `F`, as one slice: `column(field_index(P, "x"))`.
+    pub fn column(self, comptime F: i64) -> [field_type(T, F)] {
+        unsafe { make_slice(self.cols[F] as *field_type(T, F), self.len) }
+    }
+
+    // Calls `f` on field `F` of every element, which it may change.
+    pub fn each_mut(inout self, comptime F: i64, f: fn(inout field_type(T, F))) {
+        let p = self.cols[F] as *field_type(T, F)
+        for i in 0..self.len {
+            unsafe { f(&p[i]) }
+        }
+    }
+
+    fn check(self, i: i64) {
+        if (i as u64) >= (self.len as u64) {
+            panic("index out of bounds")
+        }
+    }
+}
+
+impl(T: Plain) Drop for Soa(T) {
+    fn drop(inout self) {
+        inline for f in 0..field_count(T) {
+            unsafe { mem.dealloc(field_type(T, f), self.cols[f] as *field_type(T, f), self.cap) }
+        }
+    }
+}

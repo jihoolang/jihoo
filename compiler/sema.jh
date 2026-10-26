@@ -825,6 +825,14 @@ impl Sema {
 
     fn resolve_path_ty(inout self, p: Vec(String), args: Option(Vec(ast.Expr)), env: Env, span: Span) -> Result(u32, Diag) {
         let no_args = args.is_none()
+        match args {
+            Some(a) => {
+                if p.len() == 1 && is_reflect_ty(p[0].as_str()) && self.lookup(env.module, p[0].as_str()).is_none() {
+                    return self.reflect_ty(p[0].as_str(), a, env, span)
+                }
+            }
+            None => {}
+        }
         if p.len() == 1 && no_args {
             match env.get(p[0].as_str()) {
                 Some(v) => return match v {
@@ -994,6 +1002,12 @@ impl Sema {
                             return Ok(None)
                         }
                         self.resolve_path_ty(p, Some(args.clone()), env, e.span)?
+                    }
+                    None => {
+                        if p.len() != 1 || !is_reflect_ty(p[0].as_str()) {
+                            return Ok(None)
+                        }
+                        self.reflect_ty(p[0].as_str(), args, env, e.span)?
                     }
                     _ => return Ok(None)
                 }
@@ -1287,6 +1301,43 @@ impl Sema {
 
     // Matches an impl's type against a concrete type, binding the impl's
     // parameters.
+    // Why `t` has no function `name` although an impl of its type has one:
+    // a bound of that impl that `t`'s arguments do not meet.
+    pub fn unmet_bound(inout self, t: u32, name: str) -> Result(Option(String), Diag) {
+        let decl = match self.types.adt_index(t) {
+            Some(a) => self.types.adts[a as i64].decl
+            None => return Ok(None)
+        }
+        for imp in self.adts[decl as i64].impls.clone() {
+            if self.impls[imp as i64].fns.get(name).is_none() {
+                continue
+            }
+            let module = self.impls[imp as i64].module
+            let d = at(self.impls[imp as i64].decl)
+            var binds = Vec(Option(CVal)).new()
+            for _ in 0..d.params.len() {
+                binds.push(None)
+            }
+            if !self.match_ty(d.self_ty, t, d.params, module, &binds)? {
+                continue
+            }
+            for i, p in d.params {
+                match binds[i] {
+                    Some(Type(x)) => {
+                        for b in self.param_bounds(p, module)? {
+                            if self.find_impl(b, x)?.is_none() {
+                                let m = "`" + name + "` needs `" + p.name.as_str() + ": " + self.traits[b as i64].name.as_str() + "`, and `" + self.types.show(x).as_str() + "` is not `" + self.traits[b as i64].name.as_str() + "`"
+                                return Ok(Some(m))
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn match_impl(inout self, imp: u32, t: u32) -> Result(Option(Vec(CVal)), Diag) {
         let module = self.impls[imp as i64].module
         let decl = at(self.impls[imp as i64].decl)
@@ -2441,6 +2492,11 @@ fn is_zeroed_call(e: ast.Expr) -> bool {
         }
         _ => false
     }
+}
+
+// Builtins that name a type: `field_type(T, i)`, `variant_field_type(T, v, j)`.
+pub fn is_reflect_ty(n: str) -> bool {
+    n == "field_type" || n == "variant_field_type"
 }
 
 fn has_attr(item: ast.Item, name: str) -> bool {

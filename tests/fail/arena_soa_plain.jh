@@ -1,0 +1,12 @@
+// A struct-of-arrays vector holds plain values only.
+// error: `new` needs `T: Plain`, and `Named` is not `Plain`
+import std.arena
+
+struct Named {
+    name: String
+}
+
+fn main() {
+    var s = arena.Soa(Named).new()
+    println(s.len())
+}

@@ -99,6 +99,14 @@ trait Derived {
         h
     }
 
+    // Each field's default; structs only.
+    fn default() -> Self {
+        inline if !is_struct(Self) {
+            compile_error("`Default` is derived for structs only")
+        }
+        make(Self, fn(i) { field_type(Self, i).default() })
+    }
+
     // `Point { x: 1, y: 2 }`, `Some(5)`, `None`.
     fn show(self, inout out: String) {
         inline if is_enum(Self) {

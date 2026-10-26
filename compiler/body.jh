@@ -2154,7 +2154,11 @@ impl sema.Sema {
             }
             None => {}
         }
-        Err(err(span, ("`" + self.types.show(t).as_str() + "` has no variant or function `" + name + "`").as_str()))
+        let d = err(span, ("`" + self.types.show(t).as_str() + "` has no variant or function `" + name + "`").as_str())
+        match self.unmet_bound(t, name)? {
+            Some(m) => Err(d.note(None, m.as_str()))
+            None => Err(d)
+        }
     }
 
     // `Vec.new()`, `Box.new(x)`, `Option.Some(x)`: a generic type named
@@ -3954,7 +3958,11 @@ impl sema.Sema {
             }
             break
         }
-        Err(err(span, ("`" + self.types.show(recv.ty).as_str() + "` has no method `" + name + "`").as_str()))
+        let d = err(span, ("`" + self.types.show(recv.ty).as_str() + "` has no method `" + name + "`").as_str())
+        match self.unmet_bound(recv.ty, name)? {
+            Some(m) => Err(d.note(None, m.as_str()))
+            None => Err(d)
+        }
     }
 
     // A method call whose arguments are already values.

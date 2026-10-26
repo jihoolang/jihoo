@@ -1,0 +1,19 @@
+// An id indexes only an arena of its own type.
+// error: expected `Id(Edge)`, found `Id(Node)`
+import std.arena
+
+struct Node {
+    n: i64
+}
+
+struct Edge {
+    w: i64
+}
+
+fn main() {
+    var nodes = arena.Arena(Node).new()
+    var edges = arena.Arena(Edge).new()
+    let id = nodes.add(Node { n: 1 })
+    edges.add(Edge { w: 2 })
+    println(edges[id].w)
+}

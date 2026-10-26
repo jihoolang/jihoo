@@ -1,0 +1,106 @@
+#![freestanding]
+// tests/run/arena.jh without libc.
+import std.arena
+
+// A graph whose nodes refer to each other by id, not by reference.
+struct Node {
+    name: String
+    edges: Vec(arena.Id(Node))
+}
+
+struct Particle {
+    x: f64
+    y: f64
+    alive: bool
+}
+
+fn node(name: str) -> Node {
+    Node { name: name.to_string(), edges: Vec(arena.Id(Node)).new() }
+}
+
+fn main() {
+    var g = arena.Arena(Node).new()
+    let a = g.add(node("a"))
+    let b = g.add(node("b"))
+    let c = g.add(node("c"))
+    g[a].edges.push(b)
+    g[b].edges.push(c)
+    g[c].edges.push(a)
+    // Follow the cycle from `a` three steps.
+    var at = a
+    for _ in 0..3 {
+        at = g[at].edges[0]
+    }
+    println(g[at].name)
+    //> a
+    println(b)
+    //> #1
+    println(a == at)
+    //> true
+    println(a < c)
+    //> true
+    var total = 0
+    for id in g.ids() {
+        total += g[id].edges.len()
+    }
+    println(total)
+    //> 3
+    // Ids are keys too.
+    var names = Map(arena.Id(Node), String).new()
+    names.insert(c, "third".to_string())
+    println(names[c])
+    //> third
+    println(arena.Id(Node).from_index(2) == c)
+    //> true
+
+    var p = arena.Pool(String).new()
+    let h1 = p.insert("one".to_string())
+    let h2 = p.insert("two".to_string())
+    println(p.remove(h1).unwrap())
+    //> one
+    // The slot is reused, with a new generation.
+    let h3 = p.insert("three".to_string())
+    println(h1)
+    //> #0.1
+    println(h3)
+    //> #0.3
+    println(p.contains(h1))
+    //> false
+    println(p.remove(h1).is_none())
+    //> true
+    println(p[h3])
+    //> three
+    match p.get_mut(h2) {
+        Some(s) => s.push_str("!")
+        None => {}
+    }
+    println(p[h2])
+    //> two!
+    println(p.len())
+    //> 2
+    println(p.handles().len())
+    //> 2
+
+    var s = arena.Soa(Particle).new()
+    for i in 0..10 {
+        s.push(Particle { x: i as f64, y: 0.5, alive: i % 2 == 0 })
+    }
+    s.each_mut(field_index(Particle, "y"), fn(y) { y *= 4.0 })
+    var sum = 0.0
+    for x in s.column(field_index(Particle, "x")) {
+        sum += x
+    }
+    println(sum as i64)
+    //> 45
+    println(s.get(3).y as i64)
+    //> 2
+    s.set(4, Particle { x: 1.0, y: 1.0, alive: false })
+    println(s.column(2)[4])
+    //> false
+    println(s.len())
+    //> 10
+    var t = arena.Soa((i64, u8)).new()
+    t.push((7, 1))
+    println(t.get(0).0)
+    //> 7
+}

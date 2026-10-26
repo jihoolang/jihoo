@@ -78,8 +78,9 @@ Each step builds on the ones before it.
 
 ### 1. Reflection, and `derive` in the library
 
-Done ([reflection and derive](../language/reflection.md)), except the last
-item:
+Done ([reflection and derive](../language/reflection.md)), with `Default`
+and `field_type`; derived bounds on generic types and user-written derives
+are left:
 
 - `inline for i in a..b` repeats its body once per compile-time index.
   `inline if c` compiles only the branch its compile-time condition
@@ -115,6 +116,8 @@ with `captures_mut`. Left:
   futexes.
 
 ### 3. The data-oriented standard library
+
+Done ([data by index](../language/data-oriented.md)): `std.arena`.
 
 - Typed indices (`Id(T)`) and arenas that hand them out.
 - Generational handles, which detect a use after the slot was reused.

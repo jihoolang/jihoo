@@ -293,3 +293,9 @@ pub fn is_digit(b: u8) -> bool {
 pub fn is_alpha(b: u8) -> bool {
     (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_'
 }
+
+impl Default for String {
+    fn default() -> String {
+        String.new()
+    }
+}

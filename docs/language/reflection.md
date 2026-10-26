@@ -63,7 +63,23 @@ These builtins take a type and give compile-time constants, so they work in
 | `variant_count(T)` | an enum's variants |
 | `variant_name(T, v)` | variant `v`'s name |
 | `variant_field_count(T, v)` | the values variant `v` holds |
+| `field_index(T, "name")` | the index of the field with that name |
 | `type_name(T)`, `size_of(T)`, `needs_drop(T)` | as before ([builtins](../reference/builtins.md)) |
+
+Two builtins name a type, so they go where a type is written:
+
+| builtin | |
+|---------|---|
+| `field_type(T, i)` | the type of field `i` of a struct or tuple |
+| `variant_field_type(T, v, j)` | the type of value `j` of variant `v` |
+
+```jihoo
+fn first_field(comptime T: type, v: T) -> field_type(T, 0) {
+    field(v, 0)
+}
+
+make(T, fn(i) { field_type(T, i).default() })     // how `Default` is derived
+```
 
 Indices count from 0 in declaration order. An index out of range is a
 compile error.
@@ -138,6 +154,7 @@ enum Shape {
 | `Ord` | variants in declaration order, then fields in order |
 | `Hash` | the variant and the fields' hashes, mixed in order |
 | `Show` | `Point { x: 1, y: 2 }`, `Line(Point { ... }, Point { ... })`, `Empty` |
+| `Default` | every field's `default()` (structs only) |
 
 The derived methods are written in jihoo, in `std/derive.jh`, with the
 builtins above. The compiler only makes `#[derive(Show)]` mean that
@@ -149,5 +166,4 @@ Each field must implement the trait. If one does not, the error points into
 instance (`Pair(T)` is `Clone` for any `T`). An instance whose field type
 lacks the trait fails when the method is used.
 
-Not derivable yet: `Default`, which needs a way to name a field's type at
-compile time.
+`Default` is derived for structs: every field's `default()`.
