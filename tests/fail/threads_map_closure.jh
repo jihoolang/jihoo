@@ -1,0 +1,10 @@
+// Nor a closure, which might change what it captures.
+// error: so the closure cannot capture a `var` or a closure
+import std.thread
+
+fn main() {
+    let xs = [1, 2, 3]
+    let double = fn(x: i64) { x * 2 }
+    let ys = thread.map(xs[0..3], fn(x) { double(x) })
+    println(ys[0])
+}

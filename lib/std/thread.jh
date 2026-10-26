@@ -1,0 +1,112 @@
+// Threads that borrow. Every thread started here ends before the function
+// that started it returns, so the work may borrow what the caller owns,
+// without copying it or counting references. The borrow rules that keep
+// two closures of one call from changing the same variable keep threads
+// from racing (see docs/language/threads.md).
+
+extern fn pthread_create(t: *u64, attr: *u8, start: fnptr(*u8) -> *u8, arg: *u8) -> i32
+extern fn pthread_join(t: u64, result: **u8) -> i32
+extern fn sysconf(name: i32) -> i64
+
+// `_SC_NPROCESSORS_ONLN` on Linux.
+const SC_NPROCESSORS_ONLN: i32 = 84
+
+// Where a new thread starts: `arg` points to the closure it runs.
+export fn jihoo_thread_start(arg: *u8) -> *u8 {
+    unsafe {
+        let f = read(arg as *fn())
+        f()
+    }
+    null
+}
+
+// Starts `*f` on a new thread. `*f` must stay alive and unchanged until
+// `wait` returns.
+unsafe fn start(f: *fn()) -> u64 {
+    var t: u64 = 0
+    if pthread_create(&t, null, jihoo_thread_start, f as *u8) != 0 {
+        panic("cannot start a thread")
+    }
+    t
+}
+
+unsafe fn wait(t: u64) {
+    if pthread_join(t, null) != 0 {
+        panic("cannot join a thread")
+    }
+}
+
+// The number of processors online, at least 1.
+pub fn cpu_count() -> i64 {
+    let n = unsafe { sysconf(SC_NPROCESSORS_ONLN) }
+    if n < 1 { 1 } else { n }
+}
+
+// Runs `a` on a new thread and `b` on this one, and returns both results
+// when both are done. Either may borrow what the caller owns; they may not
+// both use a variable that one of them changes.
+pub fn join(comptime A: type, comptime B: type, a: fn() -> A, b: fn() -> B) -> (A, B) {
+    var ra: Option(A) = None
+    let job = fn() { ra = Some(a()) }
+    let t = unsafe { start(&job) }
+    let rb = b()
+    unsafe { wait(t) }
+    (ra.unwrap(), rb)
+}
+
+// Calls `f(i)` for each `i` in `lo..hi`, on as many threads as there are
+// processors. `f` runs on several threads at once, so it may not change
+// what it captures.
+pub fn each(lo: i64, hi: i64, comptime f: fn(i64)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    each_in(lo, hi, levels(hi - lo), f)
+}
+
+// `f` of each element of `xs`, computed on several threads, in order.
+pub fn map(comptime T: type, comptime U: type, xs: [T], comptime f: fn(T) -> U) -> Vec(U) {
+    inline if captures_mut(f) {
+        compile_error("`thread.map` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    var out = Vec(U).with_capacity(xs.len)
+    let p = out.ptr
+    // Each index is written once, by one thread.
+    each_in(0, xs.len, levels(xs.len), fn(i) { unsafe { write(p + i, f(xs[i])) } })
+    out.len = xs.len
+    out
+}
+
+// Calls `f` on each element of `xs`, which it may change, on several
+// threads.
+pub fn each_mut(comptime T: type, inout xs: Vec(T), comptime f: fn(inout T)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each_mut` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    let p = xs.ptr
+    let n = xs.len
+    // Each element is lent to one thread.
+    each_in(0, n, levels(n), fn(i) { unsafe { f(&p[i]) } })
+}
+
+// `lo..hi` split in two `depth` times, the halves run by `join`.
+fn each_in(lo: i64, hi: i64, depth: i64, comptime f: fn(i64)) {
+    if depth == 0 || hi - lo < 2 {
+        for i in lo..hi {
+            f(i)
+        }
+        return
+    }
+    let mid = lo + (hi - lo) / 2
+    join(fn() { each_in(lo, mid, depth - 1, f) }, fn() { each_in(mid, hi, depth - 1, f) })
+}
+
+// How many times to halve `n` items: until there is a part per processor.
+fn levels(n: i64) -> i64 {
+    let k = min(cpu_count(), n)
+    var d = 0
+    while (1 << d) < k {
+        d += 1
+    }
+    d
+}

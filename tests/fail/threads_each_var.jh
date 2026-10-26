@@ -1,0 +1,9 @@
+// A closure that runs on many threads at once cannot capture a `var`.
+// error: so the closure cannot capture a `var` or a closure
+import std.thread
+
+fn main() {
+    var total = 0
+    thread.each(0, 10, fn(i) { total += i })
+    println(total)
+}

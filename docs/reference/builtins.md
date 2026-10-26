@@ -29,6 +29,8 @@ See [Reflection and derive](../language/reflection.md).
 | `variant_field(x, v, j)` | value `j` of variant `v` of `x`, as a place; stops the program if `x` holds another variant |
 | `make(T, fn(i) { ... })` | a struct or tuple from its fields; the body is inlined for each `i` |
 | `make_variant(T, v, fn(j) { ... })` | variant `v` of `T` from its values |
+| `captures_mut(f)` | whether the `comptime` closure parameter `f` captures a variable mutably or captures a closure ([threads](../language/threads.md#checks-that-libraries-write)) |
+| `compile_error("...")` | a compile error where an instance reaches it |
 
 ## In `unsafe` code
 

@@ -99,12 +99,20 @@ item:
 
 ### 2. Concurrency that borrows
 
-- Threads in a scope (`thread.scope(fn(s) { s.spawn(...) })`) that may
-  borrow what the caller owns, since closures are views and cannot leave
-  the scope.
-- Channels, mutexes and once-cells as library code over atomics.
-- A `Send`-like rule: which types may cross threads, derived from what
-  they own and whether they are views.
+Started ([threads](../language/threads.md)). `std.thread` has `join`,
+`each`, `map` and `each_mut`, on POSIX threads in native programs. A
+closure that runs on several threads at once is checked at compile time
+with `captures_mut`. Left:
+
+- Threads in a scope (`thread.scope(fn(s) { s.spawn(...) })`), whose
+  closures must outlive each statement that starts one.
+- Memory that changes behind a shared borrow (no `readonly`/`noalias`
+  there), and on it atomics, mutexes, channels and once-cells as library
+  code.
+- A `Send`-like rule, once such types exist: which values may cross
+  threads.
+- Threads in freestanding programs: a thread-safe allocator, `clone` and
+  futexes.
 
 ### 3. The data-oriented standard library
 

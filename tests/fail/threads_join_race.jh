@@ -1,0 +1,10 @@
+// Two threads cannot change the same variable: the borrow rules of one
+// call keep the closures apart.
+// error: `n` is used here while it is borrowed mutably
+import std.thread
+
+fn main() {
+    var n = 0
+    thread.join(fn() { n += 1 }, fn() { n += 2 })
+    println(n)
+}

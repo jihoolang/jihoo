@@ -1,0 +1,45 @@
+// std.thread for freestanding programs: the same functions, run on the
+// calling thread, one part after another. The freestanding allocator is
+// not safe to use from several threads yet. Running the parts in order is
+// one of the schedules the native version may choose, so results are the
+// same (see docs/language/threads.md).
+
+// 1: work runs on the calling thread.
+pub fn cpu_count() -> i64 {
+    1
+}
+
+pub fn join(comptime A: type, comptime B: type, a: fn() -> A, b: fn() -> B) -> (A, B) {
+    let ra = a()
+    (ra, b())
+}
+
+pub fn each(lo: i64, hi: i64, comptime f: fn(i64)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    for i in lo..hi {
+        f(i)
+    }
+}
+
+pub fn map(comptime T: type, comptime U: type, xs: [T], comptime f: fn(T) -> U) -> Vec(U) {
+    inline if captures_mut(f) {
+        compile_error("`thread.map` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    var out = Vec(U).with_capacity(xs.len)
+    for x in xs {
+        out.push(f(x))
+    }
+    out
+}
+
+pub fn each_mut(comptime T: type, inout xs: Vec(T), comptime f: fn(inout T)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each_mut` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    let p = xs.ptr
+    for i in 0..xs.len {
+        unsafe { f(&p[i]) }
+    }
+}
