@@ -104,20 +104,21 @@ are left:
 
 ### 2. Concurrency that borrows
 
-Started ([threads](../language/threads.md)). `std.thread` has `join`,
-`each`, `map` and `each_mut`, on POSIX threads in native programs. A
-closure that runs on several threads at once is checked at compile time
-with `captures_mut`. Left:
+Done ([threads](../language/threads.md)) but for scopes. `std.thread` has
+`join`, `each`, `map` and `each_mut`, on POSIX threads in native programs
+and `clone` in freestanding ones. A closure that runs on several threads
+at once is checked at compile time with `captures_mut`.
 
 - Threads in a scope (`thread.scope(fn(s) { s.spawn(...) })`), whose
   closures must outlive each statement that starts one.
 - Done: `#[interior]` memory, which changes behind shared borrows (no
   `readonly`/`noalias` there), and on it `std.sync.Atomic` and `Mutex`.
-- Channels and once-cells, on the same foundation.
+- Done: channels (`std.sync.Channel`, bounded or not) and once-cells
+  (`Once`), on the same foundation.
 - A `Send`-like rule, if a type that one thread only may use ever exists.
   Today `#[interior]` types promise to be safe from several threads.
-- Threads in freestanding programs: a thread-safe allocator, `clone` and
-  futexes.
+- Done: threads in freestanding programs: a thread-safe allocator,
+  `clone` and futexes.
 
 ### 3. The data-oriented standard library
 

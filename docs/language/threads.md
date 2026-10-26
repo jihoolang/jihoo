@@ -64,8 +64,9 @@ changes it. Two rules prevent it:
 Outside `unsafe`, safe jihoo has no shared mutable state: no globals, no
 reference counts, and no cells except the `#[interior]` types of
 `std.sync`, which are built to be changed by several threads. So what a
-closure can only read cannot change on another thread. Values move between threads only as the results
-of `join` and `map`.
+closure can only read cannot change on another thread. Values move between
+threads as the results of `join` and `map`, and through
+[channels](#channels).
 
 A panic on any thread stops the whole program, as it does on one thread.
 
@@ -100,14 +101,67 @@ released, and there is no guard to forget. Locking the same mutex again
 inside `f` waits forever. Waiting uses Linux futexes, so it costs nothing
 while no one else holds the lock.
 
+## Channels
+
+`sync.Channel(T)` is a queue that threads pass values through. Like
+`Mutex`, it is shared with `let`, so any number of threads may send and
+receive at once:
+
+```jihoo
+let ch = sync.Channel(i64).new()
+let (sum, _) = thread.join(fn() {
+    var total = 0
+    for v in ch.iter() {      // until the channel is closed and empty
+        total += v
+    }
+    total
+}, fn() {
+    thread.each(0, 1000, fn(i) { ch.send(i) })
+    ch.close()
+})
+```
+
+| method | |
+|--------|---|
+| `Channel(T).new()` | a channel without a limit: `send` never waits |
+| `Channel(T).bounded(n)` | at most `n` values wait in it; `send` waits while it is full |
+| `send(v)` | puts `v` at the end; on a closed channel, stops the program |
+| `recv()` | the value at the front, waiting for one; `None` once closed and empty |
+| `try_recv()` | the value at the front, or `None` without waiting |
+| `close()` | no more values will be sent; receivers get the rest, then `None` |
+| `iter()` | `for v in ch.iter()` receives until `recv` gives `None` |
+| `len()`, `is_closed()` | as they are now |
+
+Each value goes to one receiver, in the order sent. A value sent moves
+into the channel; what is never received is dropped with it. Since the
+channel itself is borrowed, it must outlive the threads that use it, which
+every channel in a `join` or `each` does.
+
+## Once-cells
+
+`sync.Once(T)` holds a value that the first thread to ask for it sets.
+`get_or_init(f)` calls `f` if no thread has, while threads asking at the
+same time wait for it, and returns the value borrowed. `get()` gives it if
+it is set, and `into_inner()` takes it back:
+
+```jihoo
+let table = sync.Once(Vec(i64)).new()
+thread.each(0, n, fn(i) {
+    let t = table.get_or_init(fn() { build_table() })   // built once
+    use(t, i)
+})
+```
+
+Asking the same `Once` inside its own `f` waits forever.
+
 ## Profiles
 
-Native programs use POSIX threads from libc. In
-[freestanding programs](profiles.md) the same functions run each part on
-the calling thread, one after another, because the freestanding allocator
-cannot be used from several threads yet. The rules above make the results
-the same: running the parts in order is one of the schedules the native
-version may choose.
+Native programs use POSIX threads from libc. [Freestanding
+programs](profiles.md) start threads with the `clone` system call, each on
+a stack of its own (8 MiB of address space, used as touched, with a guard
+page), and wait for them with a futex that the kernel clears when the
+thread ends. The freestanding allocator takes a lock, so every thread can
+allocate. `cpu_count()` counts the processors the process may run on.
 
 ## Checks that libraries write
 
@@ -134,5 +188,4 @@ code.
 
 ## Not yet
 
-- Threads that outlive a call (a `scope` you spawn into), and channels.
-- Threads in freestanding programs.
+- Threads that outlive a call (a `scope` you spawn into).

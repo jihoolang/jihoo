@@ -1,0 +1,111 @@
+// Channels and once-cells, between threads that borrow them.
+import std.sync
+import std.thread
+
+fn main() {
+    // Each side waits for the other, so the two closures of `join` must
+    // run at once.
+    let flag = sync.Atomic(i64).new(0)
+    let (a, b) = thread.join(fn() {
+        while flag.load() != 1 {}
+        flag.store(2)
+        10
+    }, fn() {
+        flag.store(1)
+        while flag.load() != 2 {}
+        20
+    })
+    println(a + b)
+    //> 30
+
+    // One thread sends, the other receives until the channel is closed.
+    let ch = sync.Channel(i64).new()
+    let (sum, _) = thread.join(fn() {
+        var total = 0
+        for v in ch.iter() {
+            total += v
+        }
+        total
+    }, fn() {
+        for i in 0..1000 {
+            ch.send(i)
+        }
+        ch.close()
+    })
+    println(sum)
+    //> 499500
+
+    // Many senders: `each`'s closure may capture a channel with `let`.
+    // A bounded channel makes senders wait for the receiver.
+    let jobs = sync.Channel(String).bounded(4)
+    let (count, _) = thread.join(fn() {
+        var n = 0
+        loop {
+            match jobs.recv() {
+                Some(s) => n += s.len()
+                None => break
+            }
+        }
+        n
+    }, fn() {
+        thread.each(0, 100, fn(i) { jobs.send(i.to_string()) })
+        jobs.close()
+    })
+    println(count)
+    //> 190
+
+    // What is left in a channel is still there, and dropped with it.
+    let left = sync.Channel(String).new()
+    left.send(String.from("a"))
+    left.send(String.from("b"))
+    println(left.len())
+    //> 2
+    match left.try_recv() {
+        Some(s) => println(s)
+        None => println("empty")
+    }
+    //> a
+    left.close()
+    println(left.is_closed())
+    //> true
+    match left.recv() {
+        Some(s) => println(s)
+        None => println("empty")
+    }
+    //> b
+    match left.recv() {
+        Some(s) => println(s)
+        None => println("empty")
+    }
+    //> empty
+    let unread = sync.Channel(Vec(i64)).new()
+    unread.send(Vec(i64).new())
+
+    // The first thread to ask sets a `Once`; the others wait and share it.
+    let calls = sync.Atomic(i64).new(0)
+    let config = sync.Once(String).new()
+    thread.each(0, 16, fn(i) {
+        let c = config.get_or_init(fn() {
+            calls.add(1)
+            String.from("ready")
+        })
+        if c.len() != 5 {
+            panic("wrong value")
+        }
+    })
+    println(calls.load())
+    //> 1
+    match config.get() {
+        Some(s) => println(s)
+        None => println("unset")
+    }
+    //> ready
+    let unset = sync.Once(i64).new()
+    println(unset.get().is_none())
+    //> true
+    match config.into_inner() {
+        Some(s) => println(s.len())
+        None => println(0)
+    }
+    //> 5
+}

@@ -123,9 +123,11 @@ and variants. `#[derive(Clone, Eq, Ord, Hash, Show, Default)]` is library code
 written with them, in `std/derive.jh`, and keeps privacy.
 
 [Threads](docs/language/threads.md): `std.thread.join`, `each`, `map` and
-`each_mut` run work on several threads that borrows what the caller owns.
+`each_mut` run work on several threads that borrows what the caller owns,
+in native and freestanding programs.
 The borrow rules and a compile-time check of the closures rule out data
-races. `std.sync.Atomic` and `Mutex` are shared through plain borrows.
+races. `std.sync.Atomic`, `Mutex`, `Channel` and `Once` are shared through
+plain borrows.
 
 [Data by index](docs/language/data-oriented.md): `std.arena` has typed ids
 and arenas, generational handles and pools, and `Soa(T)`, a
@@ -151,5 +153,5 @@ up to v0.1.1.
 Errors come several per run, in source order, with notes on where a
 moved value went and where a conflicting borrow started.
 
-Next ([roadmap](docs/internals/roadmap.md)): the compile-time heap, channels
-and freestanding threads, `dyn Trait`.
+Next ([roadmap](docs/internals/roadmap.md)): `dyn Trait` and closures that
+own what they capture, thread scopes, contracts.

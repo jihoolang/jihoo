@@ -1,7 +1,9 @@
-// Values that threads change together: `Atomic(T)` and `Mutex(T)`. Both
-// change behind shared borrows (`#[interior]`), so a closure that runs on
-// several threads may capture them with `let` (see docs/language/threads.md).
+// Values that threads change together: `Atomic(T)`, `Mutex(T)`,
+// `Channel(T)` and `Once(T)`. They change behind shared borrows
+// (`#[interior]`), so a closure that runs on several threads may capture
+// them with `let` (see docs/language/threads.md).
 
+import std.mem
 import std.sysno
 
 const FUTEX_WAIT_PRIVATE: i64 = 128
@@ -70,16 +72,10 @@ impl(T: type) Mutex(T) {
     pub fn lock(self, comptime R: type, f: fn(inout T) -> R) -> R {
         unsafe {
             let s = &self.state
-            if !atomic_cas(s, 0, 1) {
-                while atomic_swap(s, 2) != 0 {
-                    syscall(sysno.FUTEX, s, FUTEX_WAIT_PRIVATE, 2, 0, 0, 0)
-                }
-            }
+            lock_word(s)
             let p = &self.value
             let r = f(&p[0])
-            if atomic_swap(s, 0) == 2 {
-                syscall(sysno.FUTEX, s, FUTEX_WAKE_PRIVATE, 1, 0, 0, 0)
-            }
+            unlock_word(s)
             r
         }
     }
@@ -87,6 +83,300 @@ impl(T: type) Mutex(T) {
     pub fn into_inner(sink self) -> T {
         match self {
             Mutex { value, .. } => value
+        }
+    }
+}
+
+// Waits until the lock word `s` is free and takes it: 0 free, 1 held,
+// 2 held and others may be waiting.
+unsafe fn lock_word(s: *u32) {
+    if !atomic_cas(s, 0, 1) {
+        while atomic_swap(s, 2) != 0 {
+            syscall(sysno.FUTEX, s, FUTEX_WAIT_PRIVATE, 2, 0, 0, 0)
+        }
+    }
+}
+
+unsafe fn unlock_word(s: *u32) {
+    if atomic_swap(s, 0) == 2 {
+        syscall(sysno.FUTEX, s, FUTEX_WAKE_PRIVATE, 1, 0, 0, 0)
+    }
+}
+
+// A queue that threads pass values through. Any number of threads may
+// send and receive at once, each through a shared borrow. Values come out
+// in the order they went in.
+#[interior]
+pub struct Channel(T: type) {
+    lock: u32
+    // Changes on every send, receive and close; waiting threads sleep on
+    // it, and `waiting` counts them.
+    seq: u32
+    waiting: u32
+    closed: bool
+    // `len` values from `head`, in a ring of `cap`.
+    buf: *T
+    head: i64
+    len: i64
+    cap: i64
+    // At most this many values wait in the channel; 0 for no limit.
+    bound: i64
+}
+
+impl(T: type) Channel(T) {
+    // A channel that holds any number of values: `send` never waits.
+    pub fn new() -> Channel(T) {
+        Channel(T).bounded(0)
+    }
+
+    // A channel that holds at most `n` values: `send` waits while it is
+    // full. 0 means no limit.
+    pub fn bounded(n: i64) -> Channel(T) {
+        if n < 0 {
+            panic("a channel's bound cannot be negative")
+        }
+        Channel(T) { lock: 0, seq: 0, waiting: 0, closed: false, buf: null, head: 0, len: 0, cap: 0, bound: n }
+    }
+
+    // Puts `v` at the end of the queue, waiting while the channel is full.
+    // Sending on a closed channel stops the program.
+    pub fn send(self, sink v: T) {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            loop {
+                if (*c).closed {
+                    unlock_word(&(*c).lock)
+                    panic("send on a closed channel")
+                }
+                if (*c).bound == 0 || (*c).len < (*c).bound {
+                    break
+                }
+                Channel(T).sleep(c)
+            }
+            if (*c).len == (*c).cap {
+                Channel(T).grow(c)
+            }
+            write((*c).buf + ((*c).head + (*c).len) % (*c).cap, v)
+            (*c).len += 1
+            Channel(T).changed(c)
+            unlock_word(&(*c).lock)
+        }
+    }
+
+    // The value at the front of the queue, waiting until there is one.
+    // `None` once the channel is closed and empty.
+    pub fn recv(self) -> Option(T) {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            loop {
+                if (*c).len > 0 {
+                    let v = Channel(T).pop(c)
+                    unlock_word(&(*c).lock)
+                    return Some(v)
+                }
+                if (*c).closed {
+                    unlock_word(&(*c).lock)
+                    return None
+                }
+                Channel(T).sleep(c)
+            }
+        }
+    }
+
+    // The value at the front of the queue, without waiting: `None` if
+    // there is none now.
+    pub fn try_recv(self) -> Option(T) {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            var r: Option(T) = None
+            if (*c).len > 0 {
+                r = Some(Channel(T).pop(c))
+            }
+            unlock_word(&(*c).lock)
+            r
+        }
+    }
+
+    // No more values will be sent. Receivers get the ones left, then
+    // `None`; a waiting sender stops the program.
+    pub fn close(self) {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            (*c).closed = true
+            Channel(T).changed(c)
+            unlock_word(&(*c).lock)
+        }
+    }
+
+    pub fn is_closed(self) -> bool {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            let r = (*c).closed
+            unlock_word(&(*c).lock)
+            r
+        }
+    }
+
+    // The number of values waiting in the channel now.
+    pub fn len(self) -> i64 {
+        unsafe {
+            let c = &self as *Channel(T)
+            lock_word(&(*c).lock)
+            let r = (*c).len
+            unlock_word(&(*c).lock)
+            r
+        }
+    }
+
+    // `for v in ch` receives until the channel is closed and empty.
+    pub fn iter(self) -> Receive(T) {
+        Receive(T) { c: unsafe { &self as *Channel(T) } }
+    }
+
+    // The rest work with the lock held.
+    unsafe fn pop(c: *Channel(T)) -> T {
+        let v = read((*c).buf + (*c).head)
+        (*c).head = ((*c).head + 1) % (*c).cap
+        (*c).len -= 1
+        Channel(T).changed(c)
+        v
+    }
+
+    unsafe fn grow(c: *Channel(T)) {
+        let cap = if (*c).cap == 0 { 4 } else { (*c).cap * 2 }
+        let buf = mem.alloc(T, cap)
+        for i in 0..(*c).len {
+            write(buf + i, read((*c).buf + ((*c).head + i) % (*c).cap))
+        }
+        mem.dealloc(T, (*c).buf, (*c).cap)
+        (*c).buf = buf
+        (*c).cap = cap
+        (*c).head = 0
+    }
+
+    // Wakes the threads waiting for a change.
+    unsafe fn changed(c: *Channel(T)) {
+        atomic_add(&(*c).seq, 1)
+        if atomic_load(&(*c).waiting) > 0 {
+            syscall(sysno.FUTEX, &(*c).seq, FUTEX_WAKE_PRIVATE, 2147483647, 0, 0, 0)
+        }
+    }
+
+    // Lets go of the lock until the channel changes, then takes it again.
+    unsafe fn sleep(c: *Channel(T)) {
+        let seq = atomic_load(&(*c).seq)
+        atomic_add(&(*c).waiting, 1)
+        unlock_word(&(*c).lock)
+        syscall(sysno.FUTEX, &(*c).seq, FUTEX_WAIT_PRIVATE, seq, 0, 0, 0)
+        atomic_sub(&(*c).waiting, 1)
+        lock_word(&(*c).lock)
+    }
+}
+
+impl(T: type) Drop for Channel(T) {
+    // Drops the values never received.
+    fn drop(inout self) {
+        unsafe {
+            for i in 0..self.len {
+                mem.drop_at(T, self.buf + (self.head + i) % self.cap)
+            }
+            mem.dealloc(T, self.buf, self.cap)
+        }
+    }
+}
+
+// Receives from a channel until it is closed and empty.
+#[view]
+pub struct Receive(T: type) {
+    c: *Channel(T)
+}
+
+impl(T: type) Iterator for Receive(T) {
+    type Item = T
+
+    fn next(inout self) -> Option(T) {
+        unsafe { (*self.c).recv() }
+    }
+}
+
+// A value set once, by the first thread that asks for it; the others wait
+// for it and then share it.
+#[interior]
+pub struct Once(T: type) {
+    // 0: empty; 1: being set; 2: set.
+    state: u32
+    slot: *T
+}
+
+impl(T: type) Once(T) {
+    pub fn new() -> Once(T) {
+        Once(T) { state: 0, slot: null }
+    }
+
+    // The value, if it is set.
+    pub fn get(self) -> Option(ref T) {
+        unsafe {
+            if atomic_load(&self.state) == 2 {
+                return Some(*self.slot)
+            }
+            None
+        }
+    }
+
+    // The value, set to `f()` first if no thread has set it. While one
+    // thread runs `f`, others asking wait for it. Asking the same `Once`
+    // inside `f` waits forever.
+    pub fn get_or_init(self, f: fn() -> T) -> ref T {
+        unsafe {
+            let o = &self as *Once(T)
+            let s = &self.state
+            if atomic_load(s) != 2 {
+                if atomic_cas(s, 0, 1) {
+                    let p = mem.alloc(T, 1)
+                    write(p, f())
+                    (*o).slot = p
+                    atomic_store(s, 2)
+                    let _ = syscall(sysno.FUTEX, s, FUTEX_WAKE_PRIVATE, 2147483647, 0, 0, 0)
+                } else {
+                    loop {
+                        let now = atomic_load(s)
+                        if now == 2 {
+                            break
+                        }
+                        syscall(sysno.FUTEX, s, FUTEX_WAIT_PRIVATE, now, 0, 0, 0)
+                    }
+                }
+            }
+            *self.slot
+        }
+    }
+
+    pub fn into_inner(sink self) -> Option(T) {
+        var o = self
+        if o.state != 2 {
+            return None
+        }
+        o.state = 0
+        unsafe {
+            let v = read(o.slot)
+            mem.dealloc(T, o.slot, 1)
+            Some(v)
+        }
+    }
+}
+
+impl(T: type) Drop for Once(T) {
+    fn drop(inout self) {
+        if self.state == 2 {
+            unsafe {
+                mem.drop_at(T, self.slot)
+                mem.dealloc(T, self.slot, 1)
+            }
         }
     }
 }

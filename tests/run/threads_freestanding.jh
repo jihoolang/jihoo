@@ -1,5 +1,5 @@
 #![freestanding]
-// tests/run/threads.jh without libc: the same results, on one thread.
+// tests/run/threads.jh without libc: threads started with `clone`.
 import std.thread
 
 struct Grid {

@@ -1,0 +1,79 @@
+// Starting and waiting for threads without libc: `clone` with a stack of
+// the thread's own, and a futex that the kernel clears when it ends.
+
+import std.sysno
+
+// Defined in assembly by the compiler in every freestanding program:
+// `clone`, and in the new thread, `start(arg)` then `exit`.
+extern fn jihoo_clone(flags: i64, stack: *u8, ptid: *i32, ctid: *i32, start: fnptr(*u8), arg: *u8) -> i64
+
+// Each thread's stack, mapped when it starts; pages are used as touched.
+// The lowest page is a guard, so running out of stack stops the program.
+const STACK: i64 = 8388608
+const GUARD: i64 = 4096
+
+// CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD |
+// CLONE_SYSVSEM | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID
+const CLONE_THREAD_FLAGS: i64 = 0x350f00
+const FUTEX_WAIT: i64 = 0
+
+fn thread_main(arg: *u8) {
+    unsafe {
+        let f = read(arg as *fn())
+        f()
+    }
+}
+
+// The thread's id, at the top of its stack mapping: the kernel writes it
+// when the thread starts and clears it, waking `wait`, when it ends.
+unsafe fn tid_of(base: *u8) -> *i32 {
+    (base + STACK - 8) as *i32
+}
+
+// Starts `*f` on a new thread. `*f` must stay alive and unchanged until
+// `wait` returns. The handle is the thread's stack.
+pub unsafe fn start(f: *fn()) -> u64 {
+    // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK
+    let base = syscall(sysno.MMAP, 0, STACK, 3, 0x20022, -1, 0)
+    if base < 0 && base > -4096 {
+        panic("cannot start a thread")
+    }
+    let b = base as *u8
+    syscall(sysno.MPROTECT, b, GUARD, 0)
+    let tid = tid_of(b)
+    if jihoo_clone(CLONE_THREAD_FLAGS, b + STACK - 16, tid, tid, thread_main, f as *u8) < 0 {
+        panic("cannot start a thread")
+    }
+    base as u64
+}
+
+pub unsafe fn wait(t: u64) {
+    let b = t as *u8
+    let tid = tid_of(b)
+    loop {
+        let v = atomic_load(tid)
+        if v == 0 {
+            break
+        }
+        syscall(sysno.FUTEX, tid, FUTEX_WAIT, v, 0, 0, 0)
+    }
+    syscall(sysno.MUNMAP, b, STACK)
+}
+
+// The number of processors this process may run on, at least 1.
+pub fn cpu_count() -> i64 {
+    var mask = [0 as u64; 16]
+    let n = unsafe { syscall(sysno.SCHED_GETAFFINITY, 0, 128, &mask as *u64) }
+    if n <= 0 {
+        return 1
+    }
+    var count = 0
+    for i in 0..n / 8 {
+        var w = mask[i]
+        while w != 0 {
+            count += (w & 1) as i64
+            w = w >> 1
+        }
+    }
+    if count < 1 { 1 } else { count }
+}

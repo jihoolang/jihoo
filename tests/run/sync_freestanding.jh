@@ -1,5 +1,5 @@
 #![freestanding]
-// tests/run/sync.jh without libc; std.thread runs the parts in order.
+// tests/run/sync.jh without libc.
 import std.sync
 import std.thread
 
