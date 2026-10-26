@@ -10,6 +10,13 @@ enum Tok {
     Num(i64)
 }
 
+// Rust's `#[derive(Clone, PartialEq, Debug)]`.
+#[derive(Clone, Eq, Show)]
+struct Word {
+    text: String
+    n: i64
+}
+
 fn count_words(text: str) -> Map(String, i64) {
     var counts = Map(String, i64).new()
     for w in text.split(" ") {
@@ -164,6 +171,11 @@ fn main() {
     let picked: Option(i64) = if names.len() > 5 { None } else { Some(1) }
     println(picked.is_some())
     //> true
+    let w = Word { text: "hi".to_string(), n: 2 }
+    println(w.clone() == w)
+    //> true
+    println(w)
+    //> Word { text: hi, n: 2 }
 }
 
 enum Named {

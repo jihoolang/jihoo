@@ -33,7 +33,7 @@ if you know Rust, and check here when code that "should work" does not. The
 | `while let Some(x) = it.next()` | `loop { match it.next() { Some(x) => ..., None => break } }` |
 | `format!("{} {}", a, b)` | `a.to_string() + " " + b.to_string()`, or `show` into a `String` |
 | `println!("{}", x)` | `println(x)` (one argument, with `Show`) |
-| `#[derive(Clone, PartialEq)]` | write the `impl` by hand |
+| `#[derive(Clone, PartialEq, Debug)]` | `#[derive(Clone, Eq, Show)]`; `Show` prints like `{:?}` without quotes around strings |
 | `Self::new()` | `Self.new()` or `Type.new()` |
 | `x.len()` on `&str`, `&[T]` | `x.len`: a field on `str` and slices; `v.len()` on `Vec`, `String`, `Map` |
 | `unsafe { *p }`, `p.add(n)` | `unsafe { *p }`, `p + n` (in elements) |

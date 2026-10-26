@@ -1,0 +1,10 @@
+// error: `E` has no variant 2
+enum E {
+    A(i64)
+    B
+}
+
+fn main() {
+    let e = E.A(1)
+    println(variant_field(e, 2, 0))
+}

@@ -15,6 +15,21 @@ name, which then hides the builtin.
 | `sqrt`, `floor`, `ceil`, `trunc`, `round`, `abs`, `copysign` | floats (`abs` also on signed integers) |
 | `argc()`, `argv()` | the program's arguments, as C has them (see `std.env`) |
 
+## Reflection
+
+See [Reflection and derive](../language/reflection.md).
+
+| builtin | |
+|---------|---|
+| `is_struct(T)`, `is_enum(T)`, `is_tuple(T)` | compile-time `bool`s |
+| `field_count(T)`, `field_name(T, i)` | a struct's or tuple's fields (compile-time constants) |
+| `variant_count(T)`, `variant_name(T, v)`, `variant_field_count(T, v)` | an enum's variants (compile-time constants) |
+| `field(x, i)` | field `i` of `x`, as a place |
+| `variant_of(x)` | the index of `x`'s variant, as `i64` |
+| `variant_field(x, v, j)` | value `j` of variant `v` of `x`, as a place; stops the program if `x` holds another variant |
+| `make(T, fn(i) { ... })` | a struct or tuple from its fields; the body is inlined for each `i` |
+| `make_variant(T, v, fn(j) { ... })` | variant `v` of `T` from its values |
+
 ## In `unsafe` code
 
 | builtin | |

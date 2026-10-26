@@ -274,6 +274,10 @@ pub enum ExprKind {
     Loop(Block)
     // `for i, x in e`: the index, the pattern, then the iterated expression.
     For(Option(ForIndex), Pat, Box(Expr), Block)
+    // `inline for i in a..b`: the body once per compile-time `i`.
+    InlineFor(String, Box(Expr), Block)
+    // `inline if c`: only the branch the compile-time condition selects.
+    InlineIf(Box(Expr), Block, Option(Box(Expr)))
     Lambda(Vec(LambdaParam), Option(Ty), Block)
     Return(Option(Box(Expr)))
     Break
@@ -495,6 +499,8 @@ impl Clone for ExprKind {
                 }
                 ExprKind.For(ix, p.clone(), e.clone(), b.clone())
             }
+            InlineFor(n, e, b) => ExprKind.InlineFor(n.clone(), e.clone(), b.clone())
+            InlineIf(c, t, e) => ExprKind.InlineIf(c.clone(), t.clone(), e.clone())
             Lambda(ps, r, b) => ExprKind.Lambda(ps.clone(), r.clone(), b.clone())
             Return(e) => ExprKind.Return(e.clone())
             Break => ExprKind.Break

@@ -36,6 +36,8 @@ pub struct Ast {
     pub modules: Vec(ModuleAst)
     pub root: u32
     pub prelude: Option(u32)
+    // std.derive, loaded when some item has `#[derive(...)]`.
+    pub derive: Option(u32)
 }
 
 struct Loader {
@@ -120,8 +122,18 @@ pub fn load(root: str, sink search: Vec(String), target: str, inout sources: dia
             None => return Err(Diag.new(Span.new(0, 0, 0), "cannot find the standard library (std/prelude.jh); set JIHOO_PATH or pass -I"))
         }
     }
+    var derive: Option(u32) = None
+    if !no_prelude && l.any_derive() {
+        var p = Vec(String).new()
+        p.push("std".to_string())
+        p.push("derive".to_string())
+        match l.find(p, root) {
+            Some(f) => derive = Some(l.load_file(f.as_str(), "std.derive", Span.new(0, 0, 0), &sources)?)
+            None => return Err(Diag.new(Span.new(0, 0, 0), "cannot find std/derive.jh, which `#[derive(...)]` needs"))
+        }
+    }
     match l {
-        Loader { modules, .. } => Ok(Ast { modules: modules, root: root_idx, prelude: prelude })
+        Loader { modules, .. } => Ok(Ast { modules: modules, root: root_idx, prelude: prelude, derive: derive })
     }
 }
 
@@ -141,6 +153,20 @@ fn is_freestanding(text: str) -> bool {
 }
 
 impl Loader {
+    // Whether an item of a loaded module derives a trait.
+    fn any_derive(self) -> bool {
+        for m in self.modules {
+            for it in m.ast.items {
+                for a in it.attrs {
+                    if a.name == "derive" && a.args.len() > 0 {
+                        return true
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn find(self, path: Vec(String), from: str) -> Option(String) {
         var dirs = Vec(String).new()
         dirs.push(os.parent(from).to_string())

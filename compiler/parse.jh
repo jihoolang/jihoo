@@ -873,6 +873,10 @@ impl Parser {
                 ExprKind.Bool(false)
             }
             Ident => {
+                if self.text() == "inline" && (self.peek(1) == Tok.For || self.peek(1) == Tok.If) {
+                    self.bump()
+                    return self.inline_expr(start)
+                }
                 if self.text() == "fnptr" && self.peek(1) == Tok.LParen {
                     ExprKind.Type(self.ty()?)
                 } else {
@@ -1038,6 +1042,33 @@ impl Parser {
             }
         }
         Ok(Expr { kind: ExprKind.If(Box.new(c), then, els), span: start.to(self.prev_span()) })
+    }
+
+    // `inline for i in a..b { ... }`, `inline if c { ... } else ...`;
+    // `inline` is already eaten. An `else if` is `inline` too.
+    fn inline_expr(inout self, start: Span) -> Result(Expr, Diag) {
+        if self.eat(Tok.For) {
+            let name = self.ident()?
+            self.expect(Tok.In)?
+            let it = self.expr_ns()?
+            let b = self.block()?
+            return Ok(Expr { kind: ExprKind.InlineFor(name, Box.new(it), b), span: start.to(self.prev_span()) })
+        }
+        self.expect(Tok.If)?
+        let c = self.expr_ns()?
+        let then = self.block()?
+        var els: Option(Box(Expr)) = None
+        if self.eat(Tok.Else) {
+            if self.at(Tok.If) {
+                let s = self.span()
+                els = Some(Box.new(self.inline_expr(s)?))
+            } else {
+                let b = self.block()?
+                let sp = b.span
+                els = Some(Box.new(Expr { kind: ExprKind.Block(b), span: sp }))
+            }
+        }
+        Ok(Expr { kind: ExprKind.InlineIf(Box.new(c), then, els), span: start.to(self.prev_span()) })
     }
 
     // `fn(x, y: i64) -> T { ... }` is a closure; `fn(i64) -> T` is a type.

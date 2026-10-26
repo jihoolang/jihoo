@@ -1,0 +1,118 @@
+// `#[derive(...)]`: Clone, Eq, Ord, Hash and Show written by std.derive.
+import derive_mods.shapes
+
+#[derive(Clone, Eq, Ord, Hash, Show)]
+struct Point {
+    x: i64
+    y: i64
+}
+
+#[derive(Clone, Eq, Ord, Hash, Show)]
+enum Shape {
+    Dot(Point)
+    Line(Point, Point)
+    Empty
+}
+
+#[derive(Clone, Eq, Show)]
+struct Pair(T: type) {
+    a: T
+    b: T
+}
+
+#[derive(Clone, Eq, Show)]
+struct Doc {
+    title: String
+    words: Vec(String)
+    shape: Shape
+}
+
+#[derive(Show)]
+struct Unit {}
+
+fn main() {
+    let p = Point { x: 1, y: 2 }
+    let q = p.clone()
+    println(p == q)
+    //> true
+    println(p != Point { x: 1, y: 3 })
+    //> true
+    println(p)
+    //> Point { x: 1, y: 2 }
+    println(p < Point { x: 1, y: 3 })
+    //> true
+    println(Point { x: 2, y: 0 } > p)
+    //> true
+    println(p.hash() == q.hash())
+    //> true
+    println(p.hash() == Point { x: 2, y: 1 }.hash())
+    //> false
+
+    let s = Shape.Line(p, Point { x: 3, y: 4 })
+    println(s)
+    //> Line(Point { x: 1, y: 2 }, Point { x: 3, y: 4 })
+    println(Shape.Empty)
+    //> Empty
+    println(s.clone() == s)
+    //> true
+    println(s == Shape.Dot(p))
+    //> false
+    // Variants compare in the order they are declared.
+    println(Shape.Dot(Point { x: 9, y: 9 }) < s)
+    //> true
+    println(Shape.Empty > s)
+    //> true
+
+    let pr = Pair(String) { a: "x".to_string(), b: "y".to_string() }
+    let pr2 = pr.clone()
+    println(pr2)
+    //> Pair(String) { a: x, b: y }
+    println(pr == pr2)
+    //> true
+
+    // Owned fields are cloned, not copied.
+    var d = Doc { title: "t".to_string(), words: Vec(String).new(), shape: Shape.Dot(p) }
+    d.words.push("one".to_string())
+    var e = d.clone()
+    e.words.push("two".to_string())
+    println(d.words.len())
+    //> 1
+    println(e.words.len())
+    //> 2
+    println(d == e)
+    //> false
+    println(e.shape)
+    //> Dot(Point { x: 1, y: 2 })
+    println(Unit {})
+    //> Unit
+
+    // Private fields of another module's type.
+    let t = shapes.Tag.new(7, "seven")
+    let u = t.clone()
+    println(t == u)
+    //> true
+    println(u)
+    //> Tag { id: 7, label: seven }
+    println(t < shapes.Tag.new(8, "a"))
+    //> true
+
+    // Derived Hash and Eq make keys; derived Ord sorts.
+    var m = Map(Shape, i64).new()
+    m.insert(s.clone(), 1)
+    m.insert(Shape.Empty, 2)
+    println(m[Shape.Empty])
+    //> 2
+    println(m[s])
+    //> 1
+    var v = Vec(Point).new()
+    v.push(Point { x: 2, y: 1 })
+    v.push(Point { x: 1, y: 5 })
+    v.push(Point { x: 1, y: 2 })
+    sort(&v)
+    for x in v {
+        println(x)
+    }
+    //> Point { x: 1, y: 2 }
+    //> Point { x: 1, y: 5 }
+    //> Point { x: 2, y: 1 }
+}

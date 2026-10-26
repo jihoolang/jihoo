@@ -1,0 +1,14 @@
+// A module for tests/run/derive.jh: derived impls of a type whose fields
+// are private to it.
+
+#[derive(Clone, Eq, Ord, Hash, Show)]
+pub struct Tag {
+    id: i64
+    pub label: String
+}
+
+impl Tag {
+    pub fn new(id: i64, label: str) -> Tag {
+        Tag { id: id, label: label.to_string() }
+    }
+}

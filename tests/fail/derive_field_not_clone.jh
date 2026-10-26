@@ -1,0 +1,15 @@
+// A derived impl needs the fields' impls; the error names the instance.
+// error: has no method `clone`
+struct NoClone {
+    x: String
+}
+
+#[derive(Clone)]
+struct Holder {
+    n: NoClone
+}
+
+fn main() {
+    let h = Holder { n: NoClone { x: "a" } }
+    let g = h.clone()
+}

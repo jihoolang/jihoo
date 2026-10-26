@@ -97,5 +97,6 @@ give all integers `Ord`, `Hash` and `Show` with one impl each:
 impl(T: Number) Ord for T { ... }
 ```
 
-`#[derive(...)]` is reserved for impls the compiler will write; for now,
-write impls by hand.
+`#[derive(Clone, Eq, Ord, Hash, Show)]` before a struct or enum gives it
+those impls, written in the standard library with
+[reflection](reflection.md#derive).

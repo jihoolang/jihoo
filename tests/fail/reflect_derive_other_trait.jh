@@ -1,0 +1,9 @@
+// Deriving `Eq` gives `eq` only, not the other derivable methods.
+// error: has no method `clone`
+import reflect_mods.geo
+
+fn main() {
+    let e = geo.EqOnly.new()
+    let f = e.clone()
+    println(e == f)
+}

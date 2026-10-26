@@ -1,0 +1,24 @@
+// A module for the reflect_private tests: a type with a private field
+// that derives nothing.
+
+pub struct Plain {
+    a: i64
+    pub b: i64
+}
+
+impl Plain {
+    pub fn new() -> Plain {
+        Plain { a: 1, b: 2 }
+    }
+}
+
+#[derive(Eq)]
+pub struct EqOnly {
+    a: String
+}
+
+impl EqOnly {
+    pub fn new() -> EqOnly {
+        EqOnly { a: "x".to_string() }
+    }
+}

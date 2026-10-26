@@ -4,6 +4,7 @@
 import ast
 import body
 import diag
+import lex
 import mir
 import sema
 import types
@@ -19,6 +20,12 @@ type Rvalue = mir.Rvalue
 type Const = mir.Const
 type Callee = mir.Callee
 type Intrinsic = mir.Intrinsic
+type CVal = sema.CVal
+type Env = sema.Env
+type TypedConst = sema.TypedConst
+type Proj = mir.Proj
+type Term = mir.Term
+type VK = body.VK
 
 fn need_unsafe(fb: Fb, n: str, span: Span) -> Result((), Diag) {
     if fb.unsafe_depth == 0 {
@@ -77,6 +84,14 @@ impl sema.Sema {
 
     pub fn builtin_call(inout self, inout fb: Fb, n: str, args: Vec(ast.Expr), exp: Option(u32), span: Span) -> Result(Option(Val), Diag) {
         let env = fb.env.clone()
+        match self.reflect_const(n, args, env, exp, span)? {
+            Some(r) => return Ok(Some(body.val_op(Operand.Const(r.c.clone()), r.ty)))
+            None => {}
+        }
+        match self.reflect_call(&fb, n, args, span)? {
+            Some(v) => return Ok(Some(v))
+            None => {}
+        }
         if n == "size_of" || n == "align_of" {
             arity(args, 1, n, span)?
             let t = self.expr_ty(args[0], env)?
@@ -338,5 +353,307 @@ impl sema.Sema {
             return Ok(Some(self.emit_call(&fb, Callee.Intrinsic(Intrinsic.Fence), no_ops(), types.UNIT, span)?))
         }
         Ok(None)
+    }
+}
+
+// ---- reflection ----
+
+// The trait whose derived code a method of std.derive's `Derived` is.
+fn derived_trait(method: str) -> str {
+    if method == "clone" {
+        "Clone"
+    } else if method == "eq" {
+        "Eq"
+    } else if method == "compare" {
+        "Ord"
+    } else if method == "hash" {
+        "Hash"
+    } else if method == "show" {
+        "Show"
+    } else {
+        ""
+    }
+}
+
+fn reflect_int(v: i64, exp: Option(u32), t: types.Types) -> TypedConst {
+    var rt = types.I64
+    match exp {
+        Some(x) => if t.is_int(x) { rt = x }
+        None => {}
+    }
+    TypedConst { c: Const.Int(v as i128, rt), ty: rt }
+}
+
+impl sema.Sema {
+    // What a type is made of, as compile-time constants: `field_count(T)`,
+    // `field_name(T, i)`, `variant_count(T)`, `variant_name(T, v)`,
+    // `variant_field_count(T, v)`, `is_struct(T)`, `is_enum(T)`,
+    // `is_tuple(T)`. None if `n` is none of them.
+    pub fn reflect_const(inout self, n: str, args: Vec(ast.Expr), env: Env, exp: Option(u32), span: Span) -> Result(Option(TypedConst), Diag) {
+        let one = n == "field_count" || n == "variant_count" || n == "is_struct" || n == "is_enum" || n == "is_tuple"
+        let two = n == "field_name" || n == "variant_name" || n == "variant_field_count"
+        if !one && !two {
+            return Ok(None)
+        }
+        arity(args, if one { 1 } else { 2 }, n, span)?
+        let t = self.expr_ty(args[0], env)?
+        var is_struct = false
+        var fields = Vec(String).new()
+        var tuple_len: Option(i64) = None
+        var variants: Option(Vec(types.VariantDef)) = None
+        match self.types.adt_index(t) {
+            Some(a) => match self.types.adts[a as i64].body {
+                Struct(fs) => {
+                    for f in fs {
+                        fields.push(f.name.clone())
+                    }
+                    is_struct = true
+                }
+                Enum(vs) => variants = Some(vs.clone())
+                _ => {}
+            }
+            None => match self.types.kind(t) {
+                Tuple(ts) => tuple_len = Some(ts.len())
+                _ => {}
+            }
+        }
+        if n == "is_struct" {
+            return Ok(Some(TypedConst { c: Const.Bool(is_struct), ty: types.BOOL }))
+        }
+        if n == "is_enum" {
+            return Ok(Some(TypedConst { c: Const.Bool(variants.is_some()), ty: types.BOOL }))
+        }
+        if n == "is_tuple" {
+            return Ok(Some(TypedConst { c: Const.Bool(tuple_len.is_some()), ty: types.BOOL }))
+        }
+        let ts = self.types.show(t)
+        if n == "field_count" || n == "field_name" {
+            let count = if is_struct {
+                fields.len()
+            } else {
+                match tuple_len {
+                    Some(k) => k
+                    None => return Err(Diag.new(args[0].span, ("`" + n + "` takes a struct or tuple type, not `" + ts.as_str() + "`").as_str()))
+                }
+            }
+            if n == "field_count" {
+                return Ok(Some(reflect_int(count, exp, self.types)))
+            }
+            let i = self.reflect_index(args[1], env, count, "field", ts.as_str())?
+            var name = String.new()
+            if is_struct {
+                name = fields[i].clone()
+            } else {
+                i.show(&name)
+            }
+            self.view_ty(TyKind.Str)
+            return Ok(Some(TypedConst { c: Const.Str(name), ty: types.STR }))
+        }
+        let vs = match variants {
+            Some(vs) => vs
+            None => return Err(Diag.new(args[0].span, ("`" + n + "` takes an enum type, not `" + ts.as_str() + "`").as_str()))
+        }
+        if n == "variant_count" {
+            return Ok(Some(reflect_int(vs.len(), exp, self.types)))
+        }
+        let v = self.reflect_index(args[1], env, vs.len(), "variant", ts.as_str())?
+        if n == "variant_name" {
+            self.view_ty(TyKind.Str)
+            return Ok(Some(TypedConst { c: Const.Str(vs[v].name.clone()), ty: types.STR }))
+        }
+        Ok(Some(reflect_int(vs[v].fields.len(), exp, self.types)))
+    }
+
+    // A compile-time index below `count`.
+    fn reflect_index(inout self, e: ast.Expr, env: Env, count: i64, what: str, ty: str) -> Result(i64, Diag) {
+        let i = self.const_int(e, env)?
+        if i < 0 || i >= count as i128 {
+            var m = String.from("`")
+            m.push_str(ty)
+            m.push_str("` has no ")
+            m.push_str(what)
+            m.push(' ')
+            i.show(&m)
+            return Err(Diag.new(e.span, m.as_str()))
+        }
+        Ok(i as i64)
+    }
+
+    // Whether the code being lowered may name the private fields of the
+    // struct `a` through reflection: as `x.f` may, or as the derived code
+    // (std.derive's `Derived`) of a trait the struct derives.
+    fn reflect_private_ok(self, fb: Fb, a: u32) -> bool {
+        let decl = self.types.adts[a as i64].decl
+        if self.same_package(self.adts[decl as i64].module, fb.env.module) {
+            return true
+        }
+        let dt = match self.lang.derived {
+            Some(t) => t
+            None => return false
+        }
+        if fb.id as i64 >= self.inst_info.len() {
+            return false
+        }
+        let fid = match self.inst_info[fb.id as i64] {
+            Some(info) => info.decl
+            None => return false
+        }
+        match self.fns[fid as i64].owner {
+            Trait(t) => if t != dt { return false }
+            _ => return false
+        }
+        let tr = derived_trait(sema.at(self.fns[fid as i64].decl).name.as_str())
+        for d in self.adts[decl as i64].derives {
+            if d == tr {
+                return true
+            }
+        }
+        false
+    }
+
+    fn private_field_err(self, a: u32, name: str, span: Span) -> Diag {
+        Diag.new(span, ("the field `" + name + "` of `" + self.types.adts[a as i64].name.as_str() + "` is private").as_str())
+    }
+
+    // Reflection that lowers code: `field(x, i)`, `variant_of(x)`,
+    // `variant_field(x, v, j)`, `make(T, fn(i) { ... })`,
+    // `make_variant(T, v, fn(j) { ... })`. None if `n` is none of them.
+    fn reflect_call(inout self, inout fb: Fb, n: str, args: Vec(ast.Expr), span: Span) -> Result(Option(Val), Diag) {
+        let env = fb.env.clone()
+        if n == "field" {
+            // The place of a struct's or tuple's field `i`.
+            arity(args, 2, n, span)?
+            let bv = self.expr(&fb, args[0], None)?
+            let bv = self.auto_deref(&fb, bv, span)?
+            let t = bv.ty
+            let ts = self.types.show(t)
+            match self.types.adt_index(t) {
+                Some(a) => {
+                    let fs = match self.types.adts[a as i64].body {
+                        Struct(fs) => fs.clone()
+                        _ => return Err(Diag.new(args[0].span, ("`field` takes a struct or tuple, not `" + ts.as_str() + "`").as_str()))
+                    }
+                    let i = self.reflect_index(args[1], env, fs.len(), "field", ts.as_str())?
+                    if !fs[i].public && !self.reflect_private_ok(fb, a) {
+                        return Err(self.private_field_err(a, fs[i].name.as_str(), span))
+                    }
+                    let temp = bv.temp
+                    let (p, _) = self.as_place(&fb, bv, span)
+                    return Ok(Some(Val { vk: VK.Place(p.with(Proj.Field(i as u32))), ty: fs[i].ty, temp: temp }))
+                }
+                None => {}
+            }
+            let tys = match self.types.kind(t) {
+                Tuple(tys) => tys.clone()
+                _ => return Err(Diag.new(args[0].span, ("`field` takes a struct or tuple, not `" + ts.as_str() + "`").as_str()))
+            }
+            let i = self.reflect_index(args[1], env, tys.len(), "field", ts.as_str())?
+            let temp = bv.temp
+            let (p, _) = self.as_place(&fb, bv, span)
+            return Ok(Some(Val { vk: VK.Place(p.with(Proj.Field(i as u32))), ty: tys[i], temp: temp }))
+        }
+        if n == "variant_of" || n == "variant_field" {
+            arity(args, if n == "variant_of" { 1 } else { 3 }, n, span)?
+            let bv = self.expr(&fb, args[0], None)?
+            let bv = self.auto_deref(&fb, bv, span)?
+            let t = bv.ty
+            let vs = match self.types.variants(t) {
+                Some(vs) => vs.clone()
+                None => return Err(Diag.new(args[0].span, ("`" + n + "` takes an enum, not `" + self.types.show(t).as_str() + "`").as_str()))
+            }
+            let temp = bv.temp
+            let (p, _) = self.as_place(&fb, bv, span)
+            let d = fb.temp(types.I64, span)
+            fb.assign(Place.local(d), Rvalue.Discriminant(p.clone()), span)
+            if n == "variant_of" {
+                return Ok(Some(body.val_op(Operand.Copy(Place.local(d)), types.I64)))
+            }
+            // The payload of variant `v`, which the value must be.
+            let ts = self.types.show(t)
+            let v = self.reflect_index(args[1], env, vs.len(), "variant", ts.as_str())?
+            let what = "field in variant `" + vs[v].name.as_str() + "`, field"
+            let j = self.reflect_index(args[2], env, vs[v].fields.len(), what.as_str(), ts.as_str())?
+            let c = fb.temp(types.BOOL, span)
+            fb.assign(Place.local(c), Rvalue.Bin(lex.Op.Eq, Operand.Copy(Place.local(d)), Operand.Const(Const.Int(v as i128, types.I64))), span)
+            let next = fb.new_block()
+            fb.term(Term.Assert(Operand.Copy(Place.local(c)), String.from("`variant_field` of another variant"), next, span))
+            fb.switch_to(next)
+            let fp = p.with(Proj.Variant(v as u32)).with(Proj.Field(j as u32))
+            return Ok(Some(Val { vk: VK.Place(fp), ty: vs[v].fields[j], temp: temp }))
+        }
+        if n == "make" || n == "make_variant" {
+            // A value from its parts: the closure's body, inlined once per
+            // part with its parameter the part's index.
+            let variant = n == "make_variant"
+            arity(args, if variant { 3 } else { 2 }, n, span)?
+            let t = self.expr_ty(args[0], env)?
+            let ts = self.types.show(t)
+            let f = args[args.len() - 1]
+            let (pname, fbody) = match f.kind {
+                Lambda(ps, _, b) => {
+                    if ps.len() != 1 || ps[0].ty.is_some() {
+                        return Err(Diag.new(f.span, ("the last argument of `" + n + "` is a closure with one untyped parameter, the part's index: `fn(i) { ... }`").as_str()))
+                    }
+                    (ps[0].name.clone(), b.clone())
+                }
+                _ => return Err(Diag.new(f.span, ("the last argument of `" + n + "` is a closure written there: `fn(i) { ... }`").as_str()))
+            }
+            var parts = Vec(u32).new()
+            var agg = mir.Agg.Struct(t)
+            if variant {
+                let vs = match self.types.variants(t) {
+                    Some(vs) => vs.clone()
+                    None => return Err(Diag.new(args[0].span, ("`make_variant` takes an enum type, not `" + ts.as_str() + "`").as_str()))
+                }
+                let v = self.reflect_index(args[1], env, vs.len(), "variant", ts.as_str())?
+                parts = vs[v].fields.clone()
+                agg = mir.Agg.Variant(t, v as u32)
+            } else {
+                var ok = false
+                match self.types.adt_index(t) {
+                    Some(a) => match self.types.adts[a as i64].body {
+                        Struct(fs) => {
+                            for fd in fs {
+                                if !fd.public && !self.reflect_private_ok(fb, a) {
+                                    return Err(self.private_field_err(a, fd.name.as_str(), span))
+                                }
+                                parts.push(fd.ty)
+                            }
+                            ok = true
+                        }
+                        _ => {}
+                    }
+                    None => match self.types.kind(t) {
+                        Tuple(tys) => {
+                            parts = tys.clone()
+                            ok = true
+                        }
+                        _ => {}
+                    }
+                }
+                if !ok {
+                    return Err(Diag.new(args[0].span, ("`make` takes a struct or tuple type, not `" + ts.as_str() + "`").as_str()))
+                }
+            }
+            if fb.lookup(pname.as_str()).is_some() {
+                return Err(Diag.new(f.span, ("`" + pname.as_str() + "` is already a variable here; name the index differently").as_str()))
+            }
+            let mark = fb.env.names.len()
+            var ops = Vec(Operand).new()
+            for i, pt in parts {
+                fb.env.push(pname.as_str(), CVal.Int(i as i128))
+                let r = self.reflect_part(&fb, fbody, pt)
+                fb.env.names.truncate(mark)
+                ops.push(r?)
+            }
+            return Ok(Some(self.rvalue(&fb, Rvalue.Aggregate(agg, ops), t, span)))
+        }
+        Ok(None)
+    }
+
+    fn reflect_part(inout self, inout fb: Fb, b: ast.Block, t: u32) -> Result(Operand, Diag) {
+        let v = self.block(&fb, b, Some(t), true)?
+        let v = self.coerce(&fb, v, t, b.span)?
+        self.operand(&fb, v, b.span)
     }
 }

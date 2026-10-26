@@ -1,0 +1,160 @@
+// What `#[derive(...)]` gives a type, written with reflection (see
+// docs/language/reflection.md). The compiler loads this module when an item
+// derives a trait. A derived method's body is the method of the same name
+// here, with `Self` the deriving type. `Derived` is private and has no
+// impls, so nothing else reaches these bodies, and only here may they name
+// the deriving type's private fields.
+
+trait Derived {
+    // Each field cloned; for an enum, the payload of its variant.
+    fn clone(self) -> Self {
+        inline if is_enum(Self) {
+            let v = variant_of(self)
+            inline for k in 0..variant_count(Self) {
+                if v == k {
+                    return make_variant(Self, k, fn(j) { variant_field(self, k, j).clone() })
+                }
+            }
+            trap()
+        } else {
+            make(Self, fn(i) { field(self, i).clone() })
+        }
+    }
+
+    // Equal variants and equal fields.
+    fn eq(self, other: Self) -> bool {
+        inline if is_enum(Self) {
+            let v = variant_of(self)
+            if v != variant_of(other) {
+                return false
+            }
+            inline for k in 0..variant_count(Self) {
+                if v == k {
+                    inline for j in 0..variant_field_count(Self, k) {
+                        if variant_field(self, k, j) != variant_field(other, k, j) {
+                            return false
+                        }
+                    }
+                }
+            }
+            true
+        } else {
+            inline for i in 0..field_count(Self) {
+                if field(self, i) != field(other, i) {
+                    return false
+                }
+            }
+            true
+        }
+    }
+
+    // Variants in the order they are declared, then fields in order.
+    fn compare(self, other: Self) -> Ordering {
+        inline if is_enum(Self) {
+            let v = variant_of(self)
+            let w = variant_of(other)
+            if v != w {
+                return if v < w { Ordering.Less } else { Ordering.Greater }
+            }
+            inline for k in 0..variant_count(Self) {
+                if v == k {
+                    inline for j in 0..variant_field_count(Self, k) {
+                        match variant_field(self, k, j).compare(variant_field(other, k, j)) {
+                            Equal => {}
+                            c => return c
+                        }
+                    }
+                }
+            }
+            Ordering.Equal
+        } else {
+            inline for i in 0..field_count(Self) {
+                match field(self, i).compare(field(other, i)) {
+                    Equal => {}
+                    c => return c
+                }
+            }
+            Ordering.Equal
+        }
+    }
+
+    // The fields' hashes (and the variant's index), mixed in order.
+    fn hash(self) -> u64 {
+        var h: u64 = 0x9e3779b97f4a7c15
+        inline if is_enum(Self) {
+            let v = variant_of(self)
+            h = mix(h ^ v as u64)
+            inline for k in 0..variant_count(Self) {
+                if v == k {
+                    inline for j in 0..variant_field_count(Self, k) {
+                        h = mix(h ^ variant_field(self, k, j).hash())
+                    }
+                }
+            }
+        } else {
+            inline for i in 0..field_count(Self) {
+                h = mix(h ^ field(self, i).hash())
+            }
+        }
+        h
+    }
+
+    // `Point { x: 1, y: 2 }`, `Some(5)`, `None`.
+    fn show(self, inout out: String) {
+        inline if is_enum(Self) {
+            let v = variant_of(self)
+            inline for k in 0..variant_count(Self) {
+                if v == k {
+                    out.push_str(variant_name(Self, k))
+                    inline if variant_field_count(Self, k) > 0 {
+                        out.push('(')
+                        inline for j in 0..variant_field_count(Self, k) {
+                            inline if j > 0 {
+                                out.push_str(", ")
+                            }
+                            variant_field(self, k, j).show(&out)
+                        }
+                        out.push(')')
+                    }
+                }
+            }
+        } else {
+            out.push_str(short_name(type_name(Self)))
+            inline if field_count(Self) > 0 {
+                out.push_str(" { ")
+                inline for i in 0..field_count(Self) {
+                    inline if i > 0 {
+                        out.push_str(", ")
+                    }
+                    out.push_str(field_name(Self, i))
+                    out.push_str(": ")
+                    field(self, i).show(&out)
+                }
+                out.push_str(" }")
+            }
+        }
+    }
+}
+
+// A type's name without its module: `Tag` for `shapes.Tag`, but
+// `Pair(shapes.Tag)`.
+fn short_name(s: str) -> str {
+    var start = 0
+    for i in 0..s.len {
+        if s[i] == '(' {
+            break
+        }
+        if s[i] == '.' {
+            start = i + 1
+        }
+    }
+    s[start..]
+}
+
+// The prelude's `mix64`, which is private to it.
+fn mix(v: u64) -> u64 {
+    var x = v
+    x = (x ^ (x >> 30)) *% 0xbf58476d1ce4e5b9
+    x = (x ^ (x >> 27)) *% 0x94d049bb133111eb
+    x ^ (x >> 31)
+}
