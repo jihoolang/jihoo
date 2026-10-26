@@ -22,7 +22,8 @@ See [Reflection and derive](../language/reflection.md).
 | builtin | |
 |---------|---|
 | `is_struct(T)`, `is_enum(T)`, `is_tuple(T)` | compile-time `bool`s |
-| `field_count(T)`, `field_name(T, i)` | a struct's or tuple's fields (compile-time constants) |
+| `field_count(T)`, `field_name(T, i)`, `field_index(T, "name")` | a struct's or tuple's fields (compile-time constants) |
+| `field_type(T, i)`, `variant_field_type(T, v, j)` | a part's type, written where a type goes |
 | `variant_count(T)`, `variant_name(T, v)`, `variant_field_count(T, v)` | an enum's variants (compile-time constants) |
 | `field(x, i)` | field `i` of `x`, as a place |
 | `variant_of(x)` | the index of `x`'s variant, as `i64` |

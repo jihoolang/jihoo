@@ -1,0 +1,11 @@
+// A handle used after its value was removed stops the program.
+// exit: 134
+import std.arena
+
+fn main() {
+    var p = arena.Pool(i64).new()
+    let h = p.insert(1)
+    p.remove(h)
+    p.insert(2)
+    println(p[h])
+}

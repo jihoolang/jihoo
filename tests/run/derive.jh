@@ -30,6 +30,15 @@ struct Doc {
 #[derive(Show)]
 struct Unit {}
 
+#[derive(Default, Show)]
+struct Config {
+    name: String
+    retries: i64
+    verbose: bool
+    tags: Vec(String)
+    limit: Option(i64)
+}
+
 fn main() {
     let p = Point { x: 1, y: 2 }
     let q = p.clone()
@@ -85,6 +94,11 @@ fn main() {
     //> Dot(Point { x: 1, y: 2 })
     println(Unit {})
     //> Unit
+    let cfg = Config.default()
+    println(cfg.name.len() + cfg.retries + cfg.tags.len())
+    //> 0
+    println(cfg.verbose || cfg.limit.is_some())
+    //> false
 
     // Private fields of another module's type.
     let t = shapes.Tag.new(7, "seven")

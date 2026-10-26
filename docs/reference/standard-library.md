@@ -74,6 +74,7 @@ patterns see through it.
 |--------|---|
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
 | `std.thread` | `join(a, b)`, `each(lo, hi, f)`, `map(xs, f)`, `each_mut(&v, f)`, `cpu_count()`: work on several threads that borrows from the caller ([threads](../language/threads.md)) |
+| `std.arena` | `Arena(T)` and `Id(T)`, `Pool(T)` and `Handle(T)`, `Soa(T)`: data that refers to data by index ([data by index](../language/data-oriented.md)) |
 | `std.sync` | `Atomic(T)` (`new`, `load`, `store`, `add`, `sub`, `swap`, `compare_swap`, `into_inner`) and `Mutex(T)` (`new`, `lock(f)`, `into_inner`), shared by threads ([threads](../language/threads.md#sharing-changes-atomic-and-mutex)) |
 | `std.derive` | the bodies of `#[derive(...)]`d methods, loaded by the compiler when an item derives a trait ([derive](../language/reflection.md#derive)) |
 | `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at` |

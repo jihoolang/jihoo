@@ -1,0 +1,10 @@
+// error: `Default` is derived for structs only
+#[derive(Default)]
+enum E {
+    A
+    B
+}
+
+fn main() {
+    let e = E.default()
+}

@@ -379,6 +379,8 @@ fn derived_trait(method: str) -> str {
         "Hash"
     } else if method == "show" {
         "Show"
+    } else if method == "default" {
+        "Default"
     } else {
         ""
     }
@@ -404,6 +406,29 @@ impl sema.Sema {
             return Ok(Some(TypedConst { c: Const.Bool(self.captures_mut(args[0], env)?), ty: types.BOOL }))
         }
         let one = n == "field_count" || n == "variant_count" || n == "is_struct" || n == "is_enum" || n == "is_tuple"
+        if n == "field_index" {
+            // The index of the field named by a string literal.
+            arity(args, 2, n, span)?
+            let t = self.expr_ty(args[0], env)?
+            let want = match args[1].kind {
+                Str(s) => s.clone()
+                _ => return Err(Diag.new(args[1].span, "`field_index` takes the field's name as a string literal"))
+            }
+            match self.types.adt_index(t) {
+                Some(a) => match self.types.adts[a as i64].body {
+                    Struct(fs) => {
+                        for i, f in fs {
+                            if f.name == want {
+                                return Ok(Some(reflect_int(i, exp, self.types)))
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                None => {}
+            }
+            return Err(Diag.new(args[1].span, ("`" + self.types.show(t).as_str() + "` has no field `" + want.as_str() + "`").as_str()))
+        }
         let two = n == "field_name" || n == "variant_name" || n == "variant_field_count"
         if !one && !two {
             return Ok(None)
@@ -548,6 +573,50 @@ impl sema.Sema {
             }
             _ => false
         }
+    }
+
+    // `field_type(T, i)`: the type of a struct's or tuple's field `i`;
+    // `variant_field_type(T, v, j)`: of value `j` of an enum's variant `v`.
+    pub fn reflect_ty(inout self, n: str, args: Vec(ast.Expr), env: Env, span: Span) -> Result(u32, Diag) {
+        let variant = n == "variant_field_type"
+        arity(args, if variant { 3 } else { 2 }, n, span)?
+        let t = self.expr_ty(args[0], env)?
+        let ts = self.types.show(t)
+        if variant {
+            let vs = match self.types.variants(t) {
+                Some(vs) => vs.clone()
+                None => return Err(Diag.new(args[0].span, ("`variant_field_type` takes an enum type, not `" + ts.as_str() + "`").as_str()))
+            }
+            let v = self.reflect_index(args[1], env, vs.len(), "variant", ts.as_str())?
+            let what = "field in variant `" + vs[v].name.as_str() + "`, field"
+            let j = self.reflect_index(args[2], env, vs[v].fields.len(), what.as_str(), ts.as_str())?
+            return Ok(vs[v].fields[j])
+        }
+        var parts = Vec(u32).new()
+        var ok = false
+        match self.types.adt_index(t) {
+            Some(a) => match self.types.adts[a as i64].body {
+                Struct(fs) => {
+                    for f in fs {
+                        parts.push(f.ty)
+                    }
+                    ok = true
+                }
+                _ => {}
+            }
+            None => match self.types.kind(t) {
+                Tuple(tys) => {
+                    parts = tys.clone()
+                    ok = true
+                }
+                _ => {}
+            }
+        }
+        if !ok {
+            return Err(Diag.new(args[0].span, ("`field_type` takes a struct or tuple type, not `" + ts.as_str() + "`").as_str()))
+        }
+        let i = self.reflect_index(args[1], env, parts.len(), "field", ts.as_str())?
+        Ok(parts[i])
     }
 
     // A compile-time index below `count`.

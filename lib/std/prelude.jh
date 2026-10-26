@@ -138,6 +138,12 @@ impl Default for bool {
     }
 }
 
+impl(T: type) Default for Option(T) {
+    fn default() -> Option(T) {
+        None
+    }
+}
+
 impl Eq for str {
     fn eq(self, other: str) -> bool {
         if self.len != other.len {

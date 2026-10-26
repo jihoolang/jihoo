@@ -64,6 +64,11 @@ fn points(s: Shape) -> i64 {
 
 const FIELDS = field_count(Point)
 
+// A field's type, named at compile time.
+fn first_field(comptime T: type, v: T) -> field_type(T, 0) {
+    field(v, 0)
+}
+
 fn main() {
     inline for i in 0..3 {
         println(i * 10)
@@ -113,6 +118,14 @@ fn main() {
     //> 1
     println(FIELDS)
     //> 2
+    println(first_field((u8, String), (9, "s".to_string())))
+    //> 9
+    let yi = field_index(Point, "y")
+    println(yi)
+    //> 1
+    let z: field_type(Point, field_index(Point, "y")) = 3
+    println(z + size_of(variant_field_type(Shape, 1, 1)))
+    //> 19
     // The branch not taken is not checked.
     inline if size_of(i64) == 8 {
         println("64-bit")
