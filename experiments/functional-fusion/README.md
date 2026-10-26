@@ -103,6 +103,52 @@ drop order while giving LLVM one loop to optimize. The final iterator code
 is 207 bytes; it is not byte-identical to the handwritten loop. Functional
 tests check side-effect order, short-circuiting, and destruction separately.
 
+## Repeated measurements
+
+The original 1.009 iterator/C ratio was one run, not a persistent penalty.
+After committing the feature as `cdaed59`, we repeated the original protocol
+ten times and then measured ten longer sessions on guest logical CPU 2:
+
+```sh
+nix develop --command python3 experiments/functional-fusion/repeat.py --cpu 2
+```
+
+Both phases use 1,000,000 input elements. The original protocol uses seven
+samples of 128 kernel calls per implementation per session. The pinned
+phase uses fifteen paired samples of 512 calls per session, with AB/BA
+order alternated and warm-ups excluded. Measurements run sequentially;
+all results and checksums are checked. The ten rebuilt executables had the
+same SHA-256. No compiler or library code changed between measurements.
+
+| Protocol | Sessions with jihoo faster | Sessions with C faster | Median session iterator/C ratio | Session bootstrap 95% interval |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 7 | 3 | 0.98048 | 0.94937–1.00321 |
+| CPU 2 pinned, longer samples | 5 | 5 | 0.99761 | 0.98569–1.02962 |
+
+Ratios below 1 mean a shorter jihoo runtime. Each session ratio divides
+the median iterator time by the median C time. In the pinned phase, jihoo
+was faster in 76 of 150 individual pairs and C in 74. The pinned median
+session ratio corresponds to a 0.24% shorter jihoo runtime, while the
+bootstrap interval spans both directions, including a 1% difference.
+
+The `functional` and `handwritten` functions have identical instruction
+bytes and serve as a control. Their measured session ratios also varied:
+0.897–1.044 without affinity and 0.928–1.034 when pinned. These functions
+occupy different addresses, so this control includes placement effects as
+well as timing variation. CPU affinity applies to a WSL2 guest CPU; it
+does not isolate the host CPU or fix its frequency.
+
+The intervals resample whole session ratios 25,000 times, taking the
+median each time, rather than treating all correlated samples as independent.
+They describe this experiment, not every workload or host. The observations
+do not support a consistently slower jihoo iterator in this environment;
+they also do not establish exact equality or exclude every small systematic
+difference.
+
+[Raw measurements and summaries](repeat-results.json),
+[session table](repeat-results.csv), and [comparison chart](repeat-results.svg)
+are retained alongside the reproduction script.
+
 ## What this establishes
 
 For the initial push pipeline, ordinary closure conversion and LLVM optimization
