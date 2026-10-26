@@ -1,9 +1,0 @@
-// `.clone()` on a `ref T` value copies the borrow, which still borrows `v`
-// error: `v` is changed here while it is borrowed
-fn main() {
-    var v = Vec(String).new()
-    v.push("a".to_string())
-    let c = v.first().unwrap().clone()
-    v.push("b".to_string())
-    println(c)
-}

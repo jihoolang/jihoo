@@ -600,6 +600,18 @@ impl sema.Sema {
     // ---- blocks and statements ----
 
     // A block; `want` says whether its value is used.
+    // Whether local `l` belongs to scope `from` or one inside it.
+    fn local_in_scopes(self, fb: Fb, l: u32, from: i64) -> bool {
+        for i in from..fb.scopes.len() {
+            for x in fb.scopes[i].locals {
+                if x == l {
+                    return true
+                }
+            }
+        }
+        false
+    }
+
     pub fn block(inout self, inout fb: Fb, b: ast.Block, exp: Option(u32), want: bool) -> Result(Val, Diag) {
         let keep_place = fb.keep_place
         fb.keep_place = false
@@ -645,12 +657,23 @@ impl sema.Sema {
                     let root_kind = fb.body.locals[p.local as i64].kind
                     let rt = fb.body.locals[p.local as i64].ty
                     let through = p.proj.len() > 0 && p.proj[0] == Proj.Deref
-                    if root_kind == LocalKind.Temp && through {
+                    // A temporary, or a variable of the block (`let p =
+                    // ...; *p`); the pointer itself is what must live on.
+                    let local_var = root_kind == LocalKind.Var && self.local_in_scopes(fb, p.local, fb.scopes.len() - 2)
+                    if local_var && !through {
+                        let name = match fb.body.locals[p.local as i64].name {
+                            Some(n) => "`" + n.as_str() + "`"
+                            None => String.from("a local value")
+                        }
+                        return Err(err(t.span, ("this would return a borrow of " + name.as_str() + ", which ends with the function; a `ref` or `inout` result must be a part of the first parameter, or what a pointer points to").as_str()))
+                    }
+                    if (root_kind == LocalKind.Temp || local_var) && through {
                         let n = fb.scopes.len()
                         let tmp = fb.new_local(rt, None, true, LocalKind.Temp, t.span)
                         fb.push(Stmt.StorageLive(tmp))
                         fb.scopes[n - 3].locals.push(tmp)
-                        fb.assign(Place.local(tmp), Rvalue.Use(copy_of(p.local)), t.span)
+                        let o = if self.types.has_refmut(rt) { Operand.Move(Place.local(p.local)) } else { copy_of(p.local) }
+                        fb.assign(Place.local(tmp), Rvalue.Use(o), t.span)
                         result = Val { vk: VK.Place(Place { local: tmp, proj: p.proj.clone() }), ty: v.ty, temp: false }
                     } else {
                         result = v
@@ -4026,9 +4049,20 @@ impl sema.Sema {
                 Dyn(tr) => return self.dyn_method_call(&fb, recv, tr, name, args, span)
                 _ => {}
             }
+            // A borrow held as a value (`map.get(k).unwrap()`): the method
+            // of what it points to, which takes it borrowed anyway, before
+            // the borrow's own (`clone` would copy the borrow).
+            if self.types.is_ref(recv.ty) && self.find_method(self.types.pointee(recv.ty).unwrap(), name)?.is_some() {
+                recv = self.auto_deref(&fb, recv, span)?
+                continue
+            }
             match self.find_method(recv.ty, name)? {
                 Some(h) => return self.call_decl(&fb, h.imp, h.args.clone(), Some(recv), args, span, exp)
                 None => {}
+            }
+            if self.types.is_ref(recv.ty) {
+                recv = self.auto_deref(&fb, recv, span)?
+                continue
             }
             if name != "deref" && self.find_method(recv.ty, "deref")?.is_some() {
                 recv = self.method_call_val(&fb, recv, "deref", Vec(Val).new(), span, None)?

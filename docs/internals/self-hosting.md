@@ -205,11 +205,11 @@ far, each fixed in the Rust compiler with a test:
   [Coming from Rust](../language/from-rust.md): a `match` arm cannot hand
   out a borrowed part as its value, and `None` alone in an `if` arm needs
   the type written.
-- Also left as it is and documented there: a method called on a `ref T`
-  value (`self.types.variants(t).unwrap()`) is looked up on the borrow
-  first, so `.clone()` copies the borrow and the result still borrows
-  `self`; named first, the value clones the `T`
-  (`tests/fail/clone_of_ref_value.jh`). Porting the rest of sema found no
+- A method called on a `ref T` value (`self.types.variants(t).unwrap()`)
+  was looked up on the borrow first, so `.clone()` copied the borrow and
+  the result still borrowed `self`. It was left that way while porting;
+  since then the `T`'s method comes first (`tests/run/ref_values.jh`).
+  Porting the rest of sema found no
   compiler bugs; it used `|` patterns that bind names (not supported) and
   `==` on a payload-free enum (needs `Eq`), both documented already.
 - The Rust code generator wrote its declarations of external functions in

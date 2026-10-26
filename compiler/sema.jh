@@ -2150,6 +2150,10 @@ impl Sema {
                 }
                 None => break
             }
+            // Instances made for the program itself were used nowhere.
+            if at.file == 0 && at.lo == 0 && at.hi == 0 {
+                break
+            }
             let msg = "in the instance `" + self.out[cur as i64].name.as_str() + "`, used here"
             d = d.note(Some(at), msg.as_str())
             match from {

@@ -104,13 +104,12 @@ compiler copies its text instead. Write `a.as_str() + "y"` to keep `a`.
 **A value with a `Drop` impl cannot be taken apart.** `match f { F { fd }
 => ... }` is an error when `F` has `Drop`; read its fields instead.
 
-**A method called on a `ref T` value is looked up on the borrow first.**
-A call returning `ref T` (`v.first().unwrap()`, `map.get(k).unwrap()`)
-gives a value of type `ref T`, and a borrow is plain, so `.clone()` on
-it copies the borrow, not the `T`: the result still borrows `v`. Name the
-value first (`let r = v.first().unwrap()`), and `r.clone()` clones the
-`T`, as a named `ref T` stands for what it points to. Rust's
-auto-deref would pick `T::clone`.
+**A method called on a `ref T` value is that of the `T`.** A call
+returning `ref T` (`v.first().unwrap()`, `map.get(k).unwrap()`) gives a
+borrow as a value; `.clone()`, `.len()` or `.to_string()` on it call the
+`T`'s methods, as Rust's auto-deref does, so `.clone()` gives a `T` that
+no longer borrows `v`. Only a method the `T` lacks is looked up on the
+borrow itself.
 
 **Views are not stored in ordinary data.** `str`, `[T]`, closures, `ref T`
 are views. A struct holding one becomes a view itself: it can be a local
