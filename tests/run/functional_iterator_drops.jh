@@ -1,0 +1,48 @@
+import std.iter
+
+static DROPS: i64 = 0
+struct Token { n: i64 }
+impl Drop for Token {
+    fn drop(inout self) { unsafe { DROPS += 1 } }
+}
+
+fn tokens(n: i64) -> Vec(Token) {
+    var out = Vec(Token).new()
+    for i in 0..n { out.push(Token { n: i }) }
+    out
+}
+
+fn main() {
+    // Rejected, consumed and unvisited owned elements all drop exactly once.
+    println(tokens(8).into_iter().filter(fn(x) { x.n % 2 == 0 }).take(2).count())
+    //> 2
+    println(unsafe { DROPS })
+    //> 8
+    println(tokens(5).into_iter().map(fn(x) { x.n }).take(1).fold(0, fn(a, x) { a + x }))
+    //> 0
+    println(unsafe { DROPS })
+    //> 13
+    println(tokens(5).into_iter().zip(tokens(2).into_iter()).count())
+    //> 2
+    println(unsafe { DROPS })
+    //> 20
+    println(tokens(4).into_iter().any(fn(x) { x.n == 0 }))
+    //> true
+    println(unsafe { DROPS })
+    //> 24
+    println(tokens(4).into_iter().all(fn(x) { false }))
+    //> false
+    println(unsafe { DROPS })
+    //> 28
+    tokens(3).into_iter().for_each(fn(x) {})
+    println(unsafe { DROPS })
+    //> 31
+    // A mapper may itself produce owned elements that the consumer drops.
+    tokens(3).into_iter().map(fn(x) { Token { n: x.n + 10 } }).take(1).count()
+    println(unsafe { DROPS })
+    //> 35
+    println(tokens(6).into_iter().filter(fn(x) { x.n % 2 == 0 }).fold(0, fn(a, x) { a + x.n }))
+    //> 6
+    println(unsafe { DROPS })
+    //> 41
+}

@@ -31,6 +31,15 @@ A growable array. `Vec(T).new()`, `with_capacity(n)`, `Vec.filled(n, x)`;
 owns each one (`into_iter` takes the `Vec`; the values a loop that stops
 early does not reach are dropped with it).
 
+## Iterators
+
+`import std.iter` enables `IteratorExt` for every `Iterator`: `map`,
+`filter`, `take`, `zip`, `fold`, `for_each`, `count`, `any` and `all`.
+Slices gain `.iter()`, and `iter.range(start, end)` supplies a half-open
+`i64` range. Adapters are lazy and own their input iterator; callbacks
+borrow their captures. See [Iterator pipelines](../language/iterators.md)
+for execution order, ownership and compile-time use.
+
 ## `String` and `str`
 
 `str` is a borrowed view of UTF-8 bytes; `String` owns its bytes. A string
@@ -63,6 +72,7 @@ patterns see through it.
 
 | module | |
 |--------|---|
+| `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
 | `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at` |
 | `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)` |
 | `std.env` | `args() -> Vec(str)`, `get(name) -> Option(str)`, `environ()` |

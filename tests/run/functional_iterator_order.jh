@@ -1,0 +1,33 @@
+import std.iter
+
+// Separate callback environments may all have explicit global effects.
+// The fused fold must retain the same map/filter/consumer order as next().
+static TRACE: i64 = 0
+fn record(digit: i64) { unsafe { TRACE = TRACE * 10 + digit } }
+
+fn main() {
+    println(iter.range(0, 4)
+        .map(fn(x) { record(x + 1); x })
+        .filter(fn(x) { record(5); x % 2 == 0 })
+        .fold(0, fn(acc, x) { record(6); acc + x }))
+    //> 2
+    println(unsafe { TRACE })
+    //> 1562535645
+    unsafe { TRACE = 0 }
+    println(iter.range(0, 4)
+        .map(fn(x) { record(x + 1); x })
+        .filter(fn(x) { record(5); x % 2 == 0 })
+        .take(1)
+        .fold(0, fn(acc, x) { record(6); acc + x }))
+    //> 0
+    println(unsafe { TRACE })
+    //> 156
+    unsafe { TRACE = 0 }
+    println(iter.range(0, 4)
+        .map(fn(x) { record(x + 1); x })
+        .filter(fn(x) { record(5); false })
+        .fold(7, fn(acc, x) { record(6); acc + x }))
+    //> 7
+    println(unsafe { TRACE })
+    //> 15253545
+}

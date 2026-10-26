@@ -47,6 +47,11 @@ Compile-time arguments can call ordinary functions: `fill(u8, factorial(3),
 0)`. The compiler interprets the calculation before creating the instance;
 see [Compile-time evaluation](comptime.md).
 
+For a callback such as `f: fn(T) -> U`, if `T` is already known, a closure's
+input type can be inferred even while `U` is unknown. The compiler checks
+the body and uses its result to infer `U`. This allows
+[iterator pipelines](iterators.md) such as `.map(fn(x) { x.to_string() })`.
+
 ## Traits
 
 A trait is a set of functions a type can provide, with optional default

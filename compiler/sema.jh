@@ -301,13 +301,13 @@ impl Clone for ImplHit {
     }
 }
 
-// A compile-time closure parameter of an instance being lowered: the
-// instance, the name, its local, the closure's function.
+// A closure whose function is known while lowering. Its environment stays
+// in the ordinary MIR place and participates in borrow checking.
 pub struct ComptimeClosure {
     pub id: u32
-    pub name: String
-    pub local: u32
+    pub place: mir.Place
     pub lambda: u32
+    pub specialized: bool
 }
 
 pub struct Sema {

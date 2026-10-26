@@ -506,7 +506,8 @@ impl sema.Sema {
                 match env.get(p.name.as_str()) {
                     Some(Lambda(lf, _)) => {
                         let l = fb.new_local(sig.params[pi], Some(p.name.clone()), false, LocalKind.Arg, p.span)
-                        lambdas.push(sema.ComptimeClosure { id: id, name: p.name.clone(), local: l, lambda: lf })
+                        fb.bind_var(p.name.as_str(), Var { local: l, kind: VarKind.Owned })
+                        lambdas.push(sema.ComptimeClosure { id: id, place: Place.local(l), lambda: lf, specialized: true })
                         pi += 1
                     }
                     _ => {}
@@ -534,13 +535,7 @@ impl sema.Sema {
             Some(body) => self.lower_body(&fb, body, ret_val_ty)?
             None => {}
         }
-        var kept = Vec(sema.ComptimeClosure).new()
-        for c in mem.replace(&self.comptime_closures, Vec(sema.ComptimeClosure).new()).into_iter() {
-            if c.id != id {
-                kept.push(c)
-            }
-        }
-        self.comptime_closures = kept
+        self.clear_closures(id)
         match fb {
             Fb { body, .. } => self.out[id as i64].body = Some(body)
         }
@@ -869,6 +864,10 @@ impl sema.Sema {
     // `let x = v`: a borrow of a place that is not plain, else an owned
     // value.
     pub fn bind_name(inout self, inout fb: Fb, name: str, sink v: Val, mutable: bool, span: Span) -> Result(u32, Diag) {
+        let known = match v.vk {
+            Place(p) => self.known_closure(fb, p)
+            _ => None
+        }
         match self.types.kind(v.ty) {
             Type => return Err(err(span, "types exist only while compiling; use `comptime` or a constant"))
             _ => {}
@@ -895,6 +894,12 @@ impl sema.Sema {
         let o = self.operand(&fb, v, span)?
         let l = fb.declare(name, t, mutable, VarKind.Owned, span)
         fb.assign(Place.local(l), Rvalue.Use(o), span)
+        if !mutable {
+            match known {
+                Some((lf, specialized)) => self.comptime_closures.push(sema.ComptimeClosure { id: fb.id, place: Place.local(l), lambda: lf, specialized: specialized })
+                None => {}
+            }
+        }
         Ok(l)
     }
 
@@ -1712,7 +1717,7 @@ impl sema.Sema {
             StructLit(path, fields) => self.struct_lit(&fb, path.deref(), fields, exp, span)
             Match(scrut, arms) => self.match_expr(&fb, scrut.deref(), arms, exp, span)
             For(index, pat, it, body) => self.for_expr(&fb, index, pat, it.deref(), body, span)
-            Lambda(params, ret, body) => self.lambda(&fb, params, ret, body, exp, span)
+            Lambda(params, ret, body) => self.lambda(&fb, params, ret, body, exp, None, span)
         }
     }
 
@@ -3314,7 +3319,22 @@ impl sema.Sema {
 
     // ---- closures ----
 
-    fn lambda(inout self, inout fb: Fb, params: Vec(ast.LambdaParam), ret: Option(ast.Ty), body: ast.Block, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn known_closure(self, fb: Fb, p: Place) -> Option((u32, bool)) {
+        for c in self.comptime_closures {
+            if c.id == fb.id && c.place == p { return Some((c.lambda, c.specialized)) }
+        }
+        None
+    }
+
+    fn clear_closures(inout self, id: u32) {
+        var kept = Vec(sema.ComptimeClosure).new()
+        for c in mem.replace(&self.comptime_closures, Vec(sema.ComptimeClosure).new()).into_iter() {
+            if c.id != id { kept.push(c) }
+        }
+        self.comptime_closures = kept
+    }
+
+    fn lambda(inout self, inout fb: Fb, params: Vec(ast.LambdaParam), ret: Option(ast.Ty), body: ast.Block, exp: Option(u32), expected_params: Option(Vec(u32)), span: Span) -> Result(Val, Diag) {
         let env = fb.env.clone()
         var exp_sig: Option(types.Sig) = None
         var want_ptr = false
@@ -3340,6 +3360,14 @@ impl sema.Sema {
             }
             None => {}
         }
+        match expected_params {
+            Some(ps) => {
+                if ps.len() != params.len() {
+                    return Err(err(span, "the closure has the wrong number of parameters"))
+                }
+            }
+            None => {}
+        }
         // Parameter types: written, or the expected ones (already lowered:
         // borrows for non-plain values).
         var ptys = Vec(u32).new()
@@ -3351,7 +3379,10 @@ impl sema.Sema {
                 }
                 None => match exp_sig.clone() {
                     Some(sg) => ptys.push(sg.params[i])
-                    None => return Err(err(p.span, "the type of this closure parameter must be written"))
+                    None => match expected_params {
+                        Some(ps) => ptys.push(ps[i])
+                        None => return Err(err(p.span, "the type of this closure parameter must be written"))
+                    }
                 }
             }
         }
@@ -3379,7 +3410,8 @@ impl sema.Sema {
                     let p = self.var_place(fb, v)
                     let t = self.place_ty(fb, p)
                     let m = self.place_mutable(fb, p)
-                    caps.push(Capture { name: n.clone(), place: p, ty: t, mutable: m })
+                    let known = self.known_closure(fb, p)
+                    caps.push(Capture { name: n.clone(), place: p, ty: t, mutable: m, closure: known })
                 }
                 None => {}
             }
@@ -3446,6 +3478,7 @@ impl sema.Sema {
             let probe = self.block(&lfb, body, None, true)?
             rt = if probe.ty == types.NEVER { types.UNIT } else { probe.ty }
             // Lower again with the type known.
+            self.clear_closures(id)
             lfb = self.lambda_fb(fb, id, env, rt, want_ptr, env_ref, caps, params, ptys, lparams.len(), span)
             self.out[id as i64].sig.ret = rt
         }
@@ -3454,6 +3487,7 @@ impl sema.Sema {
         match lfb {
             Fb { body, .. } => self.out[id as i64].body = Some(body)
         }
+        self.clear_closures(id)
         let sig = types.Sig { params: ptys, ret: rt }
         self.last_lambda = Some((id, env_ref))
         if want_ptr {
@@ -3475,19 +3509,32 @@ impl sema.Sema {
         var cops = Vec(Operand).new()
         cops.push(Operand.Const(Const.Fn(id)))
         cops.push(copy_of(er))
-        Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Closure(ct), cops), ct, span))
+        let result = self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Closure(ct), cops), ct, span)
+        match result.vk {
+            Place(p) => self.comptime_closures.push(sema.ComptimeClosure { id: fb.id, place: p.clone(), lambda: id, specialized: false })
+            _ => {}
+        }
+        Ok(result)
     }
 
     // The builder of a closure's body: its environment's captures and its
     // parameters bound.
-    fn lambda_fb(self, fb: Fb, id: u32, env: Env, ret: u32, want_ptr: bool, env_ref: u32, caps: Vec(Capture), params: Vec(ast.LambdaParam), ptys: Vec(u32), nparams: i64, span: Span) -> Fb {
+    fn lambda_fb(inout self, fb: Fb, id: u32, env: Env, ret: u32, want_ptr: bool, env_ref: u32, caps: Vec(Capture), params: Vec(ast.LambdaParam), ptys: Vec(u32), nparams: i64, span: Span) -> Fb {
         var lfb = Fb.new(id, env.clone(), ret, ast.RetMode.Value, span)
         lfb.unsafe_depth = fb.unsafe_depth
         if !want_ptr {
             let el = lfb.new_local(env_ref, Some(String.from("env")), false, LocalKind.Arg, span)
             lfb.env_local = Some(el)
             for i, c in caps {
-                lfb.bind_var(c.name.as_str(), Var { local: el, kind: VarKind.Capture(i as u32) })
+                let v = Var { local: el, kind: VarKind.Capture(i as u32) }
+                lfb.bind_var(c.name.as_str(), v)
+                match c.closure {
+                    Some((lf, specialized)) => {
+                        let p = self.var_place(lfb, v)
+                        self.comptime_closures.push(sema.ComptimeClosure { id: id, place: p, lambda: lf, specialized: specialized })
+                    }
+                    None => {}
+                }
             }
         }
         for i, p in params {
@@ -3502,6 +3549,39 @@ impl sema.Sema {
 
     // ---- calls ----
 
+    // A generic callback can have known inputs but an unknown result type.
+    // Use those inputs to check the lambda, then infer the result from its
+    // body and feed its full signature back into ordinary generic matching.
+    fn callback_params(inout self, ty: ast.Ty, env: Env) -> Option(Vec(u32)) {
+        match ty.kind {
+            Fn(ps, _) => {
+                var out = Vec(u32).new()
+                for p in ps {
+                    let t = self.resolve_ty(p.ty, env).ok()?
+                    out.push(self.param_local_ty(p.mode, t).0)
+                }
+                Some(out)
+            }
+            _ => None
+        }
+    }
+
+    fn callback_arg(inout self, inout fb: Fb, a: ast.Expr, expected: Option(u32), pattern: Option(ast.Ty), env: Env) -> Result(Val, Diag) {
+        if expected.is_none() {
+            match a.kind {
+                Lambda(ps, ret, body) => match pattern {
+                    Some(t) => match self.callback_params(t, env) {
+                        Some(inputs) => return self.lambda(&fb, ps.clone(), ret.clone(), body.clone(), None, Some(inputs), a.span)
+                        None => {}
+                    }
+                    None => {}
+                }
+                _ => {}
+            }
+        }
+        self.expr(&fb, a, expected)
+    }
+
     fn call_expr(inout self, inout fb: Fb, callee: ast.Expr, args: Vec(ast.Expr), exp: Option(u32), span: Span) -> Result(Val, Diag) {
         let env = fb.env.clone()
         match callee.kind {
@@ -3510,19 +3590,12 @@ impl sema.Sema {
                     Some(v) => {
                         let p = self.var_place(fb, v)
                         let t = self.place_ty(fb, p)
+                        match self.known_closure(fb, p) {
+                            Some((lf, true)) => return self.call_comptime_closure(&fb, p, lf, args, span)
+                            _ => {}
+                        }
                         return self.call_value(&fb, val_place(p, t), args, span)
                     }
-                    None => {}
-                }
-                var cc: Option((u32, u32)) = None
-                for c in self.comptime_closures {
-                    if c.id == fb.id && c.name == n {
-                        cc = Some((c.local, c.lambda))
-                        break
-                    }
-                }
-                match cc {
-                    Some((l, lf)) => return self.call_comptime_closure(&fb, l, lf, args, span)
                     None => {}
                 }
                 if env.get(n.as_str()).is_some() {
@@ -3774,7 +3847,7 @@ impl sema.Sema {
         Ok(Val { vk: VK.Place(Place.local(dest)), ty: ret, temp: true })
     }
 
-    fn call_comptime_closure(inout self, inout fb: Fb, l: u32, lf: u32, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn call_comptime_closure(inout self, inout fb: Fb, p: Place, lf: u32, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
         let sig = self.out[lf as i64].sig.clone()
         if sig.params.len() != args.len() + 1 {
             var m = String.from("this closure takes ")
@@ -3788,7 +3861,7 @@ impl sema.Sema {
         var ops = Vec(Operand).new()
         let raw = self.types.ptr(types.U8)
         let e = fb.temp(raw, span)
-        fb.assign(Place.local(e), Rvalue.Use(Operand.Copy(Place.local(l).with(Proj.Field(1)))), span)
+        fb.assign(Place.local(e), Rvalue.Use(Operand.Copy(p.with(Proj.Field(1)))), span)
         let ec = fb.temp(envt, span)
         fb.assign(Place.local(ec), Rvalue.Cast(copy_of(e), envt, mir.CastKind.Ptr), span)
         ops.push(copy_of(ec))
@@ -3996,18 +4069,16 @@ impl sema.Sema {
                 var given = false
                 match a.kind {
                     Name(n) => {
-                        var cc: Option((u32, u32)) = None
-                        for c in self.comptime_closures {
-                            if c.id == fb.id && c.name == n {
-                                cc = Some((c.local, c.lambda))
-                                break
-                            }
-                        }
-                        match cc {
-                            Some((l, lf)) => {
-                                let lt = fb.ty_of(l)
+                        match fb.lookup(n.as_str()) {
+                            Some(v) => {
+                                let p = self.var_place(fb, v)
+                                let lf = match self.known_closure(fb, p) {
+                                    Some((lf, _)) => lf
+                                    None => return Err(err(a.span, "a compile-time closure argument must have a statically known function"))
+                                }
+                                let lt = self.place_ty(fb, p)
                                 let envt = self.out[lf as i64].sig.params[0]
-                                vals.push(Some(val_place(Place.local(l), lt)))
+                                vals.push(Some(val_place(p, lt)))
                                 spans.push(a.span)
                                 cv = CVal.Lambda(lf, envt)
                                 given = true
@@ -4017,7 +4088,7 @@ impl sema.Sema {
                     }
                     Lambda(_, _, _) => {
                         self.last_lambda = None
-                        let v = self.expr(&fb, a, pty)?
+                        let v = self.callback_arg(&fb, a, pty, p.ty.clone(), known)?
                         let (lf, envt) = match self.last_lambda {
                             Some(x) => x
                             None => return Err(err(a.span, "expected a closure"))
@@ -4032,6 +4103,14 @@ impl sema.Sema {
                 }
                 if !given {
                     return Err(err(a.span, "a compile-time closure parameter takes a closure written here (`fn(x) { ... }`)"))
+                }
+                if pty.is_none() {
+                    let v = vals[vals.len() - 1].clone().unwrap()
+                    var binds = cargs.clone()
+                    if !self.match_ty_env(p.ty.clone().unwrap(), v.ty, ct_params, env, &binds)? {
+                        return Err(err(a.span, "this closure does not fit the compile-time parameter's type"))
+                    }
+                    cargs = binds
                 }
                 env.push(p.name.as_str(), cv.clone())
                 cargs[ci] = Some(cv)
@@ -4106,7 +4185,7 @@ impl sema.Sema {
                 let (pl, t) = self.mut_place(&fb, a)?
                 v = val_place(pl, t)
             } else {
-                v = self.expr(&fb, a, pty)?
+                v = self.callback_arg(&fb, a, pty, p.ty.clone(), known)?
                 var lent_str = false
                 if p.mode == ast.Mode.Let && v.ty == types.STR && pty.is_some() {
                     lent_str = pty == self.string_ty()
@@ -4231,7 +4310,8 @@ impl sema.Sema {
             if p.mode == ast.Mode.Comptime {
                 match self.inst_env_get(id, p.name.as_str()) {
                     Some(Lambda(_, _)) => {
-                        let o = self.operand(&fb, vals[pi].clone().unwrap(), spans[pi])?
+                        let v = self.coerce(&fb, vals[pi].clone().unwrap(), fsig.params[li], spans[pi])?
+                        let o = self.operand(&fb, v, spans[pi])?
                         ops.push(o)
                         li += 1
                     }
@@ -4563,11 +4643,24 @@ impl sema.Sema {
         }
         for i, p in ps {
             var x = sig.params[i]
-            if p.mode != ast.Mode.Sink && self.types.is_ref(x) {
-                x = self.types.pointee(x).unwrap()
+            var known = env.clone()
+            for j, prm in params {
+                match binds[j] {
+                    Some(v) => known.push(prm.name.as_str(), v.clone())
+                    None => {}
+                }
             }
-            if !self.match_ty_env(p.ty, x, params, env, &binds)? {
-                return Ok(false)
+            match self.resolve_ty(p.ty, known) {
+                Ok(t) => {
+                    if self.param_local_ty(p.mode, t).0 != x { return Ok(false) }
+                }
+                Err(_) => {
+                    let explicit_ref = match p.ty.kind { Ref(_, _) => true, _ => false }
+                    if p.mode != ast.Mode.Sink && self.types.is_ref(x) && (p.mode == ast.Mode.Inout || !explicit_ref) {
+                        x = self.types.pointee(x).unwrap()
+                    }
+                    if !self.match_ty_env(p.ty, x, params, env, &binds)? { return Ok(false) }
+                }
             }
         }
         match r {
@@ -4675,6 +4768,7 @@ struct Capture {
     place: Place
     ty: u32
     mutable: bool
+    closure: Option((u32, bool))
 }
 
 // Every name an expression mentions (for closure captures).

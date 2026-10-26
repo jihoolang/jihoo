@@ -1,0 +1,8 @@
+import std.iter
+import std.vec
+fn bad() -> iter.MapIter(vec.Iter(i64), i64) {
+    var xs = Vec(i64).filled(3, 1)
+    xs.iter().map(fn(x) { x * 2 })
+}
+fn main() { println(bad().count()) }
+// error: borrowed

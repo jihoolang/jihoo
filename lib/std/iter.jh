@@ -1,0 +1,168 @@
+// Lazy iterator adapters. Import std.iter to make the extension trait
+// available. Adapters own their input iterator and borrow their callbacks.
+
+import std.vec
+
+pub struct Range {
+    current: i64
+    end: i64
+}
+
+// A half-open range. A reversed range is empty.
+pub fn range(start: i64, end: i64) -> Range {
+    Range { current: start, end: end }
+}
+
+impl Iterator for Range {
+    type Item = i64
+
+    fn next(inout self) -> Option(i64) {
+        if self.current >= self.end { return None }
+        let value = self.current
+        self.current += 1
+        Some(value)
+    }
+}
+
+impl(T: type) [T] {
+    pub fn iter(self) -> vec.Iter(T) {
+        unsafe { vec.Iter(T) { ptr: self.ptr, end: self.ptr + self.len } }
+    }
+}
+
+pub struct MapIter(I: Iterator, U: type) {
+    inner: I
+    transform: fn(I.Item) -> U
+}
+
+impl(I: Iterator, U: type) Iterator for MapIter(I, U) {
+    type Item = U
+
+    fn next(inout self) -> Option(U) {
+        match self.inner.next() {
+            Some(x) => Some(self.transform(x))
+            None => None
+        }
+    }
+}
+
+pub struct FilterIter(I: Iterator) {
+    inner: I
+    pred: fn(I.Item) -> bool
+}
+
+impl(I: Iterator) Iterator for FilterIter(I) {
+    type Item = I.Item
+
+    fn next(inout self) -> Option(I.Item) {
+        loop {
+            match self.inner.next() {
+                Some(x) => { if self.pred(x) { return Some(x) } }
+                None => return None
+            }
+        }
+    }
+}
+
+impl(I: Iterator) FilterIter(I) {
+    // Fuse the consumer into the source traversal. Repeatedly calling the
+    // filtering next() leaves a nested search loop that inhibits if-conversion
+    // even after callback inlining. Rejected items still drop before pulling
+    // the next source item, and combine runs only for accepted items.
+    pub fn fold(sink self, comptime A: type, sink initial: A, combine: fn(A, I.Item) -> A) -> A {
+        var acc = initial
+        loop {
+            match self.inner.next() {
+                Some(x) => { if self.pred(x) { acc = combine(acc, x) } }
+                None => break
+            }
+        }
+        acc
+    }
+}
+
+pub struct TakeIter(I: Iterator) {
+    inner: I
+    remaining: i64
+}
+
+impl(I: Iterator) Iterator for TakeIter(I) {
+    type Item = I.Item
+
+    fn next(inout self) -> Option(I.Item) {
+        if self.remaining <= 0 { return None }
+        self.remaining -= 1
+        self.inner.next()
+    }
+}
+
+pub struct ZipIter(I: Iterator, J: Iterator) {
+    left: I
+    right: J
+    done: bool
+}
+
+impl(I: Iterator, J: Iterator) Iterator for ZipIter(I, J) {
+    type Item = (I.Item, J.Item)
+
+    fn next(inout self) -> Option((I.Item, J.Item)) {
+        if self.done { return None }
+        match self.left.next() {
+            Some(a) => match self.right.next() {
+                Some(b) => return Some((a, b))
+                None => {}
+            }
+            None => {}
+        }
+        self.done = true
+        None
+    }
+}
+
+pub trait IteratorExt: Iterator {
+    // U is inferred from the callback's result, or may be written explicitly.
+    fn map(sink self, comptime U: type, transform: fn(Self.Item) -> U) -> MapIter(Self, U) {
+        MapIter(Self, U) { inner: self, transform: transform }
+    }
+
+    fn filter(sink self, pred: fn(Self.Item) -> bool) -> FilterIter(Self) {
+        FilterIter(Self) { inner: self, pred: pred }
+    }
+
+    // Zero and negative counts produce an empty iterator.
+    fn take(sink self, n: i64) -> TakeIter(Self) {
+        TakeIter(Self) { inner: self, remaining: n }
+    }
+
+    fn zip(sink self, comptime J: Iterator, sink other: J) -> ZipIter(Self, J) {
+        ZipIter(Self, J) { left: self, right: other, done: false }
+    }
+
+    fn fold(sink self, comptime A: type, sink initial: A, combine: fn(A, Self.Item) -> A) -> A {
+        var acc = initial
+        for x in self { acc = combine(acc, x) }
+        acc
+    }
+
+    fn for_each(sink self, f: fn(Self.Item)) {
+        for x in self { f(x) }
+    }
+
+    fn count(sink self) -> i64 {
+        var n = 0
+        for _ in self { n += 1 }
+        n
+    }
+
+    fn any(sink self, pred: fn(Self.Item) -> bool) -> bool {
+        for x in self { if pred(x) { return true } }
+        false
+    }
+
+    fn all(sink self, pred: fn(Self.Item) -> bool) -> bool {
+        for x in self { if !pred(x) { return false } }
+        true
+    }
+}
+
+impl(I: Iterator) IteratorExt for I {}

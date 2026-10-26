@@ -1,0 +1,107 @@
+import std.iter
+
+struct Counter { current: i64, end: i64 }
+impl Iterator for Counter {
+    type Item = i64
+    fn next(inout self) -> Option(i64) {
+        if self.current >= self.end { return None }
+        self.current += 1
+        Some(self.current - 1)
+    }
+}
+
+fn sequence(n: i64) -> Counter { Counter { current: 0, end: n } }
+
+fn calculate(n: i64) -> i64 {
+    sequence(n).map(fn(x) { x * 2 }).filter(fn(x) { x > 2 })
+        .fold(0, fn(acc, x) { acc + x })
+}
+
+// The same ordinary generic functions run in the MIR interpreter.
+const LENGTH = calculate(4)
+
+fn main() {
+    var xs = Vec(i64).new()
+    for i in 0..10 { xs.push(i) }
+    let scale = 3
+    let limit = 10
+    let pipeline = xs.iter().map(fn(x) { x * scale }).filter(fn(x) { x > limit })
+    // Keeping the pipeline does not evaluate any elements.
+    println(pipeline.take(3).fold(0, fn(acc, x) { acc + x }))
+    //> 45
+    println(xs.iter().count())
+    //> 10
+    println(xs.as_slice().iter().map(fn(x) { x + 1 }).fold(0, fn(a, x) { a + x }))
+    //> 55
+    println(sequence(0).fold(7, fn(acc, x) { acc + x }))
+    //> 7
+    println(sequence(5).filter(fn(x) { false }).count())
+    //> 0
+    println(sequence(5).filter(fn(x) { true }).count())
+    //> 5
+    println(sequence(5).take(-1).count())
+    //> 0
+    println(sequence(5).take(0).count())
+    //> 0
+    println(sequence(5).take(20).count())
+    //> 5
+    println(sequence(5).fold(7, fn(acc, x) { acc * 31 + x }))
+    //> 200435867
+
+    // Mapping changes the item type, inferred from the callback's body.
+    println(sequence(6).map(fn(x) { x % 2 == 0 }).filter(fn(x) { x }).count())
+    //> 3
+    println(sequence(3).map(fn(x) { x.to_string() }).fold(String.new(), fn(acc, x) { acc.as_str() + x.as_str() }))
+    //> 012
+    let small: u8 = sequence(5).map(u8, fn(x) { x as u8 }).fold(0 as u8, fn(acc, x) { acc + x })
+    println(small)
+    //> 10
+
+    // Consumers stop pulling as soon as they have their answer.
+    var visited = 0
+    println(sequence(100).map(fn(x) { visited += 1; x }).take(2).count())
+    //> 2
+    println(visited)
+    //> 2
+    var calls = 0
+    println(sequence(10).any(fn(x) { calls += 1; x == 2 }))
+    //> true
+    println(calls)
+    //> 3
+    calls = 0
+    println(sequence(10).all(fn(x) { calls += 1; x < 2 }))
+    //> false
+    println(calls)
+    //> 3
+    println(sequence(0).any(fn(x) { true }))
+    //> false
+    println(sequence(0).all(fn(x) { false }))
+    //> true
+
+    var total = 0
+    sequence(5).for_each(fn(x) { total += x })
+    println(total)
+    //> 10
+    var zipped = 0
+    for pair in sequence(5).zip(sequence(3)) {
+        zipped += pair.0 * 10 + pair.1
+    }
+    println(zipped)
+    //> 33
+    println(sequence(0).zip(sequence(5)).count())
+    //> 0
+    println(sequence(5).zip(sequence(0)).count())
+    //> 0
+
+    println(comptime calculate(6))
+    //> 28
+    println(comptime iter.range(0, 5).map(fn(x) { x * x }).fold(0, fn(a, x) { a + x }))
+    //> 30
+    println(iter.range(5, 0).count())
+    //> 0
+    println(iter.range(-3, 1).fold(0, fn(a, x) { a + x }))
+    //> -6
+    let array: [u8; LENGTH] = [0; LENGTH]
+    println(size_of([u8; LENGTH]))
+    //> 10
+}

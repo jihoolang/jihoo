@@ -1,0 +1,8 @@
+fn escape(comptime f: fn(i64) -> i64) -> fn(i64) -> i64 {
+    fn(x: i64) { f(x) }
+}
+fn main() {
+    let f = escape(fn(x) { x + 1 })
+    println(f(2))
+}
+// error: borrowed

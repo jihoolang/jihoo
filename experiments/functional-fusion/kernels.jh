@@ -1,0 +1,74 @@
+import stream
+import std.iter
+
+// The public library API, with callback input/output types inferred.
+export fn iterator(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    xs.iter()
+        .map(fn(x) { x * scale + offset })
+        .filter(fn(x) { x > limit })
+        .fold(0, fn(acc, x) { acc + x })
+}
+
+// The C harness owns the input; these views stay inside each call.
+export fn functional(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    stream.fold(fn(emit) {
+        stream.filter(fn(emit) {
+            stream.map(fn(emit) { stream.each(xs, emit) },
+                fn(x) { x * scale + offset }, emit)
+        }, fn(x) { x > limit }, emit)
+    }, 0, fn(acc, x) { acc + x })
+}
+
+export fn staged(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    stream.fold_static(fn(emit) {
+        stream.filter_static(fn(emit) {
+            stream.map_static(fn(emit) { stream.each(xs, emit) },
+                fn(x) { x * scale + offset }, emit)
+        }, fn(x) { x > limit }, emit)
+    }, 0, fn(acc, x) { acc + x })
+}
+
+fn map_vec(xs: [i64], transform: fn(i64) -> i64) -> Vec(i64) {
+    var out = Vec(i64).new()
+    for x in xs { out.push(transform(x)) }
+    out
+}
+
+fn filter_vec(xs: [i64], pred: fn(i64) -> bool) -> Vec(i64) {
+    var out = Vec(i64).new()
+    for x in xs { if pred(x) { out.push(x) } }
+    out
+}
+
+export fn eager(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    let mapped = map_vec(xs, fn(x) { x * scale + offset })
+    let filtered = filter_vec(mapped.as_slice(), fn(x) { x > limit })
+    var total = 0
+    for x in filtered { total += x }
+    total
+}
+
+export fn handwritten(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    var total = 0
+    for x in xs {
+        let y = x * scale + offset
+        if y > limit { total += y }
+    }
+    total
+}
+
+// A second consumer checks order and a nonzero initial accumulator.
+export fn ordered(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    stream.fold(fn(emit) {
+        stream.filter(fn(emit) {
+            stream.map(fn(emit) { stream.each(xs, emit) },
+                fn(x) { x * scale + offset }, emit)
+        }, fn(x) { x > limit }, emit)
+    }, 7, fn(acc, x) { acc * 31 + x })
+}

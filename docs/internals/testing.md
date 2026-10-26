@@ -62,3 +62,17 @@ each backend and compares its IR and frontend runtime. Runtime regressions
 above `--max-regression` (10% by default) cause failure. Use an idle machine
 and the same LLVM/clang version and linker driver for both paths; small
 differences need repeated measurements.
+
+## Functional pipelines
+
+```sh
+python3 experiments/functional-fusion/run.py --compiler out/jihoo --iterations 128
+```
+
+This compares ordinary higher-order functions, comptime producers, the
+public iterator API, eager vectors, a handwritten jihoo loop, and C. It
+checks randomized results at O0/O2 with checked/wrapping arithmetic, records
+allocations and optimized IR, and measures interleaved runtimes. See the
+[experiment](../../experiments/functional-fusion/README.md) for the method,
+recorded results, and the filter/fold fusion optimization. The program
+suite additionally checks callback order, ownership and compile-time use.

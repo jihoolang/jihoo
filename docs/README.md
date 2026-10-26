@@ -27,6 +27,7 @@ same on GitHub.
 - [Generics and traits](language/generics.md)
 - [Compile-time evaluation](language/comptime.md)
 - [Closures](language/closures.md)
+- [Iterator pipelines](language/iterators.md)
 - [Errors](language/errors.md)
 
 ### Down to the machine

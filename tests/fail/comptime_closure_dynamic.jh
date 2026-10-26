@@ -1,0 +1,4 @@
+fn apply(comptime f: fn(i64) -> i64, x: i64) -> i64 { f(x) }
+fn dynamic(f: fn(i64) -> i64) -> i64 { apply(f, 1) }
+fn main() { println(dynamic(fn(x) { x + 1 })) }
+// error: a compile-time closure argument must have a statically known function

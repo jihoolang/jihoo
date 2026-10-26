@@ -113,6 +113,11 @@ expressions, array lengths and compile-time arguments. It supports loops,
 recursion and fixed aggregates; external calls and heap allocation remain
 unavailable during evaluation.
 
+[Iterator pipelines](docs/language/iterators.md) compose `map`, `filter`,
+`take`, `zip` and `fold` without intermediate collections. Callback types
+are inferred, and compile-time closures can be named, captured and forwarded.
+Supported pipelines also run in the compile-time interpreter.
+
 LLVM 21's C API optimizes and emits objects directly, with loop and SLP
 vectorization at `-O2`/`-O3`. Native linking uses a C driver; freestanding
 linking uses lld. `JIHOO_BACKEND=clang` selects the previous backend for

@@ -1,0 +1,62 @@
+fn apply(comptime f: fn(i64) -> i64, x: i64) -> i64 { f(x) }
+
+fn nested(comptime f: fn(i64) -> i64, x: i64) -> i64 {
+    let first = f
+    let second = fn(y: i64) { apply(first, y) }
+    let third = fn(y: i64) { apply(second, y) }
+    third(x)
+}
+
+fn captured(comptime f: fn(i64) -> i64, x: i64) -> i64 {
+    // No written return type: lowering probes the body before building it.
+    let inner = fn(y: i64) { f(f(y)) }
+    apply(inner, x)
+}
+
+fn ordinary(f: fn(i64) -> i64, x: i64) -> i64 { f(x) }
+
+fn infer(comptime U: type, comptime f: fn(i64) -> U) -> U { f(5) }
+
+fn shadowed(comptime f: fn(i64) -> i64) -> i64 {
+    let f = fn(x: i64) { x + 1 }
+    apply(f, 5)
+}
+
+fn mutate(comptime f: fn()) {
+    let inner = fn() { f() }
+    inner()
+    inner()
+}
+
+fn calculate() -> i64 {
+    let k = 3
+    let f = fn(x: i64) { x + k }
+    nested(f, 10) + captured(f, 10)
+}
+
+fn main() {
+    println(calculate())
+    //> 29
+    println(comptime calculate())
+    //> 29
+    let k = 7
+    let f = fn(x: i64) { x * k }
+    let alias = f
+    println(apply(alias, 6))
+    //> 42
+    println(shadowed(f))
+    //> 6
+    println(ordinary(f, 3))
+    //> 21
+    var n = 0
+    mutate(fn() { n += 1 })
+    println(n)
+    //> 2
+    println(comptime { var n = 0; mutate(fn() { n += 1 }); n })
+    //> 2
+    println(infer(fn(x) { x > 3 }))
+    //> true
+    let stringify = fn(x: i64) { x.to_string() }
+    println(infer(stringify))
+    //> 5
+}

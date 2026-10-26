@@ -1,0 +1,176 @@
+{
+  "host": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "compiler": "/home/user/jihoo/out/jihoo",
+  "clang": "clang version 21.1.8",
+  "opt": "LLVM (http://llvm.org/):\n  LLVM version 21.1.8\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: alderlake",
+  "size": 1000000,
+  "iterations": 128,
+  "repeats": 7,
+  "validation": {
+    "checked-O0": "600 differential cases and 600 order-sensitive folds passed",
+    "checked-O2": "600 differential cases and 600 order-sensitive folds passed",
+    "wrapping-O0": "600 differential cases and 600 order-sensitive folds passed",
+    "wrapping-O2": "600 differential cases and 600 order-sensitive folds passed"
+  },
+  "build_seconds": 0.2752825200004736,
+  "ir": {
+    "functional": {
+      "reachable_functions": [
+        "functional"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    },
+    "staged": {
+      "reachable_functions": [
+        "staged"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    },
+    "iterator": {
+      "reachable_functions": [
+        "iterator"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    },
+    "eager": {
+      "reachable_functions": [
+        "eager",
+        "std.sys.write_err.60",
+        "std.vec.Vec_i64_.push.35"
+      ],
+      "external_calls": [
+        "abort",
+        "free",
+        "malloc",
+        "realloc",
+        "write"
+      ],
+      "indirect_calls": []
+    },
+    "handwritten": {
+      "reachable_functions": [
+        "handwritten"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    }
+  },
+  "machine_code": {
+    "bytes": {
+      "functional": 144,
+      "handwritten": 144,
+      "iterator": 207,
+      "staged": 144
+    },
+    "functional_equals_staged": true,
+    "iterator_equals_handwritten": false,
+    "functional_equals_handwritten": true
+  },
+  "results": {
+    "functional": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.047646173,
+      "over_c": 1.0137889348294982,
+      "samples": [
+        0.046795141,
+        0.056074667,
+        0.046610155,
+        0.046545841,
+        0.048019011,
+        0.047672062,
+        0.047646173
+      ]
+    },
+    "staged": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.047611432,
+      "over_c": 1.0130497350330128,
+      "samples": [
+        0.062993229,
+        0.054721131,
+        0.047611432,
+        0.047564963,
+        0.046047734,
+        0.046930365,
+        0.047932836
+      ]
+    },
+    "iterator": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.047421585,
+      "over_c": 1.009010275496345,
+      "samples": [
+        0.059590407,
+        0.046838937,
+        0.053667642,
+        0.046598944,
+        0.047421585,
+        0.045780212,
+        0.04745941
+      ]
+    },
+    "eager": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 37,
+      "frees": 2,
+      "seconds": 0.725860285,
+      "over_c": 15.444453957827546,
+      "samples": [
+        0.742782367,
+        0.722098393,
+        0.739865791,
+        0.722415054,
+        0.718029521,
+        0.725860285,
+        0.731827024
+      ]
+    },
+    "handwritten": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.046986141,
+      "over_c": 0.9997451387362972,
+      "samples": [
+        0.045913526,
+        0.046986141,
+        0.058541687,
+        0.056864572,
+        0.046533583,
+        0.04780965,
+        0.046702584
+      ]
+    },
+    "c": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.046998119,
+      "over_c": 1.0,
+      "samples": [
+        0.046578422,
+        0.049042104,
+        0.048322841,
+        0.047367541,
+        0.045087425,
+        0.046958989,
+        0.046998119
+      ]
+    }
+  }
+}

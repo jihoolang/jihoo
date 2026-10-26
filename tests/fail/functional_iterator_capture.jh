@@ -1,0 +1,9 @@
+import std.iter
+fn main() {
+    var xs = Vec(i64).filled(3, 1)
+    var n = 0
+    let it = xs.iter().map(fn(x) { n += x; n })
+    println(n)
+    println(it.count())
+}
+// error: borrowed mutably

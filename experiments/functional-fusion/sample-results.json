@@ -1,0 +1,150 @@
+{
+  "host": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "compiler": "/home/user/jihoo/out/jihoo",
+  "clang": "clang version 21.1.8",
+  "opt": "LLVM (http://llvm.org/):\n  LLVM version 21.1.8\n  Optimized build.\n  Default target: x86_64-unknown-linux-gnu\n  Host CPU: alderlake",
+  "size": 1000000,
+  "iterations": 128,
+  "repeats": 7,
+  "validation": {
+    "checked-O0": "600 differential cases and 600 order-sensitive folds passed",
+    "checked-O2": "600 differential cases and 600 order-sensitive folds passed",
+    "wrapping-O0": "600 differential cases and 600 order-sensitive folds passed",
+    "wrapping-O2": "600 differential cases and 600 order-sensitive folds passed"
+  },
+  "build_seconds": 0.2660121099997923,
+  "ir": {
+    "functional": {
+      "reachable_functions": [
+        "functional"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    },
+    "staged": {
+      "reachable_functions": [
+        "staged"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    },
+    "eager": {
+      "reachable_functions": [
+        "eager",
+        "std.sys.write_err.51",
+        "std.vec.Vec_i64_.push.27"
+      ],
+      "external_calls": [
+        "abort",
+        "free",
+        "malloc",
+        "realloc",
+        "write"
+      ],
+      "indirect_calls": []
+    },
+    "handwritten": {
+      "reachable_functions": [
+        "handwritten"
+      ],
+      "external_calls": [],
+      "indirect_calls": []
+    }
+  },
+  "machine_code": {
+    "bytes": {
+      "functional": 144,
+      "handwritten": 144,
+      "staged": 144
+    },
+    "functional_equals_staged": true,
+    "functional_equals_handwritten": true
+  },
+  "results": {
+    "functional": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.051038803,
+      "over_c": 1.0265989910733073,
+      "samples": [
+        0.04663808,
+        0.048809636,
+        0.053439346,
+        0.051117113,
+        0.051038803,
+        0.045738593,
+        0.055012031
+      ]
+    },
+    "staged": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.048138779,
+      "over_c": 0.9682676522194478,
+      "samples": [
+        0.047720826,
+        0.047727454,
+        0.048138779,
+        0.051906868,
+        0.054411615,
+        0.045923545,
+        0.053186713
+      ]
+    },
+    "eager": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 37,
+      "frees": 2,
+      "seconds": 0.714792138,
+      "over_c": 14.377392191151742,
+      "samples": [
+        0.704263179,
+        0.716348001,
+        0.713385665,
+        0.712948619,
+        0.717388337,
+        0.714792138,
+        0.730674987
+      ]
+    },
+    "handwritten": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.047020007,
+      "over_c": 0.9457645734062345,
+      "samples": [
+        0.045999796,
+        0.047020007,
+        0.054644385,
+        0.045102451,
+        0.054204895,
+        0.046370929,
+        0.057105803
+      ]
+    },
+    "c": {
+      "checksum": "96453855415",
+      "sample": "750234203",
+      "allocations": 0,
+      "frees": 0,
+      "seconds": 0.049716397,
+      "over_c": 1.0,
+      "samples": [
+        0.044397611,
+        0.054755612,
+        0.051165425,
+        0.045738268,
+        0.049716397,
+        0.046092373,
+        0.056226219
+      ]
+    }
+  }
+}

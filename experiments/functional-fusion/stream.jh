@@ -1,0 +1,35 @@
+// Push streams: a producer calls its consumer once per element. Combinators
+// compose functions instead of constructing intermediate collections.
+pub fn each(xs: [i64], emit: fn(i64)) {
+    for x in xs { emit(x) }
+}
+
+pub fn map(input: fn(fn(i64)), transform: fn(i64) -> i64, emit: fn(i64)) {
+    input(fn(x) { emit(transform(x)) })
+}
+
+pub fn filter(input: fn(fn(i64)), pred: fn(i64) -> bool, emit: fn(i64)) {
+    input(fn(x) { if pred(x) { emit(x) } })
+}
+
+pub fn fold(input: fn(fn(i64)), initial: i64, combine: fn(i64, i64) -> i64) -> i64 {
+    var acc = initial
+    input(fn(x) { acc = combine(acc, x) })
+    acc
+}
+
+// Only the producer is specialized. Captured transforms remain ordinary
+// closures: nested captures of comptime closure parameters are unsupported.
+pub fn map_static(comptime input: fn(fn(i64)), transform: fn(i64) -> i64, emit: fn(i64)) {
+    input(fn(x) { emit(transform(x)) })
+}
+
+pub fn filter_static(comptime input: fn(fn(i64)), pred: fn(i64) -> bool, emit: fn(i64)) {
+    input(fn(x) { if pred(x) { emit(x) } })
+}
+
+pub fn fold_static(comptime input: fn(fn(i64)), initial: i64, combine: fn(i64, i64) -> i64) -> i64 {
+    var acc = initial
+    input(fn(x) { acc = combine(acc, x) })
+    acc
+}

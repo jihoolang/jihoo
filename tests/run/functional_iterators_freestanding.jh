@@ -1,0 +1,18 @@
+#![freestanding]
+import std.iter
+
+fn squares(n: i64) -> i64 {
+    iter.range(0, n).map(fn(x) { x * x }).filter(fn(x) { x > 3 })
+        .fold(0, fn(a, x) { a + x })
+}
+
+const TOTAL = squares(5)
+
+fn main() {
+    println(TOTAL)
+    //> 29
+    var xs = Vec(i64).new()
+    for i in 0..6 { xs.push(i) }
+    println(xs.iter().map(fn(x) { x * 2 }).filter(fn(x) { x > 3 }).fold(0, fn(a, x) { a + x }))
+    //> 28
+}

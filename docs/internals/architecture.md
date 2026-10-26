@@ -47,6 +47,14 @@ copies, if plain); a place passed to a borrowed parameter is borrowed; an
 `inout` argument is borrowed mutably. It inserts a `Drop` for every owned
 local at the end of its scope, and at `return` and `break`.
 
+The jihoo lowerer also tracks statically known closure functions by MIR
+place, including immutable aliases and captures inside lifted functions.
+Specialization selects a function while passing its ordinary environment
+value; borrow checking still sees the environment and its captures. A
+callback with known inputs and an unknown generic result is first checked
+with those input types, then its full signature participates in generic
+argument inference. The same inference applies to comptime callbacks.
+
 ## MIR
 
 A function is a control-flow graph over *places*: a local followed by

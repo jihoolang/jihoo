@@ -1,0 +1,10 @@
+// Reproducer for the former nested comptime-closure capture restriction.
+// The updated compiler accepts this program and prints 42.
+fn apply(comptime transform: fn(i64) -> i64, x: i64) -> i64 {
+    let nested = fn(y: i64) -> i64 { transform(y) }
+    nested(x)
+}
+
+fn main() {
+    println(apply(fn(x) { x * 2 }, 21))
+}

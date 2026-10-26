@@ -44,6 +44,11 @@ Done ([design](redesign.md)):
   [Current limits](../language/comptime.md#checks-and-limits): heap allocation,
   destructors, pointer-bearing results and most intrinsics remain future work.
 - **`#[derive]`** for `Clone`, `Eq`, `Ord`, `Hash` and `Show`.
+- **Functional composition**: lazy iterator adapters and consumers are
+  available through `std.iter`, with generic callback result inference and
+  capture/forwarding of statically known closures. They also work with the
+  compile-time interpreter for supported operations. Owning closures and
+  broader type-level metaprogramming remain future work.
 - **Dynamic dispatch**: `dyn Trait` values, and closures that own what they
   capture, so they can be stored.
 - **Concurrency**: threads, channels and locks as library code over

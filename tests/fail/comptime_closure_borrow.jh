@@ -1,0 +1,10 @@
+fn twice(comptime f: fn(), inout n: i64) {
+    let inner = fn() { f() }
+    inner()
+    inner()
+}
+fn main() {
+    var n = 0
+    twice(fn() { n += 1 }, &n)
+}
+// error: borrowed mutably
