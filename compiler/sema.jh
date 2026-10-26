@@ -274,6 +274,9 @@ struct Pending {
 pub struct InstInfo {
     pub decl: u32
     pub env: Env
+    // Where it was first asked for, and by which instance.
+    pub at: Span
+    pub from: Option(u32)
 }
 
 pub struct Lang {
@@ -1791,7 +1794,8 @@ impl Sema {
             returns_ref: returns_ref
             span: decl.name_span
         })
-        self.inst_info.push(Some(InstInfo { decl: fid, env: env.clone() }))
+        let from: Option(u32) = if self.stack.len() > 0 { Some(self.stack[self.stack.len() - 1]) } else { None }
+        self.inst_info.push(Some(InstInfo { decl: fid, env: env.clone(), at: span, from: from }))
         self.fn_insts.insert(key, id)
         let is_extern = match decl.kind {
             Extern => true
@@ -1891,16 +1895,29 @@ impl Sema {
         Err(ty_err(span, "compile-time function has no body"))
     }
 
+    // Notes on where a generic instance came from: each instance up the
+    // chain of uses, with the place that asked for it.
     fn with_origin(self, sink d: Diag, id: u32) -> Diag {
-        if (id as i64) < self.inst_info.len() {
-            match self.inst_info[id as i64] {
+        var d = d
+        var cur = id
+        for _ in 0..8 {
+            if cur as i64 >= self.inst_info.len() {
+                break
+            }
+            let (at, from) = match self.inst_info[cur as i64] {
                 Some(info) => {
-                    if info.env.names.len() > 0 {
-                        let msg = "in the instance `" + self.out[id as i64].name.as_str() + "`"
-                        return d.note(None, msg.as_str())
+                    if info.env.names.len() == 0 && info.env.self_ty.is_none() {
+                        break
                     }
+                    (info.at, info.from)
                 }
-                None => {}
+                None => break
+            }
+            let msg = "in the instance `" + self.out[cur as i64].name.as_str() + "`, used here"
+            d = d.note(Some(at), msg.as_str())
+            match from {
+                Some(f) => cur = f
+                None => break
             }
         }
         d

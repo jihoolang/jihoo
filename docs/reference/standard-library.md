@@ -73,6 +73,7 @@ patterns see through it.
 | module | |
 |--------|---|
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
+| `std.thread` | `join(a, b)`, `each(lo, hi, f)`, `map(xs, f)`, `each_mut(&v, f)`, `cpu_count()`: work on several threads that borrows from the caller ([threads](../language/threads.md)) |
 | `std.derive` | the bodies of `#[derive(...)]`d methods, loaded by the compiler when an item derives a trait ([derive](../language/reflection.md#derive)) |
 | `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at` |
 | `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)`, `remove_file(path)`, `read_dir(path) -> Result(Vec(String), String)` (sorted names) |

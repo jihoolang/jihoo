@@ -1,0 +1,69 @@
+// std.thread: work on several threads that borrows what the caller owns.
+import std.thread
+
+struct Grid {
+    cells: Vec(i64)
+    width: i64
+}
+
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn main() {
+    // `join` runs two closures at once and returns both results.
+    let (a, b) = thread.join(fn() { fib(20) }, fn() { fib(21) })
+    println(a + b)
+    //> 17711
+
+    // Each closure may change what it alone uses.
+    var left = Vec(i64).new()
+    var right = Vec(i64).new()
+    thread.join(fn() { left.push(1) }, fn() {
+        right.push(2)
+        right.push(3)
+    })
+    println(left.len() + right.len())
+    //> 3
+
+    // `map` keeps the order of its input.
+    var xs = Vec(i64).new()
+    for i in 0..1000 {
+        xs.push(i)
+    }
+    let squares = thread.map(xs.as_slice(), fn(x) { x * x })
+    println(squares[999])
+    //> 998001
+    let words = thread.map(xs.as_slice(), fn(x) { x.to_string() })
+    println(words[123])
+    //> 123
+
+    // `each_mut` lends each element to one thread.
+    thread.each_mut(&xs, fn(x) { x += 1 })
+    println(xs[0] + xs[999])
+    //> 1001
+
+    // A `let` borrow can be captured by a closure that runs on many
+    // threads; a `var` cannot.
+    var g = Grid { cells: Vec(i64).new(), width: 10 }
+    for i in 0..100 {
+        g.cells.push(i)
+    }
+    let grid = g
+    let rows = thread.map(xs.as_slice()[0..10], fn(r) {
+        var s = 0
+        for c in 0..grid.width {
+            s += grid.cells[(r - 1) * grid.width + c]
+        }
+        s
+    })
+    println(rows[0] + rows[9])
+    //> 990
+    thread.each(0, 4, fn(i) {
+        if grid.cells[i] > 1000 {
+            println("never")
+        }
+    })
+    println(thread.cpu_count() >= 1)
+    //> true
+}

@@ -117,6 +117,15 @@ impl sema.Sema {
             let b = self.types.needs_drop(t)
             return Ok(Some(body.val_op(Operand.Const(Const.Bool(b)), types.BOOL)))
         }
+        if n == "compile_error" {
+            // Stops compilation of this instance; with `inline if`, a check
+            // a library makes of its compile-time arguments.
+            arity(args, 1, n, span)?
+            return match args[0].kind {
+                Str(m) => Err(Diag.new(span, m.as_str()))
+                _ => Err(Diag.new(args[0].span, "`compile_error` takes a string literal"))
+            }
+        }
         if n == "trap" {
             arity(args, 0, n, span)?
             return Ok(Some(self.emit_call(&fb, Callee.Intrinsic(Intrinsic.Trap), no_ops(), types.NEVER, span)?))
@@ -390,6 +399,10 @@ impl sema.Sema {
     // `variant_field_count(T, v)`, `is_struct(T)`, `is_enum(T)`,
     // `is_tuple(T)`. None if `n` is none of them.
     pub fn reflect_const(inout self, n: str, args: Vec(ast.Expr), env: Env, exp: Option(u32), span: Span) -> Result(Option(TypedConst), Diag) {
+        if n == "captures_mut" {
+            arity(args, 1, n, span)?
+            return Ok(Some(TypedConst { c: Const.Bool(self.captures_mut(args[0], env)?), ty: types.BOOL }))
+        }
         let one = n == "field_count" || n == "variant_count" || n == "is_struct" || n == "is_enum" || n == "is_tuple"
         let two = n == "field_name" || n == "variant_name" || n == "variant_field_count"
         if !one && !two {
@@ -462,6 +475,79 @@ impl sema.Sema {
             return Ok(Some(TypedConst { c: Const.Str(vs[v].name.clone()), ty: types.STR }))
         }
         Ok(Some(reflect_int(vs[v].fields.len(), exp, self.types)))
+    }
+
+    // `captures_mut(f)`, for a compile-time closure parameter `f`: whether
+    // calling the closure may change what it captures. It does if it
+    // captures a variable mutably (any `var`), or captures a closure, which
+    // might.
+    fn captures_mut(self, e: ast.Expr, env: Env) -> Result(bool, Diag) {
+        let bad = "`captures_mut` takes a compile-time closure parameter"
+        let name = match e.kind {
+            Name(n) => n.clone()
+            _ => return Err(Diag.new(e.span, bad))
+        }
+        let envt = match env.get(name.as_str()) {
+            Some(Lambda(_, t)) => t
+            _ => return Err(Diag.new(e.span, bad))
+        }
+        let tuple = self.types.pointee(envt).unwrap_or(envt)
+        let fields = match self.types.kind(tuple) {
+            Tuple(ts) => ts.clone()
+            _ => Vec(u32).new()
+        }
+        for f in fields {
+            match self.types.kind(f) {
+                RefMut(_) => return Ok(true)
+                _ => {}
+            }
+            if self.may_hold_closure(f, 0) {
+                return Ok(true)
+            }
+        }
+        Ok(false)
+    }
+
+    fn may_hold_closure(self, t: u32, depth: i64) -> bool {
+        if depth > 32 {
+            return true
+        }
+        match self.types.kind(t) {
+            Closure(_) => true
+            Ref(x) => self.may_hold_closure(x, depth + 1)
+            RefMut(x) => self.may_hold_closure(x, depth + 1)
+            Array(x, _) => self.may_hold_closure(x, depth + 1)
+            Tuple(ts) => {
+                for x in ts {
+                    if self.may_hold_closure(x, depth + 1) {
+                        return true
+                    }
+                }
+                false
+            }
+            Adt(i) => match self.types.adts[i as i64].body {
+                Struct(fs) => {
+                    for f in fs {
+                        if self.may_hold_closure(f.ty, depth + 1) {
+                            return true
+                        }
+                    }
+                    false
+                }
+                Enum(vs) => {
+                    for v in vs {
+                        for x in v.fields {
+                            if self.may_hold_closure(x, depth + 1) {
+                                return true
+                            }
+                        }
+                    }
+                    false
+                }
+                _ => false
+            }
+            _ => false
+        }
     }
 
     // A compile-time index below `count`.

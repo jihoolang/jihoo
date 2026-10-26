@@ -1,0 +1,10 @@
+// The error names where the instance was used.
+// error: threads_instance_note.jh:9:5: in the instance `each_mut
+import std.thread
+
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    var k = 2
+    thread.each_mut(&v, fn(x) { x *= k })
+}

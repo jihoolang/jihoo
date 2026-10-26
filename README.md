@@ -121,6 +121,11 @@ unroll and select code at compile time, and builtins name a type's fields
 and variants. `#[derive(Clone, Eq, Ord, Hash, Show)]` is library code
 written with them, in `std/derive.jh`, and keeps privacy.
 
+[Threads](docs/language/threads.md): `std.thread.join`, `each`, `map` and
+`each_mut` run work on several threads that borrows what the caller owns.
+The borrow rules and a compile-time check of the closures rule out data
+races.
+
 [Iterator pipelines](docs/language/iterators.md) compose `map`, `filter`,
 `take`, `zip` and `fold` without intermediate collections. Callback types
 are inferred, and compile-time closures can be named, captured and forwarded.
@@ -138,6 +143,6 @@ release builds it, and it builds itself to the same LLVM IR. There is no
 Rust left; the Rust compiler that first bootstrapped it is in the history
 up to v0.1.1.
 
-Next ([roadmap](docs/internals/roadmap.md)): threads that borrow from their
-scope, a data-oriented standard library (typed indices, arenas, `Soa(T)`),
+Next ([roadmap](docs/internals/roadmap.md)): shared atomics and locks, a
+data-oriented standard library (typed indices, arenas, `Soa(T)`),
 error notes.

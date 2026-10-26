@@ -1,0 +1,13 @@
+// `compile_error` stops compilation where `inline if` reaches it.
+// error: T must be 8 bytes
+fn only8(comptime T: type, x: T) -> T {
+    inline if size_of(T) != 8 {
+        compile_error("T must be 8 bytes")
+    }
+    x
+}
+
+fn main() {
+    println(only8(i64, 1))
+    println(only8(u8, 1))
+}
