@@ -151,9 +151,15 @@ fn run_body(inout body: Body) -> Result((), Diag) {
                 }
                 _ => {}
             }
-            transfer(&st, s, true, body)?
+            match transfer(&st, s, true, body) {
+                Ok(_) => {}
+                Err(d) => return Err(with_move_note(d, body, entry[b], b, si))
+            }
         }
-        term_transfer(&st, body.blocks[b].term, body, true)?
+        match term_transfer(&st, body.blocks[b].term, body, true) {
+            Ok(_) => {}
+            Err(d) => return Err(with_move_note(d, body, entry[b], b, body.blocks[b].stmts.len()))
+        }
     }
     for e in edits {
         if e.st == St.Maybe {
@@ -414,9 +420,220 @@ fn use_place(st: Vec(St), p: Place, body: Body, span: Span, check: bool) -> Resu
 }
 
 fn moved_err(p: Place, body: Body, span: Span) -> Diag {
-    var note = String.from("local _")
-    p.local.show(&note)
-    Diag.new(span, (local_name(body, p.local) + " is used here after it was moved away").as_str()).note(None, note.as_str())
+    Diag.new(span, (local_name(body, p.local) + " is used here after it was moved away").as_str())
+}
+
+// ---- where a value was moved ----
+
+// The error at statement `si` of block `b` (the terminator if `si` is the
+// number of statements), with a note at each move of the value it uses
+// that reaches there.
+fn with_move_note(sink d: Diag, body: Body, entry: Vec(St), b: i64, si: i64) -> Diag {
+    var st = entry.clone()
+    for k in 0..si {
+        match transfer(&st, body.blocks[b].stmts[k], false, body) {
+            Ok(_) => {}
+            Err(_) => return d
+        }
+    }
+    let used = if si < body.blocks[b].stmts.len() { stmt_reads(body.blocks[b].stmts[si]) } else { term_reads(body.blocks[b].term) }
+    var local: Option(u32) = None
+    for p in used {
+        if st[p.local as i64] != St.Init && st[p.local as i64] != St.Bottom {
+            local = Some(p.local)
+            break
+        }
+    }
+    let l = match local {
+        Some(l) => l
+        None => return d
+    }
+    var d = d
+    var count = 0
+    for mb in 0..body.blocks.len() {
+        let n = body.blocks[mb].stmts.len()
+        for k in 0..n + 1 {
+            let span = match move_at(body, mb, k, l) {
+                Some(sp) => sp
+                None => continue
+            }
+            if count < 3 && reaches(body, l, mb, k, b, si) {
+                d = d.note(Some(span), "moved here")
+                count += 1
+            }
+        }
+    }
+    d
+}
+
+// The span of statement `k` of block `b` (or its terminator) if it moves
+// the whole of local `l` away.
+fn move_at(body: Body, b: i64, k: i64, l: u32) -> Option(Span) {
+    let n = body.blocks[b].stmts.len()
+    var ops = Vec(Operand).new()
+    var span = no_span()
+    if k < n {
+        match body.blocks[b].stmts[k] {
+            Assign(_, r, sp) => {
+                ops = rvalue_operands(r)
+                span = sp
+            }
+            _ => return None
+        }
+    } else {
+        match body.blocks[b].term {
+            Call(callee, args, _, _, sp) => {
+                ops = args.clone()
+                match callee {
+                    Closure(o) => ops.push(o.clone())
+                    Ptr(o) => ops.push(o.clone())
+                    _ => {}
+                }
+                span = sp
+            }
+            _ => return None
+        }
+    }
+    for o in ops {
+        match o {
+            Move(p) => {
+                if p.local == l && p.proj.len() == 0 {
+                    return Some(span)
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// Whether the CFG goes from just after position (`b0`, `k0`) to (`b1`,
+// `k1`) without assigning local `l` again.
+fn reaches(body: Body, l: u32, b0: i64, k0: i64, b1: i64, k1: i64) -> bool {
+    var seen = Vec(bool).new()
+    for _ in 0..body.blocks.len() {
+        seen.push(false)
+    }
+    // Blocks to scan, each from a statement index.
+    var work = Vec((i64, i64)).new()
+    let n0 = body.blocks[b0].stmts.len()
+    if k0 < n0 {
+        work.push((b0, k0 + 1))
+    } else {
+        for s in succs(body.blocks[b0].term) {
+            work.push((s, 0))
+        }
+    }
+    while work.len() > 0 {
+        let (b, from) = work.pop().unwrap()
+        if from == 0 {
+            if seen[b] {
+                continue
+            }
+            seen[b] = true
+        }
+        let n = body.blocks[b].stmts.len()
+        var blocked = false
+        for k in from..n {
+            if b == b1 && k == k1 {
+                return true
+            }
+            match body.blocks[b].stmts[k] {
+                Assign(p, _, _) => {
+                    if p.local == l && p.proj.len() == 0 {
+                        blocked = true
+                        break
+                    }
+                }
+                _ => {}
+            }
+        }
+        if blocked {
+            continue
+        }
+        if b == b1 && k1 == n {
+            return true
+        }
+        match body.blocks[b].term {
+            Call(_, _, dest, _, _) => {
+                if dest.local == l && dest.proj.len() == 0 {
+                    continue
+                }
+            }
+            _ => {}
+        }
+        for s in succs(body.blocks[b].term) {
+            work.push((s, 0))
+        }
+    }
+    false
+}
+
+fn succs(t: Term) -> Vec(i64) {
+    var out = Vec(i64).new()
+    match t {
+        Goto(b) => out.push(b as i64)
+        Switch(_, targets, otherwise) => {
+            for x in targets {
+                out.push(x.block as i64)
+            }
+            out.push(otherwise as i64)
+        }
+        Call(_, _, _, next, _) => out.push(next as i64)
+        Assert(_, _, next, _) => out.push(next as i64)
+        _ => {}
+    }
+    out
+}
+
+// The places a statement or terminator reads.
+fn stmt_reads(s: Stmt) -> Vec(Place) {
+    var out = Vec(Place).new()
+    match s {
+        Assign(p, r, _) => {
+            for o in rvalue_operands(r) {
+                push_operand_place(&out, o)
+            }
+            match rvalue_place(r) {
+                Some(q) => out.push(q)
+                None => {}
+            }
+            if p.proj.len() > 0 {
+                out.push(Place.local(p.local))
+            }
+        }
+        Drop(p, _) => out.push(p.clone())
+        _ => {}
+    }
+    out
+}
+
+fn term_reads(t: Term) -> Vec(Place) {
+    var out = Vec(Place).new()
+    match t {
+        Switch(o, _, _) => push_operand_place(&out, o)
+        Call(callee, args, _, _, _) => {
+            for o in args {
+                push_operand_place(&out, o)
+            }
+            match callee {
+                Closure(o) => push_operand_place(&out, o)
+                Ptr(o) => push_operand_place(&out, o)
+                _ => {}
+            }
+        }
+        Assert(o, _, _, _) => push_operand_place(&out, o)
+        _ => {}
+    }
+    out
+}
+
+fn push_operand_place(inout out: Vec(Place), o: Operand) {
+    match o {
+        Copy(p) => out.push(p.clone())
+        Move(p) => out.push(p.clone())
+        Const(_) => {}
+    }
 }
 
 fn op_transfer(inout st: Vec(St), o: Operand, body: Body, span: Span, check: bool) -> Result((), Diag) {

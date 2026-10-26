@@ -126,6 +126,11 @@ Done ([data by index](../language/data-oriented.md)): `std.arena`.
 
 ### 4. Errors in one function
 
+Done: one run reports every function's errors, in source order. A use
+after a move notes each move that reaches it, a borrow conflict notes where
+the borrow started, and an error in a generic instance notes the chain of
+uses that made it.
+
 - Notes that show where a moved value went and where a borrow started.
 - More than one error per run.
 

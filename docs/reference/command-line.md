@@ -17,6 +17,12 @@ S-expressions with byte ranges, and `emit-program` every module the
 program loads (its name, file and imports, then its tree); they exist to compare the compiler with the one
 written in jihoo ([Self-hosting](../internals/self-hosting.md)).
 
+A program with errors gets all of them in one run, in source order (the
+first 20 are shown), each with notes: where a moved value went, where a
+conflicting borrow started, and which generic instance, used where, an
+error is in. Type errors come first. Move and borrow errors are reported
+once the program has none.
+
 | option | |
 |--------|---|
 | `-O0` … `-O3` | LLVM optimization (default `-O2`) |

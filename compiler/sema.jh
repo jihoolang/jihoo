@@ -7,6 +7,7 @@
 // Maps keyed by compile-time arguments use a text key (`inst_key`), where
 // Rust hashes them.
 
+import std.mem
 import ast
 import diag
 import lex
@@ -346,6 +347,9 @@ pub struct Sema {
     // Instances being lowered, for "required by" notes.
     stack: Vec(u32)
     pub comptime_closures: Vec(ComptimeClosure)
+    // Errors of the functions lowered so far; each one's function is left
+    // without a body and the rest go on, so that one run reports several.
+    pub errors: Vec(Diag)
     pub last_lambda: Option((u32, u32))
     pub adt_args_of: Map(u32, Vec(CVal))
 }
@@ -393,6 +397,7 @@ impl Sema {
             lambda_count: 0
             stack: Vec(u32).new()
             comptime_closures: Vec(ComptimeClosure).new()
+            errors: Vec(Diag).new()
             last_lambda: None
             adt_args_of: Map(u32, Vec(CVal)).new()
         }
@@ -1924,7 +1929,19 @@ impl Sema {
             self.stack.pop()
             match r {
                 Ok(_) => {}
-                Err(d) => return Err(self.with_origin(d, id))
+                Err(d) => {
+                    let d = self.with_origin(d, id)
+                    // One error of a generic body, not one per instance.
+                    var seen = false
+                    for e in self.errors {
+                        if e.span.file == d.span.file && e.span.lo == d.span.lo && e.msg == d.msg {
+                            seen = true
+                        }
+                    }
+                    if !seen {
+                        self.errors.push(d)
+                    }
+                }
             }
         }
         Ok(())
@@ -2676,6 +2693,9 @@ pub fn compile(a: load.Ast, tgt: target.Target, checked: bool, library: bool) ->
             }
         }
         None => {}
+    }
+    if s.errors.len() > 0 {
+        return Err(Diag.several(mem.replace(&s.errors, Vec(Diag).new())))
     }
     if entry.is_none() && !library {
         return Err(ty_err(Span.new(a.modules[root as i64].ast.file, 0, 0), "the program has no `main` function"))

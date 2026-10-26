@@ -37,6 +37,18 @@ for x in v {
 }
 ```
 
+Every borrow ends inside the function that made it, so an error can always
+point at both ends within that function:
+
+```text
+error: main.jh:4:5: `n` is used here while it is borrowed mutably
+    println(n)
+    ^^^^^^^^^^
+note: main.jh:3:13: the borrow starts here, and is used later
+    let r = fn() { n += 1 }
+            ^^^^^^^^^^^^^^^
+```
+
 A borrow lasts until its last use, not to the end of the block:
 
 ```jihoo

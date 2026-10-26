@@ -139,15 +139,23 @@ fn drive() {
         Err(d) => fail(sources.render(d).as_str(), 1)
     }
     if env.get("JIHOO_NO_ELAB").is_none() {
+        // Every function is checked; their errors are reported together.
+        var errors = Vec(diag.Diag).new()
         for i in 0..prog.fns.len() {
             match elab.run(&prog.fns[i]) {
                 Ok(_) => {}
-                Err(d) => fail(sources.render(d).as_str(), 1)
+                Err(d) => {
+                    errors.push(d)
+                    continue
+                }
             }
             match check.run(prog.types, prog.fns[i]) {
                 Ok(_) => {}
-                Err(d) => fail(sources.render(d).as_str(), 1)
+                Err(d) => errors.push(d)
             }
+        }
+        if errors.len() > 0 {
+            fail(sources.render(diag.Diag.several(errors)).as_str(), 1)
         }
     }
     if cmd == "emit-mir" {

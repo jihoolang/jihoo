@@ -1,0 +1,12 @@
+// A use after a move notes where the value went.
+// error: `s` is used here after it was moved away
+// error: move_note.jh:9:5: moved here
+fn take(sink s: String) {}
+
+fn main() {
+    let s = "x".to_string()
+    let n = 1
+    take(s)
+    println(n)
+    println(s)
+}
