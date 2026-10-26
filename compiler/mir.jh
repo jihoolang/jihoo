@@ -112,6 +112,9 @@ pub enum Const {
     // A slice of the given type over static bytes holding that many
     // elements (compile-time results).
     Slice(Vec(u8), i64, u32)
+    // The table of functions of a `dyn` value (a `*u8`): its destructor,
+    // then its methods.
+    Vtable(Vec(u32))
     // The address of a `static`.
     Static(u32, u32)
 }
@@ -129,6 +132,7 @@ impl Clone for Const {
             Zeroed(t) => Const.Zeroed(t)
             Bytes(b, t) => Const.Bytes(b.clone(), t)
             Slice(b, n, t) => Const.Slice(b.clone(), n, t)
+            Vtable(fs) => Const.Vtable(fs.clone())
             Static(i, t) => Const.Static(i, t)
         }
     }
@@ -434,6 +438,17 @@ pub fn show_operand(inout s: String, t: Types, o: Operand) {
                 s.push_str("](")
                 s.push_str(t.show(ty).as_str())
                 s.push(')')
+            }
+            Vtable(fs) => {
+                s.push_str("vtable[")
+                for i, f in fs {
+                    if i > 0 {
+                        s.push_str(", ")
+                    }
+                    s.push_str("fn#")
+                    f.show(&s)
+                }
+                s.push(']')
             }
             Static(i, _) => {
                 s.push_str("static#")

@@ -72,6 +72,11 @@ Since 0.1:
   destructors, so `Vec`, `String` and `Map` work in `comptime` code, and
   `String` and `Vec` results become static `str` and slice constants
   ([the heap](../language/comptime.md#the-heap)).
+- **Dynamic dispatch**: owned `dyn Trait` values, called through a table
+  of functions, and `dyn fn` closures that own what they capture, so they
+  can be returned and stored ([dynamic dispatch](../language/dyn.md)).
+  Left: traits with parameters, methods that return borrows, and a borrowed
+  `dyn` that does not allocate.
 - **Functional composition**: lazy iterator adapters and consumers in
   `std.iter`, with generic callback result inference and capture and
   forwarding of statically known closures.
@@ -143,8 +148,6 @@ uses that made it.
 
 - **Contracts** (which v0 had), checked by the kernel and the
   compile-time interpreter where possible.
-- **Dynamic dispatch**: `dyn Trait` values, and closures that own what they
-  capture, so they can be stored.
 - **The C ABI**: structs by value to and from C functions.
 - **Formatting**: `print` with several values, and formatting options.
 - **Tail calls** that never grow the stack.

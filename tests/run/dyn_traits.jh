@@ -1,0 +1,146 @@
+// `dyn Trait`: values of different types with one trait, owned on the
+// heap and called through a table of functions.
+
+trait Shape {
+    fn area(self) -> i64
+    fn name(self) -> String {
+        String.from("shape")
+    }
+    fn grow(inout self, k: i64)
+}
+
+#[derive(Clone)]
+struct Square {
+    side: i64
+}
+
+struct Rect {
+    w: i64
+    h: i64
+    label: String
+}
+
+impl Shape for Square {
+    fn area(self) -> i64 { self.side * self.side }
+    fn grow(inout self, k: i64) { self.side *= k }
+}
+
+impl Shape for Rect {
+    fn area(self) -> i64 { self.w * self.h }
+    fn name(self) -> String { self.label.clone() }
+    fn grow(inout self, k: i64) {
+        self.w *= k
+        self.h *= k
+    }
+}
+
+// Plain values have the trait too.
+impl Shape for i64 {
+    fn area(self) -> i64 { self }
+    fn grow(inout self, k: i64) { self += k }
+}
+
+fn total(shapes: [dyn Shape]) -> i64 {
+    var t = 0
+    for s in shapes {
+        t += s.area()
+    }
+    t
+}
+
+// A generic value becomes a `dyn` where one is expected.
+fn erase(comptime T: Shape, sink x: T) -> dyn Shape {
+    x
+}
+
+// A tree whose nodes are of different types, and a trait whose methods
+// take `dyn` values of itself.
+trait Node {
+    fn sum(self) -> i64
+    fn add(inout self, sink child: dyn Node)
+}
+
+struct Leaf {
+    n: i64
+}
+
+struct Branch {
+    children: Vec(dyn Node)
+}
+
+impl Node for Leaf {
+    fn sum(self) -> i64 { self.n }
+    fn add(inout self, sink child: dyn Node) { self.n += child.sum() }
+}
+
+impl Node for Branch {
+    fn sum(self) -> i64 {
+        var t = 0
+        for c in self.children {
+            t += c.sum()
+        }
+        t
+    }
+    fn add(inout self, sink child: dyn Node) { self.children.push(child) }
+}
+
+struct Scene {
+    items: Vec(dyn Shape)
+    focus: Option(dyn Shape)
+}
+
+fn main() {
+    var shapes = Vec(dyn Shape).new()
+    shapes.push(Square { side: 2 })
+    shapes.push(Rect { w: 2, h: 3, label: String.from("rect") })
+    shapes.push(7)
+    println(total(shapes.as_slice()))
+    //> 17
+    for s in shapes {
+        println(s.name())
+    }
+    //> shape
+    //> rect
+    //> shape
+
+    // `inout self` methods need a place that may change.
+    shapes[0].grow(3)
+    shapes[2].grow(1)
+    println(total(shapes.as_slice()))
+    //> 50
+
+    var one: dyn Shape = Square { side: 5 }
+    println(one.area())
+    //> 25
+    one = Rect { w: 1, h: 1, label: String.from("unit") }
+    println(one.name())
+    //> unit
+    let moved = one
+    println(moved.area())
+    //> 1
+
+    let e = erase(Square { side: 4 })
+    println(e.area())
+    //> 16
+
+    var scene = Scene { items: Vec(dyn Shape).new(), focus: None }
+    scene.items.push(erase(3))
+    scene.focus = Some(erase(Square { side: 9 }))
+    match scene.focus {
+        Some(f) => println(f.area() + scene.items[0].area())
+        None => {}
+    }
+    //> 84
+
+    var root: dyn Node = Branch { children: Vec(dyn Node).new() }
+    root.add(Leaf { n: 1 })
+    var inner: dyn Node = Branch { children: Vec(dyn Node).new() }
+    inner.add(Leaf { n: 2 })
+    inner.add(Leaf { n: 3 })
+    root.add(inner)
+    var leaf: dyn Node = Leaf { n: 10 }
+    leaf.add(Leaf { n: 4 })
+    root.add(leaf)
+    println(root.sum())
+    //> 20
+}

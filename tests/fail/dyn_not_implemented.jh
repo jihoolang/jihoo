@@ -1,0 +1,3 @@
+// error: `i64` does not implement `Shape`, so it cannot become a `dyn Shape`
+trait Shape { fn area(self) -> i64 }
+fn main() { let s: dyn Shape = 5 }

@@ -28,6 +28,7 @@ same on GitHub.
 - [Compile-time evaluation](language/comptime.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
+- [Dynamic dispatch](language/dyn.md)
 - [Iterator pipelines](language/iterators.md)
 - [Errors](language/errors.md)
 - [Data by index](language/data-oriented.md)

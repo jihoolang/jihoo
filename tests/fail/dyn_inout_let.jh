@@ -1,0 +1,8 @@
+// error: `s` cannot be changed; declare it with `var`
+trait Counter { fn bump(inout self) }
+struct C { n: i64 }
+impl Counter for C { fn bump(inout self) { self.n += 1 } }
+fn main() {
+    let s: dyn Counter = C { n: 0 }
+    s.bump()
+}

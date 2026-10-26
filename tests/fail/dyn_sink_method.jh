@@ -1,0 +1,14 @@
+// error: only methods that take `self` or `inout self` can be called through `dyn`
+trait Consume {
+    fn size(self) -> i64
+    fn consume(sink self) -> i64
+}
+struct A { n: i64 }
+impl Consume for A {
+    fn size(self) -> i64 { self.n }
+    fn consume(sink self) -> i64 { self.n }
+}
+fn main() {
+    let a: dyn Consume = A { n: 1 }
+    let n = a.consume()
+}

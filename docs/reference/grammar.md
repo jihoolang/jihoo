@@ -35,7 +35,7 @@ sep        a `,`, a `;`, or a newline before the next element
   ```
 
   `self`, `Self`, `null`, `fnptr`, `int`, `never`, `inline` (before `for`
-  or `if`) and the primitive types are
+  or `if`), `dyn` (before a name or `fn`) and the primitive types are
   ordinary names that the compiler gives a meaning to; `_` is a name too,
   except in patterns.
 - Some tokens are made of others: `..=` is `..` then `=`, which is how range
@@ -86,6 +86,7 @@ type     = path [ "(" expr { sep expr } ")" ]      Vec(i64), std.map.Map(K, V)
          | "(" ")" | "(" type ")"                   unit; parentheses
          | "(" type "," [ type { "," type } ] ")"   tuple
          | "fn" fn_ty | "fnptr" fn_ty               closure; function pointer
+         | "dyn" path | "dyn" "fn" fn_ty            owned trait value; owning closure
          | ( "ref" | "inout" ) type                 a borrow, as a type argument
          | "type"                                   the type of types
 path     = name { "." name }
@@ -143,7 +144,7 @@ primary  = literal | name | "(" ")" | "(" expr ")"
          | "inline" "for" name "in" cond block         unrolled at compile time
          | "inline" "if" cond block [ "else" ( "if" cond block ... | block ) ]
          | "fn" "(" [ cparam { "," cparam } ] ")" [ "->" type ] block   closure
-         | "fn" fn_ty | "fnptr" fn_ty | ( "ref" | "inout" ) type          a type
+         | "fn" fn_ty | "fnptr" fn_ty | "dyn" type | ( "ref" | "inout" ) type   a type
          | "return" [ expr ] | "break" | "continue"
 cparam   = name [ ":" type ]
 cond     = expr, where a struct literal cannot start (write `(P { x: 1 })`)

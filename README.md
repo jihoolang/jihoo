@@ -133,6 +133,11 @@ plain borrows.
 and arenas, generational handles and pools, and `Soa(T)`, a
 struct-of-arrays vector that reflection lays out from `T`'s fields.
 
+[Dynamic dispatch](docs/language/dyn.md): `dyn Trait` values own a value of
+any type with the trait and call it through a table of functions;
+`dyn fn` closures own what they capture, so they can be returned and
+stored.
+
 [Iterator pipelines](docs/language/iterators.md) compose `map`, `filter`,
 `take`, `zip` and `fold` without intermediate collections. Callback types
 are inferred, and compile-time closures can be named, captured and forwarded.
@@ -153,5 +158,5 @@ up to v0.1.1.
 Errors come several per run, in source order, with notes on where a
 moved value went and where a conflicting borrow started.
 
-Next ([roadmap](docs/internals/roadmap.md)): `dyn Trait` and closures that
-own what they capture, thread scopes, contracts.
+Next ([roadmap](docs/internals/roadmap.md)): thread scopes, contracts, the C
+ABI for structs.

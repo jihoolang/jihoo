@@ -200,7 +200,7 @@ impl Interpreter {
         match k {
             Ptr(_) | Ref(_) | RefMut(_) | FnPtr(_) => self.mark_pointer(addr, t.ptr_size)
             Str | Slice(_) => self.mark_pointer(addr, t.ptr_size)
-            Closure(_) => self.mark_pointer(addr, 2 * t.ptr_size)
+            Closure(_) | Dyn(_) | DynFn(_) => self.mark_pointer(addr, 2 * t.ptr_size)
             Array(el, n) => {
                 let stride = t.layout(el).size
                 if stride > 0 { for i in 0..n as i64 { self.pointer_fields(&t, addr + i as u64 * stride, el, span)? } }
@@ -310,6 +310,15 @@ impl Interpreter {
                 for x in integer(len as u128, t.ptr_size) { v.push(x) }
                 v
             }
+            Vtable(fs) => {
+                let addr = self.alloc(fs.len() as u64 * t.ptr_size, false, span)?
+                var data = Value.new()
+                for f in fs { for b in integer(f as u128 + 1, t.ptr_size) { data.push(b) } }
+                self.write(addr, data, span)?
+                self.mark_pointer(addr, fs.len() as u64 * t.ptr_size)
+                self.memory[(addr >> 32) as i64 - 1].readonly = true
+                integer(addr as u128, t.ptr_size)
+            }
             Static(_, _) => return Err(error(span, "statics cannot be accessed during compile-time evaluation"))
         })
     }
@@ -397,6 +406,7 @@ impl Interpreter {
                 Zeroed(ty) => ty
                 Bytes(_, ty) => ty
                 Slice(_, _, ty) => ty
+                Vtable(_) => types.BYTES
                 Static(_, ty) => ty
                 Bool(_) => types.BOOL
                 Str(_) => types.STR
@@ -713,6 +723,15 @@ impl Interpreter {
         }
         let k = t.kind(ty).clone()
         match k {
+            Dyn(_) | DynFn(_) => {
+                let data = bits(self.read_typed(&t, addr, types.BYTES, span)?, span)?
+                let vt = bits(self.read_typed(&t, addr + t.ptr_size, types.BYTES, span)?, span)? as u64
+                let f = bits(self.read(vt, t.ptr_size, span)?, span)?
+                if f == 0 || f > fns.len() as u128 { return Err(error(span, "invalid compile-time function pointer")) }
+                var args = Vec(Value).new()
+                args.push(integer(data, t.ptr_size))
+                let _ = self.call(&t, fns, f as u32 - 1, args, checked, depth + 1, span)?
+            }
             Array(el, n) => {
                 let stride = t.layout(el).size
                 for i in 0..n as i64 { self.drop_value(&t, fns, addr + i as u64 * stride, el, checked, depth, span)? }
@@ -952,7 +971,11 @@ pub fn drop_types(inout t: Types, body: mir.Body) -> Vec(u32) {
 }
 
 fn operand_functions(o: mir.Operand, inout ids: Vec(u32)) {
-    match o { Const(Fn(f)) => ids.push(f), _ => {} }
+    match o {
+        Const(Fn(f)) => ids.push(f)
+        Const(Vtable(fs)) => { for f in fs { ids.push(f) } }
+        _ => {}
+    }
 }
 
 pub fn function_ids(body: mir.Body) -> Vec(u32) {

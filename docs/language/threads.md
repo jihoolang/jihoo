@@ -156,8 +156,8 @@ Asking the same `Once` inside its own `f` waits forever.
 
 ## Profiles
 
-Native programs use POSIX threads from libc. [Freestanding
-programs](profiles.md) start threads with the `clone` system call, each on
+Native programs use POSIX threads from libc.
+[Freestanding programs](profiles.md) start threads with the `clone` system call, each on
 a stack of its own (8 MiB of address space, used as touched, with a guard
 page), and wait for them with a futex that the kernel clears when the
 thread ends. The freestanding allocator takes a lock, so every thread can

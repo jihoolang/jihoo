@@ -513,6 +513,10 @@ impl Parser {
                 let (ps, r) = self.fn_ty_rest()?
                 TyKind.FnPtr(ps, r)
             }
+            Ident if self.text() == "dyn" && (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn) => {
+                self.bump()
+                TyKind.Dyn(Box.new(self.ty()?))
+            }
             Ident => {
                 var path = Vec(String).new()
                 path.push(self.ident()?)
@@ -877,7 +881,7 @@ impl Parser {
                     self.bump()
                     return self.inline_expr(start)
                 }
-                if self.text() == "fnptr" && self.peek(1) == Tok.LParen {
+                if (self.text() == "fnptr" && self.peek(1) == Tok.LParen) || (self.text() == "dyn" && (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn)) {
                     ExprKind.Type(self.ty()?)
                 } else {
                     ExprKind.Name(self.ident()?)

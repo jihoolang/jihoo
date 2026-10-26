@@ -1,0 +1,6 @@
+// error: `s` is used here after it was moved away
+fn main() {
+    let s = String.from("a")
+    let f: dyn fn() -> i64 = fn() { s.len() }
+    println(s)
+}

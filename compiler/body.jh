@@ -80,6 +80,9 @@ pub struct Fb {
     // The place being lowered will be changed: indexing and `deref` take
     // their mutable forms.
     pub want_mut: bool
+    // A `dyn fn` body: its environment holds the captured values
+    // themselves, not borrows of them.
+    pub owned_env: bool
 }
 
 // The result of lowering an expression: a place to read or borrow, or an
@@ -167,6 +170,7 @@ impl Fb {
             env_local: None
             keep_place: false
             want_mut: false
+            owned_env: false
         }
         fb.new_local(ret, None, true, LocalKind.Ret, span)
         fb.cur = fb.new_block()
@@ -320,7 +324,9 @@ impl sema.Sema {
                 var p = Place.local(fb.env_local.unwrap())
                 p.proj.push(Proj.Deref)
                 p.proj.push(Proj.Field(i))
-                p.proj.push(Proj.Deref)
+                if !fb.owned_env {
+                    p.proj.push(Proj.Deref)
+                }
                 p
             }
         }
@@ -787,6 +793,9 @@ impl sema.Sema {
     }
 
     pub fn not_mutable_msg(self, fb: Fb, p: Place) -> String {
+        if fb.owned_env && fb.env_local == Some(p.local) {
+            return String.from("a `dyn fn` cannot change what it captured; it may be called from several places, or threads, at once")
+        }
         let l = fb.body.locals[p.local as i64]
         match l.name {
             Some(n) => {
@@ -1223,6 +1232,24 @@ impl sema.Sema {
                 }
             }
         }
+        // A value where a `dyn Trait` is expected: moved to the heap.
+        match tk.clone() {
+            Dyn(tr) => {
+                let is_dyn = match self.types.kind(from) {
+                    Dyn(_) | DynFn(_) => true
+                    _ => false
+                }
+                if !is_dyn && self.find_impl(tr, from)?.is_some() {
+                    return self.to_dyn(&fb, v, tr, to, span)
+                }
+                return Err(err(span, ("`" + self.types.show(from).as_str() + "` does not implement `" + self.traits[tr as i64].name.as_str() + "`, so it cannot become a `" + self.types.show(to).as_str() + "`").as_str()))
+            }
+            DynFn(_) => match self.types.kind(from) {
+                Closure(_) => return Err(err(span, "a closure that borrows cannot become a `dyn fn`: write the closure where the `dyn fn` is expected, so that it owns what it captures"))
+                _ => {}
+            }
+            _ => {}
+        }
         // `null` and integer constants to pointers are done by `expr`.
         // A named function where a closure is expected.
         var named: Option(u32) = None
@@ -1238,6 +1265,14 @@ impl sema.Sema {
         }
         match named {
             Some(f) => match tk {
+                DynFn(sig) => match self.types.kind(from).clone() {
+                    FnPtr(fsig) => {
+                        if fsig == sig {
+                            return self.fn_to_dyn(&fb, f, sig, to, span)
+                        }
+                    }
+                    _ => {}
+                }
                 Closure(sig) => match self.types.kind(from).clone() {
                     FnPtr(fsig) => {
                         if fsig == sig {
@@ -3408,9 +3443,14 @@ impl sema.Sema {
         let env = fb.env.clone()
         var exp_sig: Option(types.Sig) = None
         var want_ptr = false
+        var owned = false
         match exp {
             Some(t) => match self.types.kind(t).clone() {
                 Closure(sg) => exp_sig = Some(sg)
+                DynFn(sg) => {
+                    exp_sig = Some(sg)
+                    owned = true
+                }
                 FnPtr(sg) => {
                     exp_sig = Some(sg)
                     want_ptr = true
@@ -3489,9 +3529,18 @@ impl sema.Sema {
         if want_ptr && caps.len() > 0 {
             return Err(err(span, ("a `fnptr` cannot capture variables, and this closure uses `" + caps[0].name.as_str() + "`").as_str()))
         }
+        // A `dyn fn` owns what it captures: the values themselves, which
+        // its body only reads.
         var env_fields = Vec(u32).new()
         for c in caps {
-            env_fields.push(if c.mutable { self.types.refmut(c.ty) } else { self.types.refty(c.ty) })
+            if owned {
+                if self.types.is_view(c.ty) {
+                    return Err(err(span, ("a `dyn fn` owns what it captures, so it cannot capture `" + c.name.as_str() + "`, which holds a borrow (`" + self.types.show(c.ty).as_str() + "`)").as_str()))
+                }
+                env_fields.push(c.ty)
+            } else {
+                env_fields.push(if c.mutable { self.types.refmut(c.ty) } else { self.types.refty(c.ty) })
+            }
         }
         let env_t = self.types.tuple(env_fields.clone())
         let env_ref = self.types.refty(env_t)
@@ -3541,6 +3590,7 @@ impl sema.Sema {
         })
         self.inst_info.push(None)
         var lfb = self.lambda_fb(fb, id, env, r0, want_ptr, env_ref, caps, params, ptys, lparams.len(), span)
+        lfb.owned_env = owned
         // The return type, if not known, is the body's.
         var rt = r0
         if ret_t.is_none() {
@@ -3550,6 +3600,7 @@ impl sema.Sema {
             // Lower again with the type known.
             self.clear_closures(id)
             lfb = self.lambda_fb(fb, id, env, rt, want_ptr, env_ref, caps, params, ptys, lparams.len(), span)
+            lfb.owned_env = owned
             self.out[id as i64].sig.ret = rt
         }
         lfb.body.locals[0].ty = rt
@@ -3563,6 +3614,25 @@ impl sema.Sema {
         if want_ptr {
             let t = self.types.intern(TyKind.FnPtr(sig))
             return Ok(val_op(Operand.Const(Const.Fn(id)), t))
+        }
+        if owned {
+            // The captured values move (or copy) into the environment,
+            // which moves to the heap.
+            var ops = Vec(Operand).new()
+            for c in caps {
+                ops.push(self.operand(&fb, val_place(c.place.clone(), c.ty), span)?)
+            }
+            let envl = fb.temp(env_t, span)
+            fb.assign(Place.local(envl), Rvalue.Aggregate(mir.Agg.Struct(env_t), ops), span)
+            let data = self.box_dyn(&fb, val_place(Place.local(envl), env_t), span)?
+            var fns = Vec(u32).new()
+            fns.push(self.dyn_destroy(env_t, span)?)
+            fns.push(self.dyn_fn_thunk(id, env_ref, sig.clone(), span))
+            let dt = self.types.intern(TyKind.DynFn(sig))
+            var dops = Vec(Operand).new()
+            dops.push(data)
+            dops.push(Operand.Const(Const.Vtable(fns)))
+            return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(dt), dops), dt, span))
         }
         // The environment lives as long as the block around the closure.
         let envl = fb.block_temp(env_t, span)
@@ -3820,6 +3890,10 @@ impl sema.Sema {
     fn call_value(inout self, inout fb: Fb, sink v: Val, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
         var closure = false
         let sig = match self.types.kind(v.ty) {
+            DynFn(s) => {
+                let s = s.clone()
+                return self.call_dyn(&fb, v, 1, false, s, args, span)
+            }
             FnPtr(s) => s.clone()
             Closure(s) => {
                 closure = true
@@ -3947,6 +4021,10 @@ impl sema.Sema {
         for _ in 0..8 {
             if self.types.is_ptr(recv.ty) {
                 recv = self.auto_deref(&fb, recv, span)?
+            }
+            match self.types.kind(recv.ty) {
+                Dyn(tr) => return self.dyn_method_call(&fb, recv, tr, name, args, span)
+                _ => {}
             }
             match self.find_method(recv.ty, name)? {
                 Some(h) => return self.call_decl(&fb, h.imp, h.args.clone(), Some(recv), args, span, exp)
@@ -4638,6 +4716,13 @@ impl sema.Sema {
                 FnPtr(sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
                 _ => {}
             }
+            Dyn(inner) => match inner.kind.clone() {
+                Fn(ps, r) => match k {
+                    DynFn(sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
+                    _ => {}
+                }
+                _ => {}
+            }
             Path(p, args) => match args {
                 Some(args) => match k {
                     Adt(i) => {
@@ -5127,4 +5212,283 @@ impl sema.Sema {
         }
     }
 
+}
+
+// ---- dyn values ----
+//
+// A `dyn Trait` or `dyn fn` is a pointer to a value on the heap and a
+// pointer to a table of functions: first one that drops the value and
+// frees it, then one per method. A call makes an ordinary closure of the
+// method's function and a borrow of the `dyn` value, and calls that, so
+// the borrow checker sees the call as it sees any closure's.
+impl sema.Sema {
+    // Moves a value of a type with the trait into a `dyn Trait`.
+    fn to_dyn(inout self, inout fb: Fb, sink v: Val, tr: u32, to: u32, span: Span) -> Result(Val, Diag) {
+        let from = v.ty
+        if self.types.is_view(from) {
+            return Err(err(span, ("a `" + self.types.show(to).as_str() + "` owns its value, and `" + self.types.show(from).as_str() + "` holds a borrow").as_str()))
+        }
+        let fns = self.vtable(tr, from, span)?
+        let data = self.box_dyn(&fb, v, span)?
+        var ops = Vec(Operand).new()
+        ops.push(data)
+        ops.push(Operand.Const(Const.Vtable(fns)))
+        Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(to), ops), to, span))
+    }
+
+    // A named function where a `dyn fn` is expected: nothing to own.
+    fn fn_to_dyn(inout self, inout fb: Fb, f: u32, sig: types.Sig, to: u32, span: Span) -> Result(Val, Diag) {
+        var fns = Vec(u32).new()
+        fns.push(self.dyn_destroy(types.UNIT, span)?)
+        fns.push(self.closure_thunk(f, sig)?)
+        var ops = Vec(Operand).new()
+        ops.push(Operand.Const(Const.Null(types.BYTES)))
+        ops.push(Operand.Const(Const.Vtable(fns)))
+        Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(to), ops), to, span))
+    }
+
+    // `std.mem.dyn_box(T, v)`: the value moved to the heap, as a `*u8`.
+    fn box_dyn(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Operand, Diag) {
+        let fid = match self.lang.dyn_box {
+            Some(f) => f
+            None => return Err(err(span, "`dyn` values need `std.mem.dyn_box`"))
+        }
+        var iargs = Vec(CVal).new()
+        iargs.push(CVal.Type(v.ty))
+        var args = Vec(Val).new()
+        args.push(v)
+        let r = self.call_decl_vals(&fb, fid, iargs, None, args, span, None)?
+        self.operand(&fb, r, span)
+    }
+
+    // `std.mem.dyn_drop(T)`: drops the value behind a `*u8` and frees it.
+    fn dyn_destroy(inout self, t: u32, span: Span) -> Result(u32, Diag) {
+        let fid = match self.lang.dyn_drop {
+            Some(f) => f
+            None => return Err(err(span, "`dyn` values need `std.mem.dyn_drop`"))
+        }
+        var iargs = Vec(CVal).new()
+        iargs.push(CVal.Type(t))
+        self.instance(fid, iargs, span)
+    }
+
+    // The table of a type's functions for a trait.
+    fn vtable(inout self, tr: u32, t: u32, span: Span) -> Result(Vec(u32), Diag) {
+        var key = String.new()
+        tr.show(&key)
+        key.push(',')
+        t.show(&key)
+        match self.vtables.get(key.clone()) {
+            Some(fs) => return Ok(fs.clone())
+            None => {}
+        }
+        let ms = self.dyn_methods(tr, span)?
+        var fns = Vec(u32).new()
+        fns.push(self.dyn_destroy(t, span)?)
+        for m in ms {
+            let hit = match self.trait_method(tr, t, m.name.as_str(), m.fid)? {
+                Some(h) => h
+                None => return Err(err(span, ("`" + self.types.show(t).as_str() + "` has no method `" + m.name.as_str() + "`").as_str()))
+            }
+            let f = self.instance(hit.imp, hit.args, span)?
+            fns.push(self.method_thunk(f, t, m, span)?)
+        }
+        self.vtables.insert(key, fns.clone())
+        Ok(fns)
+    }
+
+    // A function for a table: it takes the `dyn` value's address (as a
+    // closure takes its environment) and calls method `f` of `t` with the
+    // value it points to as `self`.
+    fn method_thunk(inout self, f: u32, t: u32, m: sema.DynMethod, span: Span) -> Result(u32, Diag) {
+        let fsig = self.out[f as i64].sig.clone()
+        let fpass = self.out[f as i64].pass.clone()
+        var same = fsig.ret == m.sig.ret && fsig.params.len() == m.sig.params.len() + 1
+        if same {
+            for i, pt in m.sig.params {
+                if fsig.params[i + 1] != pt {
+                    same = false
+                }
+            }
+        }
+        if !same {
+            return Err(err(span, ("`" + self.out[f as i64].name.as_str() + "` has another signature than the trait's `" + m.name.as_str() + "`").as_str()))
+        }
+        var params = Vec(u32).new()
+        var pass = Vec(mir.ParamPass).new()
+        params.push(types.BYTES)
+        pass.push(mir.ParamPass.Value)
+        for i in 1..fsig.params.len() {
+            params.push(fsig.params[i])
+            pass.push(fpass[i])
+        }
+        let id = self.out.len() as u32
+        var fb = Fb.new(id, Env.new(0), fsig.ret, ast.RetMode.Value, span)
+        var locals = Vec(u32).new()
+        for t in params {
+            locals.push(fb.new_local(t, None, false, LocalKind.Arg, span))
+        }
+        fb.body.arg_count = params.len()
+        let tp = self.types.ptr(t)
+        let p = self.dyn_data(&fb, locals[0], tp, span)
+        var args = Vec(Operand).new()
+        let st = fsig.params[0]
+        match fpass[0] {
+            Borrow => {
+                let mutable = match self.types.kind(st) {
+                    RefMut(_) => true
+                    _ => false
+                }
+                let r = fb.temp(st, span)
+                fb.assign(Place.local(r), if mutable { Rvalue.RefMut(Place.deref(p)) } else { Rvalue.Ref(Place.deref(p)) }, span)
+                args.push(if mutable { Operand.Move(Place.local(r)) } else { copy_of(r) })
+            }
+            Value => args.push(Operand.Copy(Place.deref(p)))
+            Owned => return Err(err(span, "a method that takes `sink self` cannot be called through `dyn`"))
+        }
+        for i in 1..locals.len() {
+            let l = locals[i]
+            args.push(if self.types.is_plain(params[i]) { copy_of(l) } else { Operand.Move(Place.local(l)) })
+        }
+        let next = fb.new_block()
+        fb.term(Term.Call(mir.Callee.Fn(f), args, Place.local(mir.RET), next, span))
+        fb.switch_to(next)
+        fb.term(Term.Return)
+        let name = "dyn thunk for " + self.out[f as i64].name.as_str()
+        self.push_thunk(fb, name, types.Sig { params: params, ret: fsig.ret }, pass, span)
+        Ok(id)
+    }
+
+    // The table function of a `dyn fn`: calls the closure's function with
+    // its environment on the heap.
+    fn dyn_fn_thunk(inout self, f: u32, env_ref: u32, sig: types.Sig, span: Span) -> u32 {
+        let fpass = self.out[f as i64].pass.clone()
+        var params = Vec(u32).new()
+        var pass = Vec(mir.ParamPass).new()
+        params.push(types.BYTES)
+        pass.push(mir.ParamPass.Value)
+        for i, t in sig.params {
+            params.push(t)
+            pass.push(fpass[i + 1])
+        }
+        let id = self.out.len() as u32
+        var fb = Fb.new(id, Env.new(0), sig.ret, ast.RetMode.Value, span)
+        var locals = Vec(u32).new()
+        for t in params {
+            locals.push(fb.new_local(t, None, false, LocalKind.Arg, span))
+        }
+        fb.body.arg_count = params.len()
+        let e = self.dyn_data(&fb, locals[0], env_ref, span)
+        var args = Vec(Operand).new()
+        args.push(copy_of(e))
+        for i in 1..locals.len() {
+            let l = locals[i]
+            args.push(if self.types.is_plain(params[i]) { copy_of(l) } else { Operand.Move(Place.local(l)) })
+        }
+        let next = fb.new_block()
+        fb.term(Term.Call(mir.Callee.Fn(f), args, Place.local(mir.RET), next, span))
+        fb.switch_to(next)
+        fb.term(Term.Return)
+        let name = "dyn thunk for " + self.out[f as i64].name.as_str()
+        self.push_thunk(fb, name, types.Sig { params: params, ret: sig.ret }, pass, span)
+        id
+    }
+
+    // The data pointer of the `dyn` value that local `v` (a `*u8`) points
+    // to, as type `t`.
+    fn dyn_data(inout self, inout fb: Fb, v: u32, t: u32, span: Span) -> u32 {
+        let pp = self.types.ptr(types.BYTES)
+        let a = fb.temp(pp, span)
+        fb.assign(Place.local(a), Rvalue.Cast(copy_of(v), pp, mir.CastKind.Ptr), span)
+        let d = fb.temp(types.BYTES, span)
+        fb.assign(Place.local(d), Rvalue.Use(Operand.Copy(Place.deref(a))), span)
+        let p = fb.temp(t, span)
+        fb.assign(Place.local(p), Rvalue.Cast(copy_of(d), t, mir.CastKind.Ptr), span)
+        p
+    }
+
+    fn push_thunk(inout self, sink fb: Fb, sink name: String, sink sig: types.Sig, sink pass: Vec(mir.ParamPass), span: Span) {
+        let id = fb.id
+        var symbol = String.from("dyn.")
+        id.show(&symbol)
+        let body = match fb {
+            Fb { body, .. } => body
+        }
+        self.out.push(mir.Function {
+            symbol: symbol
+            name: name
+            sig: sig
+            pass: pass
+            body: Some(body)
+            linkage: mir.Linkage.Internal
+            variadic: false
+            returns_ref: false
+            span: span
+        })
+        self.inst_info.push(None)
+    }
+
+    // `x.name(args)` on a `dyn Trait`.
+    fn dyn_method_call(inout self, inout fb: Fb, sink recv: Val, tr: u32, name: str, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+        let ms = self.dyn_methods(tr, span)?
+        for m in ms {
+            if m.name == name {
+                if args.len() != m.sig.params.len() {
+                    var msg = "`" + name + "` takes "
+                    m.sig.params.len().show(&msg)
+                    msg.push_str(" argument(s), ")
+                    args.len().show(&msg)
+                    msg.push_str(" given")
+                    return Err(err(span, msg.as_str()))
+                }
+                return self.call_dyn(&fb, recv, m.slot, m.mutable, m.sig.clone(), args, span)
+            }
+        }
+        let tn = self.types.show(recv.ty)
+        if self.traits[tr as i64].fns.get(name).is_some() {
+            return Err(err(span, ("`" + tn.as_str() + "` cannot call `" + name + "`: only methods that take `self` or `inout self` can be called through `dyn`").as_str()))
+        }
+        Err(err(span, ("`" + tn.as_str() + "` has no method `" + name + "`").as_str()))
+    }
+
+    // Calls function `slot` of a `dyn` value's table, with a borrow of the
+    // value (mutable for `inout self`) as the closure's environment.
+    fn call_dyn(inout self, inout fb: Fb, sink v: Val, slot: i64, mutable: bool, sig: types.Sig, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+        if sig.params.len() != args.len() {
+            var m = String.from("this function takes ")
+            sig.params.len().show(&m)
+            m.push_str(" argument(s), ")
+            args.len().show(&m)
+            m.push_str(" given")
+            return Err(err(span, m.as_str()))
+        }
+        let dt = v.ty
+        let (p, temp) = self.as_place(&fb, v, span)
+        if mutable && !temp && !self.place_mutable(fb, p) {
+            return Err(err(span, self.not_mutable_msg(fb, p).as_str()))
+        }
+        // The table first: the borrow below is the last use of the place
+        // before the call.
+        let pp = self.types.ptr(types.BYTES)
+        let a = fb.temp(pp, span)
+        fb.assign(Place.local(a), Rvalue.Cast(Operand.Copy(p.with(Proj.Field(1))), pp, mir.CastKind.Ptr), span)
+        let s = fb.temp(pp, span)
+        fb.assign(Place.local(s), Rvalue.Offset(copy_of(a), int_const(slot as i128, types.I64)), span)
+        let code = fb.temp(types.BYTES, span)
+        fb.assign(Place.local(code), Rvalue.Use(Operand.Copy(Place.deref(s))), span)
+        let rt = if mutable { self.types.refmut(dt) } else { self.types.refty(dt) }
+        let r = fb.temp(rt, span)
+        fb.assign(Place.local(r), if mutable { Rvalue.RefMut(p.clone()) } else { Rvalue.Ref(p.clone()) }, span)
+        let ct = self.types.intern(TyKind.Closure(sig.clone()))
+        let c = fb.temp(ct, span)
+        var cops = Vec(Operand).new()
+        cops.push(copy_of(code))
+        cops.push(if mutable { Operand.Move(Place.local(r)) } else { copy_of(r) })
+        fb.assign(Place.local(c), Rvalue.Aggregate(mir.Agg.Closure(ct), cops), span)
+        var ops = Vec(Operand).new()
+        for i, x in args {
+            ops.push(self.arg_for_local_ty(&fb, x, sig.params[i])?)
+        }
+        self.emit_call(&fb, mir.Callee.Closure(copy_of(c)), ops, sig.ret, span)
+    }
 }

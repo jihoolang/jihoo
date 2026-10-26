@@ -296,6 +296,26 @@ pub struct Lang {
     pub show: Option(u32)
     // std.derive's `Derived`: the bodies of `#[derive(...)]`d methods.
     pub derived: Option(u32)
+    // `std.mem.dyn_box` and `dyn_drop`, which `dyn` values use.
+    pub dyn_box: Option(u32)
+    pub dyn_drop: Option(u32)
+}
+
+// A method that a `dyn Trait` value can call: the trait's declaration, its
+// place in the table (after the destructor), whether it takes
+// `inout self`, and its signature without `self` (as a closure's).
+pub struct DynMethod {
+    pub name: String
+    pub fid: u32
+    pub slot: i64
+    pub mutable: bool
+    pub sig: types.Sig
+}
+
+impl Clone for DynMethod {
+    fn clone(self) -> DynMethod {
+        DynMethod { name: self.name.clone(), fid: self.fid, slot: self.slot, mutable: self.mutable, sig: self.sig.clone() }
+    }
 }
 
 // An impl found for a type: the impl, and the arguments of its parameters.
@@ -353,6 +373,10 @@ pub struct Sema {
     pub errors: Vec(Diag)
     pub last_lambda: Option((u32, u32))
     pub adt_args_of: Map(u32, Vec(CVal))
+    // The methods of each trait that `dyn` values call, by trait.
+    pub dyn_methods_of: Map(u32, Vec(DynMethod))
+    // The table of each type for each trait: "trait,type" -> functions.
+    pub vtables: Map(String, Vec(u32))
 }
 
 pub fn ty_err(span: Span, msg: str) -> Diag {
@@ -391,7 +415,7 @@ impl Sema {
             queue: Vec(Pending).new()
             queue_head: 0
             eval_depth: 0
-            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, vec: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None }
+            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, vec: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None, dyn_box: None, dyn_drop: None }
             freestanding: freestanding
             target: tgt
             checked: checked
@@ -401,6 +425,8 @@ impl Sema {
             errors: Vec(Diag).new()
             last_lambda: None
             adt_args_of: Map(u32, Vec(CVal)).new()
+            dyn_methods_of: Map(u32, Vec(DynMethod)).new()
+            vtables: Map(String, Vec(u32)).new()
         }
     }
 
@@ -503,6 +529,8 @@ impl Sema {
         self.lang.result = self.lang_adt(p, "Result")
         self.lang.string = self.lang_adt(p, "String")
         self.lang.vec = self.lang_adt(p, "Vec")
+        self.lang.dyn_box = self.lang_fn(p, "dyn_box")
+        self.lang.dyn_drop = self.lang_fn(p, "dyn_drop")
         match at(self.ast).derive {
             Some(d) => self.lang.derived = self.lang_trait(d, "Derived")
             None => {}
@@ -512,6 +540,17 @@ impl Sema {
     fn lang_trait(self, p: u32, n: str) -> Option(u32) {
         match self.lookup(p, n) {
             Some(Trait(t)) => Some(t)
+            _ => None
+        }
+    }
+
+    // A function of `std.mem`, which the prelude imports.
+    fn lang_fn(self, p: u32, n: str) -> Option(u32) {
+        var path = Vec(String).new()
+        path.push(String.from("mem"))
+        path.push(String.from(n))
+        match self.lookup_path(p, path) {
+            Some((Fn(f), _)) => Some(f)
             _ => None
         }
     }
@@ -813,7 +852,100 @@ impl Sema {
             }
             Fn(ps, r) => self.resolve_fn_ty(ps, r, env, true)
             FnPtr(ps, r) => self.resolve_fn_ty(ps, r, env, false)
+            Dyn(inner) => match inner.kind.clone() {
+                Fn(ps, r) => {
+                    let c = self.resolve_fn_ty(ps, r, env, true)?
+                    let sig = match self.types.kind(c) {
+                        Closure(s) => s.clone()
+                        _ => panic("closure type")
+                    }
+                    Ok(self.types.intern(TyKind.DynFn(sig)))
+                }
+                _ => {
+                    let tr = self.resolve_trait(env.module, inner.deref())?
+                    self.dyn_methods(tr, t.span)?
+                    Ok(self.types.intern(TyKind.Dyn(tr)))
+                }
+            }
         }
+    }
+
+    // The methods of a trait that a `dyn` value can call, in the order of
+    // its table. Methods without `self`, or that take it with `sink`, are
+    // left out; a signature that names `Self` is an error.
+    pub fn dyn_methods(inout self, tr: u32, span: Span) -> Result(Vec(DynMethod), Diag) {
+        match self.dyn_methods_of.get(tr) {
+            Some(ms) => return Ok(ms.clone())
+            None => {}
+        }
+        let name = self.traits[tr as i64].name.clone()
+        self.types.trait_names.insert(tr, name.clone())
+        // A method's signature may name `dyn` of this trait again.
+        self.dyn_methods_of.insert(tr, Vec(DynMethod).new())
+        match self.dyn_methods_inner(tr, name, span) {
+            Ok(ms) => {
+                self.dyn_methods_of.insert(tr, ms.clone())
+                Ok(ms)
+            }
+            Err(d) => {
+                self.dyn_methods_of.remove(tr)
+                Err(d)
+            }
+        }
+    }
+
+    fn dyn_methods_inner(inout self, tr: u32, name: String, span: Span) -> Result(Vec(DynMethod), Diag) {
+        let decl = at(self.traits[tr as i64].decl)
+        if decl.params.len() > 0 {
+            return Err(ty_err(span, ("`dyn " + name.as_str() + "`: a trait with parameters cannot be `dyn` yet").as_str()))
+        }
+        let env = Env.new(self.traits[tr as i64].module)
+        var out = Vec(DynMethod).new()
+        for item in decl.items {
+            let f = match item.kind {
+                Fn(f) => f.clone()
+                _ => continue
+            }
+            if f.params.len() == 0 || f.params[0].name != "self" || f.params[0].mode == ast.Mode.Sink {
+                continue
+            }
+            let fid = match self.traits[tr as i64].fns.get(f.name.as_str()) {
+                Some(x) => x
+                None => continue
+            }
+            var params = Vec(u32).new()
+            for i, p in f.params {
+                if i == 0 {
+                    continue
+                }
+                if p.mode == ast.Mode.Comptime {
+                    return Err(ty_err(p.span, ("`dyn " + name.as_str() + "`: `" + f.name.as_str() + "` has a compile-time parameter, so it cannot be called through `dyn`").as_str()))
+                }
+                let pt = match p.ty {
+                    Some(t) => t.clone()
+                    None => return Err(ty_err(p.span, "this parameter needs a type"))
+                }
+                let t = match self.resolve_ty(pt, env) {
+                    Ok(t) => t
+                    Err(_) => return Err(ty_err(p.span, ("`dyn " + name.as_str() + "`: the type of this parameter of `" + f.name.as_str() + "` must not depend on the type behind the `dyn` (`Self`)").as_str()))
+                }
+                params.push(self.param_local_ty(p.mode, t).0)
+            }
+            var ret = types.UNIT
+            match f.ret {
+ Some(r) => ret = match self.resolve_ty(r.clone(), env) {
+                    Ok(t) => t
+                    Err(_) => return Err(ty_err(r.span, ("`dyn " + name.as_str() + "`: the result of `" + f.name.as_str() + "` must not depend on the type behind the `dyn` (`Self`)").as_str()))
+                }
+                None => {}
+            }
+            match f.ret_mode {
+                Value => {}
+                _ => return Err(ty_err(f.name_span, ("`dyn " + name.as_str() + "`: `" + f.name.as_str() + "` returns a borrow, which a `dyn` call cannot yet").as_str()))
+            }
+            out.push(DynMethod { name: f.name.clone(), fid: fid, slot: out.len() + 1, mutable: f.params[0].mode == ast.Mode.Inout, sig: types.Sig { params: params, ret: ret } })
+        }
+        Ok(out)
     }
 
     fn resolve_fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty)), env: Env, closure: bool) -> Result(u32, Diag) {
@@ -1670,6 +1802,36 @@ impl Sema {
             return Ok(Some(ImplHit { imp: body_fid, args: a }))
         }
         Ok(None)
+    }
+
+    // The function that a trait's method runs for a type: the impl's, a
+    // derived one, or the trait's default.
+    pub fn trait_method(inout self, tr: u32, t: u32, name: str, default_fid: u32) -> Result(Option(ImplHit), Diag) {
+        let hit = match self.find_impl(tr, t)? {
+            Some(h) => h
+            None => return Ok(None)
+        }
+        if hit.imp == BUILTIN_IMPL {
+            return Ok(None)
+        }
+        var body_fid = default_fid
+        if hit.imp != DERIVED_IMPL {
+            match self.impls[hit.imp as i64].fns.get(name) {
+                Some(fid) => return Ok(Some(ImplHit { imp: fid, args: hit.args.clone() }))
+                None => {}
+            }
+        } else {
+            match self.lang.derived {
+                Some(d) => match self.traits[d as i64].fns.get(name) {
+                    Some(f) => body_fid = f
+                    None => {}
+                }
+                None => {}
+            }
+        }
+        var a = Vec(CVal).new()
+        a.push(CVal.Type(t))
+        Ok(Some(ImplHit { imp: body_fid, args: a }))
     }
 
     // ---- instances ----

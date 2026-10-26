@@ -1,0 +1,5 @@
+// error: a `dyn fn` cannot change what it captured
+fn main() {
+    var n = 0
+    let f: dyn fn() = fn() { n += 1 }
+}

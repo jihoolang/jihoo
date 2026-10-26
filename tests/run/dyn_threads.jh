@@ -1,0 +1,42 @@
+// `dyn` values own what they hold, so they can go to another thread.
+import std.sync
+import std.thread
+
+trait Job {
+    fn run(self) -> i64
+}
+
+struct Square {
+    n: i64
+}
+
+impl Job for Square {
+    fn run(self) -> i64 { self.n * self.n }
+}
+
+fn main() {
+    let tasks = sync.Channel(dyn fn() -> i64).new()
+    let jobs = sync.Channel(dyn Job).new()
+    let (sum, _) = thread.join(fn() {
+        var t = 0
+        for f in tasks.iter() {
+            t += f()
+        }
+        for j in jobs.iter() {
+            t += j.run()
+        }
+        t
+    }, fn() {
+        for i in 0..10 {
+            let s = i.to_string()
+            tasks.send(fn() { s.len() })
+        }
+        tasks.close()
+        for i in 0..4 {
+            jobs.send(Square { n: i })
+        }
+        jobs.close()
+    })
+    println(sum)
+    //> 24
+}

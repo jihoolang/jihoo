@@ -1,0 +1,9 @@
+// error: is borrowed
+trait Shape { fn area(self, extra: dyn Shape) -> i64 }
+struct Sq { s: i64 }
+impl Shape for Sq { fn area(self, extra: dyn Shape) -> i64 { self.s } }
+fn take(sink s: dyn Shape) -> dyn Shape { s }
+fn main() {
+    var a: dyn Shape = Sq { s: 1 }
+    let n = a.area(take(a))
+}

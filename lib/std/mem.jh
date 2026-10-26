@@ -54,3 +54,18 @@ pub unsafe fn drop_at(comptime T: type, p: *T) {
         drop(read(p))
     }
 }
+
+// The heap value behind a `dyn Trait` or `dyn fn`: the compiler moves the
+// value into one allocation and puts `dyn_drop` first in its table.
+pub fn dyn_box(comptime T: type, sink v: T) -> *u8 {
+    unsafe {
+        let p = alloc(T, 1)
+        write(p, v)
+        p as *u8
+    }
+}
+
+pub unsafe fn dyn_drop(comptime T: type, p: *u8) {
+    drop_at(T, p as *T)
+    dealloc(T, p as *T, 1)
+}

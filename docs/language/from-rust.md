@@ -27,6 +27,8 @@ if you know Rust, and check here when code that "should work" does not. The
 | `\|x\| x + 1` | `fn(x) { x + 1 }` |
 | `impl Fn(i64) -> bool` | `fn(i64) -> bool` (a borrowed closure) |
 | `fn(i64) -> i64` (a pointer) | `fnptr(i64) -> i64` |
+| `Box<dyn Shape>` | `dyn Shape` (owned; the value moves in where one is expected) |
+| `Box<dyn Fn(i64) -> i64>`, `move \|x\| x + n` | `dyn fn(i64) -> i64`, `fn(x) { x + n }` where one is expected |
 | `usize`, `char` | `i64` for lengths and indices; `u8` for bytes (`'a'` is a `u8`) |
 | `0..=n` in a `for` | `0..n + 1` (`..=` exists only in patterns) |
 | `if let Some(x) = o { ... }` | `match o { Some(x) => ..., None => {} }` |
@@ -52,8 +54,9 @@ if you know Rust, and check here when code that "should work" does not. The
 - No string formatting. Build text with `+` and `to_string()`, or call
   `show(&out)` on each part.
 - No items inside function bodies: helper functions go at the top level.
-- No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes,
-  no `dyn`, no trait objects. Traits are resolved at compile time only.
+- No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes.
+  [`dyn Trait`](dyn.md) is always owned: there is no `&dyn Trait`, and a
+  `dyn fn` cannot change what it captured (no `FnMut`).
 - No `Copy` trait to opt into: a type made only of plain parts copies by
   itself ([Values and ownership](ownership.md)).
 - No overloading of `/`, `%` or the bitwise operators. `==`/`!=` call `eq`,

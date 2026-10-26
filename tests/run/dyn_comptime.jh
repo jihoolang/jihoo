@@ -1,0 +1,47 @@
+// `dyn` values during compile-time evaluation.
+//> 209
+
+trait Shape {
+    fn area(self) -> i64
+}
+
+struct Square {
+    side: i64
+}
+
+impl Shape for Square {
+    fn area(self) -> i64 { self.side * self.side }
+}
+
+struct Triangle {
+    b: i64
+    h: i64
+    name: String
+}
+
+impl Shape for Triangle {
+    fn area(self) -> i64 { self.b * self.h / 2 + self.name.len() * 0 }
+}
+
+fn areas() -> i64 {
+    var shapes = Vec(dyn Shape).new()
+    shapes.push(Square { side: 3 })
+    shapes.push(Triangle { b: 4, h: 5, name: String.from("t") })
+    var fs = Vec(dyn fn(i64) -> i64).new()
+    let k = 10
+    fs.push(fn(x) { x * k })
+    var t = 0
+    for s in shapes {
+        t += s.area()
+    }
+    for f in fs {
+        t += f(t)
+    }
+    t
+}
+
+const AREAS = areas()
+
+fn main() {
+    println(AREAS)
+}

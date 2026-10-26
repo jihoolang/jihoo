@@ -1,0 +1,5 @@
+// error: the type of this parameter of `same` must not depend on the type behind the `dyn`
+trait Same { fn same(self, other: Self) -> bool }
+struct A {}
+impl Same for A { fn same(self, other: A) -> bool { true } }
+fn main() { let s: dyn Same = A {} }
