@@ -16,8 +16,20 @@ given a new value:
 
 ```jihoo
 let a = String.from("text")
-let b = a              // moves: `a` is empty now
+var b = a              // moves: `a` is empty now
 println(a)             // error: `a` is used here after it was moved away
+```
+
+(`let b = a` would borrow `a` instead; see [borrowing](borrowing.md).) The
+error shows where the value went:
+
+```text
+error: main.jh:4:13: `a` is used here after it was moved away
+    println(a)
+            ^
+note: main.jh:3:9: moved here
+    var b = a
+        ^
 ```
 
 Copies of values that own memory are written out with `.clone()`, so a copy

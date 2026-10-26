@@ -147,5 +147,8 @@ release builds it, and it builds itself to the same LLVM IR. There is no
 Rust left; the Rust compiler that first bootstrapped it is in the history
 up to v0.1.1.
 
-Next ([roadmap](docs/internals/roadmap.md)): error notes for moves and
-borrows, more than one error per run.
+Errors come several per run, in source order, with notes on where a
+moved value went and where a conflicting borrow started.
+
+Next ([roadmap](docs/internals/roadmap.md)): the compile-time heap, channels
+and freestanding threads, `dyn Trait`.

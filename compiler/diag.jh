@@ -29,11 +29,33 @@ pub struct Diag {
     pub span: Span
     pub msg: String
     pub notes: Vec(Note)
+    // Further errors of the same run, reported after this one.
+    pub more: Vec(Diag)
 }
+
+// At most this many errors are shown.
+pub const MAX_ERRORS: i64 = 20
 
 impl Diag {
     pub fn new(span: Span, msg: str) -> Diag {
-        Diag { span: span, msg: msg.to_string(), notes: Vec(Note).new() }
+        Diag { span: span, msg: msg.to_string(), notes: Vec(Note).new(), more: Vec(Diag).new() }
+    }
+
+    // The first of several errors, carrying the others, in source order.
+    pub fn several(sink errors: Vec(Diag)) -> Diag {
+        var errors = errors
+        sort_by(&errors, fn(a, b) { a.span.file < b.span.file || (a.span.file == b.span.file && a.span.lo < b.span.lo) })
+        var first: Option(Diag) = None
+        var rest = Vec(Diag).new()
+        for d in errors.into_iter() {
+            match first {
+                Some(_) => rest.push(d)
+                None => first = Some(d)
+            }
+        }
+        var d = first.expect("no errors")
+        d.more = rest
+        d
     }
 
     pub fn note(sink self, span: Option(Span), msg: str) -> Diag {
@@ -97,41 +119,77 @@ impl Sources {
         s
     }
 
+    // An error, its notes, and the errors after it.
     pub fn render(self, d: Diag) -> String {
-        var s = String.from("error: ")
+        var s = String.new()
+        self.render_one(&s, d)
+        let n = d.more.len() + 1
+        var shown = 1
+        for m in d.more {
+            if shown == MAX_ERRORS {
+                break
+            }
+            s.push_str("\n\n")
+            self.render_one(&s, m)
+            shown += 1
+        }
+        if n > 1 {
+            s.push_str("\n\n")
+            n.show(&s)
+            s.push_str(" errors")
+            if n > shown {
+                s.push_str(" (the first ")
+                shown.show(&s)
+                s.push_str(" shown)")
+            }
+        }
+        s
+    }
+
+    fn render_one(self, inout s: String, d: Diag) {
+        s.push_str("error: ")
         s.push_str(self.where_(d.span).as_str())
         s.push_str(": ")
         s.push_str(d.msg.as_str())
-        if (d.span.file as i64) < self.files.len() {
-            let text = self.files[d.span.file as i64].text.as_str()
-            let lo = min(d.span.lo as i64, text.len)
-            var ls = lo
-            while ls > 0 && text[ls - 1] != '\n' {
-                ls -= 1
-            }
-            var le = lo
-            while le < text.len && text[le] != '\n' {
-                le += 1
-            }
-            let width = max(min(d.span.hi as i64, le), lo + 1) - lo
-            s.push_str("\n    ")
-            push_lossy(&s, text[ls..le])
-            s.push_str("\n    ")
-            repeat(&s, ' ', lo - ls)
-            repeat(&s, '^', width)
-        }
+        self.snippet(&s, d.span)
         for n in d.notes {
             match n.span {
                 Some(sp) => {
                     s.push_str("\nnote: ")
                     s.push_str(self.where_(sp).as_str())
                     s.push_str(": ")
+                    s.push_str(n.msg.as_str())
+                    self.snippet(&s, sp)
                 }
-                None => s.push_str("\nnote: ")
+                None => {
+                    s.push_str("\nnote: ")
+                    s.push_str(n.msg.as_str())
+                }
             }
-            s.push_str(n.msg.as_str())
         }
-        s
+    }
+
+    // The span's line, with `^` under the span.
+    fn snippet(self, inout s: String, span: Span) {
+        if span.file as i64 >= self.files.len() {
+            return
+        }
+        let text = self.files[span.file as i64].text.as_str()
+        let lo = min(span.lo as i64, text.len)
+        var ls = lo
+        while ls > 0 && text[ls - 1] != '\n' {
+            ls -= 1
+        }
+        var le = lo
+        while le < text.len && text[le] != '\n' {
+            le += 1
+        }
+        let width = max(min(span.hi as i64, le), lo + 1) - lo
+        s.push_str("\n    ")
+        push_lossy(&s, text[ls..le])
+        s.push_str("\n    ")
+        repeat(&s, ' ', lo - ls)
+        repeat(&s, '^', width)
     }
 }
 

@@ -1,0 +1,15 @@
+// A move before a new value is not noted; one in the previous iteration is.
+// error: move_note_reassigned.jh:13:9: moved here
+fn take(sink s: String) {}
+
+fn main() {
+    var s = "x".to_string()
+    take(s)
+    s = "y".to_string()
+    println(s)
+    var i = 0
+    while i < 2 {
+        i += 1
+        take(s)
+    }
+}

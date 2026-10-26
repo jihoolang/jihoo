@@ -1,0 +1,23 @@
+// Borrow and move errors of different functions come together.
+// error: several_borrow_errors.jh:10:13: `s` is used here after it was moved away
+// error: several_borrow_errors.jh:16:5: `n` is used here while it is borrowed mutably
+// error: 2 errors
+fn take(sink s: String) {}
+
+fn a() {
+    let s = "x".to_string()
+    take(s)
+    println(s)
+}
+
+fn b() {
+    var n = 0
+    let r = fn() { n += 1 }
+    println(n)
+    r()
+}
+
+fn main() {
+    a()
+    b()
+}

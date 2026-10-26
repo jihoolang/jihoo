@@ -1,0 +1,14 @@
+// A move on some paths is noted too.
+// error: `s` is used here, but it may have been moved away before
+// error: move_note_maybe.jh:11:9: moved here
+fn take(sink s: String) {}
+
+fn main() {
+    let s = "x".to_string()
+    let args = 3
+    if args > 2 {
+        println("taken")
+        take(s)
+    }
+    println(s)
+}

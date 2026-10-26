@@ -1,0 +1,15 @@
+// One run reports the errors of every function, in source order.
+// error: several_errors.jh:6:5: expected `i64`, found `str`
+// error: several_errors.jh:10:5: unknown function `nothing`
+// error: 2 errors
+fn f() -> i64 {
+    "no"
+}
+
+fn g() {
+    nothing()
+}
+
+fn main() {
+    println(f())
+}
