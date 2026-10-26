@@ -1,0 +1,12 @@
+// Shared interior containers must retain a scoped handle's frame loan.
+// error: a value stored through a parameter borrows
+import std.thread
+import std.sync
+
+fn main() {
+    let ch = sync.Channel(thread.ScopedJoinHandle(i64)).new()
+    thread.scope(fn(s) {
+        ch.send(s.spawn(fn() { 42 }))
+    })
+    println(ch.recv().unwrap().join())
+}

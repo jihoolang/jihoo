@@ -533,43 +533,68 @@ impl sema.Sema {
         Ok(false)
     }
 
-    fn may_hold_closure(self, t: u32, depth: i64) -> bool {
+    pub fn may_hold_closure(self, t: u32, depth: i64) -> bool {
+        self.capture_contains(t, depth, false)
+    }
+
+    pub fn may_hold_writable_view(self, t: u32, depth: i64) -> bool {
+        self.capture_contains(t, depth, true)
+    }
+
+    fn capture_contains(self, t: u32, depth: i64, writable_views: bool) -> bool {
         if depth > 32 {
             return true
         }
+        if writable_views && self.types.is_view(t) && self.types.is_interior(t) {
+            return true
+        }
         match self.types.kind(t) {
-            Closure(_) => true
-            Ref(x) => self.may_hold_closure(x, depth + 1)
-            RefMut(x) => self.may_hold_closure(x, depth + 1)
-            Array(x, _) => self.may_hold_closure(x, depth + 1)
+            Closure(_) => !writable_views
+            Ref(x) => self.capture_contains(x, depth + 1, writable_views)
+            RefMut(x) => (writable_views && self.types.is_view(x)) || self.capture_contains(x, depth + 1, writable_views)
+            Array(x, _) => self.capture_contains(x, depth + 1, writable_views)
+            Slice(x) => self.capture_contains(x, depth + 1, writable_views)
             Tuple(ts) => {
                 for x in ts {
-                    if self.may_hold_closure(x, depth + 1) {
+                    if self.capture_contains(x, depth + 1, writable_views) {
                         return true
                     }
                 }
                 false
             }
-            Adt(i) => match self.types.adts[i as i64].body {
-                Struct(fs) => {
-                    for f in fs {
-                        if self.may_hold_closure(f.ty, depth + 1) {
-                            return true
+            Adt(i) => {
+                // Containers such as Vec hide their element behind a raw
+                // pointer. Their type arguments still describe safe captures.
+                match self.adt_args_of.get(t) {
+                    Some(args) => for a in args {
+                        match a {
+                            Type(x) => if self.capture_contains(x, depth + 1, writable_views) { return true }
+                            _ => {}
                         }
                     }
-                    false
+                    None => {}
                 }
-                Enum(vs) => {
-                    for v in vs {
-                        for x in v.fields {
-                            if self.may_hold_closure(x, depth + 1) {
+                match self.types.adts[i as i64].body {
+                    Struct(fs) => {
+                        for f in fs {
+                            if self.capture_contains(f.ty, depth + 1, writable_views) {
                                 return true
                             }
                         }
+                        false
                     }
-                    false
+                    Enum(vs) => {
+                        for v in vs {
+                            for x in v.fields {
+                                if self.capture_contains(x, depth + 1, writable_views) {
+                                    return true
+                                }
+                            }
+                        }
+                        false
+                    }
+                    _ => false
                 }
-                _ => false
             }
             _ => false
         }

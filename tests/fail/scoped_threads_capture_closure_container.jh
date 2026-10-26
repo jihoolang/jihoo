@@ -1,0 +1,13 @@
+// A container can hide borrowed closures behind its raw buffer pointer.
+// error: a scoped thread cannot capture a borrowed closure
+import std.thread
+
+fn main() {
+    var n = 0
+    var fs = Vec(fn()).new()
+    fs.push(fn() { n += 1 })
+    let callbacks = fs
+    thread.scope(fn(s) {
+        s.spawn(fn() { callbacks[0]() });
+    })
+}

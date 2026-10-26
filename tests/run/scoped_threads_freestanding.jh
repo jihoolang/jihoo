@@ -1,0 +1,156 @@
+#![freestanding]
+// The scoped thread tests without libc. Keep in sync with scoped_threads.jh.
+import std.thread
+import std.sync
+
+#[view]
+struct Report {
+    text: str
+    drops: ref sync.Atomic(i64)
+}
+
+impl Drop for Report {
+    fn drop(inout self) {
+        println(self.text)
+        self.drops.add(1)
+    }
+}
+
+fn helper(inout s: thread.Scope) {
+    let local = String.from("helper")
+    s.spawn(fn() { println(local) });
+}
+
+fn early(inout s: thread.Scope) -> i64 {
+    let local = String.from("early")
+    s.spawn(fn() { println(local) })
+    return 7
+}
+
+fn try_early(inout s: thread.Scope) -> Result(i64, str) {
+    let local = String.from("try early")
+    s.spawn(fn() { println(local) })
+    let r: Result(i64, str) = Err("stop")
+    r?
+    Ok(1)
+}
+
+fn main() {
+    var left = Vec(i64).new()
+    var right = Vec(i64).new()
+    let answer = thread.scope(fn(s) {
+        let a = s.spawn(fn() {
+            left.push(20)
+            String.from("hello")
+        })
+        s.spawn(fn() { right.push(22) })
+        println(a.join())
+        42
+    })
+    println(answer)
+    println(left[0] + right[0])
+    //> hello
+    //> 42
+    //> 42
+
+    // Both workers must be running before either one can finish.
+    let ready = sync.Atomic(i64).new(0)
+    thread.scope(fn(s) {
+        s.spawn(fn() {
+            ready.add(1)
+            while ready.load() < 2 {}
+        })
+        s.spawn(fn() {
+            ready.add(1)
+            while ready.load() < 2 {}
+        });
+    })
+    println(ready.load())
+    //> 2
+
+    // The scope owns ignored and forgotten handles and their results.
+    thread.scope(fn(s) {
+        let local = String.from("borrowed")
+        s.spawn(fn() { println(local) })
+        let h = s.spawn(fn() { String.from("unused") })
+        forget(h)
+    })
+    //> borrowed
+
+    thread.scope(fn(s) {
+        s.spawn(fn() { String.from("dropped") })
+        return
+    })
+    println("done")
+    //> done
+
+    thread.scope(fn(s) {
+        let h = s.spawn(fn() { String.from("parent") })
+        helper(&s)
+        println(h.join())
+        println(early(&s))
+    })
+    //> helper
+    //> parent
+    //> early
+    //> 7
+
+    // An unused result's destructor runs before what it borrows dies.
+    let drops = sync.Atomic(i64).new(0)
+    thread.scope(fn(s) {
+        let local = String.from("result dropped")
+        s.spawn(fn() { Report { text: local.as_str(), drops: drops } });
+    })
+    println(drops.load())
+    //> result dropped
+    //> 1
+
+    // An inner scope can borrow independently of the outer workers.
+    thread.scope(fn(s) {
+        let a = s.spawn(fn() { 10 })
+        let b = thread.scope(fn(inner) {
+            let h = inner.spawn(fn() { 20 })
+            h.join()
+        })
+        println(a.join() + b)
+    })
+    //> 30
+
+    // Each iteration transfers its capture tuple into its own heap job.
+    let count = sync.Atomic(i64).new(0)
+    let total = thread.scope(fn(s) {
+        var handles = Vec(thread.ScopedJoinHandle(i64)).new()
+        for _ in 0..64 {
+            handles.push(s.spawn(fn() { count.add(1); 3 }))
+        }
+        var sum = 0
+        for h in handles.into_iter() { sum += h.join() }
+        sum
+    })
+    println(total)
+    println(count.load())
+    //> 192
+    //> 64
+
+    thread.scope(fn(s) { println(try_early(&s).is_err()) })
+    //> try early
+    //> true
+
+    thread.scope(fn(s) {
+        let a: thread.ScopedJoinHandle(i32) = s.spawn(fn() { 12 })
+        let b = s.spawn(i32, fn() { 13 })
+        println(a.join() + b.join())
+        inout alias = &s
+        let c = thread.Scope.spawn(&alias, fn() { 14 })
+        println(c.join())
+    })
+    //> 25
+    //> 14
+
+    let owned: dyn fn() -> i64 = fn() { 15 }
+    thread.scope(fn(s) {
+        let h = s.spawn(fn() { owned() })
+        println(h.join())
+    })
+    //> 15
+}

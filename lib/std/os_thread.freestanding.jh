@@ -33,6 +33,11 @@ unsafe fn tid_of(base: *u8) -> *i32 {
 // Starts `*f` on a new thread. `*f` must stay alive and unchanged until
 // `wait` returns. The handle is the thread's stack.
 pub unsafe fn start(f: *fn()) -> u64 {
+    start_raw(thread_main, f as *u8)
+}
+
+// `arg` and everything the entry uses must outlive `wait`.
+pub unsafe fn start_raw(entry: fnptr(*u8), arg: *u8) -> u64 {
     // PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_STACK
     let base = syscall(sysno.MMAP, 0, STACK, 3, 0x20022, -1, 0)
     if base < 0 && base > -4096 {
@@ -41,7 +46,7 @@ pub unsafe fn start(f: *fn()) -> u64 {
     let b = base as *u8
     syscall(sysno.MPROTECT, b, GUARD, 0)
     let tid = tid_of(b)
-    if jihoo_clone(CLONE_THREAD_FLAGS, b + STACK - 16, tid, tid, thread_main, f as *u8) < 0 {
+    if jihoo_clone(CLONE_THREAD_FLAGS, b + STACK - 16, tid, tid, entry, arg) < 0 {
         panic("cannot start a thread")
     }
     base as u64

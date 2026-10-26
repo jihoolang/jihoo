@@ -1,0 +1,7 @@
+// error: the result borrows
+import std.thread
+
+fn main() {
+    let h = thread.scope(fn(s) { s.spawn(fn() { 42 }) })
+    println(h.join())
+}

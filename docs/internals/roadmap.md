@@ -109,13 +109,15 @@ are left:
 
 ### 2. Concurrency that borrows
 
-Done ([threads](../language/threads.md)) but for scopes. `std.thread` has
-`join`, `each`, `map` and `each_mut`, on POSIX threads in native programs
+Done ([threads](../language/threads.md)). `std.thread` has
+`scope`, `join`, `each`, `map` and `each_mut`, on POSIX threads in native programs
 and `clone` in freestanding ones. A closure that runs on several threads
 at once is checked at compile time with `captures_mut`.
 
-- Threads in a scope (`thread.scope(fn(s) { s.spawn(...) })`), whose
-  closures must outlive each statement that starts one.
+- Done: scoped threads (`thread.scope(fn(s) { s.spawn(...) })`), with
+  heap-backed capture tuples, consuming result handles and compiler-inserted
+  joins before captured locals die, including on early returns. The scope
+  retains loans and owns jobs even when handles are forgotten.
 - Done: `#[interior]` memory, which changes behind shared borrows (no
   `readonly`/`noalias` there), and on it `std.sync.Atomic` and `Mutex`.
 - Done: channels (`std.sync.Channel`, bounded or not) and once-cells

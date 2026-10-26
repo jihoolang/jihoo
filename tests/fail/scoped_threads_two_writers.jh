@@ -1,0 +1,10 @@
+// error: is used here while it is borrowed mutably
+import std.thread
+
+fn main() {
+    var n = 0
+    thread.scope(fn(s) {
+        s.spawn(fn() { n += 1 })
+        s.spawn(fn() { n += 2 });
+    })
+}

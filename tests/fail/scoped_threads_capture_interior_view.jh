@@ -1,0 +1,13 @@
+// A worker must not put a borrow of a scope local into an outer channel.
+// error: a scoped thread cannot capture a mutable or interior value that holds borrows
+import std.thread
+import std.sync
+
+fn main() {
+    let ch = sync.Channel(str).new()
+    thread.scope(fn(s) {
+        let local = String.from("short")
+        s.spawn(fn() { ch.send(local.as_str()) });
+    })
+    println(ch.recv().unwrap())
+}

@@ -1,0 +1,14 @@
+// A view stored into a caller's container must outlive the function even
+// when the container is not used again inside the function.
+// error: a value stored through a parameter borrows
+
+fn add_local(inout values: Vec(str)) {
+    let local = String.from("short")
+    values.push(local.as_str())
+}
+
+fn main() {
+    var values = Vec(str).new()
+    add_local(&values)
+    println(values[0])
+}

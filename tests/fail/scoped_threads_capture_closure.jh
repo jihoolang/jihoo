@@ -1,0 +1,11 @@
+// error: a scoped thread cannot capture a borrowed closure
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        var n = 0
+        let f = fn() { n += 1 }
+        s.spawn(fn() { f() })
+        f()
+    })
+}

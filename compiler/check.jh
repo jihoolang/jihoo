@@ -502,6 +502,20 @@ fn op_loans(o: Operand, held: Vec(Bits), lc: LoanCtx, t: Types, body: Body) -> B
     }
 }
 
+// A reference parameter points outside this frame. Moving, forgetting or
+// reassigning the pointer cannot undo loans stored in its pointee. Keep
+// those obligations on the argument until the return check. A direct
+// Forget of the argument is reserved for a compiler-inserted scope join;
+// source-level forget moves its value into a separate temporary.
+fn external_holder(t: Types, body: Body, l: u32) -> bool {
+    if body.locals[l as i64].kind != LocalKind.Arg { return false }
+    match t.kind(body.locals[l as i64].ty) {
+        Ref(inner) => t.is_view(inner)
+        RefMut(inner) => t.is_view(inner)
+        _ => false
+    }
+}
+
 fn stmt_loans(s: Stmt, inout held: Vec(Bits), lc: LoanCtx, t: Types, body: Body, new: i64) {
     match s {
         Assign(p, r, _) => {
@@ -533,7 +547,7 @@ fn stmt_loans(s: Stmt, inout held: Vec(Bits), lc: LoanCtx, t: Types, body: Body,
             for o in ops {
                 match o {
                     Move(m) => {
-                        if m.proj.len() == 0 {
+                        if m.proj.len() == 0 && !external_holder(t, body, m.local) {
                             held[m.local as i64] = bits(lc.lw)
                         }
                     }
@@ -544,43 +558,52 @@ fn stmt_loans(s: Stmt, inout held: Vec(Bits), lc: LoanCtx, t: Types, body: Body,
             if !lc.is_view[d] && !starts_deref(p) {
                 return
             }
-            if p.proj.len() == 0 {
+            if p.proj.len() == 0 && !external_holder(t, body, p.local) {
                 held[d] = gained
             } else {
                 union(&held[d], gained)
             }
         }
-        StorageDead(l) => held[l as i64] = bits(lc.lw)
+        StorageDead(l) => if !external_holder(t, body, l) { held[l as i64] = bits(lc.lw) }
         Forget(l) => held[l as i64] = bits(lc.lw)
         _ => {}
     }
 }
 
-// The locals a borrow `p` points into: what `p = &mut place` borrows, and
+// The locals a borrow `p` points into: what `p = &place` borrows, and
 // through a reborrow (`&mut (*r).f`), what `r` points into too. Only these
 // can receive what a call stores through the borrow; a local that merely
 // shares some loan with `p` (the iterator of an outer loop, whose element
-// the borrowed one came from) cannot. A borrow not made by a `&mut` in
+// the borrowed one came from) cannot. A borrow not made by a Ref/RefMut in
 // this body falls back to every local that shares a loan with it.
 fn pointees(p: i64, held: Vec(Bits), body: Body, inout out: Vec(i64)) {
+    // An incoming reference has no Ref instruction in this body. Its
+    // argument local represents the caller's pointee for stored loans.
+    if body.locals[p].kind == LocalKind.Arg {
+        if !contains(out, p) { out.push(p) }
+        return
+    }
     var found = false
     for blk in body.blocks {
         for s in blk.stmts {
             match s {
-                Assign(d, r, _) => match r {
-                    RefMut(q) => {
-                        if d.local as i64 == p && d.proj.len() == 0 {
+                Assign(d, r, _) => if d.local as i64 == p && d.proj.len() == 0 {
+                    let borrowed: Option(Place) = match r {
+                        Ref(q) => Some(q.clone())
+                        RefMut(q) => Some(q.clone())
+                        _ => None
+                    }
+                    match borrowed {
+                        Some(q) => {
                             found = true
                             let r = q.local as i64
                             if r != p && !contains(out, r) {
                                 out.push(r)
-                                if has_deref(q) {
-                                    pointees(r, held, body, &out)
-                                }
+                                if has_deref(q) { pointees(r, held, body, &out) }
                             }
                         }
+                        None => {}
                     }
-                    _ => {}
                 }
                 _ => {}
             }
@@ -604,6 +627,17 @@ fn contains(xs: Vec(i64), x: i64) -> bool {
     false
 }
 
+// Interior containers can retain views through shared borrows too (for
+// example Channel(ScopedJoinHandle(T)). These borrows must keep the same
+// loans as an ordinary mutable view, including a scoped job's frame loan.
+fn stores_views(t: Types, ty: u32) -> bool {
+    match t.kind(ty) {
+        RefMut(inner) => t.is_view(inner)
+        Ref(inner) => t.is_view(inner) && t.is_interior(inner)
+        _ => false
+    }
+}
+
 fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body) {
     match t {
         Call(_, args, dest, _, _) => {
@@ -611,24 +645,18 @@ fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body
             for a in args {
                 union(&all, op_loans(a, held, lc, ts, body))
             }
-            // What a call is given can end up in its `inout` arguments that
-            // are views (`v.push(s.as_str())` with `v: Vec(str)`).
+            // What a call is given can end up in mutable or interior views.
             for a in args {
                 match operand_place(a) {
                     Some(p) => {
                         if p.proj.len() == 0 {
-                            match ts.kind(body.locals[p.local as i64].ty) {
-                                RefMut(inner) => {
-                                    if ts.is_view(inner) {
-                                        // The loans go to whatever the borrow points to.
-                                        var targets = Vec(i64).new()
-                                        pointees(p.local as i64, held, body, &targets)
-                                        for l in targets {
-                                            union(&held[l], all)
-                                        }
-                                    }
+                            if stores_views(ts, body.locals[p.local as i64].ty) {
+                                // The loans go to whatever the borrow points to.
+                                var targets = Vec(i64).new()
+                                pointees(p.local as i64, held, body, &targets)
+                                for l in targets {
+                                    union(&held[l], all)
                                 }
-                                _ => {}
                             }
                         }
                     }
@@ -638,7 +666,7 @@ fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body
             for a in args {
                 match a {
                     Move(m) => {
-                        if m.proj.len() == 0 {
+                        if m.proj.len() == 0 && !external_holder(ts, body, m.local) {
                             held[m.local as i64] = bits(lc.lw)
                         }
                     }
@@ -795,7 +823,14 @@ fn check_term(t: Types, body: Body, term: Term, cx: Ctx, f: mir.Function) -> Res
             // What the result borrows must outlive the call: it is reached
             // through a parameter.
             for i, l in cx.loans {
-                if !get(cx.held[mir.RET as i64], i) {
+                let result = get(cx.held[mir.RET as i64], i)
+                var stored = false
+                for a in 1..body.arg_count + 1 {
+                    if external_holder(t, body, a as u32) && get(cx.held[a], i) {
+                        stored = true
+                    }
+                }
+                if !result && !stored {
                     continue
                 }
                 let root = body.locals[l.place.local as i64]
@@ -805,7 +840,8 @@ fn check_term(t: Types, body: Body, term: Term, cx: Ctx, f: mir.Function) -> Res
                 // checked here as well.
                 let reborrow = starts_deref(l.place) && t.is_ref(root.ty)
                 if !through_param && !reborrow && !root_is_raw(t, body, l.place) {
-                    return Err(Diag.new(l.span, ("the result borrows " + name(body, l.place).as_str() + ", which goes away when the function returns").as_str()))
+                    let what = if result { "the result borrows " } else { "a value stored through a parameter borrows " }
+                    return Err(Diag.new(l.span, (what + name(body, l.place).as_str() + ", which goes away when the function returns").as_str()))
                 }
             }
         }

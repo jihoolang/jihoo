@@ -1,0 +1,11 @@
+// error: goes away here while it is still borrowed
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        {
+            let local = String.from("too short")
+            s.spawn(fn() { println(local) });
+        }
+    })
+}

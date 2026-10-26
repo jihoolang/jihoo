@@ -1,0 +1,10 @@
+// error: moved
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        let h = s.spawn(fn() { String.from("once") })
+        println(h.join())
+        println(h.join())
+    })
+}
