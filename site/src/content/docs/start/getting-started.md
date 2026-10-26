@@ -35,14 +35,26 @@ Or use it from your own flake:
 
 jihoo compiles for x86_64 and aarch64 Linux.
 
+### Without Nix
+
+Each [release](https://github.com/jihoolang/jihoo/releases) has the
+compiler for x86_64 and aarch64 Linux with its standard library. It needs
+glibc and LLVM 21: libLLVM, clang to link native programs and lld for
+freestanding ones. If they are not found under their usual names, set
+`JIHOO_LLVM` to the shared library, `JIHOO_CC` and `JIHOO_LD`.
+
+```sh
+curl -L https://github.com/jihoolang/jihoo/releases/download/v0.1.1/jihoo-v0.1.1-x86_64-linux.tar.gz | tar xz
+jihoo-v0.1.1-x86_64-linux/bin/jihoo run hello.jh
+```
+
 ### From source
 
 ```sh
 git clone https://github.com/jihoolang/jihoo
 cd jihoo
-nix develop                     # Rust, clang, lld
-cargo build
-cargo run -- run examples/hello.jh
+nix build                       # bootstraps the compiler: ./result/bin/jihoo
+./result/bin/jihoo run examples/hello.jh
 ```
 
 ## Your first program

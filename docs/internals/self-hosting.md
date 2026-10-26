@@ -1,63 +1,76 @@
 # Self-hosting
 
-The compiler has been rewritten in jihoo, in `compiler/`, and jihoo
-compiles itself: the compiler in jihoo, built by itself, writes the same
-LLVM IR as stage 1 for every program in the repository. The Rust bootstrap
-agrees on the compiler and standard library sources; language features added
-after the port, such as compile-time evaluation, live in the jihoo compiler.
-This page is how it got there and how it stays there.
+The compiler is written in jihoo, in `compiler/`, and jihoo compiles
+itself: the compiler built by itself writes the same LLVM IR as the one
+that built it, for every program in the repository. It was first written
+in Rust and ported pass by pass; once the port was self-hosted, the Rust
+compiler bootstrapped it for one release (0.1.1) and was then removed. This
+page is how it got there and how it stays there.
 
 ## Stages
 
-- **Stage 0** is the Rust compiler, `crates/jihoo`.
-- **Stage 1** is `compiler/main.jh` compiled by stage 0.
+- **Stage 0**, the seed, is the compiler of the latest release, downloaded
+  from [GitHub releases](https://github.com/jihoolang/jihoo/releases)
+  (`jihoo-seed` in `flake.nix`, which pins its hash).
+- **Stage 1** is `compiler/main.jh` compiled by the seed.
 - **Stage 2** is `compiler/main.jh` compiled by stage 1.
 
-jihoo is self-hosted when stage 1 can build stage 2 and the two agree: for
-every program, stage 2 writes the same LLVM IR as stage 1. That holds now.
-For `compiler/main.jh` itself, stages 0, 1 and 2 all write the same IR: a
-fixed point. The compiler in jihoo is now the one that is used and the
-one the language changes in; the Rust compiler only bootstraps it on a
-machine that has no jihoo yet ([below](#the-compiler-in-jihoo-is-the-reference)).
+Stage 1 is the current compiler built by an older one; stage 2 is the
+current compiler built by itself. jihoo is self-hosted when the two agree:
+for `compiler/main.jh`, stages 1 and 2 write the same IR, a fixed point.
 
 ## Bootstrap and packaging
 
-`nix build` makes the compiler in three steps: the Rust compiler
-(`jihoo-bootstrap`, whose tests include the comparisons below) builds
+`nix build` makes the compiler in three steps: the seed builds
 `compiler/main.jh` at `-O2` (stage 1), stage 1 builds it again (stage 2),
 and stage 2 is installed as `jihoo` once stages 1 and 2 write the same IR
-for `compiler/main.jh`. `nix flake check` runs the programs of `tests/run`
-and `tests/fail` with the installed compiler. By hand:
+for `compiler/main.jh`. `nix flake check` runs
+[the tests](testing.md) with the installed compiler; their `selfhost`
+suite has it build itself once more and compares the IR the two write for
+every `.jh` file. By hand, in the dev shell, where `jihoo` is the seed:
 
 ```sh
-cargo run -- build -O2 compiler/main.jh -o out/jihoo1     # stage 1
-out/jihoo1 build -O2 compiler/main.jh -o out/jihoo2       # stage 2
-JIHOO_COMPILER=$PWD/out/jihoo2 cargo test --test programs
+jihoo build -O2 compiler/main.jh -o out/jihoo1          # stage 1
+out/jihoo1 build -O2 compiler/main.jh -o out/jihoo2     # stage 2
+JIHOO_COMPILER=/home/jihoo/jihoo/out/jihoo2 jihoo run tests/runner.jh
 ```
 
-## Pass by pass, compared all the way
+## The seed and releases
 
-The port goes one pass at a time, in the order the compiler runs them. Each
-pass gets a command that prints what it makes, in both compilers, in the
-same format; `crates/jihoo/tests/selfhost.rs` builds stage 1 and runs both
-compilers on every bootstrap source (`lib/` and `compiler/`), comparing
-output, errors and exit status byte for byte. It also runs the examples
-built by each compiler, and builds stage 2 and compares its `emit-llvm`
-with stage 1's on every `.jh` file, including tests of new language features.
-`cargo test --test programs` runs the program and diagnostic fixtures with
-stage 1 by default:
+Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`: it builds
+the compiler of that tag with Nix on x86_64 and aarch64, and attaches
+`jihoo-vX.Y.Z-<arch>-linux.tar.gz` (`bin/jihoo` and `share/jihoo/lib`) to
+the release. The binary uses the system's dynamic loader, so it runs
+outside Nix too; the flake patches it back for Nix.
 
-```sh
-cargo test --test selfhost
-```
+`compiler/`, and the parts of `lib/std` it imports, may use only what the
+seed knows. To use a new language feature or library function in the
+compiler:
 
-Error messages are part of the bootstrap comparison. New language tests
-check their expected output or diagnostics against stage 1 directly. Inputs meant to exercise one pass
-live in `tests/selfhost/<pass>/`. A `// load-args: ...` line in a file gives
-the commands that load a program more options (`-I dir`, `--target
-aarch64`). Both compilers
-find the standard library through `JIHOO_PATH`, so they name its files the
-same way.
+1. Add it to the compiler, with tests and documentation, without using it
+   in `compiler/` yet.
+2. Tag a release and let the workflow attach the binaries.
+3. Move the seed in `flake.nix` to that release: its version and the
+   hashes of both archives (`nix hash convert --hash-algo sha256 --to sri`
+   of the `.sha256` files).
+4. Use the feature in `compiler/`.
+
+A released archive is never replaced, since the flake pins its hash.
+
+## History
+
+### Pass by pass, compared all the way
+
+The port went one pass at a time, in the order the compiler runs them. Each
+pass got a command that prints what it makes, in both compilers, in the
+same format (`emit-tokens`, `emit-ast`, `emit-program`, `emit-mir` with and
+without `JIHOO_NO_ELAB`, `emit-llvm`); `crates/jihoo/tests/selfhost.rs` built stage 1 and ran both
+compilers on every `.jh` file of the repository, comparing output, errors
+and exit status byte for byte, and ran the examples built by each.
+Error messages were part of the comparison. Inputs meant to exercise one
+pass live in `tests/selfhost/<pass>/`, and stay as inputs of the
+`selfhost` suite. A `// load-args: ...` line in a file gives the commands
+that load a program more options (`-I dir`, `--target aarch64`).
 
 | step | jihoo | Rust | compared by | state |
 |------|-------|------|-------------|-------|
@@ -102,7 +115,7 @@ keeps raw pointers into the tree instead (`*ast.FnDecl`), read through
 `sema.at`: the tree outlives sema and never changes, which is what Rust's
 `'a` says.
 
-## How the port is written
+### How the port is written
 
 The Rust compiler was written to be ported: index-based data (`TyId`,
 `Local`, `FnId`), references only as parameters, enums, `match`, `Vec` and
@@ -133,33 +146,19 @@ better way the port takes it and says so in a comment; so far:
   of the block being written is kept as blocks start, where Rust finds it
   in the text written so far.
 
-## The compiler in jihoo is the reference
+### The end of the Rust compiler
 
-From self-hosting on, `compiler/` is where the language and the compiler
-change: new features, fixes and error messages go there, with their
-tests and documentation. The Rust compiler is frozen as the bootstrap:
+Once the compiler in jihoo built itself, it became the one installed and
+the one the language changed in, and the Rust compiler was frozen: it
+changed only so that it still built `compiler/`, which used only the
+language it knew. Version 0.1.1 was the first release whose binaries are
+the compiler in jihoo; it became the seed, and the Rust compiler, its
+tests (now `tests/runner.jh`) and Cargo were removed.
 
-- It changes only so that it still builds `compiler/` correctly: a bug
-  that stage 1 inherits from it, or something `compiler/` cannot do
-  without. It gets no new features otherwise.
-- So `compiler/`, and the parts of `lib/std` it imports, use only the
-  language the Rust compiler knows. A feature added since can be used
-  there only by adding it to the Rust compiler too, which should be rare.
-- What must stay true: stage 0 builds stage 1, stage 1 builds stage 2,
-  and the two write the same IR for `compiler/main.jh`
-  (`stage2_agrees_with_stage1`, and `nix build`).
-- `tests/run` and `tests/fail` test the compiler in jihoo
-  (`JIHOO_COMPILER`, and `nix flake check` with the installed stage 2).
-  The comparisons with stage 0 on every file of the repository
-  (`self_hosted_compiler_agrees`, `stage1_builds_programs`) hold for now,
-  as the two compilers still agree. A change to the compiler in jihoo
-  that makes them differ restricts those comparisons to `compiler/` and
-  `lib/`, the code the Rust compiler still has to compile.
-
-## What porting has found
+### What porting has found
 
 Writing a large program in jihoo is also a test of jihoo. Problems found so
-far, each fixed in stage 0 with a test:
+far, each fixed in the Rust compiler with a test:
 
 - `for _ in 0..n` was rejected ("a range loop binds one name").
 - `Vec.first` and `Vec.last` did not compile: the borrow kernel rejected
@@ -235,7 +234,7 @@ And differences from Rust that are by design, now documented in
 [Coming from Rust](../language/from-rust.md): `let (var a, b)`, and
 `match` using up a whole owned variable on every path.
 
-## `i128` and `u128`
+### `i128` and `u128`
 
 Sema folds constants in `i128` (a `u64` and a negative number both fit) and
 MIR keeps integer constants that way, so jihoo gained `i128` and `u128`
@@ -253,6 +252,6 @@ also found that a shift ignored the type its context expected:
   "`p` is used here after it was moved away" from elaboration: the
   block's scope ends before the result is written. With `return p.x` the
   borrow kernel says "`p` goes away here while it is still borrowed"
-  (`tests/fail/borrow_return_local_ref.jh`). Both compilers agree; the first
+  (`tests/fail/borrow_return_local_ref.jh`). The first
   message should be the second.
 

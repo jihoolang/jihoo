@@ -226,7 +226,7 @@ source.jh ─► lex/parse ─► AST ─► sema (resolve, check, monomorphize)
 ```
 
 - **One crate, one language.** The compiler is a single Rust crate,
-  `crates/jihoo`. There is no VM profile and no C++ backend: the compiler
+  `crates/jihoo` (since ported to jihoo, [Self-hosting](self-hosting.md)). There is no VM profile and no C++ backend: the compiler
   writes LLVM IR as text and `clang` turns it into an object file and links
   it. Freestanding programs are ordinary programs whose standard library
   talks to the kernel with `syscall` instead of calling libc.

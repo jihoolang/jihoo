@@ -64,20 +64,24 @@ nix run github:jihoolang/jihoo -- run hello.jh     # try it
 nix profile install github:jihoolang/jihoo         # install `jihoo`
 ```
 
+Without Nix, each [release](https://github.com/jihoolang/jihoo/releases)
+has the compiler for x86_64 and aarch64 Linux with its standard library; it
+needs glibc and LLVM 21 (libLLVM, clang, lld).
+
 ## Build from source
 
-Everything comes from `flake.nix` (Rust, libLLVM, clang and lld from LLVM 21).
-`nix build` bootstraps the compiler: the Rust one (`crates/jihoo`) builds
-the one in jihoo (`compiler/`), which builds itself again and is installed.
+jihoo is written in jihoo. Everything comes from `flake.nix` (libLLVM,
+clang and lld from LLVM 21, and the seed: the compiler of the latest
+release). `nix build` bootstraps the compiler: the seed builds
+`compiler/`, which builds itself again and is installed.
 
 ```sh
 nix build                                    # ./result/bin/jihoo
-nix develop
-cargo build
-cargo test
-cargo run -- run examples/hello.jh
-cargo run -- build examples/calc.jh -o calc && ./calc
-cargo run -- emit-mir examples/hello.jh
+nix develop                                  # `jihoo` is the seed
+jihoo build -O2 compiler/main.jh -o out/jihoo
+out/jihoo run examples/hello.jh
+out/jihoo emit-mir examples/hello.jh
+jihoo run tests/runner.jh                    # the tests
 ```
 
 ## Layout
@@ -85,9 +89,8 @@ cargo run -- emit-mir examples/hello.jh
 | path | what |
 |------|------|
 | `compiler` | the compiler, in jihoo: parser, type checker, MIR, borrow checker, LLVM IR writer |
-| `crates/jihoo` | the same compiler in Rust, which bootstraps the one in jihoo |
 | `lib/std` | the standard library, in jihoo |
-| `tests/run`, `tests/fail` | programs and their expected output or error |
+| `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
 | `docs` | the documentation, one Markdown file per page |
 | `site` | the website ([site/README.md](site/README.md)) |
@@ -125,8 +128,9 @@ comparison. [Backend benchmarks](docs/internals/testing.md#backend-performance)
 compare compilation time and generated program speed.
 
 The compiler is written in jihoo, in `compiler/`, and
-[self-hosted](docs/internals/self-hosting.md): it builds itself, writes the
-same LLVM IR as the Rust compiler for the bootstrap sources, and is the one
-installed. The Rust compiler only bootstraps it.
+[self-hosted](docs/internals/self-hosting.md): the compiler of the latest
+release builds it, and it builds itself to the same LLVM IR. There is no
+Rust left; the Rust compiler that first bootstrapped it is in the history
+up to v0.1.1.
 
 Next ([roadmap](docs/internals/roadmap.md)): `derive`, dynamic dispatch, threads.

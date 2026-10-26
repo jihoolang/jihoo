@@ -28,7 +28,7 @@ def run(args, env):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--compiler", default="target/release/jihoo")
+    parser.add_argument("--compiler", default="out/jihoo")
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--compile-repeats", type=int, default=3)
     parser.add_argument("--max-regression", type=float, default=0.10)

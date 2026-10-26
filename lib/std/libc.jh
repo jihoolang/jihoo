@@ -25,3 +25,5 @@ pub extern fn pipe2(fds: *i32, flags: i32) -> i32
 pub extern fn dup2(fd: i32, to: i32) -> i32
 pub extern fn poll(fds: *u8, n: u64, timeout: i32) -> i32
 pub extern fn __errno_location() -> *i32
+pub extern fn getdents64(fd: i32, buf: *u8, n: i64) -> i64
+pub extern fn unlink(path: *u8) -> i32

@@ -37,3 +37,49 @@ pub fn write_file(path: str, text: str) -> Result((), String) {
     }
     Ok(())
 }
+
+// Removes a file, or says it cannot.
+pub fn remove_file(path: str) -> Result((), String) {
+    if !sys.remove_file(path) {
+        return Err("cannot remove " + path)
+    }
+    Ok(())
+}
+
+// The names in a directory, sorted, without `.` and `..`.
+pub fn read_dir(path: str) -> Result(Vec(String), String) {
+    let fd = sys.open_read(path)
+    if fd < 0 {
+        return Err("cannot open " + path)
+    }
+    var names = Vec(String).new()
+    var buf = [0 as u8; 8192]
+    loop {
+        let n = unsafe { sys.read_dir_fd(fd, &buf[0], 8192) }
+        if n < 0 {
+            sys.close(fd)
+            return Err("cannot read the directory " + path)
+        }
+        if n == 0 {
+            break
+        }
+        // Each record: inode (8 bytes), offset (8), its length (2), type
+        // (1), then the name and a 0.
+        var at = 0
+        while at < n {
+            let size = buf[at + 16] as i64 | (buf[at + 17] as i64) << 8
+            var end = at + 19
+            while buf[end] != 0 {
+                end += 1
+            }
+            let name = unsafe { make_str(&buf[at + 19], end - at - 19) }
+            if name != "." && name != ".." {
+                names.push(name.to_string())
+            }
+            at += size
+        }
+    }
+    sys.close(fd)
+    sort(&names)
+    Ok(names)
+}

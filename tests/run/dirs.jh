@@ -1,0 +1,26 @@
+// Listing a directory and removing files.
+import std.fs
+
+fn main() {
+    let names = fs.read_dir("tests/selfhost").unwrap()
+    for n in names {
+        println(n)
+    }
+    let path = "/tmp/jihoo-dirs-test.txt"
+    fs.write_file(path, "x").unwrap()
+    println(fs.remove_file(path).is_ok())
+    println(fs.remove_file(path).is_err())
+    println(fs.read_file(path).is_err())
+    println(fs.read_dir("/nonexistent").is_err())
+    println(fs.read_dir("tests/run/dirs.jh").is_err())
+}
+//> elab
+//> lex
+//> load
+//> parse
+//> sema
+//> true
+//> true
+//> true
+//> true
+//> true

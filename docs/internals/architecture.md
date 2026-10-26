@@ -8,26 +8,24 @@ The compiler writes LLVM IR as text in memory. `backend` loads LLVM 21's
 shared library, verifies and optimizes the module with the new pass manager,
 then emits an object through the target machine C API. Native linking uses
 a C driver for libc startup files; freestanding linking calls `ld.lld`
-directly. Neither compiler needs LLVM headers or a C++ shim to build.
+directly. The compiler needs no LLVM headers or C++ shim to build.
 `JIHOO_BACKEND=clang` retains the previous pipeline for comparisons.
 
-The same compiler is written in jihoo in `compiler/`, a `.jh` file for
-each file below, and that one is installed and is the reference; the Rust
-crate bootstraps it ([Self-hosting](self-hosting.md)). This page names the
-Rust files.
+The compiler is written in jihoo, in `compiler/`, and a released build of
+it bootstraps the next ([Self-hosting](self-hosting.md)).
 
 | file | what |
 |------|------|
-| `lex.rs`, `parse.rs`, `ast.rs` | tokens and the syntax tree; newlines end statements |
-| `load.rs` | finds and parses every imported module, picking per-target and per-profile files |
-| `types.rs` | interned types and their memory layout |
-| `sema/` | names, types, generic instances, and lowering to MIR |
-| `mir.rs` | the intermediate representation |
-| `elab.rs` | initialization: use after move, drop elaboration and drop flags |
-| `check.rs` | the borrow kernel: exclusivity and the lifetimes of views |
-| `llvm.rs` | MIR to LLVM IR text |
-| `backend.rs` | LLVM 21 C API: verification, optimization and object emission |
-| `main.rs` | the `jihoo` command |
+| `lex.jh`, `parse.jh`, `ast.jh` | tokens and the syntax tree; newlines end statements |
+| `load.jh` | finds and parses every imported module, picking per-target and per-profile files |
+| `types.jh` | interned types and their memory layout |
+| `sema.jh`, `body.jh`, `pat.jh`, `builtins.jh` | names, types, generic instances, and lowering to MIR |
+| `mir.jh` | the intermediate representation |
+| `elab.jh` | initialization: use after move, drop elaboration and drop flags |
+| `check.jh` | the borrow kernel: exclusivity and the lifetimes of views |
+| `llvm.jh` | MIR to LLVM IR text |
+| `backend.jh` | LLVM 21 C API: verification, optimization and object emission |
+| `main.jh` | the `jihoo` command |
 
 ## Sema
 
@@ -85,18 +83,15 @@ bytes. Layout and enum payload offsets come from the target's `Types`.
 Scalar results become MIR constants, strings become static strings, and
 aggregates without addresses become `Const.Bytes`.
 
-The frozen Rust bootstrap has no corresponding interpreter. It only needs
-to compile this implementation using the bootstrap language.
-
 ## Elaboration
 
-`elab.rs` follows which locals hold a value at every point. Using a local
+`elab.jh` follows which locals hold a value at every point. Using a local
 that may have been moved is an error; a drop of a moved local is removed;
 a local moved on some paths only gets a flag, and its drop checks it.
 
 ## The borrow kernel
 
-`check.rs` does not trust sema. It finds every borrow in the MIR (a loan of
+`check.jh` does not trust sema. It finds every borrow in the MIR (a loan of
 a place, held by a local), follows loans through views (copies, aggregates,
 calls that return views, `inout` arguments that are views), and computes
 which locals are used later. A loan lasts while some local holding it is
@@ -112,10 +107,10 @@ large part becomes a compile error and not a dangling pointer.
 
 ## Code generation
 
-`llvm.rs` is simple on purpose:
+`llvm.jh` is simple on purpose:
 
 - every local is an `alloca`; `mem2reg` and SROA make registers of them;
-- fields are byte offsets, computed once in `types.rs`, which also lays out
+- fields are byte offsets, computed once in `types.jh`, which also lays out
   enums (a tag, then each variant's fields);
 - aggregates are copied with `memcpy`, passed by pointer and returned
   through `sret`;
@@ -131,9 +126,8 @@ definitions of `memcpy`, `memmove`, `memset` and `memcmp`.
 
 ## Written to be ported
 
-The compiler will be rewritten in jihoo, so the Rust follows rules that
-port line by line: data refers to other data by index (`TyId`, `Local`,
-`BlockId`, `FnId`), references are only parameters (except the syntax tree,
-which sema reads through one shared reference), and the code uses enums,
-`match`, `Vec`, `HashMap` and `String`, all of which the jihoo standard
-library has.
+The compiler was first written in Rust and ported to jihoo line by line,
+and it keeps the rules that made that possible: data refers to other data
+by index (`TyId`, `Local`, `BlockId`, `FnId`), references are only
+parameters (except the syntax tree, which sema reads through raw pointers),
+and the code uses enums, `match`, `Vec`, `Map` and `String`.

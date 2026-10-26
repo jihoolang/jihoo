@@ -1,8 +1,7 @@
-# Builds the toolchain with Nix and runs every test: `nix flake check` builds
-# the frontend (running cargo test, with the differential tests against the
-# real LLVM backend and C compiler) and then builds and runs the examples with
-# the packaged toolchain, on x86_64 and aarch64 Linux. Clippy runs in the dev
-# shell.
+# Builds the toolchain with Nix and runs every test: `nix flake check`
+# bootstraps the compiler from the released seed (stage 1, then stage 2, which
+# must write the same IR), runs tests/runner.jh with it, and builds and runs
+# the examples with the packaged toolchain, on x86_64 and aarch64 Linux.
 name: Test
 
 on:
@@ -36,11 +35,3 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: nix flake check
         run: nix flake check -L
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
-      - name: cargo clippy
-        run: nix develop -c cargo clippy --all-targets --locked -- -D warnings

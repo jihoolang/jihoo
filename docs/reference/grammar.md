@@ -1,6 +1,6 @@
 # Grammar
 
-The whole syntax of jihoo, as the parser (`crates/jihoo/src/parse.rs`) reads
+The whole syntax of jihoo, as the parser (`compiler/parse.jh`) reads
 it. [Syntax](../language/syntax.md) explains it with examples; this page is
 the precise version, for checking what parses.
 

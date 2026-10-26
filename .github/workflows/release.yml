@@ -6,7 +6,8 @@
 # flake bootstraps the compiler from the newest of these (`jihoo-seed`).
 #
 # Pushing a tag `v*` releases it; for an older tag, run the workflow by hand
-# with that tag.
+# with that tag. An archive already released is never replaced: flake.nix
+# pins the seed's hash.
 name: Release
 
 on:
@@ -62,4 +63,4 @@ jobs:
         run: |
           gh release view "$TAG" >/dev/null 2>&1 ||
             gh release create "$TAG" --verify-tag --title "jihoo $TAG" --notes "jihoo $TAG" || true
-          gh release upload "$TAG" --clobber jihoo-$TAG-${{ matrix.arch }}-linux.tar.gz*
+          gh release upload "$TAG" jihoo-$TAG-${{ matrix.arch }}-linux.tar.gz*

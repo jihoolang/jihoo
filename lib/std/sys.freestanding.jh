@@ -212,3 +212,17 @@ pub fn is_executable(path: str) -> bool {
     // faccessat(AT_FDCWD, path, X_OK, 0)
     unsafe { syscall(sysno.FACCESSAT, CWD, p.ptr, 1, 0) == 0 }
 }
+
+// Reads directory entries (Linux's `linux_dirent64` records) into `buf`;
+// the bytes read, 0 at the end, or -1.
+pub unsafe fn read_dir_fd(fd: i32, buf: *u8, n: i64) -> i64 {
+    let r = syscall(sysno.GETDENTS64, fd as i64, buf, n)
+    if r < 0 { -1 } else { r }
+}
+
+// Removes a file; whether it could.
+pub fn remove_file(path: str) -> bool {
+    let p = c_path(path)
+    // unlinkat(AT_FDCWD, path, 0)
+    unsafe { syscall(sysno.UNLINKAT, CWD, p.ptr, 0) == 0 }
+}
