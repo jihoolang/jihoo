@@ -83,6 +83,11 @@ pub struct Fb {
     // A `dyn fn` body: its environment holds the captured values
     // themselves, not borrows of them.
     pub owned_env: bool
+    // Scope parameters are joined before the function body's locals die.
+    // Parameter, finish function, and the registry length on entry.
+    thread_scopes: Vec((u32, u32, u32))
+    // The next lambda transfers its capture tuple to a scoped job.
+    scoped_work: bool
 }
 
 // The result of lowering an expression: a place to read or borrow, or an
@@ -171,6 +176,8 @@ impl Fb {
             keep_place: false
             want_mut: false
             owned_env: false
+            thread_scopes: Vec((u32, u32, u32)).new()
+            scoped_work: false
         }
         fb.new_local(ret, None, true, LocalKind.Ret, span)
         fb.cur = fb.new_block()
@@ -465,6 +472,22 @@ impl sema.Sema {
     // ---- scopes ----
 
     fn emit_scope_exit(inout self, inout fb: Fb, idx: i64) {
+        // The function body is inside the root and return-expression scopes.
+        // Join before ending closure environments or dropping captured locals,
+        // including on early returns. Forget ends the retained loans as well.
+        if idx == 2 {
+            for (local, finish, checkpoint) in fb.thread_scopes.clone() {
+                let span = fb.body.locals[local as i64].span
+                var args = Vec(Operand).new()
+                args.push(copy_of(local))
+                args.push(copy_of(checkpoint))
+                let dest = fb.new_local(types.UNIT, None, true, LocalKind.Temp, span)
+                let next = fb.new_block()
+                fb.term(Term.Call(mir.Callee.Fn(finish), args, Place.local(dest), next, span))
+                fb.switch_to(next)
+                fb.push(Stmt.Forget(local))
+            }
+        }
         let locals = fb.scopes[idx].locals.clone()
         var i = locals.len()
         while i > 0 {
@@ -548,8 +571,39 @@ impl sema.Sema {
         Ok(())
     }
 
+    fn prepare_thread_scopes(inout self, inout fb: Fb, span: Span) -> Result((), Diag) {
+        // Scope's implementation manages the registry itself. User functions
+        // borrowing it must join before their stack frames can disappear.
+        if fb.thread_scopes.len() == 0 && self.module_name(fb.env.module) != "std.thread" {
+            for i in 1..fb.body.arg_count + 1 {
+                match self.types.kind(fb.body.locals[i].ty) {
+                    RefMut(t) => match self.types.adt_index(t) {
+                        Some(a) => {
+                            let d = self.adts[self.types.adts[a as i64].decl as i64]
+                            if d.name == "Scope" && self.module_name(d.module) == "std.thread" {
+                                let h = self.find_method(t, "finish")?.unwrap()
+                                let finish = self.instance(h.imp, h.args.clone(), span)?
+                                let h = self.find_method(t, "checkpoint")?.unwrap()
+                                let checkpoint = self.instance(h.imp, h.args.clone(), span)?
+                                var args = Vec(Operand).new()
+                                args.push(copy_of(i as u32))
+                                let v = self.emit_call(&fb, mir.Callee.Fn(checkpoint), args, types.I64, span)?
+                                let local = self.place_of_val(v).local
+                                fb.thread_scopes.push((i as u32, finish, local))
+                            }
+                        }
+                        None => {}
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
     // The function's block, its value going to the return place.
     fn lower_body(inout self, inout fb: Fb, body: ast.Block, ret_ty: u32) -> Result((), Diag) {
+        self.prepare_thread_scopes(&fb, body.span)?
         fb.push_scope(true)
         fb.keep_place = !is_ret_value(fb.ret_mode)
         let v = self.block(&fb, body, Some(ret_ty), true)?
@@ -3463,6 +3517,8 @@ impl sema.Sema {
     }
 
     fn lambda(inout self, inout fb: Fb, params: Vec(ast.LambdaParam), ret: Option(ast.Ty), body: ast.Block, exp: Option(u32), expected_params: Option(Vec(u32)), span: Span) -> Result(Val, Diag) {
+        let scoped_work = fb.scoped_work
+        fb.scoped_work = false
         let env = fb.env.clone()
         var exp_sig: Option(types.Sig) = None
         var want_ptr = false
@@ -3556,6 +3612,12 @@ impl sema.Sema {
         // its body only reads.
         var env_fields = Vec(u32).new()
         for c in caps {
+            if scoped_work && self.may_hold_closure(c.ty, 0) {
+                return Err(err(span, "a scoped thread cannot capture a borrowed closure; call a function or capture an owning `dyn fn` instead"))
+            }
+            if scoped_work && ((c.mutable && self.types.is_view(c.ty)) || self.may_hold_writable_view(c.ty, 0)) {
+                return Err(err(span, "a scoped thread cannot capture a mutable or interior value that holds borrows; store owned values instead"))
+            }
             if owned {
                 if self.types.is_view(c.ty) {
                     return Err(err(span, ("a `dyn fn` owns what it captures, so it cannot capture `" + c.name.as_str() + "`, which holds a borrow (`" + self.types.show(c.ty).as_str() + "`)").as_str()))
@@ -3617,6 +3679,7 @@ impl sema.Sema {
         // The return type, if not known, is the body's.
         var rt = r0
         if ret_t.is_none() {
+            self.prepare_thread_scopes(&lfb, body.span)?
             lfb.push_scope(true)
             let probe = self.block(&lfb, body, None, true)?
             rt = if probe.ty == types.NEVER { types.UNIT } else { probe.ty }
@@ -3658,14 +3721,17 @@ impl sema.Sema {
             return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(dt), dops), dt, span))
         }
         // The environment lives as long as the block around the closure.
-        let envl = fb.block_temp(env_t, span)
+        let envl = if scoped_work { fb.temp(env_t, span) } else { fb.block_temp(env_t, span) }
         var ops = Vec(Operand).new()
         for i, c in caps {
-            let r = fb.block_temp(env_fields[i], span)
+            let r = if scoped_work { fb.temp(env_fields[i], span) } else { fb.block_temp(env_fields[i], span) }
             fb.assign(Place.local(r), if c.mutable { Rvalue.RefMut(c.place.clone()) } else { Rvalue.Ref(c.place.clone()) }, span)
             ops.push(Operand.Move(Place.local(r)))
         }
         fb.assign(Place.local(envl), Rvalue.Aggregate(mir.Agg.Struct(env_t), ops), span)
+        if scoped_work {
+            return Ok(Val { vk: VK.Place(Place.local(envl)), ty: env_t, temp: true })
+        }
         let er = fb.block_temp(env_ref, span)
         fb.assign(Place.local(er), Rvalue.Ref(Place.local(envl)), span)
         let ct = self.types.intern(TyKind.Closure(sig))
@@ -4120,12 +4186,137 @@ impl sema.Sema {
         self.call_decl_inner(&fb, fid, iargs, recv, Vec(ast.Expr).new(), vargs, span, exp)
     }
 
+    // Follow local reborrows to a Scope parameter whose frame has a join
+    // epilogue. A scope hidden in a captured environment or another struct
+    // cannot keep this frame alive: lend it to a helper as `inout Scope`.
+    fn scope_receiver(self, fb: Fb, p: Place, depth: i64) -> bool {
+        if depth > fb.body.locals.len() { return false }
+        for (local, _, _) in fb.thread_scopes {
+            if p.local == local && p.proj.len() == 1 && p.proj[0] == Proj.Deref {
+                return true
+            }
+        }
+        var found = false
+        for blk in fb.body.blocks {
+            for s in blk.stmts {
+                match s {
+                    Assign(d, r, _) => if d.local == p.local && d.proj.len() == 0 {
+                        found = true
+                        match r {
+                            RefMut(q) => {
+                                if p.proj.len() == 0 || p.proj[0] != Proj.Deref { return false }
+                                var q = q.clone()
+                                for i in 1..p.proj.len() { q.proj.push(p.proj[i].clone()) }
+                                if !self.scope_receiver(fb, q, depth + 1) { return false }
+                            }
+                            Use(o) => {
+                                let source: Option(Place) = match o {
+                                    Copy(q) => Some(q.clone())
+                                    Move(q) => Some(q.clone())
+                                    _ => None
+                                }
+                                match source {
+                                    Some(q) => {
+                                        var q = q
+                                        for pr in p.proj { q.proj.push(pr.clone()) }
+                                        if !self.scope_receiver(fb, q, depth + 1) { return false }
+                                    }
+                                    None => return false
+                                }
+                            }
+                            _ => return false
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        found
+    }
+
+    // Move a fresh lambda's capture tuple into the job, rather than keeping
+    // a pointer to a temporary closure environment on this thread's stack.
+    fn scoped_spawn(inout self, inout fb: Fb, sink recv: Option(Val), args: Vec(ast.Expr), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+        let has_recv = recv.is_some()
+        let base = if has_recv { 1 } else { 2 }
+        if args.len() != base && args.len() != base + 1 {
+            return Err(err(span, "`Scope.spawn` takes one closure argument"))
+        }
+        var expected: Option(u32) = None
+        if args.len() == base + 1 {
+            expected = Some(self.expr_ty(args[args.len() - 2], fb.env)?)
+        } else {
+            match exp {
+                Some(t) => match self.adt_args_of.get(t) {
+                    Some(xs) => if xs.len() == 1 {
+                        match xs[0] { Type(t) => expected = Some(t), _ => {} }
+                    }
+                    None => {}
+                }
+                None => {}
+            }
+        }
+        let closure_ty: Option(u32) = match expected {
+            Some(t) => Some(self.types.intern(TyKind.Closure(types.Sig { params: Vec(u32).new(), ret: t })))
+            None => None
+        }
+        let recv = match recv {
+            Some(v) => v
+            None => {
+                let (p, t) = self.mut_place(&fb, args[0])?
+                val_place(p, t)
+            }
+        }
+        let p = match recv.vk {
+            Place(p) => p.clone()
+            _ => return Err(err(span, "`Scope.spawn` needs a mutable scope"))
+        }
+        if !self.scope_receiver(fb, p, 0) {
+            return Err(err(span, "`Scope.spawn` needs a scope borrowed as an `inout Scope` parameter; pass captured or stored scopes to a helper first"))
+        }
+        let a = args[args.len() - 1]
+        let (ps, ret, body) = match a.kind {
+            Lambda(ps, ret, body) => (ps.clone(), ret.clone(), body.clone())
+            _ => return Err(err(a.span, "`Scope.spawn` takes a closure written here (`fn() { ... }`)"))
+        }
+        if ps.len() != 0 { return Err(err(a.span, "a scoped thread's closure takes no parameters")) }
+        fb.scoped_work = true
+        let captures = self.lambda(&fb, ps, ret, body, closure_ty, None, a.span)?
+        let (lf, _) = self.last_lambda.unwrap()
+        let result = self.out[lf as i64].sig.ret
+        let env = captures.ty
+        let h = self.find_method(recv.ty, "spawn_env")?.unwrap()
+        var cargs = Vec(CVal).new()
+        cargs.push(CVal.Type(env))
+        cargs.push(CVal.Type(result))
+        let id = self.instance(h.imp, cargs, span)?
+        let sig = self.out[id as i64].sig.clone()
+        var ops = Vec(Operand).new()
+        ops.push(self.borrow_op(&fb, p, true, sig.params[0], span))
+        ops.push(self.operand(&fb, captures, a.span)?)
+        ops.push(Operand.Const(Const.Fn(lf)))
+        // Results may not outlive this frame's join epilogue, even when
+        // the worker captures nothing. A shared loan of the checkpoint
+        // anchors every handle (and any borrowed result) to this frame.
+        let checkpoint = fb.thread_scopes[0].2
+        ops.push(self.borrow_op(&fb, Place.local(checkpoint), false, sig.params[3], span))
+        // The entry has the same pointer ABI as the lifted closure's env.
+        let v = self.emit_call(&fb, mir.Callee.Fn(id), ops, sig.ret, span)?
+        match exp {
+            Some(t) => self.coerce(&fb, v, t, span)
+            None => Ok(v)
+        }
+    }
+
     // Rust's `Args` (expressions or values already lowered) is the pair
     // `args`, `vargs`: one of them is empty.
     fn call_decl_inner(inout self, inout fb: Fb, fid: u32, iargs: Vec(CVal), sink recv: Option(Val), args: Vec(ast.Expr), sink vargs: Vec(Val), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
         let info_module = self.fns[fid as i64].module
         let decl = sema.at(self.fns[fid as i64].decl)
         let module = info_module
+        if self.module_name(module) == "std.thread" && decl.name == "spawn" {
+            return self.scoped_spawn(&fb, recv, args, span, exp)
+        }
         if !self.fns[fid as i64].public && !self.same_package(module, fb.env.module) && !self.same_owner_module(fid, fb.env.module) {
             return Err(err(span, ("`" + decl.name.as_str() + "` is private").as_str()))
         }

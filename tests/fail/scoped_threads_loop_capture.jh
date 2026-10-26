@@ -1,0 +1,11 @@
+// The job owns the environment, but still borrows the loop variable.
+// error: `i` is changed here while it is borrowed
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        for i in 0..4 {
+            s.spawn(fn() { println(i) });
+        }
+    })
+}

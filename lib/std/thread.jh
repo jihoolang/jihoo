@@ -1,11 +1,136 @@
-// Threads that borrow. Every thread started here ends before the function
-// that started it returns, so the work may borrow what the caller owns,
-// without copying it or counting references. The borrow rules that keep
+// Threads that borrow. Parallel calls join before returning; scoped jobs
+// join before the body borrowing their scope releases its locals. Work
+// may borrow what the caller owns, without copying it or counting
+// references. The borrow rules that keep
 // two closures of one call from changing the same variable keep threads
 // from racing (see docs/language/threads.md). Native programs use POSIX
 // threads, freestanding ones `clone` (`std.os_thread`).
 
 import std.os_thread
+import std.mem
+
+// The compiler keeps the loans stored here until it calls `finish` before
+// the body borrowing the scope drops its locals. The registry owns every
+// job, independently of whether its result handle is used or forgotten.
+#[view]
+pub struct Scope {
+    jobs: Vec(ScopedJob)
+}
+
+struct ScopedJob {
+    data: *u8
+    wait: fnptr(*u8)
+    destroy: fnptr(*u8)
+}
+
+struct ScopedResult(T: type) {
+    result: Option(T)
+    thread: u64
+    joined: bool
+}
+
+struct ScopedTask(E: type, T: type) {
+    result: ScopedResult(T)
+    env: E
+    run: fnptr(*E) -> T
+}
+
+// A result borrowed from its scope. Joining consumes the handle; dropping
+// or forgetting it leaves the scope responsible for the job and result.
+#[view]
+pub struct ScopedJoinHandle(T: type) {
+    task: *ScopedResult(T)
+}
+
+impl(T: type) ScopedJoinHandle(T) {
+    pub fn join(sink self) -> T {
+        unsafe {
+            wait_task(self.task)
+            mem.replace(&self.task[0].result, None).unwrap()
+        }
+    }
+}
+
+impl(T: type) Drop for ScopedJoinHandle(T) {
+    fn drop(inout self) {}
+}
+
+unsafe fn wait_task(comptime T: type, task: *ScopedResult(T)) {
+    if !task[0].joined {
+        os_thread.wait(task[0].thread)
+        task[0].joined = true
+    }
+}
+
+impl Scope {
+    fn checkpoint(self) -> i64 { self.jobs.len() }
+
+    pub fn spawn(inout self, comptime T: type, work: fn() -> T) -> ScopedJoinHandle(T) {
+        compile_error("`Scope.spawn` needs a compiler with scoped thread support")
+    }
+
+    // The compiler supplies a fresh capture tuple and its lifted entry.
+    unsafe fn spawn_env(inout self, comptime E: type, comptime T: type, sink env: E, run: fnptr(*E) -> T, frame: ref i64) -> ScopedJoinHandle(T) {
+        unsafe {
+            let task = mem.alloc(ScopedTask(E, T), 1)
+            write(task, ScopedTask(E, T) {
+                result: ScopedResult(T) { result: None, thread: 0, joined: false }
+                env: env
+                run: run
+            })
+            let t = os_thread.start_raw(fn(arg: *u8) {
+                unsafe {
+                    let p = arg as *ScopedTask(E, T)
+                    let f = p[0].run
+                    let result = f(&p[0].env)
+                    write(&p[0].result.result, Some(result))
+                }
+            }, task as *u8)
+            task[0].result.thread = t
+            self.jobs.push(ScopedJob {
+                data: task as *u8
+                wait: fn(arg: *u8) { unsafe { wait_task(&(arg as *ScopedTask(E, T))[0].result) } }
+                destroy: fn(arg: *u8) {
+                    unsafe {
+                        let p = arg as *ScopedTask(E, T)
+                        mem.drop_at(p)
+                        mem.dealloc(p, 1)
+                    }
+                }
+            })
+            ScopedJoinHandle(T) { task: &task[0].result }
+        }
+    }
+
+    // Compiler-inserted before the function body releases any locals.
+    // Unsafe to call by hand: existing result handles would dangle.
+    pub unsafe fn finish(inout self, from: i64) {
+        for job in self.jobs.as_slice()[from..] {
+            let wait = job.wait
+            wait(job.data)
+        }
+        for job in self.jobs.as_slice()[from..] {
+            let destroy = job.destroy
+            destroy(job.data)
+        }
+        while self.jobs.len() > from {
+            self.jobs.pop()
+        }
+    }
+}
+
+impl Drop for Scope {
+    fn drop(inout self) {
+        unsafe { self.finish(0) }
+    }
+}
+
+// Starts a scope, runs its body, and joins every thread before returning.
+// Captured borrows last until the body's end, even after an explicit join.
+pub fn scope(comptime R: type, f: fn(inout Scope) -> R) -> R {
+    var s = Scope { jobs: Vec(ScopedJob).new() }
+    f(&s)
+}
 
 // The number of processors online, at least 1.
 pub fn cpu_count() -> i64 {

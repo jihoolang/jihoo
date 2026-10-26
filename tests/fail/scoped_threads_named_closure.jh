@@ -1,0 +1,12 @@
+// Borrowing an existing mutable closure could run it concurrently with itself.
+// error: `Scope.spawn` takes a closure written here
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        var n = 0
+        let f = fn() { n += 1 }
+        s.spawn(f)
+        f()
+    })
+}

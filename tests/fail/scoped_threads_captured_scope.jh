@@ -1,0 +1,13 @@
+// A nested callback's frame cannot disappear while its work uses it.
+// error: `Scope.spawn` needs a scope borrowed as an `inout Scope` parameter
+import std.thread
+
+fn main() {
+    thread.scope(fn(s) {
+        let work = fn() {
+            let local = String.from("callback frame")
+            s.spawn(fn() { println(local) });
+        }
+        work()
+    })
+}

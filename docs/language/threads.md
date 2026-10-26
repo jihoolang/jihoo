@@ -1,9 +1,9 @@
 # Threads
 
-`std.thread` runs work on several threads. Every thread it starts ends
-before the function that started it returns, so the work can borrow what
-the caller owns. No value needs copying, `'static`, a reference count or a
-lock to reach another thread:
+`std.thread` runs work on several threads. Parallel calls wait for their
+workers, and scope bodies join their workers before releasing local values,
+so the work can borrow what the caller owns. No value needs copying,
+`'static`, a reference count or a lock to reach another thread:
 
 ```jihoo
 import std.thread
@@ -21,10 +21,80 @@ fn main() {
 | `each(lo, hi, f)` | calls `f(i)` for each `i` in `lo..hi`, spread over the processors |
 | `map(xs, f)` | `f` of each element of the slice `xs`, as a `Vec`, in order |
 | `each_mut(&v, f)` | calls `f` on each element of the `Vec` `v`, which `f` may change |
+| `scope(f)` | lends a scope to `f`; joins all its threads before returning `f`'s owned result |
 | `cpu_count()` | the number of processors online |
 
 `each`, `map` and `each_mut` halve their range until there is a part per
 processor, and run the halves with `join`.
+
+## Scoped threads
+
+`scope` lets a body start several threads, keep working, and collect their
+results. `s.spawn(fn() { ... })` starts a thread immediately and returns a
+`ScopedJoinHandle(T)`. Its `join()` waits and consumes the handle, returning
+the closure's result:
+
+```jihoo
+var left = Vec(i64).new()
+var right = Vec(i64).new()
+let answer = thread.scope(fn(s) {
+    let a = s.spawn(fn() { left.push(20); String.from("ready") })
+    s.spawn(fn() { right.push(22) })
+    println(a.join())
+    42
+})
+println(left[0] + right[0])   // 42: both workers have finished
+```
+
+The scope joins **every** worker, including those whose handles are ignored,
+dropped or passed to `forget`. It drops unused results exactly once, before
+the body's local values go away. This also happens on `return` and `?`.
+As with other threads, a panic stops the program.
+
+Each spawn moves a fresh tuple of captured borrows into its own heap job.
+This keeps the closure's environment alive independently of the statement
+that starts it. A loop can start any number of jobs borrowing values that
+outlive the loop:
+
+```jihoo
+let hits = sync.Atomic(i64).new(0)
+thread.scope(fn(s) {
+    for _ in 0..8 {
+        s.spawn(fn() { hits.add(1) });
+    }
+})
+println(hits.load())   // 8
+```
+
+The semicolon discards the last handle: without it, a body's last expression
+is its return value, and a handle cannot leave the scope. The body can
+return an owned result such as an integer, `String` or `Vec(i64)`; a result
+that is a view currently retains the scope's borrow and cannot leave it.
+
+Each worker may change what it alone captures. Its captured borrows remain
+active until the scope body's end, even after `join()` or `forget(handle)`.
+Other workers and the body cannot read or change a mutably captured value
+in that time. A local in a shorter inner block, or a loop variable, cannot
+be borrowed by a worker that lasts until the body's end. Use an inner
+`thread.scope` when work must finish before leaving such a block.
+
+Write the worker closure at the spawn call. An existing borrowed closure,
+or a capture containing one, is rejected: it could also be called on this
+thread while the worker changes its captures. Owning `dyn fn` values and
+ordinary functions can be called from a worker.
+
+A worker also cannot capture a mutable or interior value that itself holds
+borrows, such as a mutable `Vec(str)` or a `Channel(str)`: it could store a
+borrow of a scope local where it would survive the scope. Use owned elements
+(`Vec(String)`, `Channel(String)`) in containers that workers change. Shared
+read-only views, such as `str` and slices of owned values, can be captured.
+
+Helpers can accept `inout s: thread.Scope` and call `s.spawn(...)`. The
+compiler joins the jobs that helper started before releasing its locals;
+the caller's earlier jobs and handles remain in the outer scope. To use a
+scope stored in a struct or captured by another callback, pass it to such
+a helper first. Only a direct `inout Scope` parameter, or its local
+reborrows, may be used to spawn. Scopes can also be nested normally.
 
 ## Why there are no data races
 
@@ -185,7 +255,3 @@ pub fn each(lo: i64, hi: i64, comptime f: fn(i64)) {
 The error points at `compile_error`. Its notes show each generic instance
 on the way to it and where that instance was used, ending in the caller's
 code.
-
-## Not yet
-
-- Threads that outlive a call (a `scope` you spawn into).

@@ -1,0 +1,15 @@
+// Forgetting an external pointer cannot erase the views stored through it.
+// error: a value stored through a parameter borrows
+import std.thread
+import std.sync
+
+fn escape(ch: ref sync.Channel(thread.ScopedJoinHandle(i64)), inout s: thread.Scope) {
+    ch.send(s.spawn(fn() { 42 }))
+    forget(ch)
+}
+
+fn main() {
+    let ch = sync.Channel(thread.ScopedJoinHandle(i64)).new()
+    thread.scope(fn(s) { escape(ch, &s) })
+    println(ch.recv().unwrap().join())
+}

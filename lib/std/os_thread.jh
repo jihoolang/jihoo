@@ -2,6 +2,8 @@
 // builds on these; `os_thread.freestanding.jh` has the same functions
 // without libc.
 
+import std.mem
+
 extern fn pthread_create(t: *u64, attr: *u8, start: fnptr(*u8) -> *u8, arg: *u8) -> i32
 extern fn pthread_join(t: u64, result: **u8) -> i32
 extern fn sysconf(name: i32) -> i64
@@ -23,6 +25,32 @@ fn thread_main(arg: *u8) -> *u8 {
 pub unsafe fn start(f: *fn()) -> u64 {
     var t: u64 = 0
     if pthread_create(&t, null, thread_main, f as *u8) != 0 {
+        panic("cannot start a thread")
+    }
+    t
+}
+
+struct RawJob {
+    entry: fnptr(*u8)
+    arg: *u8
+}
+
+fn raw_main(arg: *u8) -> *u8 {
+    unsafe {
+        let job = read(arg as *RawJob)
+        mem.dealloc(arg as *RawJob, 1)
+        let entry = job.entry
+        entry(job.arg)
+    }
+    null
+}
+
+// `arg` and everything the entry uses must outlive `wait`.
+pub unsafe fn start_raw(entry: fnptr(*u8), arg: *u8) -> u64 {
+    let job = mem.alloc(RawJob, 1)
+    write(job, RawJob { entry: entry, arg: arg })
+    var t: u64 = 0
+    if pthread_create(&t, null, raw_main, job as *u8) != 0 {
         panic("cannot start a thread")
     }
     t

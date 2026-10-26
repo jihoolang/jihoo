@@ -1,0 +1,15 @@
+// The helper's epilogue destroys its jobs, so even a captureless handle
+// must not be returned to a caller that owns the outer scope.
+// error: goes away here while it is still borrowed
+import std.thread
+
+fn start(inout s: thread.Scope) -> thread.ScopedJoinHandle(i64) {
+    s.spawn(fn() { 42 })
+}
+
+fn main() {
+    thread.scope(fn(s) {
+        let h = start(&s)
+        println(h.join())
+    })
+}

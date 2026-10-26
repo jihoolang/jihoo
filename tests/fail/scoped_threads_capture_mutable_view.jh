@@ -1,0 +1,11 @@
+// error: a scoped thread cannot capture a mutable or interior value that holds borrows
+import std.thread
+
+fn main() {
+    var values = Vec(str).new()
+    thread.scope(fn(s) {
+        let local = String.from("short")
+        s.spawn(fn() { values.push(local.as_str()) });
+    })
+    println(values[0])
+}
