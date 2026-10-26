@@ -1,0 +1,193 @@
+// Linux C calling conventions for the types jihoo can represent.
+// SysV AMD64: classify eightbytes and roll back aggregate registers as a
+// unit. AAPCS64: preserve HFA groups and the alignment of integer groups.
+// Keep LLVM coercions separate from the language's memory layout.
+
+import types
+import target
+import fmt
+
+pub struct Part {
+    pub ty: String
+    pub offset: u64
+    pub size: u64
+}
+
+impl Clone for Part {
+    fn clone(self) -> Part { Part { ty: self.ty.clone(), offset: self.offset, size: self.size } }
+}
+
+pub enum Mode {
+    Ignore
+    Scalar
+    Direct(Vec(Part))
+    // For arguments: SysV uses byval, AAPCS64 uses a caller-made copy.
+    Indirect
+}
+
+impl Clone for Mode {
+    fn clone(self) -> Mode {
+        match self {
+            Ignore => Mode.Ignore
+            Scalar => Mode.Scalar
+            Direct(ps) => Mode.Direct(ps.clone())
+            Indirect => Mode.Indirect
+        }
+    }
+}
+
+pub struct Plan {
+    pub ret: Mode
+    pub args: Vec(Mode)
+}
+
+struct Regs { gp: u32, fp: u32 }
+struct Eight { integer: bool, double: bool, floats: u32 }
+
+fn part(ty: str, offset: u64, size: u64) -> Part {
+    Part { ty: String.from(ty), offset: offset, size: size }
+}
+
+fn one(ty: str, size: u64) -> Mode {
+    var ps = Vec(Part).new()
+    ps.push(part(ty, 0, size))
+    Mode.Direct(ps)
+}
+
+pub fn indirect(m: Mode) -> bool { match m { Indirect => true, _ => false } }
+
+pub fn plan(inout ts: types.Types, target: target.Target, sig: types.Sig, actual: Vec(u32)) -> Plan {
+    var regs = Regs { gp: 0, fp: 0 }
+    let ret = classify(&ts, target, sig.ret, true, &regs)
+    if indirect(ret) { match target { X86_64 => regs.gp = 1, _ => {} } }
+    var args = Vec(Mode).new()
+    for t in actual { args.push(classify(&ts, target, t, false, &regs)) }
+    Plan { ret: ret, args: args }
+}
+
+fn classify(inout ts: types.Types, target: target.Target, t: u32, result: bool, inout regs: Regs) -> Mode {
+    let l = ts.layout(t)
+    if l.size == 0 { return Mode.Ignore }
+    let wide = match ts.kind(t) { Int(i) => i.bits == 128, _ => false }
+    if ts.is_scalar(t) && !wide {
+        if !result {
+            match ts.kind(t) {
+                Float(_) => if regs.fp < 8 { regs.fp += 1 }
+                _ => if regs.gp < 6 { regs.gp += 1 }
+            }
+        }
+        return Mode.Scalar
+    }
+    match target {
+        Aarch64 => {
+            if wide { return Mode.Scalar }
+            let (bits, n) = hfa(ts, t)
+            if bits > 0 && n > 0 && n <= 4 {
+                let base = if bits == 32 { "float" } else { "double" }
+                return one(("[" + fmt.n(n as i128) + " x " + base + "]").as_str(), n as u64 * (bits / 8) as u64)
+            }
+            if l.size > 16 { return Mode.Indirect }
+            if result && l.size <= 8 {
+                return one(("i" + fmt.n((l.size * 8) as i128)).as_str(), l.size)
+            }
+            if l.align == 16 { return one("i128", 16) }
+            if l.size <= 8 { return one("i64", 8) }
+            one("[2 x i64]", 16)
+        }
+        X86_64 => {
+            if l.size > 16 { return Mode.Indirect }
+            var slots = Vec(Eight).new()
+            slots.push(Eight { integer: false, double: false, floats: 0 })
+            slots.push(Eight { integer: false, double: false, floats: 0 })
+            eightbytes(&ts, t, 0, &slots)
+            var gp: u32 = 0
+            var fp: u32 = 0
+            var ps = Vec(Part).new()
+            for i in 0..2 {
+                let off = i as u64 * 8
+                if off >= l.size { break }
+                let e = slots[i]
+                let size = if l.size - off < 8 { l.size - off } else { 8 }
+                if e.integer {
+                    gp += 1
+                    ps.push(part(("i" + fmt.n((size * 8) as i128)).as_str(), off, size))
+                } else if e.double {
+                    fp += 1
+                    ps.push(part("double", off, 8))
+                } else if e.floats == 3 {
+                    fp += 1
+                    ps.push(part("<2 x float>", off, 8))
+                } else if e.floats != 0 {
+                    fp += 1
+                    ps.push(part("float", off, 4))
+                }
+            }
+            if !result {
+                if regs.gp + gp > 6 || regs.fp + fp > 8 {
+                    // LLVM keeps a scalar i128 together when it cannot be
+                    // expanded into two registers; it also preserves the
+                    // required 16-byte stack alignment.
+                    if wide { return one("i128", 16) }
+                    return Mode.Indirect
+                }
+                regs.gp += gp
+                regs.fp += fp
+            }
+            Mode.Direct(ps)
+        }
+    }
+}
+
+fn eightbytes(inout ts: types.Types, t: u32, offset: u64, inout slots: Vec(Eight)) {
+    let k = ts.kind(t).clone()
+    match k {
+        Float(bits) => {
+            let i = (offset / 8) as i64
+            if bits == 64 { slots[i].double = true }
+            else { slots[i].floats |= 1 << ((offset % 8) / 4) as u32 }
+        }
+        Array(e, n) => {
+            let size = ts.layout(e).size
+            if size == 0 { return }
+            for i in 0..n { eightbytes(&ts, e, offset + i * size, &slots) }
+        }
+        Adt(_) => {
+            let fs = ts.field_tys(t)
+            let offs = ts.field_offsets(t)
+            for i, f in fs { eightbytes(&ts, f, offset + offs[i], &slots) }
+        }
+        _ => {
+            let size = ts.layout(t).size
+            if size > 0 {
+                slots[(offset / 8) as i64].integer = true
+                slots[((offset + size - 1) / 8) as i64].integer = true
+            }
+        }
+    }
+}
+
+// Flatten nested structs and arrays, including arrays of nested structs.
+fn hfa(ts: types.Types, t: u32) -> (u32, u32) {
+    match ts.kind(t) {
+        Float(b) => (b, 1)
+        Array(e, n) => {
+            if n == 0 { return (0, 0) }
+            let (b, count) = hfa(ts, e)
+            if n > 4 || count > 4 { return (0, 0) }
+            (b, count * n as u32)
+        }
+        Adt(_) => {
+            var bits: u32 = 0
+            var n: u32 = 0
+            for f in ts.field_tys(t) {
+                let (b, count) = hfa(ts, f)
+                if b == 0 || bits != 0 && bits != b { return (0, 0) }
+                bits = b
+                n += count
+                if n > 4 { return (0, 0) }
+            }
+            (bits, n)
+        }
+        _ => (0, 0)
+    }
+}

@@ -10,19 +10,21 @@ pub struct IntTy {
 }
 
 pub struct Sig {
+    pub c_abi: bool
+    pub variadic: bool
     pub params: Vec(u32)
     pub ret: u32
 }
 
 impl Clone for Sig {
     fn clone(self) -> Sig {
-        Sig { params: self.params.clone(), ret: self.ret }
+        Sig { params: self.params.clone(), ret: self.ret, c_abi: self.c_abi, variadic: self.variadic }
     }
 }
 
 impl Eq for Sig {
     fn eq(self, other: Sig) -> bool {
-        self.ret == other.ret && self.params == other.params
+        self.ret == other.ret && self.params == other.params && self.c_abi == other.c_abi && self.variadic == other.variadic
     }
 }
 
@@ -143,6 +145,8 @@ pub fn kind_key(k: TyKind) -> String {
         }
         FnPtr(sig) => {
             s.push('p')
+            s.push(if sig.c_abi { 'C' } else { 'J' })
+            if sig.variadic { s.push('v') }
             ids(&s, sig.params)
             s.push('>')
             sig.ret.show(&s)
@@ -271,6 +275,47 @@ fn int(signed: bool, bits: u32) -> TyKind {
 }
 
 impl Types {
+    // C values have no language-managed ownership or borrowed storage.
+    // Arrays are valid struct members, but C parameters decay to pointers.
+    pub fn c_type(self, t: u32) -> bool {
+        self.c_value(t, false, Vec(u32).new())
+    }
+
+    fn c_value(self, t: u32, field: bool, sink seen: Vec(u32)) -> bool {
+        for x in seen {
+            if x == t { return true }
+        }
+        seen.push(t)
+        match self.kind(t) {
+            Bool | Float(_) | Ptr(_) | Int(_) => true
+            Array(e, _) => field && self.c_value(e, true, seen)
+            Adt(i) => {
+                let d = self.adts[i as i64]
+                if d.has_drop || d.view || d.interior { return false }
+                match d.body {
+                    Struct(fs) => {
+                        for f in fs {
+                            if !self.c_value(f.ty, true, seen.clone()) { return false }
+                        }
+                        true
+                    }
+                    // A recursive function pointer can mention its struct
+                    // while that struct's fields are still being resolved.
+                    Pending => true
+                    _ => false
+                }
+            }
+            FnPtr(s) => {
+                if !s.c_abi { return false }
+                for p in s.params {
+                    if !self.c_value(p, false, seen.clone()) { return false }
+                }
+                s.ret == UNIT || s.ret == NEVER || self.c_value(s.ret, false, seen)
+            }
+            _ => false
+        }
+    }
+
     pub fn new() -> Types {
         var t = Types {
             kinds: Vec(TyKind).new()
@@ -775,6 +820,10 @@ impl Types {
             FnPtr(sig) => {
                 s.push_str("fnptr(")
                 self.show_list(&s, sig.params)
+                if sig.variadic {
+                    if sig.params.len() > 0 { s.push_str(", ") }
+                    s.push_str("...")
+                }
                 s.push(')')
                 self.show_ret(&s, sig.ret)
             }

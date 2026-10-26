@@ -1,0 +1,5 @@
+// error: C parameters must be
+struct Inner { x: str }
+struct Outer { x: [Inner; 2] }
+extern fn bad(x: Outer)
+fn main() {}

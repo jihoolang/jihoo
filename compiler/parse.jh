@@ -496,7 +496,7 @@ impl Parser {
             }
             Fn => {
                 self.bump()
-                let (ps, r) = self.fn_ty_rest()?
+                let (ps, r, _) = self.fn_ty_rest(false)?
                 TyKind.Fn(ps, r)
             }
             Type => {
@@ -510,8 +510,8 @@ impl Parser {
             }
             Ident if self.text() == "fnptr" && self.peek(1) == Tok.LParen => {
                 self.bump()
-                let (ps, r) = self.fn_ty_rest()?
-                TyKind.FnPtr(ps, r)
+                let (ps, r, v) = self.fn_ty_rest(true)?
+                TyKind.FnPtr(ps, r, v)
             }
             Ident if self.text() == "dyn" && (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn) => {
                 self.bump()
@@ -543,10 +543,16 @@ impl Parser {
         }
     }
 
-    fn fn_ty_rest(inout self) -> Result((Vec(FnTyParam), Option(Box(Ty))), Diag) {
+    fn fn_ty_rest(inout self, allow_variadic: bool) -> Result((Vec(FnTyParam), Option(Box(Ty)), bool), Diag) {
         self.expect(Tok.LParen)?
         var ps = Vec(FnTyParam).new()
+        var variadic = false
         while !self.at(Tok.RParen) {
+            if self.eat(Tok.Ellipsis) {
+                if !allow_variadic { return Err(self.error("only C fnptr types can have `...`")) }
+                variadic = true
+                break
+            }
             let m = self.param_mode()
             ps.push(FnTyParam { mode: m, ty: self.ty()? })
             if !self.eat(Tok.Comma) {
@@ -559,7 +565,7 @@ impl Parser {
             self.bump()
             r = Some(Box.new(self.ty()?))
         }
-        Ok((ps, r))
+        Ok((ps, r, variadic))
     }
 
     // ---- statements ----

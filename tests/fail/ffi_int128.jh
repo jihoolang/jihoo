@@ -1,3 +1,0 @@
-// error: C parameters must be
-extern fn bad(x: i128)
-fn main() { unsafe { bad(1) } }

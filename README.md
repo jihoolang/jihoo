@@ -107,7 +107,9 @@ kernel; integers up to 128 bits; structs, enums, tuples, arrays, slices;
 `match` with exhaustiveness; generics with inference; traits with default
 methods and generic impls; closures that borrow, and `comptime` closures
 that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
-globals, C functions and callbacks, dynamic libraries (`std.ffi`), system calls and atomics; the standard library,
+globals, C functions and callbacks (including structs by value, 128-bit
+integers and variadic function pointers on both targets), dynamic libraries
+(`std.ffi`), system calls and atomics; the standard library,
 including running other programs.
 
 [Compile-time evaluation](docs/language/comptime.md) runs ordinary functions
@@ -160,5 +162,4 @@ up to v0.1.1.
 Errors come several per run, in source order, with notes on where a
 moved value went and where a conflicting borrow started.
 
-Next ([roadmap](docs/internals/roadmap.md)): contracts, the C
-ABI for structs.
+Next ([roadmap](docs/internals/roadmap.md)): contracts and formatting options.

@@ -49,8 +49,10 @@ Done ([design](redesign.md)):
    files, arguments, the environment, running other programs
    (`std.process`), printing; native and freestanding.
 10. x86_64 and aarch64 Linux.
-    Native C FFI includes shared libraries (`std.ffi`), scalar callbacks,
-    C default argument promotions and checked C signatures. LLVM 21's C
+    Native C FFI includes shared libraries (`std.ffi`), structs by value,
+    nested structs and arrays, 128-bit integers, aggregate callbacks and
+    variadic function pointers with C default argument promotions and
+    checked C signatures on both targets. LLVM 21's C
     API handles optimization and object emission in process; clang remains
     an optional comparison backend.
 11. Speed: on the benchmarks (recursion, a sieve, matrix multiplication,
@@ -150,7 +152,6 @@ uses that made it.
 
 - **Contracts** (which v0 had), checked by the kernel and the
   compile-time interpreter where possible.
-- **The C ABI**: structs by value to and from C functions.
 - **Formatting**: `print` with several values, and formatting options.
 - **Tail calls** that never grow the stack.
 - **Macros**, if reflection turns out not to cover what they would do.

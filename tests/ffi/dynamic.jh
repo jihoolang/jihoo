@@ -1,11 +1,22 @@
 import std.env
 import std.ffi
 
+struct ExportPair { x: f64, y: i64 }
+struct ExportLarge { a: i64, b: i64, c: i64 }
+
 fn main() {
     let args = env.args()
     unsafe {
         let lib = ffi.Library.open(args[1]).unwrap()
         let add = lib.symbol("jihoo_add").unwrap() as fnptr(i64, i64) -> i64
         println(add(20, 22))
+        let pair = lib.symbol("jihoo_pair").unwrap() as fnptr(ExportPair) -> ExportPair
+        let p = pair(ExportPair { x: 1.5, y: 41 })
+        let large = lib.symbol("jihoo_large").unwrap() as fnptr(ExportLarge) -> ExportLarge
+        let l = large(ExportLarge { a: 1, b: 2, c: 3 })
+        let wide = lib.symbol("jihoo_i128").unwrap() as fnptr(i128) -> i128
+        if p.x != 3.0 || p.y != 42 || l.a != 2 || l.b != 4 || l.c != 6 || wide(-7) != (1 as i128 << 100) - 7 {
+            panic("dynamic C ABI mismatch")
+        }
     }
 }

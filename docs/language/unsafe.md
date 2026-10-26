@@ -79,9 +79,10 @@ as `std.sync`'s `Atomic`, `Mutex`, `Channel` and `Once` do.
 ## Calling C
 
 `extern fn` declares a C function; calling it is unsafe. Arguments and
-results are integers up to 64 bits, floats, `bool`, raw pointers and scalar
-`fnptr` types; `...` accepts more arguments with
-C's promotions. A string literal passed where `*u8` is expected is a C
+results are integers through 128 bits, floats, `bool`, raw pointers,
+C-compatible `fnptr` types and plain structs by value. Structs may contain
+nested structs and fixed arrays of these types. `...` accepts more arguments
+with C's promotions. A string literal passed where `*u8` is expected is a C
 string: literals end with a zero byte.
 
 ```jihoo
@@ -108,13 +109,53 @@ cc -shared api.o -lm -ldl -o libapi.so
 The object uses PIC. Link any other libraries required by `api.jh` too.
 
 Parameters use the ordinary `name: T` syntax, without `inout`, `sink` or
-`comptime`. Results may also be `()` or `never`. Jihoo views, closures,
-borrow types, 128-bit integers and aggregates by value are rejected at the C boundary.
-Pass a struct by raw pointer instead; jihoo structs have C field order,
-padding and alignment on the supported Linux targets. For callbacks,
-use `export fn` with a matching scalar `fnptr` signature. C variadic
-arguments promote `bool` and integers smaller than 32 bits to `i32`,
-and `f32` to `f64`.
+`comptime`. Results may also be `()` or `never`. A struct passed by value
+is an independent copy; passing its raw pointer instead lets C use its
+original storage. Jihoo structs have C field order, padding and alignment
+on both supported Linux targets.
+
+```jihoo
+struct Point { x: f64, y: f64 }
+extern fn translate(p: Point, dx: f64, dy: f64) -> Point
+
+export fn scale(p: Point) -> Point {
+    Point { x: p.x * 2.0, y: p.y * 2.0 }
+}
+```
+
+The compiler uses the System V AMD64 ABI on x86_64 and AAPCS64 on aarch64.
+It handles integer and floating-point register groups, homogeneous
+floating-point aggregates, stack arguments and indirect returns, including
+when earlier arguments have exhausted the available registers. `i128`
+and `u128` match C's `__int128` and `unsigned __int128`.
+
+For callbacks, use `export fn` with a matching `fnptr` signature, such as
+`fnptr(Point) -> Point`. An ordinary named function can also be converted
+where a C-compatible `fnptr` is expected; a compiler-generated adapter
+borrows its C argument copies when the jihoo function expects borrows.
+A closure with no captures can be used where that `fnptr` is expected.
+Function pointers with C-compatible value signatures use the C ABI;
+jihoo closure and borrow signatures keep the internal calling convention.
+
+C variadic arguments may include structs and 128-bit integers. `bool`
+and integers smaller than 32 bits promote to `i32`, and `f32` to `f64`;
+struct fields are unchanged. A variadic function pointer retains `...`:
+
+```jihoo
+extern fn printf(fmt: *u8, ...) -> i32
+fn main() {
+    let print: fnptr(*u8, ...) -> i32 = printf
+    unsafe { print("%d %.1f\n", 7 as u8, 2.5 as f32) }
+}
+```
+
+Views, borrowed or owning closures, borrow types, tuples and jihoo enums
+cannot cross this boundary by value. Neither can structs with `Drop`,
+`#[view]`, `#[interior]` or incompatible fields. C array parameters must
+be declared as pointers, and C enum values as the corresponding integer
+type. C unions, bit-fields, packed structs, vector types and `long double`
+have no direct jihoo type; use a C wrapper exposing supported types for
+such interfaces.
 
 ## Shared libraries and C strings
 

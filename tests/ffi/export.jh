@@ -3,3 +3,9 @@ export fn jihoo_add(a: i64, b: i64) -> i64 { a + b }
 export fn jihoo_flip(x: bool) -> bool { !x }
 export fn jihoo_small(x: i8) -> i8 { x - 1 }
 export fn jihoo_float(x: f64) -> f64 { x * 2.0 }
+
+struct ExportPair { x: f64, y: i64 }
+struct ExportLarge { a: i64, b: i64, c: i64 }
+export fn jihoo_pair(p: ExportPair) -> ExportPair { ExportPair { x: p.x * 2.0, y: p.y + 1 } }
+export fn jihoo_large(p: ExportLarge) -> ExportLarge { ExportLarge { a: p.a + 1, b: p.b + 2, c: p.c + 3 } }
+export fn jihoo_i128(x: i128) -> i128 { x + (1 as i128 << 100) }

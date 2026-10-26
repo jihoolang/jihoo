@@ -163,7 +163,7 @@ pub enum TyKind {
     // `fn(A, inout B) -> R`: a borrowed closure.
     Fn(Vec(FnTyParam), Option(Box(Ty)))
     // `fnptr(A) -> R`.
-    FnPtr(Vec(FnTyParam), Option(Box(Ty)))
+    FnPtr(Vec(FnTyParam), Option(Box(Ty)), bool)
     // `dyn Trait`, `dyn fn(A) -> R`: owned values whose type is known only
     // when the program runs.
     Dyn(Box(Ty))
@@ -406,7 +406,7 @@ impl Clone for TyKind {
             Slice(t) => TyKind.Slice(t.clone())
             Tuple(ts) => TyKind.Tuple(ts.clone())
             Fn(ps, r) => TyKind.Fn(ps.clone(), r.clone())
-            FnPtr(ps, r) => TyKind.FnPtr(ps.clone(), r.clone())
+            FnPtr(ps, r, v) => TyKind.FnPtr(ps.clone(), r.clone(), v)
             Dyn(t) => TyKind.Dyn(t.clone())
         }
     }

@@ -352,8 +352,8 @@ impl Dump {
                 self.open("fn", t.span)
                 self.fn_ty(ps, r)
             }
-            FnPtr(ps, r) => {
-                self.open("fnptr", t.span)
+            FnPtr(ps, r, v) => {
+                self.open(if v { "fnptr..." } else { "fnptr" }, t.span)
                 self.fn_ty(ps, r)
             }
             Dyn(i) => {

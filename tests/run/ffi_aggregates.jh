@@ -1,0 +1,156 @@
+// link: tests/ffi/aggregates.c
+//> C aggregates passed
+
+struct Tiny { bytes: [u8; 3] }
+struct IntPair { a: i64, b: i64 }
+struct Mixed { x: f64, y: i32 }
+struct Reverse { y: i32, x: f64 }
+struct FloatPair { a: f32, b: f32 }
+struct Float3 { v: [f32; 3] }
+struct Hfa4 { p: [FloatPair; 2] }
+struct Double4 { v: [f64; 4] }
+struct Large { a: i64, b: i64, c: i64 }
+struct Wide { x: i128 }
+struct Aligned { tag: u8, x: i128 }
+struct Nested { pair: IntPair, tiny: Tiny, z: i16 }
+struct FloatInt { f: f32, i: i32 }
+struct Tail { d: f64, f: f32 }
+struct Bytes17 { v: [u8; 17] }
+struct Flags { a: bool, b: bool }
+struct Node { apply: fnptr(Node) -> i64, value: i64 }
+
+extern fn abi_tiny(v: Tiny) -> Tiny
+extern fn abi_pair(v: IntPair) -> IntPair
+extern fn abi_mixed(v: Mixed) -> Mixed
+extern fn abi_reverse(v: Reverse) -> Reverse
+extern fn abi_floats(v: FloatPair) -> FloatPair
+extern fn abi_float3(v: Float3) -> Float3
+extern fn abi_hfa4(v: Hfa4) -> Hfa4
+extern fn abi_double4(v: Double4) -> Double4
+extern fn abi_large(v: Large) -> Large
+extern fn abi_wide(v: Wide) -> Wide
+extern fn abi_aligned(v: Aligned) -> Aligned
+extern fn abi_nested(v: Nested) -> Nested
+extern fn abi_float_int(v: FloatInt) -> FloatInt
+extern fn abi_tail(v: Tail) -> Tail
+extern fn abi_bytes17(v: Bytes17) -> Bytes17
+extern fn abi_flags(v: Flags) -> Flags
+extern fn abi_i128(x: i128) -> i128
+extern fn abi_u128(x: u128) -> u128
+extern fn abi_gp(a: i64, b: i64, c: i64, d: i64, e: i64, p: IntPair, z: i64) -> i64
+extern fn abi_gp_mixed(a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, p: Mixed, z: f64) -> i64
+extern fn abi_fp(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, g: f64, p: FloatPair, z: f64) -> f64
+extern fn abi_fp_pair(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, g: f64, p: Tail, z: f64) -> f64
+extern fn abi_gp_i128(a: i64, b: i64, c: i64, d: i64, e: i64, x: i128, z: i64) -> i128
+extern fn abi_gp_wide(a: i64, b: i64, c: i64, d: i64, e: i64, x: Wide, z: i64) -> Wide
+extern fn abi_sret(a: i64, b: i64, c: i64, d: i64, p: IntPair, z: i64) -> Large
+extern fn abi_callback(f: fnptr(IntPair) -> IntPair, x: IntPair) -> IntPair
+extern fn abi_callback_float3(f: fnptr(Float3) -> Float3, x: Float3) -> Float3
+extern fn abi_callback_large(f: fnptr(Large) -> Large, x: Large) -> Large
+extern fn abi_callback_i128(f: fnptr(i128) -> i128, x: i128) -> i128
+extern fn abi_varargs(tag: i32, ...) -> i64
+extern fn abi_check_exports() -> i32
+extern fn abi_node(n: Node) -> Node
+extern fn abi_stack(a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64, h: i64, t: Tiny, w: Wide, p: Float3, z: i64) -> i64
+extern fn abi_varspill(a: i64, b: i64, c: i64, d: i64, e: i64, f0: f64, f1: f64, f2: f64, f3: f64, f4: f64, f5: f64, f6: f64, ...) -> i64
+
+export fn jh_pair(p: IntPair) -> IntPair { IntPair { a: p.a + 10, b: p.b + 20 } }
+export fn jh_mixed(p: Mixed) -> Mixed { Mixed { x: p.x * 2.0, y: p.y + 3 } }
+export fn jh_float3(p: Float3) -> Float3 { Float3 { v: [p.v[0] + 1.0, p.v[1], p.v[2] + 3.0] } }
+export fn jh_double4(p: Double4) -> Double4 { Double4 { v: [p.v[0] + 1.0, p.v[1], p.v[2], p.v[3] + 4.0] } }
+export fn jh_large(p: Large) -> Large { Large { a: p.a + 1, b: p.b + 2, c: p.c + 3 } }
+export fn jh_tiny(p: Tiny) -> Tiny { Tiny { bytes: [p.bytes[0] + 1, p.bytes[1], p.bytes[2] + 3] } }
+export fn jh_aligned(p: Aligned) -> Aligned { Aligned { tag: p.tag + 1, x: p.x + (1 as i128 << 90) + 7 } }
+export fn jh_i128(x: i128) -> i128 { x + (1 as i128 << 100) + 9 }
+export fn jh_gp(a: i64, b: i64, c: i64, d: i64, e: i64, p: IntPair, z: i64) -> i64 { a+b+c+d+e+p.a+p.b+z }
+export fn jh_fp(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, g: f64, p: Tail, z: f64) -> f64 { a+b+c+d+e+f+g+p.d+p.f as f64+z }
+
+fn node_value(n: Node) -> i64 { n.value }
+fn identity(x: i64) -> i64 { x }
+fn local_pair(p: IntPair) -> IntPair { IntPair { a: p.a + 10, b: p.b + 20 } }
+fn check(ok: bool) { if !ok { panic("C ABI mismatch") } }
+
+fn main() {
+    unsafe {
+        let tiny = Tiny { bytes: [1, 2, 3] }
+        let t = abi_tiny(tiny)
+        check(t.bytes[0] == 2 && t.bytes[2] == 6 && tiny.bytes[0] == 1)
+        let pair = IntPair { a: 1, b: 2 }
+        let p = abi_pair(pair)
+        check(p.a == 11 && p.b == 22 && pair.a == 1)
+        let m = abi_mixed(Mixed { x: 1.5, y: 4 })
+        check(m.x == 3.0 && m.y == 7)
+        let r = abi_reverse(Reverse { x: 1.5, y: 4 })
+        check(r.x == 3.0 && r.y == 7)
+        let f = abi_floats(FloatPair { a: 1.0, b: 2.0 })
+        check(f.a == 2.0 && f.b == 4.0)
+        let f3 = Float3 { v: [1.0, 2.0, 3.0] }
+        let f = abi_float3(f3)
+        check(f.v[0] == 2.0 && f.v[2] == 6.0)
+        let f = abi_hfa4(Hfa4 { p: [FloatPair { a: 1.0, b: 2.0 }, FloatPair { a: 3.0, b: 4.0 }] })
+        check(f.p[0].a == 2.0 && f.p[1].b == 8.0)
+        let doubles = Double4 { v: [1.0, 2.0, 3.0, 4.0] }
+        let f = abi_double4(doubles)
+        check(f.v[0] == 2.0 && f.v[3] == 8.0)
+        let large = Large { a: 1, b: 2, c: 3 }
+        let l = abi_large(large)
+        check(l.a == 2 && l.b == 4 && l.c == 6 && large.a == 1)
+        let wide = 1 as i128 << 80
+        let w = abi_wide(Wide { x: wide })
+        check(w.x == wide + (1 as i128 << 90) + 7)
+        let a = abi_aligned(Aligned { tag: 5, x: wide })
+        check(a.tag == 6 && a.x == w.x)
+        let n = abi_nested(Nested { pair: pair, tiny: tiny, z: -5 })
+        check(n.pair.a == 2 && n.tiny.bytes[2] == 6 && n.z == -9)
+        let fi = abi_float_int(FloatInt { f: 2.0, i: -3 })
+        check(fi.f == 3.0 && fi.i == -5)
+        let tail = abi_tail(Tail { d: 1.5, f: 2.5 })
+        check(tail.d == 2.5 && tail.f == 4.5)
+        let bytes = abi_bytes17(Bytes17 { v: [3; 17] })
+        check(bytes.v[0] == 4 && bytes.v[16] == 5)
+        let flags = abi_flags(Flags { a: false, b: true })
+        check(flags.a && !flags.b)
+        check(abi_i128(-7) == (1 as i128 << 100) + 2)
+        check(abi_u128(7) == (1 as u128 << 127) + 7)
+        check(abi_gp(1,2,3,4,5,IntPair { a: 6, b: 7 },8) == 36)
+        check(abi_gp_mixed(1,2,3,4,5,6,Mixed { x: 7.0, y: 8 },9.0) == 45)
+        check(abi_fp(1.0,2.0,3.0,4.0,5.0,6.0,7.0,FloatPair { a: 8.0, b: 9.0 },10.0) == 55.0)
+        check(abi_fp_pair(1.0,2.0,3.0,4.0,5.0,6.0,7.0,Tail { d: 8.0, f: 9.0 },10.0) == 55.0)
+        check(abi_gp_i128(1,2,3,4,5,wide,6) == wide + 21)
+        check(abi_gp_wide(1,2,3,4,5,Wide { x: wide },6).x == wide + 21)
+        let s = abi_sret(1,2,3,4,IntPair { a: 5, b: 6 },7)
+        check(s.a == 10 && s.b == 11 && s.c == 7)
+        let cb = abi_callback(jh_pair, pair)
+        check(cb.a == 11 && cb.b == 22)
+        let cb = abi_callback(local_pair, pair)
+        check(cb.a == 11 && cb.b == 22)
+        let cb = abi_callback(fn(p: IntPair) { IntPair { a: p.a + 10, b: p.b + 20 } }, pair)
+        check(cb.a == 11 && cb.b == 22)
+        let cb = abi_callback_float3(jh_float3, f3)
+        check(cb.v[0] == 2.0 && cb.v[2] == 6.0)
+        let cb = abi_callback_large(jh_large, large)
+        check(cb.a == 2 && cb.c == 6)
+        check(abi_callback_i128(jh_i128, -7) == (1 as i128 << 100) + 2)
+        let fp = abi_pair
+        let p = fp(pair)
+        check(p.a == 11 && p.b == 22)
+        let fp = abi_large
+        check(fp(large).c == 6)
+        let callback: fnptr(IntPair) -> IntPair = local_pair
+        check(callback(pair).a == 11)
+        let internal = local_pair
+        check(internal(pair).a == 11)
+        check(abi_varargs(1, pair, Mixed { x: 3.0, y: 4 }, doubles, large, 7 as i128, 8 as u8, 9.0 as f32) == 45)
+        let vp: fnptr(i32, ...) -> i64 = abi_varargs
+        check(vp(1, pair, Mixed { x: 3.0, y: 4 }, doubles, large, 7 as i128, 8 as u8, 9.0 as f32) == 45)
+        let node = abi_node(Node { apply: node_value, value: 41 })
+        check(node.apply(node) == 42)
+        check(abi_stack(1,2,3,4,5,6,7,8,tiny,Wide { x: wide + 14 },Float3 { v: [10.0,11.0,12.0] },15) == 104)
+        check(abi_varspill(1,2,3,4,5,1.0,2.0,3.0,4.0,5.0,6.0,7.0,IntPair { a: 6, b: 7 },Mixed { x: 8.0, y: 9 },Float3 { v: [10.0,11.0,12.0] },wide + 14,Large { a: 15, b: 16, c: 17 },true,18.0 as f32) == 187)
+        let inferred = identity
+        let explicit: fnptr(i64) -> i64 = inferred
+        check(explicit(42) == 42)
+        check(abi_check_exports() == 1)
+    }
+    println("C aggregates passed")
+}

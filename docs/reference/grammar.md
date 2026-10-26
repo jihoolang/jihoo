@@ -85,14 +85,18 @@ type     = path [ "(" expr { sep expr } ")" ]      Vec(i64), std.map.Map(K, V)
          | "[" type ";" expr "]"                    array
          | "(" ")" | "(" type ")"                   unit; parentheses
          | "(" type "," [ type { "," type } ] ")"   tuple
-         | "fn" fn_ty | "fnptr" fn_ty               closure; function pointer
+         | "fn" fn_ty | "fnptr" fnptr_ty            closure; function pointer
          | "dyn" path | "dyn" "fn" fn_ty            owned trait value; owning closure
          | ( "ref" | "inout" ) type                 a borrow, as a type argument
          | "type"                                   the type of types
 path     = name { "." name }
 fn_ty    = "(" [ [ "inout" | "sink" ] type { "," [ "inout" | "sink" ] type } ] ")"
            [ "->" type ]
+fnptr_ty = "(" [ [ "inout" | "sink" ] type { "," [ "inout" | "sink" ] type }
+                 [ "," "..." ] | "..." ] ")" [ "->" type ]
 ```
+
+`...` in a function pointer requires a C-compatible value signature.
 
 Type arguments are expressions, so a number can be one (`[T; N]`,
 `Matrix(f64, 3)`). The `(` of type arguments, and the `->` of a function

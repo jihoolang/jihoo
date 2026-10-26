@@ -1,0 +1,4 @@
+// error: C parameters must be
+enum E { A, B }
+extern fn bad(e: E)
+fn main() {}

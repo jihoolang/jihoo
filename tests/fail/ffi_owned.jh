@@ -1,0 +1,5 @@
+// error: C parameters must be
+struct Owned { x: i64 }
+impl Drop for Owned { fn drop(inout self) {} }
+extern fn bad(x: Owned)
+fn main() {}

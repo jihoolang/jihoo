@@ -850,11 +850,11 @@ impl Sema {
                 }
                 Ok(self.types.tuple(v))
             }
-            Fn(ps, r) => self.resolve_fn_ty(ps, r, env, true)
-            FnPtr(ps, r) => self.resolve_fn_ty(ps, r, env, false)
+            Fn(ps, r) => self.resolve_fn_ty(ps, r, env, true, false, t.span)
+            FnPtr(ps, r, v) => self.resolve_fn_ty(ps, r, env, false, v, t.span)
             Dyn(inner) => match inner.kind.clone() {
                 Fn(ps, r) => {
-                    let c = self.resolve_fn_ty(ps, r, env, true)?
+                    let c = self.resolve_fn_ty(ps, r, env, true, false, t.span)?
                     let sig = match self.types.kind(c) {
                         Closure(s) => s.clone()
                         _ => panic("closure type")
@@ -943,22 +943,29 @@ impl Sema {
                 Value => {}
                 _ => return Err(ty_err(f.name_span, ("`dyn " + name.as_str() + "`: `" + f.name.as_str() + "` returns a borrow, which a `dyn` call cannot yet").as_str()))
             }
-            out.push(DynMethod { name: f.name.clone(), fid: fid, slot: out.len() + 1, mutable: f.params[0].mode == ast.Mode.Inout, sig: types.Sig { params: params, ret: ret } })
+            out.push(DynMethod { name: f.name.clone(), fid: fid, slot: out.len() + 1, mutable: f.params[0].mode == ast.Mode.Inout, sig: types.Sig { params: params, ret: ret, c_abi: false, variadic: false } })
         }
         Ok(out)
     }
 
-    fn resolve_fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty)), env: Env, closure: bool) -> Result(u32, Diag) {
+    fn resolve_fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty)), env: Env, closure: bool, variadic: bool, span: Span) -> Result(u32, Diag) {
+        var raw = Vec(u32).new()
         var params = Vec(u32).new()
+        var c_abi = !closure
         for x in ps {
             let pt = self.resolve_ty(x.ty, env)?
+            raw.push(pt)
             params.push(self.param_local_ty(x.mode, pt).0)
+            if x.mode != ast.Mode.Let || !self.c_type(pt) { c_abi = false }
         }
         let ret = match r {
             Some(r) => self.resolve_ty(r.deref(), env)?
             None => types.UNIT
         }
-        let sig = types.Sig { params: params, ret: ret }
+        if !(ret == types.UNIT || ret == types.NEVER || self.c_type(ret)) { c_abi = false }
+        if variadic && !c_abi { return Err(ty_err(span, "a variadic fnptr needs C-compatible value parameters and result")) }
+        if c_abi { params = raw }
+        let sig = types.Sig { params: params, ret: ret, c_abi: c_abi, variadic: variadic }
         Ok(self.types.intern(if closure { TyKind.Closure(sig) } else { TyKind.FnPtr(sig) }))
     }
 
@@ -1931,9 +1938,9 @@ impl Sema {
             }
             let plain_mode = match p.mode { Let => true, _ => false }
             if c_signature && (!plain_mode || !self.c_type(t)) {
-                return Err(ty_err(p.span, "C parameters must be integers up to 64 bits, floats, bool, raw pointers or C-compatible fnptr types; pass aggregates by raw pointer"))
+                return Err(ty_err(p.span, "C parameters must be C-compatible value types: integers, floats, bool, raw pointers, C fnptr types or plain C-layout structs"))
             }
-            let lp = self.param_local_ty(p.mode, t)
+            let lp = if c_signature { (t, mir.ParamPass.Value) } else { self.param_local_ty(p.mode, t) }
             params.push(lp.0)
             pass.push(lp.1)
         }
@@ -1943,7 +1950,7 @@ impl Sema {
         }
         let value_ret = match decl.ret_mode { Value => true, _ => false }
         if c_signature && (!value_ret || !(ret_t == types.UNIT || ret_t == types.NEVER || self.c_type(ret_t))) {
-            return Err(ty_err(decl.name_span, "C results must be integers up to 64 bits, floats, bool, raw pointers, C-compatible fnptr types or (); pass aggregates by raw pointer"))
+            return Err(ty_err(decl.name_span, "C results must be C-compatible value types, () or never; views, owned types, tuples and enums cannot cross the C boundary"))
         }
         let ret = match decl.ret_mode {
             Value => ret_t
@@ -2011,7 +2018,7 @@ impl Sema {
         self.out.push(mir.Function {
             symbol: symbol
             name: name
-            sig: types.Sig { params: params, ret: ret }
+            sig: types.Sig { params: params, ret: ret, c_abi: c_signature, variadic: decl.variadic }
             pass: pass
             body: None
             linkage: linkage
@@ -2035,21 +2042,12 @@ impl Sema {
         Ok(id)
     }
 
-    // How a parameter is held in the callee: by value, owned, or borrowed.
+    // Whether this type can cross a C function boundary by value.
     pub fn c_type(self, t: u32) -> bool {
-        match self.types.kind(t) {
-            Bool | Float(_) | Ptr(_) => true
-            Int(i) => i.bits <= 64
-            FnPtr(s) => {
-                for p in s.params {
-                    if !self.c_type(p) { return false }
-                }
-                s.ret == types.UNIT || s.ret == types.NEVER || self.c_type(s.ret)
-            }
-            _ => false
-        }
+        self.types.c_type(t)
     }
 
+    // How a jihoo parameter is held: by value, owned, or borrowed.
     pub fn param_local_ty(inout self, mode: ast.Mode, t: u32) -> (u32, mir.ParamPass) {
         match mode {
             Let => {

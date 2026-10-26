@@ -1,4 +1,4 @@
 // error: C results must be
-struct Pair { x: i64 }
+struct Pair { x: str }
 extern fn bad() -> Pair
 fn main() { unsafe { bad() } }

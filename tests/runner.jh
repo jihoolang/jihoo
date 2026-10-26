@@ -299,7 +299,12 @@ impl Tests {
     // ---- backend ----
 
     fn c_abi(self) -> Result((), String) {
-        let src = fs.read_file("tests/run/ffi.jh")?
+        self.c_abi_file("tests/run/ffi.jh")?
+        self.c_abi_file("tests/run/ffi_aggregates.jh")
+    }
+
+    fn c_abi_file(self, file: str) -> Result((), String) {
+        let src = fs.read_file(file)?
         let lines = directives(src.as_str(), "//> ")
         var want = String.new()
         for d in lines {
@@ -314,17 +319,17 @@ impl Tests {
                 a.push(self.compiler.as_str())
                 a.push("build")
                 a.push(opt)
-                a.push("tests/run/ffi.jh")
-                a.push("tests/ffi/native.c")
+                a.push(file)
+                words(src.as_str(), "// link:", &a)
                 a.push("-o")
                 a.push(exe.as_str())
                 let built = exec("env", a.as_slice())
                 if !built.status.success() {
-                    return Err(backend + " " + opt + ": does not compile:\n" + built.stderr.as_str())
+                    return Err(file + ": " + backend + " " + opt + ": does not compile:\n" + built.stderr.as_str())
                 }
                 let r = exec(exe.as_str(), [])
                 if !r.status.success() || r.stdout != want.as_str() {
-                    return Err(backend + " " + opt + ": prints\n" + r.stdout.as_str() + r.stderr.as_str())
+                    return Err(file + ": " + backend + " " + opt + ": prints\n" + r.stdout.as_str() + r.stderr.as_str())
                 }
             }
         }
@@ -364,7 +369,7 @@ impl Tests {
             return Err(cc + " cannot link the object:\n" + linked.stderr.as_str())
         }
         let r = exec(exe.as_str(), [])
-        if r.stdout != "C called jihoo\n" {
+        if !r.status.success() || r.stdout != "C called jihoo\n" {
             return Err("the C program prints\n" + r.stdout.as_str() + r.stderr.as_str())
         }
         var s = Vec(str).new()
@@ -387,7 +392,7 @@ impl Tests {
         fs.remove_file(obj.as_str())
         fs.remove_file(exe.as_str())
         fs.remove_file(shared.as_str())
-        if dyn.stdout != "42\n" {
+        if !dyn.status.success() || dyn.stdout != "42\n" {
             return Err("tests/ffi/dynamic.jh prints\n" + dyn.stdout.as_str() + dyn.stderr.as_str())
         }
         Ok(())
@@ -397,25 +402,27 @@ impl Tests {
     fn cross_objects(self) -> Result((), String) {
         let obj = self.temp("cross.o")
         for t in ["x86_64", "aarch64"] {
-            var a = Vec(str).new()
-            a.push("JIHOO_CC=/no-such-c-compiler")
-            a.push(self.compiler.as_str())
-            a.push("emit-obj")
-            a.push("examples/freestanding.jh")
-            a.push("--target")
-            a.push(t)
-            a.push("-o")
-            a.push(obj.as_str())
-            let o = exec("env", a.as_slice())
-            if !o.status.success() {
-                return Err(t + ": " + o.stderr.as_str())
-            }
-            let bytes = fs.read_file(obj.as_str())?
-            let b = bytes.as_str()
-            // ELF, and e_machine: 62 for x86_64, 183 for aarch64
-            let want: i64 = if t == "x86_64" { 62 } else { 183 }
-            if b.len < 20 || b[0] != 0x7f || b[1..4] != "ELF" || (b[18] as i64 | (b[19] as i64) << 8) != want {
-                return Err(t + ": not an ELF object for that machine")
+            for file in ["examples/freestanding.jh", "tests/run/ffi_aggregates.jh"] {
+                var a = Vec(str).new()
+                a.push("JIHOO_CC=/no-such-c-compiler")
+                a.push(self.compiler.as_str())
+                a.push("emit-obj")
+                a.push(file)
+                a.push("--target")
+                a.push(t)
+                a.push("-o")
+                a.push(obj.as_str())
+                let o = exec("env", a.as_slice())
+                if !o.status.success() {
+                    return Err(t + ": " + o.stderr.as_str())
+                }
+                let bytes = fs.read_file(obj.as_str())?
+                let b = bytes.as_str()
+                // ELF, and e_machine: 62 for x86_64, 183 for aarch64
+                let want: i64 = if t == "x86_64" { 62 } else { 183 }
+                if b.len < 20 || b[0] != 0x7f || b[1..4] != "ELF" || (b[18] as i64 | (b[19] as i64) << 8) != want {
+                    return Err(t + ": not an ELF object for that machine")
+                }
             }
         }
         fs.remove_file(obj.as_str())

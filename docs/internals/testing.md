@@ -26,9 +26,11 @@ the runner. Its suites:
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message.
 - **examples**: the programs in `examples/` build and run.
-- **backend**: the C ABI (`tests/run/ffi.jh`) at `-O0` to `-O3` with
+- **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
+  `-O0` to `-O3` with
   both backends; an object without `main` (`emit-obj --lib`) that C links,
-  statically and as a shared library; objects cross-compiled with no C
+  statically and as a shared library, with aggregate and 128-bit signatures;
+  objects cross-compiled with no C
   compiler; link errors; and a missing LLVM.
 - **selfhost**: the compiler builds `compiler/main.jh`, and the compiler it
   builds writes the same `emit-llvm` output, errors included, for every
@@ -54,7 +56,24 @@ nix-shell -p valgrind --run 'valgrind --leak-check=full --error-exitcode=9 /tmp/
 ## Other machines
 
 `jihoo build --target aarch64` cross-compiles; freestanding programs run
-under `qemu-aarch64` (`nix-shell -p qemu`).
+under `qemu-aarch64` (`nix-shell -p qemu`). The aggregate C ABI test can
+also run without libc on either target; the C oracle only needs Clang's
+freestanding headers:
+
+```sh
+{ echo '#![freestanding]'; cat tests/run/ffi_aggregates.jh; } > /tmp/ffi-aggregates.jh
+clang --target=aarch64-linux-gnu -ffreestanding -fno-stack-protector -O2 \
+  -c tests/ffi/aggregates.c -o /tmp/ffi-c.o
+out/jihoo build --target aarch64 /tmp/ffi-aggregates.jh /tmp/ffi-c.o -o /tmp/ffi-arm
+qemu-aarch64 /tmp/ffi-arm
+```
+
+`compiler/cabi.jh` implements the classification described by the
+[AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex)
+and [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst).
+The C oracle exercises mixed register classes, homogeneous aggregates,
+register exhaustion and rollback, stack alignment, independent argument
+copies, callbacks, dynamic symbols, and variadic promotions and aggregates.
 
 ## Backend performance
 

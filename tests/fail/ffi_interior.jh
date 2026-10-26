@@ -1,0 +1,5 @@
+// error: C parameters must be
+#[interior]
+struct Interior { x: i32 }
+extern fn bad(x: Interior)
+fn main() {}

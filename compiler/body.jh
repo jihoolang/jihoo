@@ -2,6 +2,7 @@
 // compiler's `sema/body.rs`.
 
 import std.mem
+import fmt
 import check
 import elab
 import interp
@@ -1342,9 +1343,24 @@ impl sema.Sema {
         }
         match named {
             Some(f) => match tk {
+                FnPtr(sig) => {
+                    let fsig = self.out[f as i64].sig.clone()
+                    if sig.c_abi && !fsig.c_abi && !fsig.variadic && !sig.variadic && sig.ret == fsig.ret && sig.params.len() == fsig.params.len() {
+                        var fits = true
+                        for i, t in sig.params {
+                            let ft = fsig.params[i]
+                            let borrowed = match self.types.kind(ft) { Ref(inner) => inner == t, _ => false }
+                            if ft != t && !borrowed { fits = false }
+                        }
+                        if fits {
+                            let thunk = self.c_fn_thunk(f, sig, span)
+                            return Ok(val_op(Operand.Const(Const.Fn(thunk)), to))
+                        }
+                    }
+                }
                 DynFn(sig) => match self.types.kind(from).clone() {
                     FnPtr(fsig) => {
-                        if fsig == sig {
+                        if fsig.params == sig.params && fsig.ret == sig.ret && !fsig.variadic {
                             return self.fn_to_dyn(&fb, f, sig, to, span)
                         }
                     }
@@ -1352,7 +1368,7 @@ impl sema.Sema {
                 }
                 Closure(sig) => match self.types.kind(from).clone() {
                     FnPtr(fsig) => {
-                        if fsig == sig {
+                        if fsig.params == sig.params && fsig.ret == sig.ret && !fsig.variadic {
                             let w = self.closure_thunk(f, sig)?
                             let null = Operand.Const(Const.Null(self.types.ptr(types.U8)))
                             var ops = Vec(Operand).new()
@@ -1383,6 +1399,46 @@ impl sema.Sema {
             None => return None
         }
         self.adt_instance(d, Vec(CVal).new(), Span.new(0, 0, 0)).ok()
+    }
+
+    // Adapt an ordinary named function's borrows to a C callback's owned
+    // argument slots. No environment is captured by a C function pointer.
+    fn c_fn_thunk(inout self, f: u32, sig: types.Sig, span: Span) -> u32 {
+        let symbol = "c.thunk." + fmt.n(f as i128)
+        for i, fun in self.out {
+            if fun.symbol == symbol && fun.sig == sig { return i as u32 }
+        }
+        let fsig = self.out[f as i64].sig.clone()
+        let id = self.out.len() as u32
+        var fb = Fb.new(id, Env.new(0), sig.ret, ast.RetMode.Value, span)
+        var args = Vec(Operand).new()
+        var pass = Vec(mir.ParamPass).new()
+        for i, t in sig.params {
+            let l = fb.new_local(t, None, false, LocalKind.Arg, span)
+            pass.push(mir.ParamPass.Value)
+            if fsig.params[i] == t { args.push(copy_of(l)) }
+            else { args.push(self.borrow_op(&fb, Place.local(l), false, fsig.params[i], span)) }
+        }
+        fb.body.arg_count = sig.params.len()
+        let next = fb.new_block()
+        fb.term(Term.Call(mir.Callee.Fn(f), args, Place.local(mir.RET), next, span))
+        fb.switch_to(next)
+        fb.term(Term.Return)
+        let name = "C callback for " + self.out[f as i64].name.as_str()
+        let body = match fb { Fb { body, .. } => body }
+        self.out.push(mir.Function {
+            symbol: symbol
+            name: name
+            sig: sig.clone()
+            pass: pass
+            body: Some(body)
+            linkage: mir.Linkage.Internal
+            variadic: false
+            returns_ref: false
+            span: span
+        })
+        self.inst_info.push(None)
+        id
     }
 
     // A function taking an ignored environment first and calling `f`, so
@@ -1423,7 +1479,7 @@ impl sema.Sema {
         self.out.push(mir.Function {
             symbol: symbol
             name: name
-            sig: types.Sig { params: params, ret: sig.ret }
+            sig: types.Sig { params: params, ret: sig.ret, c_abi: false, variadic: false }
             pass: pass
             body: Some(body)
             linkage: mir.Linkage.Internal
@@ -2010,9 +2066,21 @@ impl sema.Sema {
                 _ => {}
             }
         }
-        let sig = self.out[id as i64].sig.clone()
+        var sig = self.out[id as i64].sig.clone()
+        var value_id = id
+        // Scalar parameters need no borrow adaptation. Give inferred
+        // pointers to these functions the same C convention as an explicit
+        // fnptr type, including aggregate or 128-bit return values.
+        if !sig.c_abi {
+            var compatible = sig.ret == types.UNIT || sig.ret == types.NEVER || self.c_type(sig.ret)
+            for p in sig.params { if !self.c_type(p) { compatible = false } }
+            if compatible {
+                sig.c_abi = true
+                value_id = self.c_fn_thunk(id, sig, span)
+            }
+        }
         let t = self.types.intern(TyKind.FnPtr(sig))
-        Ok(val_op(Operand.Const(Const.Fn(id)), t))
+        Ok(val_op(Operand.Const(Const.Fn(value_id)), t))
     }
 
     pub fn auto_deref(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Val, Diag) {
@@ -3540,6 +3608,7 @@ impl sema.Sema {
         }
         match exp_sig.clone() {
             Some(sg) => {
+                if sg.variadic { return Err(err(span, "a variadic C function pointer needs an extern function, not a closure")) }
                 if sg.params.len() != params.len() {
                     var m = String.from("a closure with ")
                     sg.params.len().show(&m)
@@ -3564,7 +3633,8 @@ impl sema.Sema {
             match p.ty {
                 Some(t) => {
                     let t = self.resolve_ty(t, env)?
-                    ptys.push(self.param_local_ty(ast.Mode.Let, t).0)
+                    let c_value = match exp_sig.clone() { Some(sg) => want_ptr && sg.c_abi, None => false }
+                    ptys.push(if c_value { t } else { self.param_local_ty(ast.Mode.Let, t).0 })
                 }
                 None => match exp_sig.clone() {
                     Some(sg) => ptys.push(sg.params[i])
@@ -3665,7 +3735,7 @@ impl sema.Sema {
         self.out.push(mir.Function {
             symbol: symbol
             name: fname
-            sig: types.Sig { params: lparams.clone(), ret: r0 }
+            sig: types.Sig { params: lparams.clone(), ret: r0, c_abi: false, variadic: false }
             pass: pass
             body: None
             linkage: mir.Linkage.Internal
@@ -3695,7 +3765,9 @@ impl sema.Sema {
             Fb { body, .. } => self.out[id as i64].body = Some(body)
         }
         self.clear_closures(id)
-        let sig = types.Sig { params: ptys, ret: rt }
+        let c_abi = match exp_sig.clone() { Some(sg) => want_ptr && sg.c_abi, None => false }
+        self.out[id as i64].sig.c_abi = c_abi
+        let sig = types.Sig { params: ptys, ret: rt, c_abi: c_abi, variadic: false }
         self.last_lambda = Some((id, env_ref))
         if want_ptr {
             let t = self.types.intern(TyKind.FnPtr(sig))
@@ -3990,7 +4062,7 @@ impl sema.Sema {
             }
             _ => return Err(err(span, ("`" + self.types.show(v.ty).as_str() + "` is not a function").as_str()))
         }
-        if sig.params.len() != args.len() {
+        if (!sig.variadic && sig.params.len() != args.len()) || args.len() < sig.params.len() {
             var m = String.from("this function takes ")
             sig.params.len().show(&m)
             m.push_str(" argument(s), ")
@@ -4003,10 +4075,46 @@ impl sema.Sema {
         let ct = self.types.intern(if closure { TyKind.Closure(sig.clone()) } else { TyKind.FnPtr(sig.clone()) })
         let cl = self.operand_local(&fb, callee_op, ct, span)
         for i, a in args {
-            ops.push(self.arg_for_local_ty(&fb, a, sig.params[i])?)
+            if i < sig.params.len() { ops.push(self.arg_for_local_ty(&fb, a, sig.params[i])?) }
+            else { ops.push(self.c_vararg(&fb, a)?) }
         }
         let callee = if closure { mir.Callee.Closure(copy_of(cl)) } else { mir.Callee.Ptr(copy_of(cl)) }
         self.emit_call(&fb, callee, ops, sig.ret, span)
+    }
+
+    fn c_vararg(inout self, inout fb: Fb, a: ast.Expr) -> Result(Operand, Diag) {
+        var v = self.expr(&fb, a, None)?
+        if v.ty == types.STR {
+            let pu8 = self.types.ptr(types.U8)
+            v = self.coerce(&fb, v, pu8, a.span)?
+        }
+        let t = v.ty
+        if !self.c_type(t) {
+            return Err(err(a.span, "only C-compatible value types can be passed to a C function's `...`"))
+        }
+        let o = self.operand(&fb, v, a.span)?
+        var to: Option(u32) = None
+        match self.types.kind(t).clone() {
+            Int(it) => {
+                if it.bits < 32 {
+                    to = Some(types.I32)
+                }
+            }
+            Float(b) => {
+                if b == 32 {
+                    to = Some(types.F64)
+                }
+            }
+            Bool => to = Some(types.I32)
+            _ => {}
+        }
+        match to {
+            Some(to) => {
+                let c = self.rvalue(&fb, Rvalue.Cast(o, to, mir.CastKind.Numeric), to, a.span)
+                return Ok(Operand.Copy(self.place_of_val(c)))
+            }
+            None => return Ok(o)
+        }
     }
 
     // An argument for a parameter whose lowered type is known (closures).
@@ -4257,7 +4365,7 @@ impl sema.Sema {
             }
         }
         let closure_ty: Option(u32) = match expected {
-            Some(t) => Some(self.types.intern(TyKind.Closure(types.Sig { params: Vec(u32).new(), ret: t })))
+            Some(t) => Some(self.types.intern(TyKind.Closure(types.Sig { params: Vec(u32).new(), ret: t, c_abi: false, variadic: false })))
             None => None
         }
         let recv = match recv {
@@ -4750,46 +4858,8 @@ impl sema.Sema {
             ops.push(op)
             li += 1
         }
-        // The variable arguments of a C function, with C's promotions.
-        for i in args.len() - nextra..args.len() {
-            let a = args[i]
-            var v = self.expr(&fb, a, None)?
-            if v.ty == types.STR {
-                let pu8 = self.types.ptr(types.U8)
-                v = self.coerce(&fb, v, pu8, a.span)?
-            }
-            let t = v.ty
-            if !self.c_type(t) {
-                return Err(err(a.span, "only numbers and pointers can be passed to a C function's `...` (integers must be at most 64 bits)"))
-            }
-            let o = self.operand(&fb, v, a.span)?
-            var to: Option(u32) = None
-            match self.types.kind(t).clone() {
-                Int(it) => {
-                    if it.bits < 32 {
-                        to = Some(types.I32)
-                    }
-                }
-                Float(b) => {
-                    if b == 32 {
-                        to = Some(types.F64)
-                    }
-                }
-                Bool => to = Some(types.I32)
-                _ => {
-                    if !self.types.is_scalar(t) {
-                        return Err(err(a.span, "only numbers and pointers can be passed to a C function's `...`"))
-                    }
-                }
-            }
-            match to {
-                Some(to) => {
-                    let c = self.rvalue(&fb, Rvalue.Cast(o, to, mir.CastKind.Numeric), to, a.span)
-                    ops.push(Operand.Copy(self.place_of_val(c)))
-                }
-                None => ops.push(o)
-            }
-        }
+        // The variable arguments use the same promotions as fnptr calls.
+        for i in args.len() - nextra..args.len() { ops.push(self.c_vararg(&fb, args[i])?) }
         self.emit_call(&fb, mir.Callee.Fn(id), ops, fsig.ret, span)
     }
 
@@ -4937,8 +5007,11 @@ impl sema.Sema {
                 Closure(sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
                 _ => {}
             }
-            FnPtr(ps, r) => match k {
-                FnPtr(sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
+            FnPtr(ps, r, variadic) => match k {
+                FnPtr(sig) => {
+                    if sig.variadic != variadic { return Ok(false) }
+                    return self.match_fn_ty(ps, r, sig, params, env, &binds)
+                }
                 _ => {}
             }
             Dyn(inner) => match inner.kind.clone() {
@@ -5036,7 +5109,8 @@ impl sema.Sema {
             }
             match self.resolve_ty(p.ty, known) {
                 Ok(t) => {
-                    if self.param_local_ty(p.mode, t).0 != x { return Ok(false) }
+                    let expected = if sig.c_abi { t } else { self.param_local_ty(p.mode, t).0 }
+                    if expected != x { return Ok(false) }
                 }
                 Err(_) => {
                     let explicit_ref = match p.ty.kind { Ref(_, _) => true, _ => false }
@@ -5379,7 +5453,7 @@ impl sema.Sema {
         var root = mir.Function {
             symbol: String.from("comptime")
             name: String.from("comptime")
-            sig: types.Sig { params: Vec(u32).new(), ret: ty }
+            sig: types.Sig { params: Vec(u32).new(), ret: ty, c_abi: false, variadic: false }
             pass: Vec(mir.ParamPass).new()
             body: Some(fb.body.clone())
             linkage: mir.Linkage.Internal
@@ -5580,7 +5654,7 @@ impl sema.Sema {
         fb.switch_to(next)
         fb.term(Term.Return)
         let name = "dyn thunk for " + self.out[f as i64].name.as_str()
-        self.push_thunk(fb, name, types.Sig { params: params, ret: fsig.ret }, pass, span)
+        self.push_thunk(fb, name, types.Sig { params: params, ret: fsig.ret, c_abi: false, variadic: false }, pass, span)
         Ok(id)
     }
 
@@ -5615,7 +5689,7 @@ impl sema.Sema {
         fb.switch_to(next)
         fb.term(Term.Return)
         let name = "dyn thunk for " + self.out[f as i64].name.as_str()
-        self.push_thunk(fb, name, types.Sig { params: params, ret: sig.ret }, pass, span)
+        self.push_thunk(fb, name, types.Sig { params: params, ret: sig.ret, c_abi: false, variadic: false }, pass, span)
         id
     }
 
@@ -5642,7 +5716,7 @@ impl sema.Sema {
         self.out.push(mir.Function {
             symbol: symbol
             name: name
-            sig: sig
+            sig: sig.clone()
             pass: pass
             body: Some(body)
             linkage: mir.Linkage.Internal

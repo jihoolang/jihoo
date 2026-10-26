@@ -1,0 +1,4 @@
+// error: expected
+struct Pair { x: i64 }
+fn mutate(inout p: Pair) -> Pair { p.x += 1; p }
+fn main() { let p: fnptr(Pair) -> Pair = mutate }
