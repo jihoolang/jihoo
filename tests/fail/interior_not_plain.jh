@@ -1,0 +1,10 @@
+// A value that changes behind shared borrows does not copy: `var` moves it.
+// error: `a` is used here after it was moved away
+import std.sync
+
+fn main() {
+    let a = sync.Atomic(i64).new(1)
+    var b = sync.Atomic(i64).new(2)
+    b = a
+    println(a.load() + b.load())
+}

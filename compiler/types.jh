@@ -202,6 +202,8 @@ pub struct AdtDef {
     pub has_drop: bool
     // Marked `#[view]`, or has a view as an argument: it may hold borrows.
     pub view: bool
+    // Marked `#[interior]`: unsafe code changes it behind shared borrows.
+    pub interior: bool
 }
 
 pub struct Layout {
@@ -310,7 +312,7 @@ impl Types {
 
     pub fn new_adt(inout self, sink name: String, decl: u32) -> u32 {
         let idx = self.adts.len() as u32
-        self.adts.push(AdtDef { name: name, decl: decl, body: AdtBody.Pending, has_drop: false, view: false })
+        self.adts.push(AdtDef { name: name, decl: decl, body: AdtBody.Pending, has_drop: false, view: false, interior: false })
         self.intern(TyKind.Adt(idx))
     }
 
@@ -510,9 +512,54 @@ impl Types {
         false
     }
 
-    // Plain values copy implicitly.
+    // Plain values copy implicitly. A value that changes behind shared
+    // borrows does not: a copy would be another value.
     pub fn is_plain(inout self, t: u32) -> bool {
-        !self.has_refmut(t) && !self.needs_drop(t)
+        !self.has_refmut(t) && !self.needs_drop(t) && !self.is_interior(t)
+    }
+
+    // Whether a value of `t` holds memory that `#[interior]` code changes
+    // while it is borrowed shared: such borrows are not `readonly` or
+    // `noalias`.
+    pub fn is_interior(self, t: u32) -> bool {
+        match self.kind(t) {
+            Tuple(ts) => {
+                for x in ts {
+                    if self.is_interior(x) {
+                        return true
+                    }
+                }
+                false
+            }
+            Array(e, _) => self.is_interior(e)
+            Adt(i) => {
+                if self.adts[i as i64].interior {
+                    return true
+                }
+                match self.adts[i as i64].body {
+                    Struct(fs) => {
+                        for f in fs {
+                            if self.is_interior(f.ty) {
+                                return true
+                            }
+                        }
+                        false
+                    }
+                    Enum(vs) => {
+                        for v in vs {
+                            for x in v.fields {
+                                if self.is_interior(x) {
+                                    return true
+                                }
+                            }
+                        }
+                        false
+                    }
+                    Pending => false
+                }
+            }
+            _ => false
+        }
     }
 
     pub fn reset_drop_cache(inout self) {

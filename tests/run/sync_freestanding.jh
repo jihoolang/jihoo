@@ -1,0 +1,94 @@
+#![freestanding]
+// tests/run/sync.jh without libc; std.thread runs the parts in order.
+import std.sync
+import std.thread
+
+// A cell changed behind shared borrows by plain (not atomic) writes: only
+// for one thread, but `#[interior]` keeps the optimizer from assuming a
+// shared borrow leaves it unchanged.
+#[interior]
+struct Cell {
+    v: i64
+}
+
+impl Cell {
+    fn set(self, x: i64) {
+        unsafe {
+            let p = &self.v
+            *p = x
+        }
+    }
+    fn get(self) -> i64 {
+        self.v
+    }
+}
+
+fn set_then_get(c: Cell) -> i64 {
+    let before = c.get()
+    c.set(before + 41)
+    c.get()
+}
+
+struct Stats {
+    hits: sync.Atomic(i64)
+    names: sync.Mutex(Vec(String))
+}
+
+fn record(s: Stats, name: str) {
+    s.hits.add(1)
+    s.names.lock(fn(v) { v.push(name.to_string()) })
+}
+
+fn main() {
+    let c = Cell { v: 1 }
+    println(set_then_get(c))
+    //> 42
+    println(c.get())
+    //> 42
+
+    let count = sync.Atomic(i64).new(0)
+    thread.each(0, 100000, fn(i) { count.add(i) })
+    println(count.load())
+    //> 4999950000
+
+    let sevens = sync.Mutex(Vec(i64)).new(Vec(i64).new())
+    thread.each(0, 1000, fn(i) {
+        if i % 7 == 0 {
+            sevens.lock(fn(v) { v.push(i) })
+        }
+    })
+    println(sevens.lock(fn(v) { v.len() }))
+    //> 143
+    var total = 0
+    for x in sevens.into_inner() {
+        total += x
+    }
+    println(total)
+    //> 71071
+
+    // Many threads, one plain counter: `lock` lets one in at a time.
+    let plain = sync.Mutex(i64).new(0)
+    thread.each(0, 200000, fn(i) { plain.lock(fn(n) { n += 1 }) })
+    println(plain.into_inner())
+    //> 200000
+
+    let flag = sync.Atomic(u32).new(5)
+    println(flag.compare_swap(4, 7))
+    //> false
+    println(flag.compare_swap(5, 9))
+    //> true
+    println(flag.swap(1))
+    //> 9
+    println(flag.sub(1))
+    //> 1
+    println(flag.into_inner())
+    //> 0
+
+    // A struct holding them is shared the same way.
+    let stats = Stats { hits: sync.Atomic(i64).new(0), names: sync.Mutex(Vec(String)).new(Vec(String).new()) }
+    thread.join(fn() { record(stats, "a") }, fn() { record(stats, "b") })
+    println(stats.hits.load())
+    //> 2
+    println(stats.names.lock(fn(v) { v.len() }))
+    //> 2
+}

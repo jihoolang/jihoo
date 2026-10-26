@@ -65,8 +65,9 @@ alias    = "type" name [ "=" type ]
 ```
 
 - `#![...]` attributes come first in the file; the only one is
-  `#![freestanding]`. Item attributes are `#[view]` and `#[derive(...)]`
-  ([derive](../language/reflection.md#derive)).
+  `#![freestanding]`. Item attributes are `#[view]`, `#[derive(...)]`
+  ([derive](../language/reflection.md#derive)) and `#[interior]`
+  ([unsafe code](../language/unsafe.md#changing-behind-a-shared-borrow)).
 - A parameter's type may be left out only for `self`. A function without a
   block is a declaration: an `extern fn`, or a trait function without a
   default body. Items do not nest inside function bodies.

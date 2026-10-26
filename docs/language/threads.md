@@ -61,12 +61,44 @@ changes it. Two rules prevent it:
   It also may not capture another closure, which might change what that
   closure captures.
 
-Safe jihoo has no shared mutable state: no globals outside `unsafe`, no
-reference counts and no cells. So what a closure can only read cannot
-change on another thread. Values move between threads only as the results
+Outside `unsafe`, safe jihoo has no shared mutable state: no globals, no
+reference counts, and no cells except the `#[interior]` types of
+`std.sync`, which are built to be changed by several threads. So what a
+closure can only read cannot change on another thread. Values move between threads only as the results
 of `join` and `map`.
 
 A panic on any thread stops the whole program, as it does on one thread.
+
+## Sharing changes: `Atomic` and `Mutex`
+
+`std.sync` has two types that threads change together. They change behind
+shared borrows (they are `#[interior]`, see
+[unsafe code](unsafe.md#changing-behind-a-shared-borrow)),
+so a closure that runs on several threads may capture them with `let`:
+
+```jihoo
+import std.sync
+
+let hits = sync.Atomic(i64).new(0)
+let seen = sync.Mutex(Vec(i64)).new(Vec(i64).new())
+thread.each(0, n, fn(i) {
+    hits.add(1)
+    if i % 7 == 0 {
+        seen.lock(fn(v) { v.push(i) })
+    }
+})
+println(hits.load())
+let all = seen.into_inner()
+```
+
+`Atomic(T)` holds an integer: `load`, `store`, `add`, `sub`, `swap` and
+`compare_swap`, all sequentially consistent. `Mutex(T)` holds any value.
+`m.lock(f)` waits until no other thread holds it, then calls `f` with the
+value lent mutably, and returns what `f` returns. Since the value is lent
+only for the call, nothing can keep a part of it after the lock is
+released, and there is no guard to forget. Locking the same mutex again
+inside `f` waits forever. Waiting uses Linux futexes, so it costs nothing
+while no one else holds the lock.
 
 ## Profiles
 
@@ -102,9 +134,5 @@ code.
 
 ## Not yet
 
-- Threads that outlive a call (a `scope` you spawn into), channels and
-  mutexes.
-- Atomic values that safe code can share. They need a way to mark
-  memory that changes behind a shared borrow, because the compiler tells
-  LLVM that shared borrows are read-only.
+- Threads that outlive a call (a `scope` you spawn into), and channels.
 - Threads in freestanding programs.

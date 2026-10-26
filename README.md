@@ -124,7 +124,7 @@ written with them, in `std/derive.jh`, and keeps privacy.
 [Threads](docs/language/threads.md): `std.thread.join`, `each`, `map` and
 `each_mut` run work on several threads that borrows what the caller owns.
 The borrow rules and a compile-time check of the closures rule out data
-races.
+races. `std.sync.Atomic` and `Mutex` are shared through plain borrows.
 
 [Iterator pipelines](docs/language/iterators.md) compose `map`, `filter`,
 `take`, `zip` and `fold` without intermediate collections. Callback types
@@ -143,6 +143,5 @@ release builds it, and it builds itself to the same LLVM IR. There is no
 Rust left; the Rust compiler that first bootstrapped it is in the history
 up to v0.1.1.
 
-Next ([roadmap](docs/internals/roadmap.md)): shared atomics and locks, a
-data-oriented standard library (typed indices, arenas, `Soa(T)`),
+Next ([roadmap](docs/internals/roadmap.md)): a data-oriented standard library (typed indices, arenas, `Soa(T)`),
 error notes.
