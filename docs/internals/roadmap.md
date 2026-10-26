@@ -24,6 +24,10 @@ Done ([design](redesign.md)):
    files, arguments, the environment, running other programs
    (`std.process`), printing; native and freestanding.
 10. x86_64 and aarch64 Linux.
+    Native C FFI includes shared libraries (`std.ffi`), scalar callbacks,
+    C default argument promotions and checked C signatures. LLVM 21's C
+    API handles optimization and object emission in process; clang remains
+    an optional comparison backend.
 11. Speed: on the benchmarks (recursion, a sieve, matrix multiplication,
     n-body), within measurement noise of C compiled by clang at `-O2`, with
     bounds checks on.

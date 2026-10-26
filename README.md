@@ -66,7 +66,7 @@ nix profile install github:jihoolang/jihoo         # install `jihoo`
 
 ## Build from source
 
-Everything comes from `flake.nix` (Rust, clang and lld from LLVM 21).
+Everything comes from `flake.nix` (Rust, libLLVM, clang and lld from LLVM 21).
 `nix build` bootstraps the compiler: the Rust one (`crates/jihoo`) builds
 the one in jihoo (`compiler/`), which builds itself again and is installed.
 
@@ -104,8 +104,14 @@ kernel; integers up to 128 bits; structs, enums, tuples, arrays, slices;
 `match` with exhaustiveness; generics with inference; traits with default
 methods and generic impls; closures that borrow, and `comptime` closures
 that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
-globals, C functions, system calls and atomics; the standard library,
+globals, C functions and callbacks, dynamic libraries (`std.ffi`), system calls and atomics; the standard library,
 including running other programs.
+
+LLVM 21's C API optimizes and emits objects directly, with loop and SLP
+vectorization at `-O2`/`-O3`. Native linking uses a C driver; freestanding
+linking uses lld. `JIHOO_BACKEND=clang` selects the previous backend for
+comparison. [Backend benchmarks](docs/internals/testing.md#backend-performance)
+compare compilation time and generated program speed.
 
 The compiler is written in jihoo, in `compiler/`, and
 [self-hosted](docs/internals/self-hosting.md): it builds itself, writes the

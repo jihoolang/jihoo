@@ -1,0 +1,68 @@
+// link: tests/ffi/native.c
+import std.ffi
+
+extern fn ffi_i8(x: i8) -> i8
+extern fn ffi_u8(x: u8) -> u8
+extern fn ffi_i16(x: i16) -> i16
+extern fn ffi_u16(x: u16) -> u16
+extern fn ffi_bool(x: bool) -> bool
+extern fn ffi_float(x: f32) -> f32
+extern fn ffi_double(x: f64) -> f64
+extern fn ffi_pair(p: *Pair)
+extern fn ffi_callback(f: fnptr(bool) -> bool, x: bool) -> bool
+extern fn ffi_small_callback(f: fnptr(i8) -> i8, x: i8) -> i8
+extern fn ffi_promotions(tag: i32, ...) -> i32
+
+struct Pair {
+    first: i32
+    second: i64
+}
+
+//> -101
+//> 201
+//> -1001
+//> 50001
+//> true
+//> 3
+//> 5
+//> 11
+//> 22
+//> true
+//> -6
+//> 260
+//> false
+//> 1
+//> true
+//> true
+//> hello
+
+export fn flip(x: bool) -> bool { !x }
+export fn decrement(x: i8) -> i8 { x - 1 }
+
+fn main() {
+    unsafe {
+        println(ffi_i8(-100))
+        println(ffi_u8(200))
+        println(ffi_i16(-1000))
+        println(ffi_u16(50000))
+        println(ffi_bool(false))
+        println(ffi_float(1.5) as i64)
+        println(ffi_double(2.5) as i64)
+        var p = Pair { first: 10, second: 20 }
+        ffi_pair(&p)
+        println(p.first)
+        println(p.second)
+        println(ffi_callback(flip, false))
+        println(ffi_small_callback(decrement, -5))
+        println(ffi_promotions(10, -2 as i8, 250 as u8, true, 1.5 as f32))
+        let fp = ffi_bool
+        println(fp(true))
+        let lib = ffi.Library.open("libm.so.6").unwrap()
+        let cos = lib.symbol("cos").unwrap() as fnptr(f64) -> f64
+        println(cos(0.0) as i64)
+        println(lib.symbol("jihoo_no_such_symbol").is_err())
+    }
+    println(ffi.c_string("a\0b").is_err())
+    let c = ffi.c_string("hello").unwrap()
+    println(unsafe { ffi.copy_c_string(c.as_str().ptr) })
+}

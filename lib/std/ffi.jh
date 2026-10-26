@@ -1,0 +1,79 @@
+// C interoperation on native Linux. Addresses obtained from a library are
+// valid only until that library is dropped.
+
+import std.libc
+
+pub type c_schar = i8
+pub type c_uchar = u8
+pub type c_int = i32
+pub type c_uint = u32
+pub type c_long = i64
+pub type c_ulong = u64
+pub type size_t = u64
+
+extern fn dlopen(path: *u8, flags: i32) -> *u8
+extern fn dlsym(handle: *u8, name: *u8) -> *u8
+extern fn dlclose(handle: *u8) -> i32
+extern fn dlerror() -> *u8
+
+// An owned, zero-terminated copy. Reject embedded zeros, which would make
+// the C library see a different name from the one the caller supplied.
+pub fn c_string(s: str) -> Result(String, String) {
+    for b in s {
+        if b == 0 {
+            return Err(String.from("a C string cannot contain a zero byte"))
+        }
+    }
+    var out = String.from(s)
+    out.push(0)
+    Ok(out)
+}
+
+// `p` must address a readable zero-terminated string for this call.
+pub unsafe fn copy_c_string(p: *u8) -> String {
+    String.from(make_str(p, libc.strlen(p)))
+}
+
+fn loader_error() -> String {
+    let p = unsafe { dlerror() }
+    if p == null {
+        return String.from("dynamic library operation failed")
+    }
+    unsafe { copy_c_string(p) }
+}
+
+pub struct Library {
+    handle: *u8
+}
+
+impl Library {
+    // Loading runs the library's initializers. The caller must trust the
+    // library and its dependencies. RTLD_NOW | RTLD_LOCAL on Linux.
+    pub unsafe fn open(path: str) -> Result(Library, String) {
+        let c = c_string(path)?
+        let h = dlopen(c.as_str().ptr, 2)
+        if h == null {
+            return Err(loader_error())
+        }
+        Ok(Library { handle: h })
+    }
+
+    // Cast to the exact C function pointer or data pointer type. The
+    // caller must keep this Library alive while using the address.
+    pub unsafe fn symbol(self, name: str) -> Result(*u8, String) {
+        let c = c_string(name)?
+        dlerror()
+        let p = dlsym(self.handle, c.as_str().ptr)
+        let e = dlerror()
+        if e != null {
+            return Err(copy_c_string(e))
+        }
+        Ok(p)
+    }
+}
+
+impl Drop for Library {
+    fn drop(inout self) {
+        unsafe { dlclose(self.handle) }
+    }
+}

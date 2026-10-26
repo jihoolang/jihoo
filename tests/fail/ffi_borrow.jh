@@ -1,0 +1,4 @@
+// error: C parameters must be
+extern fn bad(inout x: i32)
+fn main() { var x: i32 = 0
+unsafe { bad(&x) } }

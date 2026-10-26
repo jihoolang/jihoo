@@ -1166,6 +1166,10 @@ impl<'a> Sema<'a> {
         let info = &self.fns[fid as usize];
         let decl = info.decl;
         let module = info.module;
+        // std.rt defines LLVM's compiler-rt libcalls, including i128
+        // arithmetic. These use LLVM's libcall ABI, not the user C FFI.
+        let c_signature = decl.kind != ast::FnKind::Normal
+            && !(decl.kind == ast::FnKind::Export && self.module_name(module) == "std.rt");
         for p in &decl.params {
             if p.mode == Mode::Comptime {
                 let Some(a) = args.get(used) else { return ty_err(span, "missing compile-time argument") };
@@ -1189,6 +1193,9 @@ impl<'a> Sema<'a> {
                 Some(t) => self.resolve_ty(t, &env)?,
                 None => env.self_ty.ok_or_else(|| Diag::new(p.span, "`self` outside an impl"))?,
             };
+            if c_signature && (p.mode != Mode::Let || !self.c_type(t)) {
+                return ty_err(p.span, "C parameters must be integers up to 64 bits, floats, bool, raw pointers or C-compatible fnptr types; pass aggregates by raw pointer");
+            }
             let (lt, pp) = self.param_local_ty(p.mode, t);
             params.push(lt);
             pass.push(pp);
@@ -1197,6 +1204,9 @@ impl<'a> Sema<'a> {
             Some(t) => self.resolve_ty(t, &env)?,
             None => types::UNIT,
         };
+        if c_signature && (decl.ret_mode != RetMode::Value || !(ret_t == types::UNIT || ret_t == types::NEVER || self.c_type(ret_t))) {
+            return ty_err(decl.name_span, "C results must be integers up to 64 bits, floats, bool, raw pointers, C-compatible fnptr types or (); pass aggregates by raw pointer");
+        }
         let ret = match decl.ret_mode {
             RetMode::Value => ret_t,
             RetMode::Ref => self.types.refty(ret_t),
@@ -1247,6 +1257,15 @@ impl<'a> Sema<'a> {
     }
 
     /// How a parameter is held in the callee: by value, owned, or borrowed.
+    pub fn c_type(&self, t: TyId) -> bool {
+        match self.types.kind(t) {
+            TyKind::Bool | TyKind::Float(_) | TyKind::Ptr(_) => true,
+            TyKind::Int(i) => i.bits <= 64,
+            TyKind::FnPtr(s) => s.params.iter().all(|&p| self.c_type(p)) && (s.ret == types::UNIT || s.ret == types::NEVER || self.c_type(s.ret)),
+            _ => false,
+        }
+    }
+
     pub fn param_local_ty(&mut self, mode: Mode, t: TyId) -> (TyId, ParamPass) {
         match mode {
             Mode::Let => {
@@ -1333,11 +1352,12 @@ pub fn expr_as_ty(e: &ast::Expr) -> Option<ast::Ty> {
     Some(ast::Ty { kind, span: e.span })
 }
 
-pub fn compile(ast: &Ast, target: crate::target::Target, checked: bool) -> R<mir::Program> {
+pub fn compile(ast: &Ast, target: crate::target::Target, checked: bool, library: bool) -> R<mir::Program> {
     let mut s = Sema::new(ast, target, checked);
     s.collect()?;
     let root = ast.root;
     let entry = match s.lookup(root, "main") {
+        _ if library => None,
         Some(Sym::Fn(f)) if s.fns[f as usize].module == root => Some(s.instance(f, Vec::new(), Span::default())?),
         _ => None,
     };
@@ -1353,7 +1373,7 @@ pub fn compile(ast: &Ast, target: crate::target::Target, checked: bool) -> R<mir
                 Owner::Trait(_) => true,
             };
         let user = !s.module_name(info.module).starts_with("std.");
-        if info.decl.kind == ast::FnKind::Export || (user && !generic && info.decl.kind == ast::FnKind::Normal) {
+        if info.decl.kind == ast::FnKind::Export || (user && !generic) {
             s.instance(fid, Vec::new(), Span::default())?;
         }
     }
@@ -1385,7 +1405,7 @@ pub fn compile(ast: &Ast, target: crate::target::Target, checked: bool) -> R<mir
             }
         }
     }
-    if entry.is_none() {
+    if entry.is_none() && !library {
         return ty_err(Span { file: ast.modules[root as usize].ast.file, lo: 0, hi: 0 }, "the program has no `main` function");
     }
     let mut statics = Vec::new();

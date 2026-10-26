@@ -85,10 +85,11 @@ are in `tests/selfhost/elab/`.
 
 The code generator (step 6) is compared by `emit-llvm`, on the host target
 and on aarch64, and the driver by building and running the test programs
-with each compiler. The driver in jihoo runs clang through `std.process`,
-and like the Rust driver keeps clang's standard error (`process.output`),
-to show it without warnings when clang fails. With both done, stage 1
-builds stage 2 (step 7).
+with each compiler. Both drivers now load LLVM 21's shared library through
+the C API to verify, optimize and emit objects. Native linking uses a C
+driver through `std.process`, and freestanding linking uses lld directly.
+The previous clang pipeline is available with `JIHOO_BACKEND=clang` for
+comparisons. Stage 1 builds stage 2 (step 7).
 
 The Rust `Sema` keeps references into the syntax tree (`&'a ast::FnDecl`).
 In jihoo a `ref T` read out of a table (`self.fns[f].decl`) carries the

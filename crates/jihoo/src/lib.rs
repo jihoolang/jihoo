@@ -9,6 +9,7 @@ pub mod diag;
 pub mod elab;
 pub mod lex;
 pub mod llvm;
+pub mod backend;
 pub mod load;
 pub mod mir;
 pub mod parse;
@@ -25,13 +26,15 @@ pub struct Options {
     /// Integer overflow traps.
     pub checked: bool,
     pub no_prelude: bool,
+    /// Emit a C-linkable library object, without an entry point.
+    pub library: bool,
 }
 
 /// Source to MIR, checked and with drops elaborated.
 pub fn compile(path: &Path, opts: &Options, sources: &mut Sources) -> Result<mir::Program, diag::Diag> {
     let search = load::default_search(&opts.search);
     let ast = load::load(path, search, opts.target.name(), sources, opts.no_prelude)?;
-    let mut prog = sema::compile(&ast, opts.target, opts.checked)?;
+    let mut prog = sema::compile(&ast, opts.target, opts.checked, opts.library)?;
     if std::env::var("JIHOO_NO_ELAB").is_ok() {
         return Ok(prog);
     }

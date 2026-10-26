@@ -1,0 +1,3 @@
+// error: an extern function cannot have a body
+extern fn bad() {}
+fn main() {}

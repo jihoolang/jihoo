@@ -1,0 +1,5 @@
+// load-args: --lib
+export fn jihoo_add(a: i64, b: i64) -> i64 { a + b }
+export fn jihoo_flip(x: bool) -> bool { !x }
+export fn jihoo_small(x: i8) -> i8 { x - 1 }
+export fn jihoo_float(x: f64) -> f64 { x * 2.0 }

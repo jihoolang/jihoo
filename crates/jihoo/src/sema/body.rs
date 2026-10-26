@@ -2817,10 +2817,13 @@ impl<'a> Sema<'a> {
             let pu8 = self.types_ptr_u8();
             let v = if v.ty == types::STR { self.coerce(fb, v, pu8, a.span)? } else { v };
             let t = v.ty;
+            if !self.c_type(t) {
+                return ty_err(a.span, "only numbers and pointers can be passed to a C function's `...` (integers must be at most 64 bits)");
+            }
             let o = self.operand(fb, v, a.span)?;
             let o = match self.types.kind(t).clone() {
                 TyKind::Int(i) if i.bits < 32 => {
-                    let to = if i.signed { types::I32 } else { types::U32 };
+                    let to = types::I32;
                     let c = self.rvalue(fb, Rvalue::Cast(o, to, CastKind::Numeric), to, a.span);
                     Operand::Copy(self.place_of_val(c))
                 }

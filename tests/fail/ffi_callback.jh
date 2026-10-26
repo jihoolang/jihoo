@@ -1,0 +1,4 @@
+// error: C parameters must be
+extern fn bad(f: fnptr(str))
+fn callback(s: str) {}
+fn main() { unsafe { bad(callback) } }

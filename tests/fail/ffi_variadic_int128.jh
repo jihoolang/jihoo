@@ -1,0 +1,3 @@
+// error: integers must be at most 64 bits
+extern fn bad(tag: i32, ...)
+fn main() { unsafe { bad(1, 1 as i128) } }

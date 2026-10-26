@@ -45,7 +45,8 @@ fn run_one(p: &Path) -> Result<(), String> {
     let args: Vec<String> = src.lines().find_map(|l| l.trim_start().strip_prefix("// args:")).map(|s| s.split_whitespace().map(String::from).collect()).unwrap_or_default();
     let exe = std::env::temp_dir().join(format!("jihoo-test-{}-{}", std::process::id(), p.file_stem().unwrap().to_string_lossy()));
     let opt = std::env::var("JIHOO_TEST_OPT").unwrap_or_else(|_| "-O1".into());
-    let o = jihoo().arg("build").arg(&opt).arg(p).arg("-o").arg(&exe).output().unwrap();
+    let link = src.lines().find_map(|l| l.trim_start().strip_prefix("// link:")).unwrap_or("");
+    let o = jihoo().arg("build").arg(&opt).arg(p).args(link.split_whitespace()).arg("-o").arg(&exe).current_dir(root()).output().unwrap();
     if !o.status.success() {
         return Err(format!("does not compile:\n{}", String::from_utf8_lossy(&o.stderr)));
     }

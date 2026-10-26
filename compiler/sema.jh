@@ -1641,6 +1641,12 @@ impl Sema {
         self.fn_self_ty(fid, &env)?
         let decl = at(self.fns[fid as i64].decl)
         let module = self.fns[fid as i64].module
+        // std.rt's i128 arithmetic helpers implement LLVM's libcall ABI.
+        let c_signature = match decl.kind {
+            Normal => false
+            Export => self.module_name(module) != "std.rt"
+            Extern => true
+        }
         for p in decl.params {
             if p.mode == ast.Mode.Comptime {
                 if used >= args.len() {
@@ -1675,6 +1681,10 @@ impl Sema {
                     None => return Err(ty_err(p.span, "`self` outside an impl"))
                 }
             }
+            let plain_mode = match p.mode { Let => true, _ => false }
+            if c_signature && (!plain_mode || !self.c_type(t)) {
+                return Err(ty_err(p.span, "C parameters must be integers up to 64 bits, floats, bool, raw pointers or C-compatible fnptr types; pass aggregates by raw pointer"))
+            }
             let lp = self.param_local_ty(p.mode, t)
             params.push(lp.0)
             pass.push(lp.1)
@@ -1682,6 +1692,10 @@ impl Sema {
         let ret_t = match decl.ret {
             Some(t) => self.resolve_ty(t, env)?
             None => types.UNIT
+        }
+        let value_ret = match decl.ret_mode { Value => true, _ => false }
+        if c_signature && (!value_ret || !(ret_t == types.UNIT || ret_t == types.NEVER || self.c_type(ret_t))) {
+            return Err(ty_err(decl.name_span, "C results must be integers up to 64 bits, floats, bool, raw pointers, C-compatible fnptr types or (); pass aggregates by raw pointer"))
         }
         let ret = match decl.ret_mode {
             Value => ret_t
@@ -1773,6 +1787,20 @@ impl Sema {
     }
 
     // How a parameter is held in the callee: by value, owned, or borrowed.
+    pub fn c_type(self, t: u32) -> bool {
+        match self.types.kind(t) {
+            Bool | Float(_) | Ptr(_) => true
+            Int(i) => i.bits <= 64
+            FnPtr(s) => {
+                for p in s.params {
+                    if !self.c_type(p) { return false }
+                }
+                s.ret == types.UNIT || s.ret == types.NEVER || self.c_type(s.ret)
+            }
+            _ => false
+        }
+    }
+
     pub fn param_local_ty(inout self, mode: ast.Mode, t: u32) -> (u32, mir.ParamPass) {
         match mode {
             Let => {
@@ -2458,14 +2486,14 @@ pub fn expr_as_ty(e: ast.Expr) -> Option(ast.Ty) {
     Some(ast.Ty { kind: kind, span: e.span })
 }
 
-pub fn compile(a: load.Ast, tgt: target.Target, checked: bool) -> Result(mir.Program, Diag) {
+pub fn compile(a: load.Ast, tgt: target.Target, checked: bool, library: bool) -> Result(mir.Program, Diag) {
     var s = Sema.new(a, tgt, checked)
     s.collect()?
     let root = a.root
     var entry: Option(u32) = None
     match s.lookup(root, "main") {
         Some(Fn(f)) => {
-            if s.fns[f as i64].module == root {
+            if !library && s.fns[f as i64].module == root {
                 entry = Some(s.instance(f, Vec(CVal).new(), no_span())?)
             }
         }
@@ -2496,11 +2524,7 @@ pub fn compile(a: load.Ast, tgt: target.Target, checked: bool) -> Result(mir.Pro
             Export => true
             _ => false
         }
-        let normal = match decl.kind {
-            Normal => true
-            _ => false
-        }
-        if exported || (user && !generic && normal) {
+        if exported || (user && !generic) {
             s.instance(fid as u32, Vec(CVal).new(), no_span())?
         }
     }
@@ -2539,7 +2563,7 @@ pub fn compile(a: load.Ast, tgt: target.Target, checked: bool) -> Result(mir.Pro
         }
         None => {}
     }
-    if entry.is_none() {
+    if entry.is_none() && !library {
         return Err(ty_err(Span.new(a.modules[root as i64].ast.file, 0, 0), "the program has no `main` function"))
     }
     var statics = Vec(mir.StaticDef).new()

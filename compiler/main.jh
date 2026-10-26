@@ -22,10 +22,11 @@ import check
 import elab
 import fmt
 import llvm
+import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --keep-ll         keep the LLVM IR next to the output"
+const USAGE = "usage:\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -51,6 +52,7 @@ fn drive() {
     var search = Vec(String).new()
     var tgt = target.Target.host()
     var checked = true
+    var library = false
     var link = Vec(str).new()
     var prog_args = Vec(str).new()
     var keep_ll = false
@@ -91,6 +93,8 @@ fn drive() {
             keep_ll = true
         } else if a == "--no-prelude" {
             no_prelude = true
+        } else if a == "--lib" {
+            library = true
         } else if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" {
             opt = a
         } else if a == "-h" || a == "--help" {
@@ -127,7 +131,10 @@ fn drive() {
         Ok(a) => a
         Err(d) => fail(sources.render(d).as_str(), 1)
     }
-    var prog = match sema.compile(a, tgt, checked) {
+    if library && (cmd == "build" || cmd == "run") {
+        fail("error: use `emit-obj --lib` to build a C-linkable library object", 2)
+    }
+    var prog = match sema.compile(a, tgt, checked, library) {
         Ok(p) => p
         Err(d) => fail(sources.render(d).as_str(), 1)
     }
@@ -157,6 +164,17 @@ fn drive() {
                 Err(e) => fail(("error: cannot write " + o + ": " + e.as_str()).as_str(), 1)
             }
             None => print(ll)
+        }
+    } else if cmd == "emit-obj" {
+        let freestanding = prog.freestanding
+        let ll = llvm.emit(prog)
+        let output = match out {
+            Some(o) => String.from(o)
+            None => with_extension(file_stem(file), "o")
+        }
+        match backend.object(ll.as_str(), output.as_str(), opt, tgt, freestanding) {
+            Ok(_) => {}
+            Err(e) => fail(("error: " + e.as_str()).as_str(), 1)
         }
     } else if cmd == "build" || cmd == "run" {
         let freestanding = prog.freestanding
@@ -225,6 +243,16 @@ fn with_extension(path: str, ext: str) -> String {
 // Writes the IR and has clang (`JIHOO_CC`) optimize and link it. If clang
 // fails, its messages, without warnings, are the error.
 fn link_exe(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool, link: Vec(str), keep: bool) -> Result((), String) {
+    let selected = match env.get("JIHOO_BACKEND") {
+        Some(s) => s
+        None => "llvm"
+    }
+    if selected == "llvm" {
+        return link_object(ll, exe, opt, tgt, freestanding, link, keep)
+    }
+    if selected != "clang" {
+        return Err(String.from("unknown JIHOO_BACKEND; use llvm or clang"))
+    }
     var ll_path = String.new()
     if keep {
         ll_path = with_extension(exe, "ll")
@@ -285,6 +313,76 @@ fn link_exe(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool,
             if !first {
                 msg.push('\n')
             }
+            msg.push_str(l)
+            first = false
+        }
+        return Err(msg)
+    }
+    Ok(())
+}
+
+fn link_object(ll: str, exe: str, opt: str, tgt: target.Target, freestanding: bool, link: Vec(str), keep: bool) -> Result((), String) {
+    if keep {
+        let path = with_extension(exe, "ll")
+        match fs.write_file(path.as_str(), ll) {
+            Ok(_) => {}
+            Err(e) => return Err("cannot write " + path.as_str() + ": " + e.as_str())
+        }
+    }
+    let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" + exe[name_start(exe)..exe.len] + ".o"
+    let obj = os.join(os.temp_dir().as_str(), name.as_str())
+    let r = object_and_link(ll, obj.as_str(), exe, opt, tgt, freestanding, link)
+    os.remove(obj.as_str())
+    r
+}
+
+fn object_and_link(ll: str, obj: str, exe: str, opt: str, tgt: target.Target, freestanding: bool, link: Vec(str)) -> Result((), String) {
+    backend.object(ll, obj, opt, tgt, freestanding)?
+    let driver = if freestanding {
+        match env.get("JIHOO_LD") {
+            Some(s) => s
+            None => "ld.lld"
+        }
+    } else {
+        match env.get("JIHOO_CC") {
+            Some(s) => s
+            None => if tgt.name() == target.Target.host().name() { "cc" } else { "clang" }
+        }
+    }
+    var c = Vec(str).new()
+    if freestanding {
+        c.push("-m")
+        c.push(match tgt { X86_64 => "elf_x86_64", Aarch64 => "aarch64linux" })
+        c.push("-static")
+        c.push("--gc-sections")
+        c.push("-e")
+        c.push("_start")
+    } else {
+        c.push(opt)
+        c.push("-w")
+        if driver.contains("clang") {
+            c.push("-target")
+            c.push(tgt.triple())
+        }
+    }
+    c.push(obj)
+    for l in link { c.push(l) }
+    if !freestanding {
+        c.push("-lm")
+        c.push("-ldl")
+    }
+    c.push("-o")
+    c.push(exe)
+    let o = match process.output(driver, c.as_slice()) {
+        Ok(o) => o
+        Err(e) => return Err("cannot run " + driver + ": " + e.as_str() + " (set " + (if freestanding { "JIHOO_LD to ld.lld" } else { "JIHOO_CC to a C linker driver" }) + ")")
+    }
+    if !o.status.success() {
+        var msg = driver + " failed:\n"
+        var first = true
+        for l in o.stderr.as_str().lines() {
+            if l.contains("warning:") { continue }
+            if !first { msg.push('\n') }
             msg.push_str(l)
             first = false
         }

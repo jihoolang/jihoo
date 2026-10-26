@@ -11,6 +11,7 @@ const USAGE: &str = "usage:
   jihoo build <file.jh> [-o out] [link inputs]  compile a program
   jihoo emit-mir <file.jh>                      print the compiler's MIR
   jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
+  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
   jihoo emit-tokens <file.jh>                   print the tokens of one file
   jihoo emit-ast <file.jh>                      print the syntax tree of one file
   jihoo emit-program <file.jh>                  print every module a program loads
@@ -21,6 +22,7 @@ options:
   --target <t>      x86_64 or aarch64 (Linux)
   -I <dir>          also look for modules in <dir>
   -o <file>         output file
+  --lib             omit the entry point (emit-obj/emit-llvm)
   --keep-ll         keep the LLVM IR next to the output";
 
 fn main() {
@@ -51,6 +53,7 @@ fn run() {
     // Without the standard library: for comparing sema with the compiler in
     // jihoo on small programs (not in the usage).
     let mut no_prelude = false;
+    let mut library = false;
     let mut i = 1;
     while i < args.len() {
         let a = &args[i];
@@ -82,6 +85,7 @@ fn run() {
             "--release" => checked = false,
             "--keep-ll" => keep_ll = true,
             "--no-prelude" => no_prelude = true,
+            "--lib" => library = true,
             "-O0" | "-O1" | "-O2" | "-O3" => opt = a.clone(),
             "-h" | "--help" => {
                 println!("{}", USAGE);
@@ -104,7 +108,11 @@ fn run() {
         emit_syntax(&file, cmd == "emit-ast");
         return;
     }
-    let opts = Options { search, target, checked, no_prelude };
+    if library && (cmd == "build" || cmd == "run") {
+        eprintln!("error: use `emit-obj --lib` to build a C-linkable library object");
+        exit(2);
+    }
+    let opts = Options { search, target, checked, no_prelude, library };
     let mut sources = Sources::default();
     if cmd == "emit-program" {
         match jihoo::load::load(&file, jihoo::load::default_search(&opts.search), target.name(), &mut sources, opts.no_prelude) {
@@ -134,6 +142,14 @@ fn run() {
             match out {
                 Some(o) => std::fs::write(o, ll).expect("write"),
                 None => print!("{}", ll),
+            }
+        }
+        "emit-obj" => {
+            let ll = emit_llvm(&mut prog);
+            let out = out.unwrap_or_else(|| PathBuf::from(file.file_stem().unwrap()).with_extension("o"));
+            if let Err(e) = jihoo::backend::object(&ll, &out, &opt, target, prog.freestanding) {
+                eprintln!("error: {}", e);
+                exit(1);
             }
         }
         "build" | "run" => {
@@ -176,6 +192,11 @@ fn run() {
 }
 
 fn link_exe(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool, link: &[String], keep: bool) -> Result<(), String> {
+    match std::env::var("JIHOO_BACKEND").as_deref().unwrap_or("llvm") {
+        "llvm" => return link_object(ll, exe, opt, target, freestanding, link, keep),
+        "clang" => {},
+        _ => return Err("unknown JIHOO_BACKEND; use llvm or clang".into()),
+    }
     let ll_path = if keep { exe.with_extension("ll") } else { std::env::temp_dir().join(format!("jihoo-{}-{}.ll", std::process::id(), exe.file_name().unwrap().to_string_lossy())) };
     std::fs::write(&ll_path, ll).map_err(|e| format!("cannot write {}: {}", ll_path.display(), e))?;
     let cc = std::env::var("JIHOO_CC").unwrap_or_else(|_| "clang".into());
@@ -203,6 +224,40 @@ fn link_exe(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool,
         return Err(format!("{} failed:\n{}", cc, lines.join("\n")));
     }
     Ok(())
+}
+
+fn link_object(ll: &str, exe: &Path, opt: &str, target: Target, freestanding: bool, link: &[String], keep: bool) -> Result<(), String> {
+    if keep {
+        let p = exe.with_extension("ll");
+        std::fs::write(&p, ll).map_err(|e| format!("cannot write {}: {}", p.display(), e))?;
+    }
+    let obj = std::env::temp_dir().join(format!("jihoo-{}-{}.o", std::process::id(), exe.file_name().unwrap().to_string_lossy()));
+    let result = (|| {
+        jihoo::backend::object(ll, &obj, opt, target, freestanding)?;
+        let driver = if freestanding {
+            std::env::var("JIHOO_LD").unwrap_or_else(|_| "ld.lld".into())
+        } else {
+            std::env::var("JIHOO_CC").unwrap_or_else(|_| if target == Target::host() { "cc" } else { "clang" }.into())
+        };
+        let mut c = Command::new(&driver);
+        if freestanding {
+            c.args(["-m", if target == Target::X86_64 { "elf_x86_64" } else { "aarch64linux" }, "-static", "--gc-sections", "-e", "_start"]);
+        } else {
+            c.args([opt, "-w"]);
+            if driver.contains("clang") { c.args(["-target", target.triple()]); }
+        }
+        c.arg(&obj).args(link);
+        if !freestanding { c.args(["-lm", "-ldl"]); }
+        c.arg("-o").arg(exe);
+        let o = c.output().map_err(|e| format!("cannot run {}: {} (set {})", driver, e, if freestanding { "JIHOO_LD to ld.lld" } else { "JIHOO_CC to a C linker driver" }))?;
+        if !o.status.success() {
+            let err = String::from_utf8_lossy(&o.stderr);
+            return Err(format!("{} failed:\n{}", driver, err.lines().filter(|l| !l.contains("warning:")).collect::<Vec<_>>().join("\n")));
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(obj);
+    result
 }
 
 /// The tokens of one file, one per line: its byte range, whether a newline

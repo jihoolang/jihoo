@@ -141,6 +141,7 @@ fn stage1_builds_programs() {
         let rel = f.strip_prefix(root()).unwrap_or(f);
         let src = std::fs::read_to_string(f).unwrap();
         let mut args = vec!["run".to_string(), "-O1".to_string()];
+        let link: Vec<String> = src.lines().find_map(|l| l.trim_start().strip_prefix("// link:")).unwrap_or("").split_whitespace().map(String::from).collect();
         if let Some(a) = src.lines().find_map(|l| l.trim_start().strip_prefix("// args:")) {
             args.push("--".to_string());
             args.extend(a.split_whitespace().map(String::from));
@@ -149,6 +150,7 @@ fn stage1_builds_programs() {
         let (before, after) = args.split_at(2);
         let mut a0: Vec<String> = before.to_vec();
         a0.push(rel.display().to_string());
+        a0.extend(link);
         a0.extend(after.iter().cloned());
         let lib = root().join("lib").canonicalize().unwrap();
         let out = |exe: &Path| {

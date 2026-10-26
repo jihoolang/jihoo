@@ -39,8 +39,10 @@ nix build                                        # stage 2 (the compiler in jiho
 nix build .#jihoo-bootstrap                      # stage 0 (the Rust compiler) alone
 ```
 
-The compiler writes LLVM IR text and runs `clang` (`JIHOO_CC`) to optimize and
-link. `import` searches the importing file's directory, `-I` dirs,
+The compiler writes LLVM IR text in memory and uses LLVM 21's C API
+(`JIHOO_LLVM`) to optimize and emit objects. `JIHOO_CC` is the native linker
+driver; `JIHOO_LD` is the freestanding linker. `JIHOO_BACKEND=clang` keeps
+the previous pipeline for comparison. `import` searches the importing file's directory, `-I` dirs,
 `JIHOO_PATH`, then the checkout's `lib/`.
 
 ## Tests
@@ -66,7 +68,7 @@ nix flake check                                    # everything CI runs
 ## Architecture
 
 ```
-source.jh → lex/parse → load → sema (check + lower) → MIR → elab → check → llvm (text) → clang
+source.jh → lex/parse → load → sema (check + lower) → MIR → elab → check → llvm (text) → LLVM C API → object → linker
 ```
 
 One crate, `crates/jihoo`:

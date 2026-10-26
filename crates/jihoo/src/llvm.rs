@@ -1,4 +1,4 @@
-// Code generation: MIR to LLVM IR text, which clang compiles.
+// Code generation: MIR to LLVM IR text, consumed by the LLVM C API.
 //
 // Simple on purpose: every local is an alloca, every field a byte offset,
 // every aggregate copy a memcpy; mem2reg and SROA turn that into registers.
@@ -117,6 +117,27 @@ impl<'p> Gen<'p> {
         }
     }
 
+    // Use the same scalar ABI for direct calls, fnptr calls and callbacks.
+    // x86-64 C extends sub-int arguments/results; AArch64 does not.
+    fn scalar_ext(&self, t: TyId) -> &str {
+        if self.p.target != Target::X86_64 { return ""; }
+        match self.p.types.kind(t) {
+            TyKind::Bool => "zeroext",
+            TyKind::Int(i) if i.bits < 32 => if i.signed { "signext" } else { "zeroext" },
+            _ => "",
+        }
+    }
+
+    fn scalar_result(&self, t: TyId) -> String {
+        let ext = self.scalar_ext(t);
+        if ext.is_empty() { self.scalar(t) } else { format!("{} {}", ext, self.scalar(t)) }
+    }
+
+    fn scalar_param(&self, t: TyId) -> String {
+        let ext = self.scalar_ext(t);
+        if ext.is_empty() { self.scalar(t) } else { format!("{} {}", self.scalar(t), ext) }
+    }
+
     /// The LLVM type of a scalar in memory (bools are bytes).
     fn mem_scalar(&self, t: TyId) -> String {
         if t == types::BOOL {
@@ -191,18 +212,13 @@ impl<'p> Gen<'p> {
     /// The LLVM parameter list and return type of a function.
     fn signature(&mut self, f: FnId) -> (String, Vec<String>, bool) {
         let fun = self.p.fns[f as usize].clone();
-        let c_abi = fun.linkage != Linkage::Internal;
         let ret = fun.sig.ret;
         let mut params = Vec::new();
         let mut sret = false;
         let rty = if ret == types::NEVER || self.ty().is_zst(ret) {
             "void".to_string()
         } else if self.is_scalar(ret) {
-            if c_abi && ret == types::BOOL {
-                "zeroext i1".into()
-            } else {
-                self.scalar(ret)
-            }
+            self.scalar_result(ret)
         } else {
             sret = true;
             let s = self.size(ret);
@@ -212,17 +228,14 @@ impl<'p> Gen<'p> {
         };
         for (i, &t) in fun.sig.params.iter().enumerate() {
             let pass = fun.pass.get(i).copied().unwrap_or(ParamPass::Value);
-            params.push(self.param_ty(t, pass, c_abi));
+            params.push(self.param_ty(t, pass));
         }
         (rty, params, sret)
     }
 
-    fn param_ty(&mut self, t: TyId, pass: ParamPass, c_abi: bool) -> String {
+    fn param_ty(&mut self, t: TyId, pass: ParamPass) -> String {
         if self.is_scalar(t) {
-            let mut s = self.scalar(t);
-            if c_abi && t == types::BOOL {
-                s = "zeroext i1".into();
-            }
+            let mut s = self.scalar_param(t);
             if pass == ParamPass::Borrow {
                 let inner = self.p.types.pointee(t).unwrap();
                 let size = self.size(inner);
@@ -1088,11 +1101,10 @@ impl<'p> Gen<'p> {
 
     fn call(&mut self, cx: &mut FnCx, body: &Body, callee: &Callee, args: &[Operand], dest: &Place) {
         let (dptr, dt) = self.place(cx, body, dest);
-        let (sig, pass, target, c_abi, variadic) = match callee {
+        let (sig, pass, target, variadic) = match callee {
             Callee::Fn(f) => {
                 let fun = self.p.fns[*f as usize].clone();
-                let c = fun.linkage != Linkage::Internal;
-                (fun.sig.clone(), fun.pass.clone(), sym(&fun.symbol), c, fun.variadic)
+                (fun.sig.clone(), fun.pass.clone(), sym(&fun.symbol), fun.variadic)
             }
             Callee::Ptr(o) => {
                 let ot = self.operand_ty(body, o);
@@ -1100,7 +1112,7 @@ impl<'p> Gen<'p> {
                 let v = self.operand(cx, body, o);
                 let fp = self.imm(cx, v, ot);
                 let pass = sig.params.iter().map(|&t| if self.p.types.is_ref(t) { ParamPass::Borrow } else { ParamPass::Value }).collect();
-                (sig, pass, fp, false, false)
+                (sig, pass, fp, false)
             }
             Callee::Closure(o) => {
                 let ot = self.operand_ty(body, o);
@@ -1118,14 +1130,14 @@ impl<'p> Gen<'p> {
                 pass.extend(sig.params.iter().map(|&t| if self.p.types.is_ref(t) { ParamPass::Borrow } else { ParamPass::Value }));
                 let s2 = types::Sig { params, ret: sig.ret };
                 // The environment goes first.
-                return self.emit_call_inst(cx, body, &s2, &pass, &fp, false, false, Some(env), args, &dptr, dt);
+                return self.emit_call_inst(cx, body, &s2, &pass, &fp, false, Some(env), args, &dptr, dt);
             }
             Callee::Intrinsic(i) => {
                 self.intrinsic(cx, body, i, args, &dptr, dt);
                 return;
             }
         };
-        self.emit_call_inst(cx, body, &sig, &pass, &target, c_abi, variadic, None, args, &dptr, dt);
+        self.emit_call_inst(cx, body, &sig, &pass, &target, variadic, None, args, &dptr, dt);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1136,7 +1148,6 @@ impl<'p> Gen<'p> {
         sig: &types::Sig,
         pass: &[ParamPass],
         target: &str,
-        c_abi: bool,
         variadic: bool,
         env: Option<String>,
         args: &[Operand],
@@ -1166,9 +1177,9 @@ impl<'p> Gen<'p> {
             let v = self.operand(cx, body, o);
             if self.is_scalar(pt) {
                 let x = self.imm(cx, v, pt);
-                let ty = if c_abi && pt == types::BOOL { "zeroext i1".to_string() } else { self.scalar(pt) };
+                let ty = self.scalar_param(pt);
                 actual.push(format!("{} {}", ty, x));
-                param_tys.push(ty);
+                param_tys.push(self.scalar(pt));
             } else {
                 // Aggregates by pointer; a callee that owns the value gets
                 // its own copy unless the value was moved.
@@ -1190,14 +1201,13 @@ impl<'p> Gen<'p> {
         }
         let rty = if ret == types::NEVER || self.ty().is_zst(ret) || sret {
             "void".to_string()
-        } else if c_abi && ret == types::BOOL {
-            "zeroext i1".to_string()
         } else {
-            self.scalar(ret)
+            self.scalar_result(ret)
         };
         let fnty = if variadic {
             let fixed: Vec<String> = param_tys.iter().take(sig.params.len() + sret as usize).cloned().collect();
-            format!("{} ({}, ...)", rty, fixed.join(", "))
+            let prefix = if fixed.is_empty() { String::new() } else { fixed.join(", ") + ", " };
+            format!("{} ({}...)", rty, prefix)
         } else {
             rty.clone()
         };

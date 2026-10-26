@@ -1,13 +1,15 @@
 # Architecture
 
 ```text
-source.jh ─► lex ─► parse ─► load ─► sema ─► MIR ─► elab ─► check ─► llvm ─► .ll ─► clang ─► program
+source.jh ─► lex ─► parse ─► load ─► sema ─► MIR ─► elab ─► check ─► llvm ─► LLVM C API ─► .o ─► linker ─► program
 ```
 
-The compiler is one Rust crate, `crates/jihoo`. It writes LLVM IR as text
-and runs `clang`, which optimizes it and links the program (with libc, or
-statically with `ld.lld` for freestanding programs). The Rust build does not
-link LLVM.
+The compiler writes LLVM IR as text in memory. `backend` loads LLVM 21's
+shared library, verifies and optimizes the module with the new pass manager,
+then emits an object through the target machine C API. Native linking uses
+a C driver for libc startup files; freestanding linking calls `ld.lld`
+directly. Neither compiler needs LLVM headers or a C++ shim to build.
+`JIHOO_BACKEND=clang` retains the previous pipeline for comparisons.
 
 The same compiler is written in jihoo in `compiler/`, a `.jh` file for
 each file below, and that one is installed and is the reference; the Rust
@@ -24,6 +26,7 @@ Rust files.
 | `elab.rs` | initialization: use after move, drop elaboration and drop flags |
 | `check.rs` | the borrow kernel: exclusivity and the lifetimes of views |
 | `llvm.rs` | MIR to LLVM IR text |
+| `backend.rs` | LLVM 21 C API: verification, optimization and object emission |
 | `main.rs` | the `jihoo` command |
 
 ## Sema

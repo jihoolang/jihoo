@@ -69,4 +69,5 @@ patterns see through it.
 | `std.process` | `run(program, args) -> Result(Exit, String)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, String)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH` |
 | `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `spawn`, `spawn_io` (with the child's standard streams), `pipe`, `poll`, `wait`, `exit`, `abort`, and the allocator under `mem` |
 | `std.libc` | C library declarations (native programs) |
+| `std.ffi` | native Linux `Library.open`/`symbol` (unsafe), `c_string`, `copy_c_string` (unsafe), and C integer aliases; see [C interoperation](../language/unsafe.md#shared-libraries-and-c-strings) |
 | `std.sysno` | Linux system call numbers for the target |

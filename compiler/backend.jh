@@ -1,0 +1,181 @@
+// LLVM 21's C API. Keep the prototypes and options in step with the
+// bootstrap's crates/jihoo/src/backend.rs. No C or C++ shim is needed.
+import std.env
+import std.ffi
+import target
+
+struct Api {
+    LLVMGetVersion: fnptr(*u32, *u32, *u32)
+    LLVMContextCreate: fnptr() -> *u8
+    LLVMContextDispose: fnptr(*u8)
+    LLVMCreateMemoryBufferWithMemoryRangeCopy: fnptr(*u8, u64, *u8) -> *u8
+    LLVMParseIRInContext: fnptr(*u8, *u8, **u8, **u8) -> i32
+    LLVMDisposeModule: fnptr(*u8)
+    LLVMDisposeMessage: fnptr(*u8)
+    LLVMVerifyModule: fnptr(*u8, i32, **u8) -> i32
+    LLVMGetTargetFromTriple: fnptr(*u8, **u8, **u8) -> i32
+    LLVMCreateTargetMachine: fnptr(*u8, *u8, *u8, *u8, i32, i32, i32) -> *u8
+    LLVMDisposeTargetMachine: fnptr(*u8)
+    LLVMCreateTargetDataLayout: fnptr(*u8) -> *u8
+    LLVMSetModuleDataLayout: fnptr(*u8, *u8)
+    LLVMDisposeTargetData: fnptr(*u8)
+    LLVMCreatePassBuilderOptions: fnptr() -> *u8
+    LLVMDisposePassBuilderOptions: fnptr(*u8)
+    LLVMPassBuilderOptionsSetLoopVectorization: fnptr(*u8, i32)
+    LLVMPassBuilderOptionsSetSLPVectorization: fnptr(*u8, i32)
+    LLVMRunPasses: fnptr(*u8, *u8, *u8, *u8) -> *u8
+    LLVMGetErrorMessage: fnptr(*u8) -> *u8
+    LLVMDisposeErrorMessage: fnptr(*u8)
+    LLVMTargetMachineEmitToFile: fnptr(*u8, *u8, *u8, i32, **u8) -> i32
+    LLVMGetFirstFunction: fnptr(*u8) -> *u8
+    LLVMGetNextFunction: fnptr(*u8) -> *u8
+    LLVMSetSection: fnptr(*u8, *u8)
+}
+
+unsafe fn load_api(lib: ffi.Library) -> Result(Api, String) {
+    Ok(Api {
+        LLVMGetVersion: lib.symbol("LLVMGetVersion")? as fnptr(*u32, *u32, *u32)
+        LLVMContextCreate: lib.symbol("LLVMContextCreate")? as fnptr() -> *u8
+        LLVMContextDispose: lib.symbol("LLVMContextDispose")? as fnptr(*u8)
+        LLVMCreateMemoryBufferWithMemoryRangeCopy: lib.symbol("LLVMCreateMemoryBufferWithMemoryRangeCopy")? as fnptr(*u8, u64, *u8) -> *u8
+        LLVMParseIRInContext: lib.symbol("LLVMParseIRInContext")? as fnptr(*u8, *u8, **u8, **u8) -> i32
+        LLVMDisposeModule: lib.symbol("LLVMDisposeModule")? as fnptr(*u8)
+        LLVMDisposeMessage: lib.symbol("LLVMDisposeMessage")? as fnptr(*u8)
+        LLVMVerifyModule: lib.symbol("LLVMVerifyModule")? as fnptr(*u8, i32, **u8) -> i32
+        LLVMGetTargetFromTriple: lib.symbol("LLVMGetTargetFromTriple")? as fnptr(*u8, **u8, **u8) -> i32
+        LLVMCreateTargetMachine: lib.symbol("LLVMCreateTargetMachine")? as fnptr(*u8, *u8, *u8, *u8, i32, i32, i32) -> *u8
+        LLVMDisposeTargetMachine: lib.symbol("LLVMDisposeTargetMachine")? as fnptr(*u8)
+        LLVMCreateTargetDataLayout: lib.symbol("LLVMCreateTargetDataLayout")? as fnptr(*u8) -> *u8
+        LLVMSetModuleDataLayout: lib.symbol("LLVMSetModuleDataLayout")? as fnptr(*u8, *u8)
+        LLVMDisposeTargetData: lib.symbol("LLVMDisposeTargetData")? as fnptr(*u8)
+        LLVMCreatePassBuilderOptions: lib.symbol("LLVMCreatePassBuilderOptions")? as fnptr() -> *u8
+        LLVMDisposePassBuilderOptions: lib.symbol("LLVMDisposePassBuilderOptions")? as fnptr(*u8)
+        LLVMPassBuilderOptionsSetLoopVectorization: lib.symbol("LLVMPassBuilderOptionsSetLoopVectorization")? as fnptr(*u8, i32)
+        LLVMPassBuilderOptionsSetSLPVectorization: lib.symbol("LLVMPassBuilderOptionsSetSLPVectorization")? as fnptr(*u8, i32)
+        LLVMRunPasses: lib.symbol("LLVMRunPasses")? as fnptr(*u8, *u8, *u8, *u8) -> *u8
+        LLVMGetErrorMessage: lib.symbol("LLVMGetErrorMessage")? as fnptr(*u8) -> *u8
+        LLVMDisposeErrorMessage: lib.symbol("LLVMDisposeErrorMessage")? as fnptr(*u8)
+        LLVMTargetMachineEmitToFile: lib.symbol("LLVMTargetMachineEmitToFile")? as fnptr(*u8, *u8, *u8, i32, **u8) -> i32
+        LLVMGetFirstFunction: lib.symbol("LLVMGetFirstFunction")? as fnptr(*u8) -> *u8
+        LLVMGetNextFunction: lib.symbol("LLVMGetNextFunction")? as fnptr(*u8) -> *u8
+        LLVMSetSection: lib.symbol("LLVMSetSection")? as fnptr(*u8, *u8)
+    })
+}
+
+unsafe fn open_llvm() -> Result(ffi.Library, String) {
+    match env.get("JIHOO_LLVM") {
+        Some(path) => return ffi.Library.open(path)
+        None => {}
+    }
+    var last = String.new()
+    for name in ["libLLVM-21.so", "libLLVM.so.21.1", "libLLVM.so"] {
+        match ffi.Library.open(name) {
+            Ok(lib) => return Ok(lib)
+            Err(e) => last = e
+        }
+    }
+    Err("cannot load LLVM 21: " + last.as_str() + " (set JIHOO_LLVM to its shared library)")
+}
+
+// Reverse destruction order: module and machine before context, all before
+// the Library. This also covers every early error return.
+struct Resources {
+    api: Api
+    ctx: *u8
+    module: *u8
+    machine: *u8
+}
+
+impl Drop for Resources {
+    fn drop(inout self) {
+        unsafe {
+            if self.machine != null { self.api.LLVMDisposeTargetMachine(self.machine) }
+            if self.module != null { self.api.LLVMDisposeModule(self.module) }
+            self.api.LLVMContextDispose(self.ctx)
+        }
+    }
+}
+
+unsafe fn message(api: Api, p: *u8) -> String {
+    if p == null { return String.from("unknown LLVM error") }
+    let text = ffi.copy_c_string(p)
+    api.LLVMDisposeMessage(p)
+    text
+}
+
+pub fn object(ir: str, path: str, opt: str, tgt: target.Target, freestanding: bool) -> Result((), String) {
+    unsafe { emit_object(ir, path, opt, tgt, freestanding) }
+}
+
+unsafe fn emit_object(ir: str, path: str, opt: str, tgt: target.Target, freestanding: bool) -> Result((), String) {
+    let lib = open_llvm()?
+    let api = load_api(lib)?
+    var major: u32 = 0
+    api.LLVMGetVersion(&major, null, null)
+    if major != 21 {
+        return Err("expected LLVM 21, found LLVM " + major.to_string())
+    }
+    let arch = match tgt {
+        X86_64 => "X86"
+        Aarch64 => "AArch64"
+    }
+    for suffix in ["TargetInfo", "Target", "TargetMC", "AsmPrinter", "AsmParser"] {
+        let init = lib.symbol(("LLVMInitialize" + arch + suffix).as_str())? as fnptr()
+        init()
+    }
+    var r = Resources { api: api, ctx: api.LLVMContextCreate(), module: null, machine: null }
+    var msg: *u8 = null
+    let buffer = api.LLVMCreateMemoryBufferWithMemoryRangeCopy(ir.ptr, ir.len as u64, "jihoo")
+    // LLVMParseIRInContext consumes the buffer, including on failure.
+    if api.LLVMParseIRInContext(r.ctx, buffer, &r.module, &msg) != 0 {
+        return Err("LLVM IR: " + message(api, msg).as_str())
+    }
+    if api.LLVMVerifyModule(r.module, 2, &msg) != 0 {
+        return Err("LLVM verification: " + message(api, msg).as_str())
+    }
+    if msg != null { api.LLVMDisposeMessage(msg) }
+    msg = null
+    let triple = ffi.c_string(tgt.triple())?
+    var llvm_target: *u8 = null
+    if api.LLVMGetTargetFromTriple(triple.as_str().ptr, &llvm_target, &msg) != 0 {
+        return Err("LLVM target: " + message(api, msg).as_str())
+    }
+    let cpu = match tgt {
+        X86_64 => "x86-64"
+        Aarch64 => "generic"
+    }
+    let level = (opt[2] - '0') as i32
+    r.machine = api.LLVMCreateTargetMachine(llvm_target, triple.as_str().ptr, cpu.ptr, "".ptr, level, 2, 0)
+    if r.machine == null { return Err(String.from("LLVM cannot create target machine")) }
+    let data = api.LLVMCreateTargetDataLayout(r.machine)
+    api.LLVMSetModuleDataLayout(r.module, data)
+    api.LLVMDisposeTargetData(data)
+    let options = api.LLVMCreatePassBuilderOptions()
+    // Explicitly enable clang's vectorizers at O2/O3.
+    api.LLVMPassBuilderOptionsSetLoopVectorization(options, (level >= 2) as i32)
+    api.LLVMPassBuilderOptionsSetSLPVectorization(options, (level >= 2) as i32)
+    let pipeline = ffi.c_string(("default<" + opt[1..opt.len] + ">").as_str())?
+    let error = api.LLVMRunPasses(r.module, pipeline.as_str().ptr, r.machine, options)
+    api.LLVMDisposePassBuilderOptions(options)
+    if error != null {
+        let p = api.LLVMGetErrorMessage(error)
+        let text = ffi.copy_c_string(p)
+        api.LLVMDisposeErrorMessage(p)
+        return Err("LLVM optimization: " + text.as_str())
+    }
+    if freestanding {
+        var f = api.LLVMGetFirstFunction(r.module)
+        var i = 0
+        while f != null {
+            let section = ffi.c_string((".text.jihoo." + i.to_string()).as_str())?
+            api.LLVMSetSection(f, section.as_str().ptr)
+            f = api.LLVMGetNextFunction(f)
+            i += 1
+        }
+    }
+    let output = ffi.c_string(path)?
+    if api.LLVMTargetMachineEmitToFile(r.machine, r.module, output.as_str().ptr, 1, &msg) != 0 {
+        return Err("LLVM object: " + message(api, msg).as_str())
+    }
+    Ok(())
+}

@@ -1,0 +1,3 @@
+// error: is an unsafe function
+import std.ffi
+fn main() { ffi.Library.open("libm.so.6") }

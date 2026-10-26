@@ -1,4 +1,4 @@
-// Code generation: MIR to LLVM IR text, which clang compiles. The Rust
+// Code generation: MIR to LLVM IR text, consumed by the LLVM C API. The Rust
 // compiler's `llvm.rs`.
 //
 // Simple on purpose: every local is an alloca, every field a byte offset,
@@ -192,6 +192,30 @@ impl Gen {
         }
     }
 
+    // Keep direct calls, function pointers and C callbacks on the same
+    // scalar ABI. AArch64 does not use these extension attributes.
+    fn scalar_ext(self, t: u32) -> str {
+        match self.p.target {
+            Aarch64 => return ""
+            _ => {}
+        }
+        match self.p.types.kind(t) {
+            Bool => "zeroext"
+            Int(i) => if i.bits < 32 { if i.signed { "signext" } else { "zeroext" } } else { "" }
+            _ => ""
+        }
+    }
+
+    fn scalar_result(self, t: u32) -> String {
+        let ext = self.scalar_ext(t)
+        if ext.len == 0 { self.scalar(t) } else { ext + " " + self.scalar(t).as_str() }
+    }
+
+    fn scalar_param(self, t: u32) -> String {
+        let ext = self.scalar_ext(t)
+        if ext.len == 0 { self.scalar(t) } else { self.scalar(t) + " " + ext }
+    }
+
     // The LLVM type of a scalar in memory (bools are bytes).
     fn mem_scalar(self, t: u32) -> String {
         if t == types.BOOL { String.from("i8") } else { self.scalar(t) }
@@ -277,7 +301,6 @@ impl Gen {
 
     // The LLVM parameter list and return type of a function.
     fn signature(inout self, f: u32) -> (String, Vec(String), bool) {
-        let c_abi = !is_internal(self.p.fns[f as i64].linkage)
         let sig = self.p.fns[f as i64].sig.clone()
         let pass = self.p.fns[f as i64].pass.clone()
         let ret = sig.ret
@@ -287,7 +310,7 @@ impl Gen {
         if ret == types.NEVER || self.is_zst(ret) {
             rty = String.from("void")
         } else if self.is_scalar(ret) {
-            rty = if c_abi && ret == types.BOOL { String.from("zeroext i1") } else { self.scalar(ret) }
+            rty = self.scalar_result(ret)
         } else {
             sret = true
             let s = fmt.n(self.size(ret) as i128)
@@ -296,20 +319,17 @@ impl Gen {
         }
         for i, t in sig.params {
             let pp = if i < pass.len() { pass[i] } else { ParamPass.Value }
-            params.push(self.param_ty(t, pp, c_abi))
+            params.push(self.param_ty(t, pp))
         }
         (rty, params, sret)
     }
 
-    fn param_ty(inout self, t: u32, pass: ParamPass, c_abi: bool) -> String {
+    fn param_ty(inout self, t: u32, pass: ParamPass) -> String {
         if !self.is_scalar(t) {
             // Aggregates (and values without bytes) go by pointer.
             return String.from("ptr")
         }
-        var s = self.scalar(t)
-        if c_abi && t == types.BOOL {
-            s = String.from("zeroext i1")
-        }
+        var s = self.scalar_param(t)
         if is_borrow(pass) {
             let inner = self.p.types.pointee(t).unwrap()
             let size = self.size(inner)
@@ -1243,12 +1263,11 @@ impl Gen {
         let (dptr, dt) = self.place(&cx, body, dest)
         match callee {
             Fn(f) => {
-                let c_abi = !is_internal(self.p.fns[f as i64].linkage)
                 let sig = self.p.fns[f as i64].sig.clone()
                 let pass = self.p.fns[f as i64].pass.clone()
                 let target = sym(self.p.fns[f as i64].symbol.as_str())
                 let variadic = self.p.fns[f as i64].variadic
-                self.emit_call_inst(&cx, body, sig, pass, target.as_str(), c_abi, variadic, None, args, dptr.as_str(), dt)
+                self.emit_call_inst(&cx, body, sig, pass, target.as_str(), variadic, None, args, dptr.as_str(), dt)
             }
             Ptr(o) => {
                 let ot = self.operand_ty(body, o)
@@ -1259,7 +1278,7 @@ impl Gen {
                 let v = self.operand(&cx, body, o)
                 let fp = self.imm(&cx, v, ot)
                 let pass = self.value_passes(sig)
-                self.emit_call_inst(&cx, body, sig, pass, fp.as_str(), false, false, None, args, dptr.as_str(), dt)
+                self.emit_call_inst(&cx, body, sig, pass, fp.as_str(), false, None, args, dptr.as_str(), dt)
             }
             Closure(o) => {
                 let ot = self.operand_ty(body, o)
@@ -1290,13 +1309,13 @@ impl Gen {
                 }
                 let s2 = types.Sig { params: params, ret: sig.ret }
                 // The environment goes first.
-                self.emit_call_inst(&cx, body, s2, pass, fp.as_str(), false, false, Some(env), args, dptr.as_str(), dt)
+                self.emit_call_inst(&cx, body, s2, pass, fp.as_str(), false, Some(env), args, dptr.as_str(), dt)
             }
             Intrinsic(i) => self.intrinsic(&cx, body, i, args, dptr.as_str(), dt)
         }
     }
 
-    fn emit_call_inst(inout self, inout cx: FnCx, body: Body, sig: types.Sig, pass: Vec(ParamPass), target: str, c_abi: bool, variadic: bool, sink env: Option(String), args: Vec(Operand), dptr: str, dt: u32) {
+    fn emit_call_inst(inout self, inout cx: FnCx, body: Body, sig: types.Sig, pass: Vec(ParamPass), target: str, variadic: bool, sink env: Option(String), args: Vec(Operand), dptr: str, dt: u32) {
         let ret = sig.ret
         var actual = Vec(String).new()
         let sret = ret != types.NEVER && !self.is_zst(ret) && !self.is_scalar(ret)
@@ -1323,9 +1342,9 @@ impl Gen {
             let v = self.operand(&cx, body, o)
             if self.is_scalar(pt) {
                 let x = self.imm(&cx, v, pt)
-                let ty = if c_abi && pt == types.BOOL { String.from("zeroext i1") } else { self.scalar(pt) }
+                let ty = self.scalar_param(pt)
                 actual.push(ty.as_str() + " " + x.as_str())
-                param_tys.push(ty)
+                param_tys.push(self.scalar(pt))
             } else {
                 // Aggregates by pointer; a callee that owns the value gets
                 // its own copy unless the value was moved.
@@ -1358,10 +1377,8 @@ impl Gen {
         var rty = String.from("void")
         if ret == types.NEVER || self.is_zst(ret) || sret {
             rty = String.from("void")
-        } else if c_abi && ret == types.BOOL {
-            rty = String.from("zeroext i1")
         } else {
-            rty = self.scalar(ret)
+            rty = self.scalar_result(ret)
         }
         var fnty = rty.clone()
         if variadic {
@@ -1372,7 +1389,8 @@ impl Gen {
                     fixed.push(x.clone())
                 }
             }
-            fnty = fmt.f("{} ({}, ...)", [rty.as_str(), join(fixed, ", ").as_str()])
+            let prefix = if fixed.len() == 0 { String.new() } else { join(fixed, ", ") + ", " }
+            fnty = fmt.f("{} ({}...)", [rty.as_str(), prefix.as_str()])
         }
         if rty == "void" {
             cx.line(fmt.f("call {} {}({})", [fnty.as_str(), target, join(actual, ", ").as_str()]).as_str())

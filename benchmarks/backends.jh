@@ -1,0 +1,73 @@
+// Runtime workloads for scripts/benchmark_backends.py. Inputs come from argv
+// so both backends must actually execute the work. Bounds checks stay on.
+import std.env
+
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn sieve(n: i64) -> i64 {
+    var flags = Vec(u8).filled(n, 1)
+    var p = 2
+    while p * p < n {
+        if flags[p] != 0 {
+            var i = p * p
+            while i < n {
+                flags[i] = 0
+                i += p
+            }
+        }
+        p += 1
+    }
+    var count = 0
+    for i in 2..n { count += flags[i] as i64 }
+    count
+}
+
+fn matrix(n: i64) -> i64 {
+    var a = Vec(f64).filled(n * n, 0.0)
+    var b = Vec(f64).filled(n * n, 0.0)
+    var c = Vec(f64).filled(n * n, 0.0)
+    for i in 0..n * n {
+        a[i] = (i % 17) as f64 / 17.0
+        b[i] = (i % 13) as f64 / 13.0
+    }
+    for i in 0..n {
+        for k in 0..n {
+            for j in 0..n {
+                c[i * n + j] += a[i * n + k] * b[k * n + j]
+            }
+        }
+    }
+    var sum = 0.0
+    for x in c { sum += x }
+    sum as i64
+}
+
+fn floating(n: i64) -> i64 {
+    var xs = Vec(f64).filled(1024, 0.5)
+    for step in 0..n {
+        for i in 0..xs.len() {
+            let x = xs[i]
+            xs[i] = x * 0.999999 + (i as f64 + step as f64) * 0.000001
+        }
+    }
+    var sum = 0.0
+    for x in xs { sum += x }
+    (sum * 1000.0) as i64
+}
+
+fn main() {
+    let args = env.args()
+    let n = args[2].parse_int().unwrap()
+    let repetitions = args[3].parse_int().unwrap()
+    var result = 0
+    for i in 0..repetitions {
+        // Vary each iteration's input to prevent loop-invariant hoisting.
+        if args[1] == "fib" { result += fib(n + i % 2) }
+        else if args[1] == "sieve" { result += sieve(n + i) }
+        else if args[1] == "matrix" { result += matrix(n + i % 2) }
+        else { result += floating(n + i) }
+    }
+    println(result)
+}

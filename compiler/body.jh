@@ -4299,12 +4299,15 @@ impl sema.Sema {
                 v = self.coerce(&fb, v, pu8, a.span)?
             }
             let t = v.ty
+            if !self.c_type(t) {
+                return Err(err(a.span, "only numbers and pointers can be passed to a C function's `...` (integers must be at most 64 bits)"))
+            }
             let o = self.operand(&fb, v, a.span)?
             var to: Option(u32) = None
             match self.types.kind(t).clone() {
                 Int(it) => {
                     if it.bits < 32 {
-                        to = Some(if it.signed { types.I32 } else { types.U32 })
+                        to = Some(types.I32)
                     }
                 }
                 Float(b) => {

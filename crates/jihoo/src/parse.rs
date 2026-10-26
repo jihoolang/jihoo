@@ -316,6 +316,12 @@ impl Parser {
             ret = Some(self.ty()?);
         }
         let body = if self.at(&Tok::LBrace) { Some(self.block()?) } else { None };
+        if variadic && kind != FnKind::Extern {
+            return Err(Diag::new(name_span, "only extern functions can have `...` parameters"));
+        }
+        if kind == FnKind::Extern && body.is_some() {
+            return Err(Diag::new(name_span, "an extern function cannot have a body; use `export fn` to define a C function"));
+        }
         Ok(FnDecl { name, name_span, params, ret, ret_mode, body, kind, variadic, is_unsafe })
     }
 

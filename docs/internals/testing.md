@@ -18,7 +18,8 @@ in `tests/fail/` and checks the error:
 
 - in `tests/run`, `//> text` lines are the expected standard output in
   order, `// exit: N` the exit status (default 0; a trap is 132), and
-  `// args: a b` the program's arguments;
+  `// args: a b` the program's arguments; `// link: tests/ffi/native.c`
+  adds link inputs relative to the checkout;
 - in `tests/fail`, each `// error: text` must appear in the error message.
 
 `JIHOO_COMPILER` names the compiler to test instead of the Rust one built
@@ -44,3 +45,20 @@ nix-shell -p valgrind --run 'valgrind --leak-check=full --error-exitcode=9 /tmp/
 
 `jihoo build --target aarch64` cross-compiles; freestanding programs run
 under `qemu-aarch64` (`nix-shell -p qemu`).
+
+## Backend performance
+
+```sh
+cargo build --release
+python3 scripts/benchmark_backends.py --compiler target/release/jihoo --selfhost --json /tmp/backends.json
+```
+
+The script builds the same runtime workloads through LLVM's C API and
+clang at `-O2 --release`, keeps bounds checks, checks their output, warms
+up both executables, and alternates run order. It reports median runtime
+for recursion, a sieve, matrix multiplication and floating point loops,
+and median compilation time. `--selfhost` also builds the compiler with
+each backend and compares its IR and frontend runtime. Runtime regressions
+above `--max-regression` (10% by default) cause failure. Use an idle machine
+and the same LLVM/clang version and linker driver for both paths; small
+differences need repeated measurements.

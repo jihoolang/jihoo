@@ -1,0 +1,11 @@
+import std.env
+import std.ffi
+
+fn main() {
+    let args = env.args()
+    unsafe {
+        let lib = ffi.Library.open(args[1]).unwrap()
+        let add = lib.symbol("jihoo_add").unwrap() as fnptr(i64, i64) -> i64
+        println(add(20, 22))
+    }
+}

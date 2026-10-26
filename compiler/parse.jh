@@ -397,6 +397,13 @@ impl Parser {
             ret = Some(self.ty()?)
         }
         let body = if self.at(Tok.LBrace) { Some(self.block()?) } else { None }
+        let is_extern = match kind { Extern => true, _ => false }
+        if variadic && !is_extern {
+            return Err(Diag.new(name_span, "only extern functions can have `...` parameters"))
+        }
+        if is_extern && body.is_some() {
+            return Err(Diag.new(name_span, "an extern function cannot have a body; use `export fn` to define a C function"))
+        }
         Ok(FnDecl {
             name: name
             name_span: name_span

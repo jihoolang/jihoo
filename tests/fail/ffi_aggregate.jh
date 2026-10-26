@@ -1,0 +1,4 @@
+// error: C parameters must be
+struct Pair { x: i64 }
+extern fn bad(x: Pair)
+fn main() {}

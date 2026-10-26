@@ -32,17 +32,19 @@
         platforms = lib.platforms.linux;
       };
 
-      # Change the LLVM version here only. The compiler writes LLVM IR as
-      # text, which this clang compiles and links.
+      # LLVM's C API optimizes IR and emits objects in process. Keep the
+      # shared library at major version 21, as checked by both backends.
       llvmFor = pkgs: pkgs.llvmPackages_21;
 
-      # Ship the standard library, and clang and lld to finish programs.
+      # Ship the standard library, libLLVM, and native/freestanding linkers.
       wrapCompiler = llvm: ''
         mkdir -p $out/share/jihoo
         cp -r lib $out/share/jihoo/lib
         wrapProgram $out/bin/jihoo \
           --suffix JIHOO_PATH : $out/share/jihoo/lib \
           --set-default JIHOO_CC ${llvm.clang}/bin/clang \
+          --set-default JIHOO_LLVM ${llvm.llvm.lib}/lib/libLLVM-21.so \
+          --set-default JIHOO_LD ${llvm.lld}/bin/ld.lld \
           --prefix PATH : ${llvm.lld}/bin
       '';
 
@@ -62,6 +64,8 @@
             nativeCheckInputs = [ llvm.clang llvm.lld ];
             preCheck = ''
               export JIHOO_CC=${llvm.clang}/bin/clang
+              export JIHOO_LLVM=${llvm.llvm.lib}/lib/libLLVM-21.so
+              export JIHOO_LD=${llvm.lld}/bin/ld.lld
             '';
 
             postInstall = wrapCompiler llvm;
@@ -81,6 +85,8 @@
             buildPhase = ''
               runHook preBuild
               export JIHOO_PATH=$PWD/lib JIHOO_CC=${llvm.clang}/bin/clang
+              export JIHOO_LLVM=${llvm.llvm.lib}/lib/libLLVM-21.so
+              export JIHOO_LD=${llvm.lld}/bin/ld.lld
               jihoo build -O2 compiler/main.jh -o stage1
               ./stage1 build -O2 compiler/main.jh -o stage2
               ./stage1 emit-llvm compiler/main.jh -o stage1.ll
@@ -170,11 +176,13 @@
               pkgs.rustfmt
               pkgs.clippy
               pkgs.rust-analyzer
-              llvm.clang # finishes programs: LLVM IR to executables
+              llvm.clang # native linker driver; C source link inputs
               llvm.lld # links freestanding programs
               llvm.llvm # opt, llc, llvm-dis for looking at what the compiler writes
             ];
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+            JIHOO_LLVM = "${llvm.llvm.lib}/lib/libLLVM-21.so";
+            JIHOO_LD = "${llvm.lld}/bin/ld.lld";
           };
 
           # For working on the website in site/.
