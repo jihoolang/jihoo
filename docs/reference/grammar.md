@@ -34,7 +34,8 @@ sep        a `,`, a `;`, or a newline before the next element
   trait true type unsafe var while
   ```
 
-  `self`, `Self`, `null`, `fnptr`, `int`, `never` and the primitive types are
+  `self`, `Self`, `null`, `fnptr`, `int`, `never`, `inline` (before `for`
+  or `if`) and the primitive types are
   ordinary names that the compiler gives a meaning to; `_` is a name too,
   except in patterns.
 - Some tokens are made of others: `..=` is `..` then `=`, which is how range
@@ -65,7 +66,7 @@ alias    = "type" name [ "=" type ]
 
 - `#![...]` attributes come first in the file; the only one is
   `#![freestanding]`. Item attributes are `#[view]` and `#[derive(...)]`
-  (reserved).
+  ([derive](../language/reflection.md#derive)).
 - A parameter's type may be left out only for `self`. A function without a
   block is a declaration: an `extern fn`, or a trait function without a
   default body. Items do not nest inside function bodies.
@@ -138,6 +139,8 @@ primary  = literal | name | "(" ")" | "(" expr ")"
          | "while" cond block
          | "loop" block
          | "for" [ name "," ] pattern "in" cond block
+         | "inline" "for" name "in" cond block         unrolled at compile time
+         | "inline" "if" cond block [ "else" ( "if" cond block ... | block ) ]
          | "fn" "(" [ cparam { "," cparam } ] ")" [ "->" type ] block   closure
          | "fn" fn_ty | "fnptr" fn_ty | ( "ref" | "inout" ) type          a type
          | "return" [ expr ] | "break" | "continue"

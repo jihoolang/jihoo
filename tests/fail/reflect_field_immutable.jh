@@ -1,0 +1,11 @@
+// A field named by reflection is a place like `p.x`: a `let` is not changed.
+// error: `p` cannot be changed
+struct P {
+    x: i64
+}
+
+fn main() {
+    let p = P { x: 1 }
+    field(p, 0) = 2
+    println(p.x)
+}

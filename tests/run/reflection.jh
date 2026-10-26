@@ -1,0 +1,126 @@
+// Reflection: `inline for`, `inline if`, and the builtins that describe a
+// type and name or build its parts.
+
+struct Point {
+    x: i64
+    y: i64
+}
+
+enum Shape {
+    Dot(Point)
+    Line(Point, Point)
+    Empty
+}
+
+// Generic over any struct: the sum of its `i64` fields.
+fn sum_fields(comptime T: type, v: T) -> i64 {
+    var total = 0
+    inline for i in 0..field_count(T) {
+        total += field(v, i)
+    }
+    total
+}
+
+// The names of a type's parts, as text.
+fn describe(comptime T: type) -> String {
+    var s = String.from(type_name(T))
+    inline if is_enum(T) {
+        s.push_str(" =")
+        inline for v in 0..variant_count(T) {
+            s.push(' ')
+            s.push_str(variant_name(T, v))
+            s.push('/')
+            variant_field_count(T, v).show(&s)
+        }
+    } else if is_struct(T) {
+        s.push_str(" {")
+        inline for i in 0..field_count(T) {
+            s.push(' ')
+            s.push_str(field_name(T, i))
+        }
+        s.push_str(" }")
+    } else {
+        s.push_str(" (other)")
+    }
+    s
+}
+
+// Every field doubled, built with `make`.
+fn doubled(comptime T: type, v: T) -> T {
+    make(T, fn(i) { field(v, i) * 2 })
+}
+
+// How many points a shape has, by reflection over its variants.
+fn points(s: Shape) -> i64 {
+    let v = variant_of(s)
+    var n = 0
+    inline for k in 0..variant_count(Shape) {
+        if v == k {
+            n = variant_field_count(Shape, k)
+        }
+    }
+    n
+}
+
+const FIELDS = field_count(Point)
+
+fn main() {
+    inline for i in 0..3 {
+        println(i * 10)
+    }
+    //> 0
+    //> 10
+    //> 20
+    let p = Point { x: 3, y: 4 }
+    println(sum_fields(Point, p))
+    //> 7
+    println(sum_fields((i64, i64, i64), (1, 2, 3)))
+    //> 6
+    println(describe(Point))
+    //> Point { x y }
+    println(describe(Shape))
+    //> Shape = Dot/1 Line/2 Empty/0
+    println(describe(i64))
+    //> i64 (other)
+    let q = doubled(Point, p)
+    println(q.y)
+    //> 8
+    let t = make((i64, bool, String), fn(i) {
+        inline if i == 0 {
+            7
+        } else if i == 1 {
+            true
+        } else {
+            "text".to_string()
+        }
+    })
+    println(t.2)
+    //> text
+    println(points(Shape.Line(p, q)))
+    //> 2
+    println(points(Shape.Empty))
+    //> 0
+    // A place: assigned, borrowed mutably.
+    var r = Point { x: 0, y: 0 }
+    field(r, 1) = 5
+    inline for i in 0..field_count(Point) {
+        field(r, i) += 1
+    }
+    println(r.x + r.y)
+    //> 7
+    let s = make_variant(Shape, 1, fn(j) { Point { x: j, y: j } })
+    println(variant_field(s, 1, 1).x)
+    //> 1
+    println(FIELDS)
+    //> 2
+    // The branch not taken is not checked.
+    inline if size_of(i64) == 8 {
+        println("64-bit")
+    } else {
+        no_such_function()
+    }
+    //> 64-bit
+    let arr: [i64; field_count(Point)] = [0; 2]
+    println(arr[1] + size_of([i64; field_count(Point)]))
+    //> 16
+}

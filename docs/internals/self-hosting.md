@@ -138,7 +138,8 @@ better way the port takes it and says so in a comment; so far:
   `host.aarch64.jh`.
 - Types are interned by a short text spelling the kind out
   (`types.kind_key`), where Rust hashes the `TyKind` with a derived
-  `Hash`; jihoo has no `derive` yet.
+  `Hash`. jihoo has `derive` now, but `compiler/` may use it only once a
+  release that has it is the seed.
 - The code generator's many `format!` lines become `fmt.f`, which fills
   `{}` in a template from a slice of `str`s. Its `Gen` owns the program
   (Rust's borrows it), and takes a function's body out while writing it,

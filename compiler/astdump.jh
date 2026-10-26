@@ -611,6 +611,23 @@ impl Dump {
                 self.s(" ")
                 self.block(b)
             }
+            InlineFor(n, it, b) => {
+                self.open("inline-for", sp)
+                self.s(" ")
+                self.s(n.as_str())
+                self.s(" ")
+                self.expr(it.deref())
+                self.s(" ")
+                self.block(b)
+            }
+            InlineIf(c, then, els) => {
+                self.open("inline-if", sp)
+                self.s(" ")
+                self.expr(c.deref())
+                self.s(" ")
+                self.block(then)
+                self.opt_box(els)
+            }
             Lambda(params, ret, b) => {
                 self.open("lambda", sp)
                 self.s(" [")

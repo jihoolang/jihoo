@@ -1,0 +1,8 @@
+// The condition of `inline if` is known at compile time.
+// error: is not a compile-time constant
+fn main() {
+    let b = true
+    inline if b {
+        println(1)
+    }
+}

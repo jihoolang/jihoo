@@ -26,6 +26,7 @@ same on GitHub.
 - [Structs, enums and patterns](language/data.md)
 - [Generics and traits](language/generics.md)
 - [Compile-time evaluation](language/comptime.md)
+- [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Iterator pipelines](language/iterators.md)
 - [Errors](language/errors.md)

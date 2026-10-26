@@ -287,6 +287,8 @@ pub struct Lang {
     pub ord: Option(u32)
     pub hash: Option(u32)
     pub show: Option(u32)
+    // std.derive's `Derived`: the bodies of `#[derive(...)]`d methods.
+    pub derived: Option(u32)
 }
 
 // An impl found for a type: the impl, and the arguments of its parameters.
@@ -379,7 +381,7 @@ impl Sema {
             queue: Vec(Pending).new()
             queue_head: 0
             eval_depth: 0
-            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, iterator: None, eq: None, ord: None, hash: None, show: None }
+            lang: Lang { drop: None, clone: None, option: None, result: None, string: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None }
             freestanding: freestanding
             target: tgt
             checked: checked
@@ -489,6 +491,10 @@ impl Sema {
         self.lang.option = self.lang_adt(p, "Option")
         self.lang.result = self.lang_adt(p, "Result")
         self.lang.string = self.lang_adt(p, "String")
+        match at(self.ast).derive {
+            Some(d) => self.lang.derived = self.lang_trait(d, "Derived")
+            None => {}
+        }
     }
 
     fn lang_trait(self, p: u32, n: str) -> Option(u32) {
@@ -1575,15 +1581,27 @@ impl Sema {
             if hit.imp == BUILTIN_IMPL {
                 continue
             }
+            var body_fid = default_fid
             if hit.imp != DERIVED_IMPL {
                 match self.impls[hit.imp as i64].fns.get(name) {
                     Some(fid) => return Ok(Some(ImplHit { imp: fid, args: hit.args.clone() }))
                     None => {}
                 }
+            } else {
+                // A derived method's body is std.derive's, written with
+                // reflection; methods it does not write are the trait's
+                // defaults.
+                match self.lang.derived {
+                    Some(d) => match self.traits[d as i64].fns.get(name) {
+                        Some(f) => body_fid = f
+                        None => {}
+                    }
+                    None => {}
+                }
             }
             var a = Vec(CVal).new()
             a.push(CVal.Type(t))
-            return Ok(Some(ImplHit { imp: default_fid, args: a }))
+            return Ok(Some(ImplHit { imp: body_fid, args: a }))
         }
         Ok(None)
     }
@@ -2096,12 +2114,18 @@ impl Sema {
                 Ok(TypedConst { c: self.const_cast(r.c, r.ty, to, e.span)?, ty: to })
             }
             Call(callee, args) => {
-                if args.len() != 1 {
-                    return self.eval_const_expr(e, env, exp)
-                }
                 let name = match callee.kind {
                     Name(n) => n.clone()
                     _ => String.new()
+                }
+                if self.lookup(env.module, name.as_str()).is_none() {
+                    match self.reflect_const(name.as_str(), args, env, exp, e.span)? {
+                        Some(r) => return Ok(r)
+                        None => {}
+                    }
+                }
+                if args.len() != 1 {
+                    return self.eval_const_expr(e, env, exp)
                 }
                 if name == "size_of" || name == "align_of" {
                     let t = self.expr_ty(args[0], env)?

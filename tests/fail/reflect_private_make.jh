@@ -1,0 +1,8 @@
+// `make` cannot build a value of a type whose fields are private.
+// error: the field `a` of `reflect_mods.geo.Plain` is private
+import reflect_mods.geo
+
+fn main() {
+    let p = make(geo.Plain, fn(i) { 0 })
+    println(p.b)
+}

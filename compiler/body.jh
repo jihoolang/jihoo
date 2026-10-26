@@ -1717,6 +1717,8 @@ impl sema.Sema {
             StructLit(path, fields) => self.struct_lit(&fb, path.deref(), fields, exp, span)
             Match(scrut, arms) => self.match_expr(&fb, scrut.deref(), arms, exp, span)
             For(index, pat, it, body) => self.for_expr(&fb, index, pat, it.deref(), body, span)
+            InlineFor(name, it, body) => self.inline_for(&fb, name.as_str(), it.deref(), body, span)
+            InlineIf(c, then, els) => self.inline_if(&fb, c.deref(), then, els, exp, span)
             Lambda(params, ret, body) => self.lambda(&fb, params, ret, body, exp, None, span)
         }
     }
@@ -1901,7 +1903,7 @@ impl sema.Sema {
         Ok(val_op(Operand.Const(Const.Fn(id)), t))
     }
 
-    fn auto_deref(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Val, Diag) {
+    pub fn auto_deref(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Val, Diag) {
         if self.types.is_ref(v.ty) {
             let inner = self.types.pointee(v.ty).unwrap()
             let (p, _) = self.as_place(&fb, v, span)
@@ -2955,6 +2957,70 @@ impl sema.Sema {
         // Register the result where the statement's temporaries are.
         fb.body.locals[r as i64].ty = t
         Ok(Val { vk: VK.Place(Place.local(r)), ty: t, temp: true })
+    }
+
+    // `inline if`: only the selected branch is checked and lowered.
+    fn inline_if(inout self, inout fb: Fb, c: ast.Expr, then: ast.Block, els: Option(Box(ast.Expr)), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+        let env = fb.env.clone()
+        let r = self.const_expr(c, env, Some(types.BOOL))?
+        let b = match r.c {
+            Bool(b) => b
+            _ => return Err(err(c.span, "the condition of `inline if` is a compile-time `bool`"))
+        }
+        match els {
+            Some(e) => {
+                if b {
+                    self.block(&fb, then, exp, true)
+                } else {
+                    self.expr(&fb, e.deref(), exp)
+                }
+            }
+            None => {
+                if !b {
+                    return Ok(val_unit())
+                }
+                let v = self.block(&fb, then, Some(types.UNIT), false)?
+                Ok(if v.ty == types.NEVER { val_never() } else { val_unit() })
+            }
+        }
+    }
+
+    // `inline for i in a..b`: the body once for each `i`, which is a
+    // compile-time constant there, as a `comptime` parameter is.
+    fn inline_for(inout self, inout fb: Fb, name: str, it: ast.Expr, body: ast.Block, span: Span) -> Result(Val, Diag) {
+        let bad = "`inline for` goes over a range with both ends, `a..b`"
+        let (lo, hi) = match it.kind {
+            Range(a, b) => match a {
+                Some(a) => match b {
+                    Some(b) => (a.deref().clone(), b.deref().clone())
+                    None => return Err(err(it.span, bad))
+                }
+                None => return Err(err(it.span, bad))
+            }
+            _ => return Err(err(it.span, bad))
+        }
+        if fb.lookup(name).is_some() {
+            return Err(err(span, ("`" + name + "` is already a variable here; name the `inline for` index differently").as_str()))
+        }
+        let env = fb.env.clone()
+        let a = self.const_int(lo, env)?
+        let b = self.const_int(hi, env)?
+        if b - a > 65536 {
+            return Err(err(it.span, "`inline for` repeats its body at most 65536 times"))
+        }
+        let n = fb.env.names.len()
+        var diverged = false
+        var i = a
+        while i < b {
+            fb.env.push(name, CVal.Int(i))
+            let v = self.block(&fb, body, Some(types.UNIT), false)
+            fb.env.names.truncate(n)
+            if v?.ty == types.NEVER {
+                diverged = true
+            }
+            i += 1
+        }
+        Ok(if diverged { val_never() } else { val_unit() })
     }
 
     // `==` calls `eq`, `<` and friends call `compare`, `+` calls `add`.
@@ -4864,6 +4930,18 @@ pub fn collect_names(e: ast.Expr, inout out: Vec(String)) {
         For(_, _, it, b) => {
             collect_names(it.deref(), &out)
             collect_names_block(b, &out)
+        }
+        InlineFor(_, it, b) => {
+            collect_names(it.deref(), &out)
+            collect_names_block(b, &out)
+        }
+        InlineIf(c, t, e2) => {
+            collect_names(c.deref(), &out)
+            collect_names_block(t, &out)
+            match e2 {
+                Some(e2) => collect_names(e2.deref(), &out)
+                None => {}
+            }
         }
         Lambda(_, _, b) => collect_names_block(b, &out)
         Return(v) => match v {

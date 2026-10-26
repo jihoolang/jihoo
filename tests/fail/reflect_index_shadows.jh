@@ -1,0 +1,8 @@
+// The index of `inline for` does not hide a variable.
+// error: is already a variable here
+fn main() {
+    let i = 5
+    inline for i in 0..2 {
+        println(i)
+    }
+}

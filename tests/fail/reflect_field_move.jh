@@ -1,0 +1,11 @@
+// A field named by reflection moves only as `p.s` would.
+// error: cannot move a part of `a` out of its place
+struct A {
+    s: String
+}
+
+fn main() {
+    let a = A { s: "x" }
+    var t = field(a, 0)
+    println(t)
+}
