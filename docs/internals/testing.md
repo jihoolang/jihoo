@@ -13,7 +13,7 @@ nix flake check                             # what CI runs
 ## Programs
 
 `crates/jihoo/tests/programs.rs` compiles every file in `tests/run/` with
-the built `jihoo`, runs it and compares its output, and compiles every file
+stage 1 (built once by the Rust bootstrap), runs it and compares its output, and compiles every file
 in `tests/fail/` and checks the error:
 
 - in `tests/run`, `//> text` lines are the expected standard output in
@@ -22,8 +22,8 @@ in `tests/fail/` and checks the error:
   adds link inputs relative to the checkout;
 - in `tests/fail`, each `// error: text` must appear in the error message.
 
-`JIHOO_COMPILER` names the compiler to test instead of the Rust one built
-with the tests, such as the compiler in jihoo
+`JIHOO_COMPILER` names the compiler to test instead of the automatically
+bootstrapped stage 1, such as the compiler in jihoo
 ([stage 1 or 2](self-hosting.md#bootstrap-and-packaging)); `nix flake
 check` runs these tests with the installed one.
 

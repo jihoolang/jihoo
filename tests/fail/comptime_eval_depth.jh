@@ -1,0 +1,3 @@
+// error: call depth limit
+fn recur(n: i64) -> i64 { recur(n + 1) }
+fn main() { let x = comptime recur(0) }

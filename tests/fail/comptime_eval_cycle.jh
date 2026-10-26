@@ -1,0 +1,4 @@
+// error: depends on itself
+const X = get()
+fn get() -> i64 { X }
+fn main() { println(X) }

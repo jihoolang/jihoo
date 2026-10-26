@@ -25,6 +25,7 @@ same on GitHub.
 
 - [Structs, enums and patterns](language/data.md)
 - [Generics and traits](language/generics.md)
+- [Compile-time evaluation](language/comptime.md)
 - [Closures](language/closures.md)
 - [Errors](language/errors.md)
 

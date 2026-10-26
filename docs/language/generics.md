@@ -43,6 +43,10 @@ let v: Vec(u8) = Vec.new()    // from the expected type
 A generic function's body is checked for each instance, as in Zig: errors
 name the instance. Bounds are checked when the instance is made.
 
+Compile-time arguments can call ordinary functions: `fill(u8, factorial(3),
+0)`. The compiler interprets the calculation before creating the instance;
+see [Compile-time evaluation](comptime.md).
+
 ## Traits
 
 A trait is a set of functions a type can provide, with optional default

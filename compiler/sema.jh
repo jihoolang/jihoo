@@ -330,6 +330,7 @@ pub struct Sema {
     pub inst_info: Vec(Option(InstInfo))
     queue: Vec(Pending)
     queue_head: i64
+    pub eval_depth: u32
     pub lang: Lang
     pub freestanding: bool
     pub target: target.Target
@@ -377,6 +378,7 @@ impl Sema {
             inst_info: Vec(Option(InstInfo)).new()
             queue: Vec(Pending).new()
             queue_head: 0
+            eval_depth: 0
             lang: Lang { drop: None, clone: None, option: None, result: None, string: None, iterator: None, eq: None, ord: None, hash: None, show: None }
             freestanding: freestanding
             target: tgt
@@ -1838,6 +1840,7 @@ impl Sema {
             let id = self.queue[i].id
             let decl = self.queue[i].decl
             let env = self.queue[i].env.clone()
+            if self.out[id as i64].body.is_some() { continue }
             self.stack.push(id)
             let r = self.lower_fn(id, decl, env)
             self.stack.pop()
@@ -1847,6 +1850,27 @@ impl Sema {
             }
         }
         Ok(())
+    }
+
+    pub fn prepare_const_fn(inout self, id: u32, span: Span) -> Result((), Diag) {
+        if self.out[id as i64].body.is_some() { return Ok(()) }
+        match self.out[id as i64].linkage { Extern => return Ok(()), _ => {} }
+        for active in self.stack {
+            if active == id { return Err(ty_err(span, "compile-time evaluation depends on a function currently being compiled")) }
+        }
+        // Pending stores its environment by value; take a copy before
+        // lower_fn can append more instances to the queue.
+        for pending in self.queue {
+            if pending.id == id {
+                let decl = pending.decl
+                let env = pending.env.clone()
+                self.stack.push(id)
+                let result = self.lower_fn(id, decl, env)
+                self.stack.pop()
+                return result
+            }
+        }
+        Err(ty_err(span, "compile-time function has no body"))
     }
 
     fn with_origin(self, sink d: Diag, id: u32) -> Diag {
@@ -1954,6 +1978,7 @@ impl Sema {
             None => {}
         }
         match e.kind {
+            Comptime(inner) => self.const_expr(inner.deref(), env, exp)
             Int(v) => {
                 match exp_float {
                     Some(t) => return Ok(TypedConst { c: Const.Float(v as f64, t), ty: t })
@@ -2012,11 +2037,11 @@ impl Sema {
             Field(_, _) => {
                 let p = match expr_path(e) {
                     Some(p) => p
-                    None => return Err(ty_err(e.span, "not a constant"))
+                    None => return self.eval_const_expr(e, env, exp)
                 }
                 match self.lookup_path(env.module, p) {
                     Some((Const(c), _)) => self.const_value(c)
-                    _ => Err(ty_err(e.span, "not a compile-time constant"))
+                    _ => self.eval_const_expr(e, env, exp)
                 }
             }
             Unary(op, inner) => match op {
@@ -2031,7 +2056,10 @@ impl Sema {
                             if !signed {
                                 return Err(ty_err(e.span, "only signed integers can be negated"))
                             }
-                            Ok(TypedConst { c: Const.Int(self.wrap_int(0 - v, t), t), ty: t })
+                            let bits = self.types.int(t).unwrap().bits
+                            let minimum = if bits == 128 { 1 as i128 << 127 } else { 0 - (1 as i128 << (bits - 1)) }
+                            if v == minimum { return Err(ty_err(e.span, "the result overflows its type")) }
+                            Ok(TypedConst { c: Const.Int(self.wrap_int(0 -% v, t), t), ty: t })
                         }
                         Float(v, t) => Ok(TypedConst { c: Const.Float(0.0 - v, t), ty: t })
                         _ => Err(ty_err(e.span, "cannot negate this"))
@@ -2045,9 +2073,10 @@ impl Sema {
                         _ => Err(ty_err(e.span, "cannot apply `!` to this"))
                     }
                 }
-                _ => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                _ => self.eval_const_expr(e, env, exp)
             }
             Binary(op, a, b) => {
+                if op == Op.LogAnd || op == Op.LogOr { return self.eval_const_expr(e, env, exp) }
                 let ea: Option(u32) = if op.is_compare() { None } else { exp }
                 let ra = self.const_expr(a.deref(), env, ea)?
                 let rb = self.const_expr(b.deref(), env, Some(ra.ty))?
@@ -2068,7 +2097,7 @@ impl Sema {
             }
             Call(callee, args) => {
                 if args.len() != 1 {
-                    return Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                    return self.eval_const_expr(e, env, exp)
                 }
                 let name = match callee.kind {
                     Name(n) => n.clone()
@@ -2085,39 +2114,19 @@ impl Sema {
                     let rt = exp_int.unwrap_or(types.I64)
                     return Ok(TypedConst { c: Const.Int(v as i128, rt), ty: rt })
                 }
-                Err(ty_err(e.span, "this call cannot be evaluated while compiling yet"))
+                self.eval_const_expr(e, env, exp)
             }
             Block(b) => {
                 if b.stmts.len() > 0 {
-                    return Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                    return self.eval_const_expr(e, env, exp)
                 }
                 match b.tail {
                     Some(t) => self.const_expr(t.deref(), env, exp)
-                    None => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+                    None => self.eval_const_expr(e, env, exp)
                 }
             }
-            If(c, then, els) => {
-                let rc = self.const_expr(c.deref(), env, Some(types.BOOL))?
-                let cv = match rc.c {
-                    Bool(b) => b
-                    _ => return Err(ty_err(c.span, "expected a bool"))
-                }
-                if cv {
-                    if then.stmts.len() == 0 {
-                        match then.tail {
-                            Some(t) => return self.const_expr(t.deref(), env, exp)
-                            None => {}
-                        }
-                    }
-                    Err(ty_err(e.span, "not a constant"))
-                } else {
-                    match els {
-                        Some(x) => self.const_expr(x.deref(), env, exp)
-                        None => Err(ty_err(e.span, "not a constant"))
-                    }
-                }
-            }
-            _ => Err(ty_err(e.span, "this expression cannot be evaluated while compiling yet"))
+            If(_, _, _) => self.eval_const_expr(e, env, exp)
+            _ => self.eval_const_expr(e, env, exp)
         }
     }
 
@@ -2198,6 +2207,9 @@ impl Sema {
                 if y == 0 {
                     return Err(ty_err(span, "division by zero"))
                 }
+                if signed && x == 0 - (1 as i128 << (bits - 1)) && y == -1 {
+                    return Err(ty_err(span, "the result overflows its type"))
+                }
                 let v = match op {
                     Div => x / y
                     _ => x % y
@@ -2267,7 +2279,7 @@ fn cbool(b: bool) -> TypedConst {
 
 // Arithmetic on 128-bit constants, which are bit patterns in an `i128`:
 // at that width, as the program would do it.
-fn fold_128(op: Op, x: i128, y: i128, signed: bool, t: u32, span: Span) -> Result(TypedConst, Diag) {
+pub fn fold_128(op: Op, x: i128, y: i128, signed: bool, t: u32, span: Span) -> Result(TypedConst, Diag) {
     let int = fn(v: i128) -> Result(TypedConst, Diag) { Ok(TypedConst { c: Const.Int(v, t), ty: t }) }
     let ux = x as u128
     let uy = y as u128
@@ -2285,7 +2297,7 @@ fn fold_128(op: Op, x: i128, y: i128, signed: bool, t: u32, span: Span) -> Resul
                 let over = match op {
                     Add => (x >= 0) == (y >= 0) && (v >= 0) != (x >= 0)
                     Sub => (x >= 0) != (y >= 0) && (v >= 0) != (x >= 0)
-                    _ => x != 0 && (v / x != y || (x == -1 && y as u128 == top))
+                    _ => x != 0 && ((x == -1 && v as u128 == top) || v / x != y)
                 }
                 if over {
                     return Err(ty_err(span, "the result overflows its type"))

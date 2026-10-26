@@ -1,0 +1,7 @@
+// error: outside its lifetime
+fn expired() -> i64 {
+    var p: *i64 = null
+    { var local = 42; p = &local }
+    unsafe { *p }
+}
+fn main() { let n = comptime expired() }

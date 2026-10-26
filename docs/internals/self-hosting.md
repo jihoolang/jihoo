@@ -2,8 +2,10 @@
 
 The compiler has been rewritten in jihoo, in `compiler/`, and jihoo
 compiles itself: the compiler in jihoo, built by itself, writes the same
-LLVM IR as the Rust compiler for every program in the repository. This
-page is how it got there and how it stays there.
+LLVM IR as stage 1 for every program in the repository. The Rust bootstrap
+agrees on the compiler and standard library sources; language features added
+after the port, such as compile-time evaluation, live in the jihoo compiler.
+This page is how it got there and how it stays there.
 
 ## Stages
 
@@ -38,18 +40,19 @@ JIHOO_COMPILER=$PWD/out/jihoo2 cargo test --test programs
 The port goes one pass at a time, in the order the compiler runs them. Each
 pass gets a command that prints what it makes, in both compilers, in the
 same format; `crates/jihoo/tests/selfhost.rs` builds stage 1 and runs both
-compilers on every `.jh` file in the repository (`lib/`, `tests/`,
-`examples/`, `compiler/`), comparing output, errors and exit status byte for
-byte. It also runs the programs of `tests/run` and `examples` built by each
-compiler, and builds stage 2 and compares its `emit-llvm` with stage 1's on
-every file:
+compilers on every bootstrap source (`lib/` and `compiler/`), comparing
+output, errors and exit status byte for byte. It also runs the examples
+built by each compiler, and builds stage 2 and compares its `emit-llvm`
+with stage 1's on every `.jh` file, including tests of new language features.
+`cargo test --test programs` runs the program and diagnostic fixtures with
+stage 1 by default:
 
 ```sh
 cargo test --test selfhost
 ```
 
-Error messages are part of the comparison, so stage 1 gives the same
-errors, at the same places, as stage 0. Inputs meant to exercise one pass
+Error messages are part of the bootstrap comparison. New language tests
+check their expected output or diagnostics against stage 1 directly. Inputs meant to exercise one pass
 live in `tests/selfhost/<pass>/`. A `// load-args: ...` line in a file gives
 the commands that load a program more options (`-I dir`, `--target
 aarch64`). Both compilers

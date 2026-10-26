@@ -778,3 +778,166 @@ impl Clone for Callee {
         }
     }
 }
+
+// Snapshots used to check and execute compile-time MIR without changing
+// the bodies that the normal elaboration and code generation passes read.
+
+impl Clone for UnOp {
+    fn clone(self) -> UnOp {
+        match self {
+            Neg => UnOp.Neg
+            Not => UnOp.Not
+        }
+    }
+}
+
+impl Clone for Agg {
+    fn clone(self) -> Agg {
+        match self {
+            Struct(a) => Agg.Struct(a)
+            Variant(a, b) => Agg.Variant(a, b)
+            Array(a) => Agg.Array(a)
+            View(a) => Agg.View(a)
+            Closure(a) => Agg.Closure(a)
+        }
+    }
+}
+
+impl Clone for CastKind {
+    fn clone(self) -> CastKind {
+        match self {
+            Numeric => CastKind.Numeric
+            Ptr => CastKind.Ptr
+        }
+    }
+}
+
+impl Clone for Rvalue {
+    fn clone(self) -> Rvalue {
+        match self {
+            Use(a) => Rvalue.Use(a.clone())
+            Bin(a, b, c) => Rvalue.Bin(a, b.clone(), c.clone())
+            Un(a, b) => Rvalue.Un(a.clone(), b.clone())
+            Cast(a, b, c) => Rvalue.Cast(a.clone(), b, c.clone())
+            Ref(a) => Rvalue.Ref(a.clone())
+            RefMut(a) => Rvalue.RefMut(a.clone())
+            Addr(a) => Rvalue.Addr(a.clone())
+            Aggregate(a, b) => Rvalue.Aggregate(a.clone(), b.clone())
+            Discriminant(a) => Rvalue.Discriminant(a.clone())
+            Offset(a, b) => Rvalue.Offset(a.clone(), b.clone())
+            Repeat(a, b) => Rvalue.Repeat(a.clone(), b)
+        }
+    }
+}
+
+impl Clone for Stmt {
+    fn clone(self) -> Stmt {
+        match self {
+            Assign(a, b, c) => Stmt.Assign(a.clone(), b.clone(), c)
+            StorageLive(a) => Stmt.StorageLive(a)
+            StorageDead(a) => Stmt.StorageDead(a)
+            Drop(a, b) => Stmt.Drop(a.clone(), b)
+            Forget(a) => Stmt.Forget(a)
+            Nop => Stmt.Nop
+        }
+    }
+}
+
+impl Clone for Callee {
+    fn clone(self) -> Callee {
+        match self {
+            Fn(a) => Callee.Fn(a)
+            Ptr(a) => Callee.Ptr(a.clone())
+            Closure(a) => Callee.Closure(a.clone())
+            Intrinsic(a) => Callee.Intrinsic(a.clone())
+        }
+    }
+}
+
+impl Clone for Term {
+    fn clone(self) -> Term {
+        match self {
+            Goto(a) => Term.Goto(a)
+            Switch(a, b, c) => Term.Switch(a.clone(), b.clone(), c)
+            Return => Term.Return
+            Unreachable => Term.Unreachable
+            Call(a, b, c, d, e) => Term.Call(a.clone(), b.clone(), c.clone(), d, e)
+            Assert(a, b, c, d) => Term.Assert(a.clone(), b.clone(), c, d)
+            Pending => Term.Pending
+        }
+    }
+}
+
+impl Clone for Linkage {
+    fn clone(self) -> Linkage {
+        match self {
+            Internal => Linkage.Internal
+            Export => Linkage.Export
+            Extern => Linkage.Extern
+        }
+    }
+}
+
+impl Clone for SwitchTarget {
+    fn clone(self) -> SwitchTarget {
+        SwitchTarget {
+            value: self.value
+            block: self.block
+        }
+    }
+}
+
+impl Clone for Block {
+    fn clone(self) -> Block {
+        Block {
+            stmts: self.stmts.clone()
+            term: self.term.clone()
+        }
+    }
+}
+
+impl Clone for LocalDecl {
+    fn clone(self) -> LocalDecl {
+        LocalDecl {
+            ty: self.ty
+            name: self.name.clone()
+            span: self.span
+            mutable: self.mutable
+            kind: self.kind
+        }
+    }
+}
+
+impl Clone for Body {
+    fn clone(self) -> Body {
+        Body {
+            locals: self.locals.clone()
+            blocks: self.blocks.clone()
+            arg_count: self.arg_count
+        }
+    }
+}
+
+impl Clone for Function {
+    fn clone(self) -> Function {
+        Function {
+            symbol: self.symbol.clone()
+            name: self.name.clone()
+            sig: self.sig.clone()
+            pass: self.pass.clone()
+            body: self.body.clone()
+            linkage: self.linkage.clone()
+            variadic: self.variadic
+            returns_ref: self.returns_ref
+            span: self.span
+        }
+    }
+}
+
+impl Clone for LocalKind {
+    fn clone(self) -> LocalKind { self }
+}
+
+impl Clone for ParamPass {
+    fn clone(self) -> ParamPass { self }
+}

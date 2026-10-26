@@ -1,0 +1,3 @@
+// error: invalid pointer
+fn bad() -> i64 { unsafe { let p = zeroed(*i64); *p } }
+fn main() { let x = comptime bad() }

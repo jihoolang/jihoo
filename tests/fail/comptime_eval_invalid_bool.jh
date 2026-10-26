@@ -1,0 +1,6 @@
+// error: invalid bool during compile-time evaluation
+fn invalid() -> bool {
+    var byte: u8 = 2
+    unsafe { *(&byte as *bool) }
+}
+fn main() { let b = comptime invalid() }

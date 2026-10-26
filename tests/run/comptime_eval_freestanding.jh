@@ -1,0 +1,14 @@
+#![freestanding]
+//> 5050
+//> 81
+fn sum(n: i64) -> i64 {
+    var result = 0
+    for i in 0..n + 1 { result += i }
+    result
+}
+fn square(n: i64) -> i64 { n * n }
+const SUM = sum(100)
+fn main() {
+    println(SUM)
+    println(comptime square(9))
+}

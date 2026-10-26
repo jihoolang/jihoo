@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -29,10 +30,21 @@ fn files(dir: &str) -> Vec<PathBuf> {
     v
 }
 
-/// The compiler under test: `JIHOO_COMPILER`, else the Rust one built with
-/// the tests. It finds the checkout's standard library through `JIHOO_PATH`.
+/// The compiler under test: `JIHOO_COMPILER`, else the reference compiler
+/// in jihoo, bootstrapped once with the Rust binary built by Cargo.
 fn jihoo() -> Command {
-    let exe = std::env::var_os("JIHOO_COMPILER").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_jihoo")));
+    static COMPILER: OnceLock<PathBuf> = OnceLock::new();
+    let exe = std::env::var_os("JIHOO_COMPILER").map(PathBuf::from).unwrap_or_else(|| {
+        COMPILER.get_or_init(|| {
+            let out = std::env::temp_dir().join(format!("jihoo-programs-{}", std::process::id()));
+            let result = Command::new(env!("CARGO_BIN_EXE_jihoo"))
+                .args(["build", "-O1"]).arg(root().join("compiler/main.jh"))
+                .arg("-o").arg(&out).env("JIHOO_PATH", root().join("lib"))
+                .env_remove("JIHOO_NO_ELAB").output().unwrap();
+            assert!(result.status.success(), "cannot bootstrap compiler:\n{}", String::from_utf8_lossy(&result.stderr));
+            out
+        }).clone()
+    });
     let mut c = Command::new(exe);
     c.env("JIHOO_PATH", root().join("lib"));
     c

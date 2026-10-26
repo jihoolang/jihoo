@@ -1,0 +1,802 @@
+// Bounded MIR execution for compile-time expressions. All addresses refer
+// to allocations in this interpreter, never to the compiler process.
+// Layout and scalar widths come from the target's Types table.
+import diag
+import lex
+import mir
+import sema
+import types
+
+type Diag = diag.Diag
+type Span = diag.Span
+type Types = types.Types
+type Const = mir.Const
+
+type Value = Vec(u8)
+
+const MAX_STEPS: u64 = 1000000
+const MAX_MEMORY: u64 = 67108864
+const MAX_DEPTH: u32 = 128
+
+struct Allocation {
+    bytes: Value
+    initialized: Vec(bool)
+    pointers: Vec(bool)
+    live: bool
+    readonly: bool
+}
+
+struct Frame {
+    locals: Vec(u64)
+}
+
+pub struct Interpreter {
+    memory: Vec(Allocation)
+    used: u64
+    steps: u64
+}
+
+fn error(span: Span, msg: str) -> Diag {
+    Diag.new(span, msg).note(None, "while evaluating at compile time")
+}
+
+fn zero(n: u64) -> Value {
+    var v = Value.new()
+    for _ in 0..n as i64 { v.push(0) }
+    v
+}
+
+fn bits(v: Value, span: Span) -> Result(u128, Diag) {
+    if v.len() > 16 { return Err(error(span, "expected a scalar compile-time value")) }
+    var n: u128 = 0
+    for i, b in v { n = n | ((b as u128) << (i * 8) as u32) }
+    Ok(n)
+}
+
+fn integer(n: u128, size: u64) -> Value {
+    var v = Value.new()
+    for i in 0..size as i64 { v.push((n >> (i * 8) as u32) as u8) }
+    v
+}
+
+fn part(v: Value, off: u64, n: u64) -> Value {
+    var r = Value.new()
+    for i in 0..n as i64 { r.push(v[off as i64 + i]) }
+    r
+}
+
+fn put(inout v: Value, off: u64, x: Value) {
+    for i, b in x { v[off as i64 + i] = b }
+}
+
+fn view_field(t: Types, ty: u32, i: u32) -> u32 {
+    if i != 0 { return types.I64 }
+    let el = match t.kind(ty) { Slice(el) => el, Str => types.U8, _ => return types.U64 }
+    for j, k in t.kinds { match k { Ptr(x) => { if x == el { return j as u32 } }, _ => {} } }
+    panic("view element pointer type is interned")
+}
+
+fn signed(t: Types, v: u128, ty: u32) -> i128 {
+    match t.int(ty) {
+        Some(i) => {
+            if i.signed && i.bits < 128 && (v >> (i.bits - 1)) & 1 == 1 {
+                return (v | (!0 as u128 << i.bits)) as i128
+            }
+        }
+        None => {}
+    }
+    v as i128
+}
+
+// Reinterpret the host float's bits, rather than converting its value.
+// Both supported targets use IEEE floats and little-endian memory.
+fn float_bytes(v: f64, ty: u32) -> Value {
+    if ty == types.F32 {
+        var x = v as f32
+        return integer(unsafe { *(&x as *u32) } as u128, 4)
+    }
+    var x = v
+    integer(unsafe { *(&x as *u64) } as u128, 8)
+}
+
+fn float_value(v: Value, ty: u32, span: Span) -> Result(f64, Diag) {
+    let n = bits(v, span)?
+    if ty == types.F32 {
+        var x = n as u32
+        return Ok(unsafe { *(&x as *f32) } as f64)
+    }
+    var x = n as u64
+    Ok(unsafe { *(&x as *f64) })
+}
+
+impl Interpreter {
+    pub fn new() -> Interpreter {
+        Interpreter { memory: Vec(Allocation).new(), used: 0, steps: 0 }
+    }
+
+    fn tick(inout self, span: Span) -> Result((), Diag) {
+        if self.steps >= MAX_STEPS { return Err(error(span, "compile-time evaluation exceeded its step limit")) }
+        self.steps += 1
+        Ok(())
+    }
+
+    fn alloc(inout self, n: u64, readonly: bool, span: Span) -> Result(u64, Diag) {
+        if n > MAX_MEMORY || self.used > MAX_MEMORY - n || self.memory.len() >= 1000000 {
+            return Err(error(span, "compile-time evaluation exceeded its memory limit"))
+        }
+        self.used += n
+        var initialized = Vec(bool).new()
+        var pointers = Vec(bool).new()
+        for _ in 0..n as i64 { initialized.push(false); pointers.push(false) }
+        self.memory.push(Allocation { bytes: zero(n), initialized: initialized, pointers: pointers, live: true, readonly: readonly })
+        Ok((self.memory.len() as u64) << 32)
+    }
+
+    fn check(self, addr: u64, n: u64, write: bool, span: Span) -> Result((), Diag) {
+        let id = (addr >> 32) as i64 - 1
+        let off = addr & 0xffffffff
+        if id < 0 || id >= self.memory.len() { return Err(error(span, "invalid pointer during compile-time evaluation")) }
+        let a = self.memory[id]
+        if !a.live { return Err(error(span, "compile-time evaluation accessed a value outside its lifetime")) }
+        if off > a.bytes.len() as u64 || n > a.bytes.len() as u64 - off {
+            return Err(error(span, "out-of-bounds memory access during compile-time evaluation"))
+        }
+        if write && a.readonly { return Err(error(span, "cannot change constant memory during compile-time evaluation")) }
+        Ok(())
+    }
+
+    fn read(self, addr: u64, n: u64, span: Span) -> Result(Value, Diag) {
+        self.check(addr, n, false, span)?
+        Ok(part(self.memory[(addr >> 32) as i64 - 1].bytes, addr & 0xffffffff, n))
+    }
+
+    fn write(inout self, addr: u64, v: Value, span: Span) -> Result((), Diag) {
+        self.check(addr, v.len() as u64, true, span)?
+        let id = (addr >> 32) as i64 - 1
+        let off = (addr & 0xffffffff) as i64
+        put(&self.memory[id].bytes, off as u64, v)
+        for i in 0..v.len() {
+            self.memory[id].initialized[off + i] = true
+            self.memory[id].pointers[off + i] = false
+        }
+        Ok(())
+    }
+
+    fn mark_pointer(inout self, addr: u64, n: u64) {
+        let id = (addr >> 32) as i64 - 1
+        let off = (addr & 0xffffffff) as i64
+        for i in 0..n as i64 { self.memory[id].pointers[off + i] = true }
+    }
+
+    fn pointer_fields(inout self, inout t: Types, addr: u64, ty: u32, span: Span) -> Result((), Diag) {
+        self.tick(span)?
+        let k = t.kind(ty).clone()
+        match k {
+            Ptr(_) | Ref(_) | RefMut(_) | FnPtr(_) => self.mark_pointer(addr, t.ptr_size)
+            Str | Slice(_) => self.mark_pointer(addr, t.ptr_size)
+            Closure(_) => self.mark_pointer(addr, 2 * t.ptr_size)
+            Array(el, n) => {
+                let stride = t.layout(el).size
+                if stride > 0 { for i in 0..n as i64 { self.pointer_fields(&t, addr + i as u64 * stride, el, span)? } }
+            }
+            Adt(_) => match t.variants(ty) {
+                Some(vs) => {
+                    let variants = vs.clone()
+                    let layout = t.enum_layout(ty).1
+                    let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
+                    if tag >= variants.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
+                    let fields = variants[tag as i64].fields.clone()
+                    for i, f in fields { self.pointer_fields(&t, addr + layout.fields[tag as i64][i], f, span)? }
+                }
+                None => {
+                    let offs = t.field_offsets(ty)
+                    for i, f in t.field_tys(ty) { self.pointer_fields(&t, addr + offs[i], f, span)? }
+                }
+            }
+            Tuple(ts) => {
+                let offs = t.field_offsets(ty)
+                for i, f in ts { self.pointer_fields(&t, addr + offs[i], f, span)? }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn write_typed(inout self, inout t: Types, addr: u64, v: Value, ty: u32, span: Span) -> Result((), Diag) {
+        self.write(addr, v, span)?
+        self.pointer_fields(&t, addr, ty, span)
+    }
+
+    fn validate(inout self, inout t: Types, addr: u64, ty: u32, span: Span) -> Result((), Diag) {
+        self.tick(span)?
+        let size = t.layout(ty).size
+        self.check(addr, size, false, span)?
+        if size == 0 { return Ok(()) }
+        let k = t.kind(ty).clone()
+        match k {
+            Tuple(ts) => {
+                let offs = t.field_offsets(ty)
+                for i, f in ts { self.validate(&t, addr + offs[i], f, span)? }
+                return Ok(())
+            }
+            Array(el, n) => {
+                let stride = t.layout(el).size
+                if stride > 0 { for i in 0..n as i64 { self.validate(&t, addr + i as u64 * stride, el, span)? } }
+                return Ok(())
+            }
+            Adt(_) => {
+                let offs = t.field_offsets(ty)
+                match t.variants(ty) {
+                    Some(vs) => {
+                        let fields = vs.clone()
+                        let layout = t.enum_layout(ty).1
+                        self.validate(&t, addr, if layout.tag_bits == 8 { types.U8 } else { types.U32 }, span)?
+                        let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
+                        if tag >= fields.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
+                        for i, f in fields[tag as i64].fields { self.validate(&t, addr + layout.fields[tag as i64][i], f, span)? }
+                    }
+                    None => { for i, f in t.field_tys(ty) { self.validate(&t, addr + offs[i], f, span)? } }
+                }
+                return Ok(())
+            }
+            _ => {}
+        }
+        let id = (addr >> 32) as i64 - 1
+        let off = (addr & 0xffffffff) as i64
+        let opaque = match t.kind(ty) { Int(_) | Float(_) | Bool => true, _ => false }
+        for i in 0..size as i64 {
+            if !self.memory[id].initialized[off + i] { return Err(error(span, "uninitialized memory during compile-time evaluation")) }
+            if opaque && self.memory[id].pointers[off + i] { return Err(error(span, "a compile-time pointer cannot be read as scalar bytes")) }
+        }
+        if ty == types.BOOL && self.memory[id].bytes[off] > 1 { return Err(error(span, "invalid bool during compile-time evaluation")) }
+        Ok(())
+    }
+
+    fn read_typed(inout self, inout t: Types, addr: u64, ty: u32, span: Span) -> Result(Value, Diag) {
+        self.validate(&t, addr, ty, span)?
+        self.read(addr, t.layout(ty).size, span)
+    }
+
+    fn constant(inout self, inout t: Types, c: Const, ty: u32, span: Span) -> Result(Value, Diag) {
+        let n = t.layout(ty).size
+        Ok(match c {
+            Int(v, _) => integer(v as u128, n)
+            Float(v, ct) => float_bytes(v, ct)
+            Bool(b) => integer(if b { 1 } else { 0 }, 1)
+            Zst(_) | Zeroed(_) | Null(_) => zero(n)
+            Bytes(b, _) => b.clone()
+            Fn(f) => integer(f as u128 + 1, t.ptr_size)
+            Str(s) => {
+                let addr = self.alloc(s.len() as u64, false, span)?
+                var data = Value.new()
+                for b in s.as_str() { data.push(b) }
+                self.write(addr, data, span)?
+                self.memory[(addr >> 32) as i64 - 1].readonly = true
+                var v = integer(addr as u128, t.ptr_size)
+                for b in integer(s.len() as u128, t.ptr_size) { v.push(b) }
+                v
+            }
+            Static(_, _) => return Err(error(span, "statics cannot be accessed during compile-time evaluation"))
+        })
+    }
+
+    fn place(inout self, inout t: Types, body: mir.Body, fr: Frame, p: mir.Place, span: Span) -> Result((u64, u32), Diag) {
+        var addr = fr.locals[p.local as i64]
+        var ty = body.locals[p.local as i64].ty
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => {
+                    addr = bits(self.read_typed(&t, addr, ty, span)?, span)? as u64
+                    ty = t.pointee(ty).unwrap()
+                    variant = None
+                }
+                Variant(v) => variant = Some(v)
+                Field(i) => {
+                    match variant {
+                        Some(v) => {
+                            let layout = t.enum_layout(ty).1
+                            addr += layout.fields[v as i64][i as i64]
+                            ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]
+                            variant = None
+                        }
+                        None => {
+                            let offs = t.field_offsets(ty)
+                            addr += offs[i as i64]
+                            ty = match t.kind(ty) {
+                                Str | Slice(_) | Closure(_) => view_field(t, ty, i)
+                                _ => t.field_tys(ty)[i as i64]
+                            }
+                        }
+                    }
+                }
+                Index(l) => {
+                    let it = body.locals[l as i64].ty
+                    let iv = self.read_typed(&t, fr.locals[l as i64], it, span)?
+                    let index = signed(t, bits(iv, span)?, it)
+                    match t.kind(ty) {
+                        Array(el, len) => {
+                            if index < 0 || index as u128 >= len as u128 { return Err(error(span, "array index out of bounds during compile-time evaluation")) }
+                            ty = el
+                        }
+                        _ => return Err(error(span, "invalid array projection during compile-time evaluation"))
+                    }
+                    addr += index as u64 * t.layout(ty).size
+                }
+            }
+        }
+        Ok((addr, ty))
+    }
+
+    fn operand_ty(t: Types, body: mir.Body, p: mir.Place) -> u32 {
+        var ty = body.locals[p.local as i64].ty
+        var variant: Option(u32) = None
+        for pr in p.proj {
+            match pr {
+                Deref => ty = t.pointee(ty).unwrap()
+                Variant(v) => variant = Some(v)
+                Index(_) => match t.kind(ty) { Array(el, _) => ty = el, _ => {} }
+                Field(i) => {
+                    ty = match variant {
+                        Some(v) => t.variants(ty).unwrap()[v as i64].fields[i as i64]
+                        None => match t.kind(ty) {
+                            Str | Slice(_) | Closure(_) => view_field(t, ty, i)
+                            _ => t.field_tys(ty)[i as i64]
+                        }
+                    }
+                    variant = None
+                }
+            }
+        }
+        ty
+    }
+
+    fn op_ty(t: Types, body: mir.Body, o: mir.Operand) -> u32 {
+        match o {
+            Copy(p) => Interpreter.operand_ty(t, body, p)
+            Move(p) => Interpreter.operand_ty(t, body, p)
+            Const(c) => match c {
+                Int(_, ty) => ty
+                Float(_, ty) => ty
+                Zst(ty) => ty
+                Null(ty) => ty
+                Zeroed(ty) => ty
+                Bytes(_, ty) => ty
+                Static(_, ty) => ty
+                Bool(_) => types.BOOL
+                Str(_) => types.STR
+                Fn(_) => types.U64
+            }
+        }
+    }
+
+    fn operand(inout self, inout t: Types, body: mir.Body, fr: Frame, o: mir.Operand, span: Span) -> Result(Value, Diag) {
+        match o {
+            Copy(p) => {
+                let (addr, ty) = self.place(&t, body, fr, p, span)?
+                self.read_typed(&t, addr, ty, span)
+            }
+            Move(p) => {
+                let (addr, ty) = self.place(&t, body, fr, p, span)?
+                self.read_typed(&t, addr, ty, span)
+            }
+            Const(c) => self.constant(&t, c, Interpreter.op_ty(t, body, o), span)
+        }
+    }
+
+    fn scalar_const(t: Types, v: Value, ty: u32, span: Span) -> Result(Const, Diag) {
+        Ok(match t.kind(ty) {
+            Float(_) => Const.Float(float_value(v, ty, span)?, ty)
+            Bool => Const.Bool(bits(v, span)? != 0)
+            _ => Const.Int(signed(t, bits(v, span)?, ty), ty)
+        })
+    }
+
+    fn binary(inout self, inout t: Types, op: lex.Op, a: Value, b: Value, ty: u32, out_ty: u32, checked: bool, span: Span) -> Result(Value, Diag) {
+        if t.is_float(ty) {
+            let x = float_value(a, ty, span)?
+            let y = float_value(b, ty, span)?
+            return Ok(match op {
+                Add => float_bytes(x + y, ty)
+                Sub => float_bytes(x - y, ty)
+                Mul => float_bytes(x * y, ty)
+                Div => float_bytes(x / y, ty)
+                Eq => integer(if x == y { 1 } else { 0 }, 1)
+                Ne => integer(if x != y { 1 } else { 0 }, 1)
+                Lt => integer(if x < y { 1 } else { 0 }, 1)
+                Le => integer(if x <= y { 1 } else { 0 }, 1)
+                Gt => integer(if x > y { 1 } else { 0 }, 1)
+                Ge => integer(if x >= y { 1 } else { 0 }, 1)
+                _ => return Err(error(span, "unsupported float operation during compile-time evaluation"))
+            })
+        }
+        let x = bits(a, span)?
+        let y = bits(b, span)?
+        let sx = signed(t, x, ty)
+        let sy = signed(t, y, ty)
+        let int = t.int(ty)
+        var width: u32 = 64
+        var is_signed = false
+        match int { Some(i) => { width = i.bits; is_signed = i.signed }, None => {} }
+        let n = (y as u32) % width
+        var operation = op
+        if !checked {
+            operation = match op { Add => lex.Op.AddWrap, Sub => lex.Op.SubWrap, Mul => lex.Op.MulWrap, _ => op }
+        }
+        // Use the constant folder's checked 128-bit arithmetic and signed
+        // comparisons, then verify the narrower target width below.
+        var result: u128 = 0
+        if ty == types.BOOL {
+            result = match op {
+                And | LogAnd => if x != 0 && y != 0 { 1 } else { 0 }
+                Or | LogOr => if x != 0 || y != 0 { 1 } else { 0 }
+                Eq => if x == y { 1 } else { 0 }
+                Ne | Xor => if x != y { 1 } else { 0 }
+                _ => return Err(error(span, "unsupported bool operation during compile-time evaluation"))
+            }
+        } else {
+            let folded = sema.fold_128(operation, if is_signed { sx } else { x as i128 }, if is_signed { sy } else { y as i128 }, is_signed, ty, span)?
+            result = match folded.c { Int(v, _) => v as u128, Bool(v) => if v { 1 } else { 0 }, _ => 0 }
+            if checked && width < 128 && (op == lex.Op.Add || op == lex.Op.Sub || op == lex.Op.Mul) {
+                if is_signed {
+                    let limit: i128 = 1 << (width - 1)
+                    if (result as i128) < 0 - limit || result as i128 >= limit { return Err(error(span, "the result overflows its type")) }
+                } else if result >= (1 as u128 << width) { return Err(error(span, "the result overflows its type")) }
+            }
+            // The shift count is reduced by the operand width, not 128.
+            if op == lex.Op.Shl { result = x << n }
+            if op == lex.Op.Shr { result = if is_signed { (sx >> n) as u128 } else { x >> n } }
+            if is_signed && (op == lex.Op.Div || op == lex.Op.Rem) && width < 128 {
+                let min: i128 = 0 - (1 as i128 << (width - 1))
+                if sx == min && sy == -1 { return Err(error(span, "the result overflows its type")) }
+            }
+        }
+        Ok(integer(result, t.layout(out_ty).size))
+    }
+
+    fn cast(inout self, inout t: Types, v: Value, from: u32, to: u32, span: Span) -> Result(Value, Diag) {
+        let n = t.layout(to).size
+        let from_pointer = t.is_ptr(from) || t.is_ref(from)
+        if from_pointer && t.is_int(to) && bits(v, span)? != 0 {
+            return Err(error(span, "a compile-time pointer cannot be converted to an integer"))
+        }
+        if t.is_float(from) {
+            let f = float_value(v, from, span)?
+            if t.is_float(to) { return Ok(float_bytes(f, to)) }
+            let i = t.int(to).unwrap()
+            let x: u128 = if i.signed {
+                if i.bits == 128 { (f as i128) as u128 } else { (f as i64) as u128 }
+            } else {
+                if i.bits == 128 { f as u128 } else { (f as u64) as u128 }
+            }
+            // Float-to-integer casts saturate to the destination width.
+            if i.bits < 64 {
+                if i.signed {
+                    let hi = (1 as i128 << (i.bits - 1)) - 1
+                    let lo = 0 - hi - 1
+                    return Ok(integer(max(lo, min(hi, x as i128)) as u128, n))
+                }
+                return Ok(integer(min(x, (1 as u128 << i.bits) - 1), n))
+            }
+            return Ok(integer(x, n))
+        }
+        let x = bits(v, span)?
+        if t.is_float(to) {
+            let is_signed = match t.int(from) { Some(i) => i.signed, None => false }
+            return Ok(float_bytes(if is_signed { signed(t, x, from) as f64 } else { x as f64 }, to))
+        }
+        Ok(integer(signed(t, x, from) as u128, n))
+    }
+
+    fn rvalue(inout self, inout t: Types, body: mir.Body, fr: Frame, rv: mir.Rvalue, ty: u32, checked: bool, span: Span) -> Result(Value, Diag) {
+        match rv {
+            Use(o) => self.operand(&t, body, fr, o, span)
+            Ref(p) => {
+                let (addr, _) = self.place(&t, body, fr, p, span)?
+                Ok(integer(addr as u128, t.ptr_size))
+            }
+            RefMut(p) => {
+                let (addr, _) = self.place(&t, body, fr, p, span)?
+                Ok(integer(addr as u128, t.ptr_size))
+            }
+            Addr(p) => {
+                let (addr, _) = self.place(&t, body, fr, p, span)?
+                Ok(integer(addr as u128, t.ptr_size))
+            }
+            Bin(op, a, b) => {
+                let at = Interpreter.op_ty(t, body, a)
+                let av = self.operand(&t, body, fr, a, span)?
+                let bv = self.operand(&t, body, fr, b, span)?
+                self.binary(&t, op, av, bv, at, ty, checked, span)
+            }
+            Un(op, a) => {
+                let av = self.operand(&t, body, fr, a, span)?
+                if t.is_float(ty) { return Ok(float_bytes(-float_value(av, ty, span)?, ty)) }
+                let x = bits(av, span)?
+                var v = !x
+                match op {
+                    Neg => {
+                        let width = t.int(ty).unwrap().bits
+                        if checked && x == (1 as u128 << (width - 1)) { return Err(error(span, "the result overflows its type")) }
+                        v = 0 -% x
+                    }
+                    Not => { if ty == types.BOOL { v = if x == 0 { 1 } else { 0 } } }
+                }
+                Ok(integer(v, t.layout(ty).size))
+            }
+            Cast(a, to, _) => {
+                let from = Interpreter.op_ty(t, body, a)
+                let av = self.operand(&t, body, fr, a, span)?
+                self.cast(&t, av, from, to, span)
+            }
+            Aggregate(agg, os) => {
+                let size = t.layout(ty).size
+                if size > MAX_MEMORY { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                var out = zero(size)
+                var offs = Vec(u64).new()
+                match agg {
+                    Array(_) => {
+                        let el = match t.kind(ty) { Array(el, _) => el, _ => types.UNIT }
+                        let stride = t.layout(el).size
+                        for i in 0..os.len() { offs.push(i as u64 * stride) }
+                    }
+                    Variant(_, v) => {
+                        let layout = t.enum_layout(ty).1
+                        put(&out, 0, integer(v as u128, (layout.tag_bits / 8) as u64))
+                        offs = layout.fields[v as i64].clone()
+                    }
+                    _ => offs = t.field_offsets(ty)
+                }
+                for i, o in os { put(&out, offs[i], self.operand(&t, body, fr, o, span)?) }
+                Ok(out)
+            }
+            Discriminant(p) => {
+                let (addr, pt) = self.place(&t, body, fr, p, span)?
+                let n = (t.enum_layout(pt).1.tag_bits / 8) as u64
+                Ok(integer(bits(self.read(addr, n, span)?, span)?, t.layout(ty).size))
+            }
+            Offset(a, b) => {
+                let at = Interpreter.op_ty(t, body, a)
+                let bt = Interpreter.op_ty(t, body, b)
+                let av = self.operand(&t, body, fr, a, span)?
+                let bv = self.operand(&t, body, fr, b, span)?
+                let addr = bits(av, span)? as u64
+                let index = signed(t, bits(bv, span)?, bt)
+                let stride = t.layout(t.pointee(at).unwrap()).size
+                let off = (addr & 0xffffffff) as i128 + index * stride as i128
+                if off < 0 || off > 0xffffffff { return Err(error(span, "invalid pointer offset during compile-time evaluation")) }
+                let next = (addr & 0xffffffff00000000) | off as u64
+                self.check(next, 0, false, span)?
+                Ok(integer(next as u128, t.ptr_size))
+            }
+            Repeat(a, n) => {
+                let av = self.operand(&t, body, fr, a, span)?
+                if n > MAX_MEMORY || (av.len() as u64 > 0 && n > MAX_MEMORY / av.len() as u64) {
+                    return Err(error(span, "compile-time evaluation exceeded its memory limit"))
+                }
+                var out = Value.new()
+                for _ in 0..n as i64 { for b in av { out.push(b) } }
+                Ok(out)
+            }
+        }
+    }
+
+    fn intrinsic(inout self, inout t: Types, i: mir.Intrinsic, args: Vec(Value), span: Span) -> Result(Value, Diag) {
+        match i {
+            Copy(ty) => {
+                let dst = bits(args[0], span)? as u64
+                let src = bits(args[1], span)? as u64
+                let count = bits(args[2], span)?
+                let stride = t.layout(ty).size
+                if count > MAX_MEMORY as u128 || count * stride as u128 > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                let v = self.read(src, count as u64 * stride, span)?
+                var initialized = Vec(bool).new()
+                var pointers = Vec(bool).new()
+                let src_id = (src >> 32) as i64 - 1
+                let src_off = (src & 0xffffffff) as i64
+                for j in 0..v.len() {
+                    initialized.push(self.memory[src_id].initialized[src_off + j])
+                    pointers.push(self.memory[src_id].pointers[src_off + j])
+                }
+                self.write(dst, v, span)?
+                let dst_id = (dst >> 32) as i64 - 1
+                let dst_off = (dst & 0xffffffff) as i64
+                for j in 0..v.len() {
+                    self.memory[dst_id].initialized[dst_off + j] = initialized[j]
+                    self.memory[dst_id].pointers[dst_off + j] = pointers[j]
+                }
+                Ok(Value.new())
+            }
+            Fill => {
+                let dst = bits(args[0], span)? as u64
+                let byte = bits(args[1], span)? as u8
+                let count = bits(args[2], span)?
+                if count > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                var v = zero(count as u64)
+                for j in 0..v.len() { v[j] = byte }
+                self.write(dst, v, span)?
+                Ok(Value.new())
+            }
+            Trap => Err(error(span, "compile-time evaluation reached a trap"))
+            _ => Err(error(span, "this intrinsic is not available during compile-time evaluation"))
+        }
+    }
+
+    fn call(inout self, inout t: Types, fns: Vec(mir.Function), id: u32, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
+        if id as i64 >= fns.len() { return Err(error(span, "invalid compile-time function pointer")) }
+        let f = fns[id as i64]
+        match f.body {
+            Some(body) => self.execute(&t, fns, body, args, checked, depth, span)
+            None => Err(error(span, ("external function `" + f.name.as_str() + "` cannot be called during compile-time evaluation").as_str()))
+        }
+    }
+
+    fn execute(inout self, inout t: Types, fns: Vec(mir.Function), body: mir.Body, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
+        if depth >= MAX_DEPTH { return Err(error(span, "compile-time evaluation exceeded its call depth limit")) }
+        self.tick(span)?
+        var fr = Frame { locals: Vec(u64).new() }
+        for l in body.locals { fr.locals.push(self.alloc(t.layout(l.ty).size, false, l.span)?) }
+        for i, arg in args { self.write_typed(&t, fr.locals[i + 1], arg, body.locals[i + 1].ty, span)? }
+        var block: u32 = 0
+        loop {
+            self.tick(span)?
+            let bb = body.blocks[block as i64]
+            for st in bb.stmts {
+                self.tick(span)?
+                match st {
+                    Assign(p, rv, sp) => {
+                        let (addr, ty) = self.place(&t, body, fr, p, sp)?
+                        let v = self.rvalue(&t, body, fr, rv, ty, checked, sp)?
+                        self.write_typed(&t, addr, v, ty, sp)?
+                    }
+                    StorageLive(l) => {
+                        let id = (fr.locals[l as i64] >> 32) as i64 - 1
+                        self.memory[id].live = true
+                        for i in 0..self.memory[id].bytes.len() {
+                            self.memory[id].initialized[i] = false
+                            self.memory[id].pointers[i] = false
+                        }
+                    }
+                    StorageDead(l) => self.memory[(fr.locals[l as i64] >> 32) as i64 - 1].live = false
+                    Drop(_, sp) => return Err(error(sp, "values with destructors are not supported during compile-time evaluation"))
+                    Forget(_) | Nop => {}
+                }
+            }
+            match bb.term {
+                Goto(next) => block = next
+                Switch(o, targets, otherwise) => {
+                    let v = bits(self.operand(&t, body, fr, o, span)?, span)?
+                    let ty = Interpreter.op_ty(t, body, o)
+                    let n = signed(t, v, ty)
+                    block = otherwise
+                    for target in targets { if n == target.value { block = target.block; break } }
+                }
+                Return => {
+                    let ret = self.read_typed(&t, fr.locals[0], body.locals[0].ty, span)?
+                    for addr in fr.locals { self.memory[(addr >> 32) as i64 - 1].live = false }
+                    return Ok(ret)
+                }
+                Call(callee, os, dest, next, sp) => {
+                    var values = Vec(Value).new()
+                    // Evaluate the callee before its arguments, and keep
+                    // a closure's environment as its first argument.
+                    var function: Option(u32) = None
+                    match callee {
+                        Fn(f) => function = Some(f)
+                        Ptr(o) => {
+                            let v = bits(self.operand(&t, body, fr, o, sp)?, sp)?
+                            if v == 0 || v > fns.len() as u128 { return Err(error(sp, "invalid compile-time function pointer")) }
+                            function = Some(v as u32 - 1)
+                        }
+                        Closure(o) => {
+                            let v = self.operand(&t, body, fr, o, sp)?
+                            let f = bits(part(v, 0, t.ptr_size), sp)?
+                            if f == 0 || f > fns.len() as u128 { return Err(error(sp, "invalid compile-time closure")) }
+                            function = Some(f as u32 - 1)
+                            values.push(part(v, t.ptr_size, t.ptr_size))
+                        }
+                        Intrinsic(_) => {}
+                    }
+                    for o in os { values.push(self.operand(&t, body, fr, o, sp)?) }
+                    let result = match function {
+                        Some(f) => self.call(&t, fns, f, values, checked, depth + 1, sp)?
+                        None => match callee {
+                            Intrinsic(i) => self.intrinsic(&t, i, values, sp)?
+                            _ => return Err(error(sp, "invalid compile-time callee"))
+                        }
+                    }
+                    let (addr, ty) = self.place(&t, body, fr, dest, sp)?
+                    self.write_typed(&t, addr, result, ty, sp)?
+                    block = next
+                }
+                Assert(o, msg, next, sp) => {
+                    if bits(self.operand(&t, body, fr, o, sp)?, sp)? == 0 { return Err(error(sp, msg.as_str())) }
+                    block = next
+                }
+                Unreachable | Pending => return Err(error(span, "compile-time evaluation reached unreachable code"))
+            }
+        }
+    }
+
+    pub fn evaluate(inout self, inout t: Types, fns: Vec(mir.Function), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
+        let ty = root.locals[0].ty
+        let v = self.execute(&t, fns, root, Vec(Value).new(), checked, 0, span)?
+        let c = match t.kind(ty) {
+            Int(_) | Float(_) | Bool => Interpreter.scalar_const(t, v, ty, span)?
+            Str => {
+                let addr = bits(part(v, 0, t.ptr_size), span)? as u64
+                let len = bits(part(v, t.ptr_size, t.ptr_size), span)?
+                if len > MAX_MEMORY as u128 { return Err(error(span, "invalid compile-time string length")) }
+                for j in 0..len as i64 { self.validate(&t, addr + j as u64, types.U8, span)? }
+                let data = self.read(addr, len as u64, span)?
+                var s = String.new()
+                for b in data { s.push(b) }
+                Const.Str(s)
+            }
+            _ => {
+                if !persistable(t, ty) { return Err(error(span, "this compile-time result contains a pointer, borrow or owned value")) }
+                if t.layout(ty).size == 0 { Const.Zst(ty) } else { Const.Bytes(v, ty) }
+            }
+        }
+        Ok(sema.TypedConst { c: c, ty: ty })
+    }
+}
+
+// Bytes can become a runtime constant only when they contain no addresses
+// in the interpreter's memory. Strings have a separate static-byte path.
+fn persistable(t: Types, ty: u32) -> bool {
+    match t.kind(ty) {
+        Int(_) | Float(_) | Bool | Never => true
+        Tuple(ts) => { for el in ts { if !persistable(t, el) { return false } }; true }
+        Array(el, _) => persistable(t, el)
+        Adt(i) => {
+            if t.adts[i as i64].has_drop { return false }
+            match t.adts[i as i64].body {
+                Struct(fs) => { for f in fs { if !persistable(t, f.ty) { return false } }; true }
+                Enum(vs) => { for v in vs { for f in v.fields { if !persistable(t, f) { return false } } }; true }
+                Pending => false
+            }
+        }
+        _ => false
+    }
+}
+
+fn operand_functions(o: mir.Operand, inout ids: Vec(u32)) {
+    match o { Const(Fn(f)) => ids.push(f), _ => {} }
+}
+
+pub fn function_ids(body: mir.Body) -> Vec(u32) {
+    var ids = Vec(u32).new()
+    for bb in body.blocks {
+        for st in bb.stmts {
+            match st {
+                Assign(_, rv, _) => match rv {
+                    Use(o) => operand_functions(o, &ids)
+                    Un(_, o) => operand_functions(o, &ids)
+                    Cast(o, _, _) => operand_functions(o, &ids)
+                    Repeat(o, _) => operand_functions(o, &ids)
+                    Bin(_, a, b) => { operand_functions(a, &ids); operand_functions(b, &ids) }
+                    Offset(a, b) => { operand_functions(a, &ids); operand_functions(b, &ids) }
+                    Aggregate(_, os) => { for o in os { operand_functions(o, &ids) } }
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+        match bb.term {
+            Call(c, os, _, _, _) => {
+                match c {
+                    Fn(f) => ids.push(f)
+                    Ptr(o) => operand_functions(o, &ids)
+                    Closure(o) => operand_functions(o, &ids)
+                    _ => {}
+                }
+                for o in os { operand_functions(o, &ids) }
+            }
+            Switch(o, _, _) => operand_functions(o, &ids)
+            Assert(o, _, _, _) => operand_functions(o, &ids)
+            _ => {}
+        }
+    }
+    ids
+}

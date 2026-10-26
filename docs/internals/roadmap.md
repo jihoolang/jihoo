@@ -37,9 +37,12 @@ Done ([design](redesign.md)):
 - **The compiler in jihoo.** The first goal after 0.1: port
   `crates/jihoo` to jihoo, then build it with itself
   ([plan and progress](self-hosting.md)). Done: every pass is ported, and the compiler in jihoo builds itself (stage 2) and writes the same LLVM IR as the Rust compiler for every program. It is now the one installed and the one the language changes in; the Rust compiler is frozen as its bootstrap.
-- **Compile-time evaluation**: an interpreter of MIR with the target's
-  memory layout, for `const` items, `comptime` expressions and compile-time
-  arguments beyond the arithmetic sema folds today.
+- **Compile-time evaluation**: done for ordinary function calls, recursion,
+  control flow and fixed aggregates, through a separate MIR interpreter
+  using the target's layout. `const` items, `comptime` expressions, array
+  lengths and compile-time arguments use it beyond simple folding.
+  [Current limits](../language/comptime.md#checks-and-limits): heap allocation,
+  destructors, pointer-bearing results and most intrinsics remain future work.
 - **`#[derive]`** for `Clone`, `Eq`, `Ord`, `Hash` and `Show`.
 - **Dynamic dispatch**: `dyn Trait` values, and closures that own what they
   capture, so they can be stored.

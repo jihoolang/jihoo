@@ -1,7 +1,7 @@
 // The compiler written in jihoo (`compiler/`), against this one: builds it
-// with this compiler (stage 1), then runs both on every `.jh` file in the
-// repository and compares what they print, errors and exit status
-// included; runs the test programs built by each; and builds the compiler
+// with this compiler (stage 1), then compares both on the bootstrap inputs
+// (compiler/ and lib/), errors and exit status included; runs the examples
+// built by each; and builds the compiler
 // with stage 1 (stage 2), which must write the same LLVM IR as stage 1.
 //
 //   cargo test --test selfhost
@@ -97,7 +97,11 @@ fn report(failed: &[String], of: usize) {
 fn self_hosted_compiler_agrees() {
     let stage0 = stage0();
     let stage1 = build_compiler(&stage0, "stage1");
-    let files = all_files();
+    // New language features live in stage 1. Stage 0 must agree only on
+    // the source it needs to bootstrap, which uses its frozen language.
+    let files: Vec<_> = all_files().into_iter().filter(|f| {
+        f.starts_with(root().join("compiler")) || f.starts_with(root().join("lib"))
+    }).collect();
     let mut failed = Vec::new();
     for f in &files {
         // Relative paths, so that error messages name the file the same way.
@@ -120,14 +124,14 @@ fn self_hosted_compiler_agrees() {
     report(&failed, files.len());
 }
 
-/// The programs of `tests/run` and `examples`, built and run by stage 1,
-/// do what they do built by stage 0.
+/// Examples in the bootstrap language still run identically. The program
+/// suite tests stage 1 directly, including features absent from stage 0.
 #[test]
-fn stage1_builds_programs() {
+fn stage1_builds_examples() {
     let stage0 = stage0();
     let stage1 = build_compiler(&stage0, "stage1-run");
     let mut files = Vec::new();
-    for d in ["tests/run", "examples"] {
+    for d in ["examples"] {
         for e in std::fs::read_dir(root().join(d)).unwrap() {
             let p = e.unwrap().path();
             if p.extension().map(|e| e == "jh").unwrap_or(false) {

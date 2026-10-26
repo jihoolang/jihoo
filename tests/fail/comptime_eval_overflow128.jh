@@ -1,0 +1,3 @@
+// error: overflows its type
+fn mul(x: i128) -> i128 { x * -1 }
+fn main() { let x = comptime mul((1 as i128) << 127) }

@@ -1,0 +1,140 @@
+// Functions run on MIR during compilation; the runtime sees their results.
+//> 720
+//> 55
+//> 42
+//> 49
+//> 18
+//> 42
+//> 294
+//> hello
+//> 42
+//> 30
+//> 42
+//> 6
+//> 42
+//> true
+//> true
+//> 4
+//> 44
+//> 255
+//> 3
+//> 7
+//> 1267650600228229401496703205376
+//> -1267650600228229401496703205376
+//> 255
+//> 255
+//> 5
+//> 9
+//> 24
+//> 23
+//> 42
+
+struct Pair { small: u8, large: i64 }
+enum Choice { Empty, Number(i64) }
+
+fn factorial(n: i64) -> i64 {
+    var result = 1
+    for i in 1..n + 1 { result *= i }
+    result
+}
+
+fn fib(n: i64) -> i64 {
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn squares() -> [i64; 8] {
+    var xs = [0; 8]
+    for i in 0..8 { xs[i] = i * i }
+    xs
+}
+
+fn choose(n: i64) -> Choice {
+    if n == 0 { Choice.Empty } else { Choice.Number(n * 2) }
+}
+
+fn number(c: Choice) -> i64 {
+    match c { Empty => 0, Number(n) => n }
+}
+
+fn bump(inout n: i64) { n += 1 }
+fn add_one(n: i64) -> i64 { var x = n; bump(&x); x }
+fn sum_bytes(s: str) -> i64 {
+    var result = 0
+    for b in s { result += b as i64 }
+    result
+}
+fn greeting() -> str { "hello" }
+fn twice(x: i64) -> i64 { x * 2 }
+fn apply(f: fnptr(i64) -> i64, x: i64) -> i64 { f(x) }
+fn count(comptime N: i64) -> i64 { N }
+fn identity(comptime T: type, x: T) -> T { x }
+fn loop_control() -> i64 {
+    var sum = 0
+    var i = 0
+    loop {
+        i += 1
+        if i > 5 { break }
+        if i % 2 == 0 { continue }
+        sum += i
+    }
+    return sum + 21
+}
+fn early(n: i64) -> i64 {
+    var i = 0
+    while i < n { if i == 6 { return i }; i += 1 }
+    0
+}
+fn first(xs: [i64]) -> i64 { xs[0] }
+fn shift(x: u8, n: u8) -> u8 { x << n }
+fn wrapped(x: u8) -> u8 { x +% 1 }
+fn big() -> u128 { (1 as u128) << 100 }
+fn negative_big() -> i128 { 0 - (1 as i128 << 100) }
+fn narrow(f: f64) -> u8 { f as u8 }
+fn integer_float(n: i64) -> i64 { ((n as f32) * 1.5 as f32) as i64 }
+fn short_circuit() -> bool { false && (1 / 0 == 0) || true }
+fn memory() -> i64 {
+    var xs = [1, 2, 3]
+    unsafe { mem_copy(&xs[0], &xs[1], 2) }
+    xs[0] + xs[1]
+}
+
+const FACT = factorial(6)
+const TABLE = squares()
+const PAIR = Pair { small: 7, large: 42 }
+const CHOICE = choose(9)
+const N = factorial(3)
+const GRID: [i64; N] = [7; N]
+const TUPLE = (3, true, 7)
+
+fn main() {
+    println(FACT)
+    println(comptime fib(10))
+    println(comptime { var x = 4; x += 3; x * 6 })
+    println(TABLE[7])
+    println(comptime number(CHOICE))
+    println(PAIR.large)
+    println(comptime sum_bytes("abc"))
+    println(comptime greeting())
+    println(comptime { let f = fn(x: i64) -> i64 { x * 2 }; f(21) })
+    println(comptime loop_control())
+    println(comptime apply(twice, 21))
+    println(count(factorial(3)))
+    println(comptime identity(i64, 42))
+    println(comptime short_circuit())
+    println(comptime (true || (1 / 0 == 0)))
+    println(comptime shift(1, 10))
+    println(comptime (300 as u8))
+    println(comptime wrapped(254))
+    println(TUPLE.0)
+    println(GRID[5])
+    println(comptime big())
+    println(comptime negative_big())
+    println(comptime narrow(999.0))
+    println(comptime narrow(255.9))
+    println(comptime memory())
+    println(comptime { var a = 9; let f = fn(x: i64) -> i64 { a + x }; f(0) })
+    println(comptime first([24, 3]))
+    println(comptime integer_float(15) + 1)
+    let early: i64 = comptime { return 42 }
+    println(early)
+}

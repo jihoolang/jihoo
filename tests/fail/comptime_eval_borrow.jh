@@ -1,0 +1,4 @@
+// error: borrowed
+fn touch(inout a: i64, inout b: i64) { a += b }
+fn bad() -> i64 { var x = 1; touch(&x, &x); x }
+fn main() { let x = comptime bad() }

@@ -1,0 +1,3 @@
+// error: compile-time evaluation reached a trap
+fn fail() -> i64 { trap() }
+fn main() { let n = comptime fail() }

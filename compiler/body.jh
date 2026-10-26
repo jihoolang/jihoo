@@ -2,6 +2,9 @@
 // compiler's `sema/body.rs`.
 
 import std.mem
+import check
+import elab
+import interp
 import ast
 import diag
 import lex
@@ -3408,7 +3411,7 @@ impl sema.Sema {
             lparams.push(t)
         }
         let n = self.next_lambda()
-        var fname = self.out[fb.id as i64].name.clone()
+        var fname = if fb.id as i64 < self.out.len() { self.out[fb.id as i64].name.clone() } else { String.from("comptime") }
         fname.push_str(".closure")
         n.show(&fname)
         var symbol = String.from("closure.")
@@ -4802,4 +4805,81 @@ fn variant_index(vs: Vec(types.VariantDef), name: str) -> i64 {
         }
     }
     panic("no such variant")
+}
+
+// Compile-time expressions use the ordinary expression lowerer, including
+// its coercions, generic instantiation and ownership rules. Runtime locals
+// are intentionally absent: only the compile-time environment is copied.
+impl sema.Sema {
+    pub fn eval_const_expr(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(sema.TypedConst, Diag) {
+        if self.eval_depth >= 128 {
+            return Err(err(e.span, "compile-time evaluation exceeded its dependency depth limit"))
+        }
+        self.eval_depth += 1
+        let result = self.eval_const_inner(e, env, exp)
+        self.eval_depth -= 1
+        result
+    }
+
+    fn eval_const_inner(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(sema.TypedConst, Diag) {
+        var fb = Fb.new(4294967295, env.clone(), exp.unwrap_or(types.UNIT), ast.RetMode.Value, e.span)
+        fb.push_scope(true)
+        let v = self.expr(&fb, e, exp)?
+        let v = match exp { Some(t) => self.coerce(&fb, v, t, e.span)?, None => v }
+        let ty = if v.ty == types.NEVER { exp.unwrap_or(types.UNIT) } else { v.ty }
+        fb.body.locals[0].ty = ty
+        if v.ty != types.NEVER {
+            let operand = self.operand(&fb, v, e.span)?
+            fb.assign(Place.local(mir.RET), Rvalue.Use(operand), e.span)
+        }
+        self.exit_to(&fb, 0)
+        fb.term(Term.Return)
+        var root = mir.Function {
+            symbol: String.from("comptime")
+            name: String.from("comptime")
+            sig: types.Sig { params: Vec(u32).new(), ret: ty }
+            pass: Vec(mir.ParamPass).new()
+            body: Some(fb.body.clone())
+            linkage: mir.Linkage.Internal
+            variadic: false
+            returns_ref: false
+            span: e.span
+        }
+        // Lower only the functions reachable from this expression. Draining
+        // the global queue here could try to lower its enclosing function
+        // a second time, or falsely make an unrelated constant cyclic.
+        var ids = match root.body { Some(body) => interp.function_ids(body), None => Vec(u32).new() }
+        var seen = Map(u32, bool).new()
+        var i = 0
+        while i < ids.len() {
+            let id = ids[i]
+            i += 1
+            if seen.contains(id) { continue }
+            seen.insert(id, true)
+            self.prepare_const_fn(id, e.span)?
+            match self.out[id as i64].body {
+                Some(body) => { for f in interp.function_ids(body) { ids.push(f) } }
+                None => {}
+            }
+        }
+        // Check snapshots: the normal compilation pipeline must still see
+        // the original MIR, including when JIHOO_NO_ELAB is requested.
+        elab.run(&root)?
+        check.run(self.types, root)?
+        var functions = Vec(mir.Function).new()
+        for id, f in self.out {
+            var copy = f.clone()
+            if seen.contains(id as u32) {
+                elab.run(&copy)?
+                check.run(self.types, copy)?
+            }
+            functions.push(copy)
+        }
+        var interpreter = interp.Interpreter.new()
+        match root.body {
+            Some(body) => interpreter.evaluate(&self.types, functions, body, self.checked, e.span)
+            None => Err(err(e.span, "compile-time expression has no body"))
+        }
+    }
+
 }

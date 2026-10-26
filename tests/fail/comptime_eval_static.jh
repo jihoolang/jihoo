@@ -1,0 +1,4 @@
+// error: statics cannot be accessed
+static X: i64 = 42
+fn get() -> i64 { unsafe { X } }
+fn main() { let x = comptime get() }

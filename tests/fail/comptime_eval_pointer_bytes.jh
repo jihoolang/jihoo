@@ -1,0 +1,3 @@
+// error: cannot be read as scalar bytes
+fn address() -> u64 { var x = 1; var p = &x; unsafe { *(&p as *u64) } }
+fn main() { let n = comptime address() }

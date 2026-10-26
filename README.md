@@ -107,6 +107,12 @@ that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions and callbacks, dynamic libraries (`std.ffi`), system calls and atomics; the standard library,
 including running other programs.
 
+[Compile-time evaluation](docs/language/comptime.md) runs ordinary functions
+and blocks in a separate MIR interpreter for `const` values, `comptime`
+expressions, array lengths and compile-time arguments. It supports loops,
+recursion and fixed aggregates; external calls and heap allocation remain
+unavailable during evaluation.
+
 LLVM 21's C API optimizes and emits objects directly, with loop and SLP
 vectorization at `-O2`/`-O3`. Native linking uses a C driver; freestanding
 linking uses lld. `JIHOO_BACKEND=clang` selects the previous backend for
@@ -115,8 +121,7 @@ compare compilation time and generated program speed.
 
 The compiler is written in jihoo, in `compiler/`, and
 [self-hosted](docs/internals/self-hosting.md): it builds itself, writes the
-same LLVM IR as the Rust compiler for every program, and is the one
+same LLVM IR as the Rust compiler for the bootstrap sources, and is the one
 installed. The Rust compiler only bootstraps it.
 
-Next ([roadmap](docs/internals/roadmap.md)): compile-time evaluation,
-`derive`, dynamic dispatch, threads.
+Next ([roadmap](docs/internals/roadmap.md)): `derive`, dynamic dispatch, threads.

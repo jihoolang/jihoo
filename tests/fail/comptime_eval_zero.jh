@@ -1,0 +1,3 @@
+// error: division by zero
+fn divide(n: i64) -> i64 { 10 / n }
+fn main() { let x = comptime divide(0) }

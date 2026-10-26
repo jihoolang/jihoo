@@ -58,6 +58,28 @@ checking passes read.
 
 `jihoo emit-mir file.jh` prints it.
 
+## Compile-time interpreter
+
+`compiler/interp.jh` executes MIR for `const` initializers, `comptime`
+expressions, array lengths and compile-time arguments. Simple arithmetic
+still uses sema's constant folder. Other expressions use the normal lowerer
+with a compile-time environment and no runtime locals. Reachable function
+instances are lowered on demand, without draining the enclosing function's
+pending queue.
+
+Before execution, snapshots of the expression and reachable functions pass
+elaboration and the borrow kernel. The runtime compilation pipeline retains
+its original bodies. The interpreter follows basic blocks and call frames,
+with bounded execution, recursion and allocation. Its memory is separate
+from the compiler's address space: pointers encode allocation identities
+and offsets, with checks for lifetime, bounds, initialization and pointer
+bytes. Layout and enum payload offsets come from the target's `Types`.
+Scalar results become MIR constants, strings become static strings, and
+aggregates without addresses become `Const.Bytes`.
+
+The frozen Rust bootstrap has no corresponding interpreter. It only needs
+to compile this implementation using the bootstrap language.
+
 ## Elaboration
 
 `elab.rs` follows which locals hold a value at every point. Using a local
