@@ -74,7 +74,7 @@ patterns see through it.
 |--------|---|
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
 | `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at` |
-| `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)` |
+| `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)`, `remove_file(path)`, `read_dir(path) -> Result(Vec(String), String)` (sorted names) |
 | `std.env` | `args() -> Vec(str)`, `get(name) -> Option(str)`, `environ()` |
 | `std.process` | `run(program, args) -> Result(Exit, String)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, String)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH` |
 | `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `spawn`, `spawn_io` (with the child's standard streams), `pipe`, `poll`, `wait`, `exit`, `abort`, and the allocator under `mem` |

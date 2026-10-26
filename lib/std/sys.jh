@@ -145,3 +145,15 @@ pub fn is_executable(path: str) -> bool {
     // X_OK
     unsafe { libc.access(p.ptr, 1) == 0 }
 }
+
+// Reads directory entries (Linux's `linux_dirent64` records) into `buf`;
+// the bytes read, 0 at the end, or -1.
+pub unsafe fn read_dir_fd(fd: i32, buf: *u8, n: i64) -> i64 {
+    libc.getdents64(fd, buf, n)
+}
+
+// Removes a file; whether it could.
+pub fn remove_file(path: str) -> bool {
+    let p = c_path(path)
+    unsafe { libc.unlink(p.ptr) == 0 }
+}

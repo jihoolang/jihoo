@@ -1,0 +1,592 @@
+// The tests of the compiler and its standard library, run from the root of
+// the checkout:
+//
+//   jihoo run tests/runner.jh                    every suite
+//   jihoo run tests/runner.jh -- run fail        some of them
+//   JIHOO_TEST=maps jihoo run tests/runner.jh    the files whose path has `maps`
+//   JIHOO_TEST_OPT=-O0 jihoo run tests/runner.jh -- run
+//   JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh
+//
+// The compiler tested is JIHOO_COMPILER, else compiler/main.jh built by the
+// compiler that runs this program (the `jihoo` on PATH: in the dev shell,
+// the seed). The suites:
+//
+// - run: each program in tests/run is built and run. Its `//> text` lines
+//   are its standard output in order, `// exit: N` its exit status (128 + N
+//   for a signal N, so a trap is 132), `// args: a b` its arguments and
+//   `// link: f.c` more inputs.
+// - fail: each program in tests/fail must not compile, and the error must
+//   contain every `// error: text`.
+// - examples: each program in examples builds and runs.
+// - backend: the C ABI at every optimization level and with both backends,
+//   objects that C links, cross-compiled objects, link errors and a missing
+//   LLVM.
+// - selfhost: the compiler builds itself, and the compiler it builds writes
+//   the same LLVM IR, errors included, for every .jh file of the checkout.
+
+import std.env
+import std.fs
+import std.process
+
+struct Tests {
+    // the compiler under test
+    compiler: String
+    // a directory for the files the tests make
+    tmp: String
+    // JIHOO_TEST: only the files whose path contains it
+    filter: String
+    failures: Vec(String)
+    count: i64
+}
+
+// ---- running programs ----
+
+// What a program wrote and how it ended; a program that cannot start ends
+// with status 127, the reason in its standard error.
+fn exec(program: str, args: [str]) -> process.Output {
+    match process.output(program, args) {
+        Ok(o) => o
+        Err(e) => process.Output { status: process.Exit.Code(127), stdout: String.new(), stderr: e }
+    }
+}
+
+// The exit status as a shell reports it.
+fn status(o: process.Output) -> i64 {
+    match o.status {
+        Code(c) => c as i64
+        Signal(s) => 128 + s as i64
+    }
+}
+
+// ---- reading the expectations in a test ----
+
+fn trim_start(s: str) -> str {
+    var i = 0
+    while i < s.len && (s[i] == ' ' || s[i] == '\t') {
+        i += 1
+    }
+    s[i..]
+}
+
+// What follows `prefix` on each line that starts with it.
+fn directives(src: str, prefix: str) -> Vec(str) {
+    var out = Vec(str).new()
+    for line in src.lines() {
+        let l = trim_start(line)
+        if l.starts_with(prefix) {
+            out.push(l[prefix.len..])
+        }
+    }
+    out
+}
+
+// Adds the words after the first line that starts with `prefix`.
+fn words(src: str, prefix: str, inout out: Vec(str)) {
+    for line in src.lines() {
+        let l = trim_start(line)
+        if l.starts_with(prefix) {
+            let rest = l[prefix.len..]
+            var i = 0
+            while i < rest.len {
+                while i < rest.len && rest[i] == ' ' {
+                    i += 1
+                }
+                let start = i
+                while i < rest.len && rest[i] != ' ' {
+                    i += 1
+                }
+                if i > start {
+                    out.push(rest[start..i])
+                }
+            }
+            break
+        }
+    }
+}
+
+fn join(xs: Vec(str)) -> String {
+    var s = String.new()
+    for i in 0..xs.len() {
+        if i > 0 {
+            s.push('\n')
+        }
+        s.push_str(xs[i])
+    }
+    s
+}
+
+fn same(a: Vec(str), b: Vec(str)) -> bool {
+    if a.len() != b.len() {
+        return false
+    }
+    for i in 0..a.len() {
+        if a[i] != b[i] {
+            return false
+        }
+    }
+    true
+}
+
+// The file name without its directory and extension.
+fn stem(path: str) -> str {
+    var start = path.len
+    while start > 0 && path[start - 1] != '/' {
+        start -= 1
+    }
+    var end = path.len
+    if path.ends_with(".jh") {
+        end -= 3
+    }
+    path[start..end]
+}
+
+// The .jh files of a directory, sorted, and with `deep` those of the
+// directories in it.
+fn jh_files(dir: str, deep: bool, inout out: Vec(String)) {
+    match fs.read_dir(dir) {
+        Ok(names) => {
+            for n in names {
+                let path = dir + "/" + n.as_str()
+                if n.as_str().ends_with(".jh") {
+                    out.push(path)
+                } else if deep {
+                    jh_files(path.as_str(), true, &out)
+                }
+            }
+        }
+        Err(_) => {}
+    }
+}
+
+// ---- the tests ----
+
+impl Tests {
+    fn selected(self, path: str) -> bool {
+        self.filter.len() == 0 || path.contains(self.filter.as_str())
+    }
+
+    fn temp(self, name: str) -> String {
+        self.tmp.as_str() + "/" + name
+    }
+
+    // Records the result of one test.
+    fn check(inout self, what: str, r: Result((), String)) {
+        self.count += 1
+        match r {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln("--- " + what + ": " + e.as_str())
+                self.failures.push(what.to_string())
+            }
+        }
+    }
+
+    // compiler/main.jh built by `compiler`, as `name` in the temporary
+    // directory.
+    fn build_compiler(self, compiler: str, name: str) -> Result(String, String) {
+        let out = self.temp(name)
+        let o = exec(compiler, ["build", "-O1", "compiler/main.jh", "-o", out.as_str()])
+        if !o.status.success() {
+            return Err("compiler/main.jh does not compile with " + compiler + ":\n" + o.stderr.as_str())
+        }
+        Ok(out)
+    }
+
+    fn run_one(self, path: str) -> Result((), String) {
+        let src = fs.read_file(path)?
+        let lines = directives(src.as_str(), "//>")
+        var want = Vec(str).new()
+        for d in lines {
+            want.push(if d.starts_with(" ") { d[1..] } else { d })
+        }
+        var code: i64 = 0
+        let exits = directives(src.as_str(), "// exit:")
+        if exits.len() > 0 {
+            code = exits[0].trim().parse_int().unwrap()
+        }
+        let exe = self.temp(stem(path))
+        let opt = match env.get("JIHOO_TEST_OPT") {
+            Some(o) => o
+            None => "-O1"
+        }
+        var a = Vec(str).new()
+        a.push("build")
+        a.push(opt)
+        a.push(path)
+        words(src.as_str(), "// link:", &a)
+        a.push("-o")
+        a.push(exe.as_str())
+        let built = exec(self.compiler.as_str(), a.as_slice())
+        if !built.status.success() {
+            return Err("does not compile:\n" + built.stderr.as_str())
+        }
+        var args = Vec(str).new()
+        words(src.as_str(), "// args:", &args)
+        let r = exec(exe.as_str(), args.as_slice())
+        fs.remove_file(exe.as_str())
+        let got = r.stdout.as_str().lines()
+        let st = status(r)
+        if !same(got, want) || st != code {
+            return Err("expected (exit " + code.to_string().as_str() + "):\n" + join(want).as_str() +
+                "\ngot (exit " + st.to_string().as_str() + "):\n" + join(got).as_str() +
+                "\nstderr:\n" + r.stderr.as_str())
+        }
+        Ok(())
+    }
+
+    fn fail_one(self, path: str) -> Result((), String) {
+        let src = fs.read_file(path)?
+        let want = directives(src.as_str(), "// error:")
+        if want.len() == 0 {
+            return Err(String.from("no `// error:` line"))
+        }
+        var a = Vec(str).new()
+        a.push("emit-mir")
+        a.push(path)
+        let o = exec(self.compiler.as_str(), a.as_slice())
+        if o.status.success() {
+            return Err(String.from("compiles, but should not"))
+        }
+        for w in want {
+            if !o.stderr.as_str().contains(w.trim()) {
+                return Err("the error does not say `" + w.trim() + "`:\n" + o.stderr.as_str())
+            }
+        }
+        Ok(())
+    }
+
+    fn example_one(self, path: str) -> Result((), String) {
+        let src = fs.read_file(path)?
+        let exe = self.temp(stem(path))
+        var a = Vec(str).new()
+        a.push("build")
+        a.push(path)
+        a.push("-o")
+        a.push(exe.as_str())
+        let built = exec(self.compiler.as_str(), a.as_slice())
+        if !built.status.success() {
+            return Err("does not compile:\n" + built.stderr.as_str())
+        }
+        var args = Vec(str).new()
+        words(src.as_str(), "// args:", &args)
+        let r = exec(exe.as_str(), args.as_slice())
+        fs.remove_file(exe.as_str())
+        match r.status {
+            Signal(s) => return Err("stopped by signal " + s.to_string().as_str() + ":\n" + r.stderr.as_str())
+            Code(_) => {}
+        }
+        Ok(())
+    }
+
+    fn suite_files(inout self, dir: str, kind: str) {
+        var files = Vec(String).new()
+        jh_files(dir, false, &files)
+        for f in files {
+            if !self.selected(f.as_str()) {
+                continue
+            }
+            let r = if kind == "run" {
+                self.run_one(f.as_str())
+            } else if kind == "fail" {
+                self.fail_one(f.as_str())
+            } else {
+                self.example_one(f.as_str())
+            }
+            self.check(f.as_str(), r)
+        }
+    }
+
+    // ---- backend ----
+
+    fn c_abi(self) -> Result((), String) {
+        let src = fs.read_file("tests/run/ffi.jh")?
+        let lines = directives(src.as_str(), "//> ")
+        var want = String.new()
+        for d in lines {
+            want.push_str(d)
+            want.push('\n')
+        }
+        let exe = self.temp("ffi")
+        for backend in ["JIHOO_BACKEND=llvm", "JIHOO_BACKEND=clang"] {
+            for opt in ["-O0", "-O1", "-O2", "-O3"] {
+                var a = Vec(str).new()
+                a.push(backend)
+                a.push(self.compiler.as_str())
+                a.push("build")
+                a.push(opt)
+                a.push("tests/run/ffi.jh")
+                a.push("tests/ffi/native.c")
+                a.push("-o")
+                a.push(exe.as_str())
+                let built = exec("env", a.as_slice())
+                if !built.status.success() {
+                    return Err(backend + " " + opt + ": does not compile:\n" + built.stderr.as_str())
+                }
+                let r = exec(exe.as_str(), [])
+                if !r.status.success() || r.stdout != want.as_str() {
+                    return Err(backend + " " + opt + ": prints\n" + r.stdout.as_str() + r.stderr.as_str())
+                }
+            }
+        }
+        fs.remove_file(exe.as_str())
+        Ok(())
+    }
+
+    // An object without `main` that C links, statically and as a shared
+    // library that a jihoo program opens.
+    fn c_links_export(self) -> Result((), String) {
+        let obj = self.temp("exports.o")
+        let exe = self.temp("consumer")
+        let shared = self.temp("libexports.so")
+        let cc = match env.get("JIHOO_CC") {
+            Some(c) => c
+            None => "clang"
+        }
+        var a = Vec(str).new()
+        a.push("emit-obj")
+        a.push("--lib")
+        a.push("tests/ffi/export.jh")
+        a.push("-o")
+        a.push(obj.as_str())
+        let o = exec(self.compiler.as_str(), a.as_slice())
+        if !o.status.success() {
+            return Err("emit-obj --lib fails:\n" + o.stderr.as_str())
+        }
+        var c = Vec(str).new()
+        c.push("tests/ffi/consumer.c")
+        c.push(obj.as_str())
+        c.push("-lm")
+        c.push("-ldl")
+        c.push("-o")
+        c.push(exe.as_str())
+        let linked = exec(cc, c.as_slice())
+        if !linked.status.success() {
+            return Err(cc + " cannot link the object:\n" + linked.stderr.as_str())
+        }
+        let r = exec(exe.as_str(), [])
+        if r.stdout != "C called jihoo\n" {
+            return Err("the C program prints\n" + r.stdout.as_str() + r.stderr.as_str())
+        }
+        var s = Vec(str).new()
+        s.push("-shared")
+        s.push(obj.as_str())
+        s.push("-lm")
+        s.push("-ldl")
+        s.push("-o")
+        s.push(shared.as_str())
+        let so = exec(cc, s.as_slice())
+        if !so.status.success() {
+            return Err(cc + " cannot make a shared library:\n" + so.stderr.as_str())
+        }
+        var d = Vec(str).new()
+        d.push("run")
+        d.push("tests/ffi/dynamic.jh")
+        d.push("--")
+        d.push(shared.as_str())
+        let dyn = exec(self.compiler.as_str(), d.as_slice())
+        fs.remove_file(obj.as_str())
+        fs.remove_file(exe.as_str())
+        fs.remove_file(shared.as_str())
+        if dyn.stdout != "42\n" {
+            return Err("tests/ffi/dynamic.jh prints\n" + dyn.stdout.as_str() + dyn.stderr.as_str())
+        }
+        Ok(())
+    }
+
+    // Objects for both machines, with no C compiler to call.
+    fn cross_objects(self) -> Result((), String) {
+        let obj = self.temp("cross.o")
+        for t in ["x86_64", "aarch64"] {
+            var a = Vec(str).new()
+            a.push("JIHOO_CC=/no-such-c-compiler")
+            a.push(self.compiler.as_str())
+            a.push("emit-obj")
+            a.push("examples/freestanding.jh")
+            a.push("--target")
+            a.push(t)
+            a.push("-o")
+            a.push(obj.as_str())
+            let o = exec("env", a.as_slice())
+            if !o.status.success() {
+                return Err(t + ": " + o.stderr.as_str())
+            }
+            let bytes = fs.read_file(obj.as_str())?
+            let b = bytes.as_str()
+            // ELF, and e_machine: 62 for x86_64, 183 for aarch64
+            let want: i64 = if t == "x86_64" { 62 } else { 183 }
+            if b.len < 20 || b[0] != 0x7f || b[1..4] != "ELF" || (b[18] as i64 | (b[19] as i64) << 8) != want {
+                return Err(t + ": not an ELF object for that machine")
+            }
+        }
+        fs.remove_file(obj.as_str())
+        Ok(())
+    }
+
+    // A failed link reports clang's messages without its warnings.
+    fn link_errors(self) -> Result((), String) {
+        let exe = self.temp("no-link")
+        var a = Vec(str).new()
+        a.push("build")
+        a.push("examples/hello.jh")
+        a.push("no-such-input.o")
+        a.push("-o")
+        a.push(exe.as_str())
+        let o = exec(self.compiler.as_str(), a.as_slice())
+        let err = o.stderr.as_str()
+        if o.status.success() || !err.contains("failed:\n") || !err.contains("no-such-input.o") || err.contains("warning:") {
+            return Err("the link error is\n" + err)
+        }
+        Ok(())
+    }
+
+    // Without LLVM, building fails and names the library; emit-llvm needs
+    // no LLVM.
+    fn missing_llvm(self) -> Result((), String) {
+        let exe = self.temp("no-llvm")
+        let lib = self.temp("no-library.so")
+        let var_ = "JIHOO_LLVM=" + lib.as_str()
+        var a = Vec(str).new()
+        a.push(var_.as_str())
+        a.push(self.compiler.as_str())
+        a.push("build")
+        a.push("examples/hello.jh")
+        a.push("-o")
+        a.push(exe.as_str())
+        let o = exec("env", a.as_slice())
+        if o.status.success() || !o.stderr.as_str().contains("no-library.so") || fs.read_file(exe.as_str()).is_ok() {
+            return Err("building without LLVM says\n" + o.stderr.as_str())
+        }
+        var b = Vec(str).new()
+        b.push("JIHOO_LLVM=/no-library.so")
+        b.push(self.compiler.as_str())
+        b.push("emit-llvm")
+        b.push("examples/hello.jh")
+        let e = exec("env", b.as_slice())
+        if !e.status.success() {
+            return Err("emit-llvm without LLVM fails:\n" + e.stderr.as_str())
+        }
+        Ok(())
+    }
+
+    fn backend(inout self) {
+        let r = self.c_abi()
+        self.check("backend: C ABI", r)
+        let r = self.c_links_export()
+        self.check("backend: C links an exported object", r)
+        let r = self.cross_objects()
+        self.check("backend: cross-compiled objects", r)
+        let r = self.link_errors()
+        self.check("backend: link errors", r)
+        let r = self.missing_llvm()
+        self.check("backend: missing LLVM", r)
+    }
+
+    // ---- selfhost ----
+
+    fn selfhost(inout self) {
+        let next = match self.build_compiler(self.compiler.as_str(), "next") {
+            Ok(n) => n
+            Err(e) => {
+                self.check("selfhost: the compiler builds itself", Err(e))
+                return
+            }
+        }
+        var files = Vec(String).new()
+        for d in ["compiler", "examples", "lib", "tests"] {
+            jh_files(d, true, &files)
+        }
+        files.push(String.from("tests/selfhost/load/nonexistent.jh"))
+        for f in files {
+            if !self.selected(f.as_str()) {
+                continue
+            }
+            let src = match fs.read_file(f.as_str()) {
+                Ok(s) => s
+                Err(_) => String.new()
+            }
+            for t in ["x86_64", "aarch64"] {
+                var a = Vec(str).new()
+                a.push("emit-llvm")
+                a.push("--target")
+                a.push(t)
+                words(src.as_str(), "// load-args:", &a)
+                a.push(f.as_str())
+                let want = exec(self.compiler.as_str(), a.as_slice())
+                let got = exec(next.as_str(), a.as_slice())
+                var r: Result((), String) = Ok(())
+                if want.stdout != got.stdout.as_str() || want.stderr != got.stderr.as_str() || status(want) != status(got) {
+                    r = Err("the compiler it builds writes something else:\n--- tested\n" + want.stderr.as_str() +
+                        "--- built by it\n" + got.stderr.as_str())
+                }
+                let what = "selfhost: emit-llvm --target " + t + " " + f.as_str()
+                self.check(what.as_str(), r)
+            }
+        }
+        fs.remove_file(next.as_str())
+    }
+}
+
+fn main() -> i32 {
+    if !fs.read_file("compiler/main.jh").is_ok() {
+        eprintln("run tests/runner.jh from the root of the checkout")
+        return 2
+    }
+    let args = env.args()
+    var suites = Vec(str).new()
+    for i in 1..args.len() {
+        suites.push(args[i])
+    }
+    if suites.len() == 0 {
+        for s in ["run", "fail", "examples", "backend", "selfhost"] {
+            suites.push(s)
+        }
+    }
+    let made = exec("mktemp", ["-d", "-t", "jihoo-tests.XXXXXX"])
+    if !made.status.success() {
+        eprintln("cannot make a temporary directory: " + made.stderr.as_str())
+        return 2
+    }
+    let filter = match env.get("JIHOO_TEST") {
+        Some(f) => f
+        None => ""
+    }
+    var t = Tests { compiler: String.new(), tmp: made.stdout.as_str().trim().to_string(), filter: filter.to_string(), failures: Vec(String).new(), count: 0 }
+    match env.get("JIHOO_COMPILER") {
+        Some(c) => t.compiler = c.to_string()
+        None => {
+            match t.build_compiler("jihoo", "jihoo") {
+                Ok(c) => t.compiler = c
+                Err(e) => {
+                    eprintln(e)
+                    return 1
+                }
+            }
+        }
+    }
+    for s in suites {
+        if s == "run" {
+            t.suite_files("tests/run", "run")
+        } else if s == "fail" {
+            t.suite_files("tests/fail", "fail")
+        } else if s == "examples" {
+            t.suite_files("examples", "examples")
+        } else if s == "backend" {
+            t.backend()
+        } else if s == "selfhost" {
+            t.selfhost()
+        } else {
+            eprintln("unknown suite " + s + "; the suites are run, fail, examples, backend and selfhost")
+            return 2
+        }
+    }
+    exec("rm", ["-rf", t.tmp.as_str()])
+    if t.failures.len() > 0 {
+        eprintln(t.failures.len().to_string() + " of " + t.count.to_string().as_str() + " tests failed:")
+        for f in t.failures {
+            eprintln("  " + f.as_str())
+        }
+        return 1
+    }
+    println(t.count.to_string() + " tests passed")
+    0
+}

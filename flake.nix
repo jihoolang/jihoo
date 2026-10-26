@@ -16,14 +16,23 @@
       src = lib.fileset.toSource {
         root = ./.;
         fileset = lib.fileset.unions [
-          ./Cargo.toml
-          ./Cargo.lock
-          ./crates
           ./compiler
           ./lib
           ./examples
           ./tests
         ];
+      };
+
+      # The seed: the compiler of a release (see .github/workflows/release.yml),
+      # which builds this one. compiler/ and the lib/ it imports may use only
+      # what the seed knows; to use something new there, release the compiler
+      # that has it and move the seed here.
+      seed = {
+        version = "0.1.1";
+        hash = {
+          x86_64-linux = "sha256-2yoneMdGJkVBjD+EiEt8ESxMme4ch9nGmZdXQBm+F9E=";
+          aarch64-linux = "sha256-wuCYgs9gDyidHxtOkOvn4dPobfcEiwiT9wQDfyK+JWU=";
+        };
       };
 
       meta = {
@@ -51,37 +60,38 @@
       mkPackages = pkgs:
         let llvm = llvmFor pkgs; in
         rec {
-          # Stage 0: the compiler in Rust (crates/jihoo), which only
-          # bootstraps the compiler in jihoo.
-          jihoo-bootstrap = pkgs.rustPlatform.buildRustPackage {
-            pname = "jihoo-bootstrap";
-            inherit version src;
-            cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.makeWrapper ];
-
-            # The tests compile and run programs, native and freestanding,
-            # and build the compiler in jihoo to compare it with this one.
-            nativeCheckInputs = [ llvm.clang llvm.lld ];
-            preCheck = ''
-              export JIHOO_CC=${llvm.clang}/bin/clang
-              export JIHOO_LLVM=${llvm.llvm.lib}/lib/libLLVM-21.so
-              export JIHOO_LD=${llvm.lld}/bin/ld.lld
+          # Stage 0: the released compiler, its loader and libgcc_s
+          # patched in for Nix.
+          jihoo-seed = pkgs.stdenv.mkDerivation {
+            pname = "jihoo-seed";
+            inherit (seed) version;
+            src = pkgs.fetchurl {
+              url = "https://github.com/jihoolang/jihoo/releases/download/v${seed.version}/jihoo-v${seed.version}-${pkgs.stdenv.hostPlatform.parsed.cpu.name}-linux.tar.gz";
+              hash = seed.hash.${pkgs.stdenv.hostPlatform.system};
+            };
+            nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
+            buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+            installPhase = ''
+              mkdir -p $out
+              cp -r bin share $out/
+              wrapProgram $out/bin/jihoo \
+                --set-default JIHOO_CC ${llvm.clang}/bin/clang \
+                --set-default JIHOO_LLVM ${llvm.llvm.lib}/lib/libLLVM-21.so \
+                --set-default JIHOO_LD ${llvm.lld}/bin/ld.lld
             '';
-
-            postInstall = wrapCompiler llvm;
             meta = meta // {
-              description = "The jihoo compiler written in Rust, to bootstrap the one written in jihoo";
+              description = "The released jihoo compiler that bootstraps this one";
               mainProgram = "jihoo";
             };
           };
 
-          # The compiler in jihoo (compiler/): stage 0 builds it (stage 1),
+          # The compiler (compiler/): the seed builds it (stage 1),
           # stage 1 builds it again (stage 2), and stage 2 is installed
           # once stages 1 and 2 write the same IR for it: a fixed point.
           jihoo = pkgs.stdenv.mkDerivation {
             pname = "jihoo";
             inherit version src;
-            nativeBuildInputs = [ jihoo-bootstrap pkgs.makeWrapper ];
+            nativeBuildInputs = [ jihoo-seed pkgs.makeWrapper ];
             buildPhase = ''
               runHook preBuild
               export JIHOO_PATH=$PWD/lib JIHOO_CC=${llvm.clang}/bin/clang
@@ -130,8 +140,7 @@
       # `nix flake check`: the installed compiler (stage 2), used from
       # outside the source tree, builds and runs the examples, natively and
       # freestanding, and cross-compiles one for the other machine; and it
-      # passes the tests of tests/run and tests/fail. Building the packages
-      # runs the Rust compiler's tests, which compare the two compilers.
+      # passes the tests of tests/runner.jh.
       checks = forAllSystems (pkgs:
         let
           llvm = llvmFor pkgs;
@@ -139,14 +148,17 @@
           otherTarget = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64" else "x86_64";
         in
         {
-          programs = pkgs.rustPlatform.buildRustPackage {
-            pname = "jihoo-programs-check";
+          # tests/runner.jh, built and run by the installed compiler, tests
+          # it: the programs of tests/run, tests/fail and examples, the
+          # backend, and that it builds a compiler that writes the same IR.
+          tests = pkgs.stdenv.mkDerivation {
+            pname = "jihoo-tests";
             inherit version src;
-            cargoLock.lockFile = ./Cargo.lock;
-            nativeCheckInputs = [ llvm.clang llvm.lld ];
-            cargoTestFlags = [ "--test" "programs" ];
-            preCheck = ''
-              export JIHOO_COMPILER=${jihoo}/bin/jihoo
+            nativeBuildInputs = [ jihoo llvm.clang llvm.lld ];
+            dontConfigure = true;
+            buildPhase = ''
+              export JIHOO_PATH=$PWD/lib JIHOO_COMPILER=${jihoo}/bin/jihoo
+              jihoo run tests/runner.jh
             '';
             installPhase = "touch $out";
           };
@@ -171,18 +183,18 @@
         {
           default = pkgs.mkShell {
             nativeBuildInputs = [
-              pkgs.cargo
-              pkgs.rustc
-              pkgs.rustfmt
-              pkgs.clippy
-              pkgs.rust-analyzer
+              # `jihoo`: the seed, which builds compiler/
+              self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo-seed
               llvm.clang # native linker driver; C source link inputs
               llvm.lld # links freestanding programs
               llvm.llvm # opt, llc, llvm-dis for looking at what the compiler writes
             ];
-            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
             JIHOO_LLVM = "${llvm.llvm.lib}/lib/libLLVM-21.so";
             JIHOO_LD = "${llvm.lld}/bin/ld.lld";
+            # The checkout's standard library, not the seed's.
+            shellHook = ''
+              export JIHOO_PATH=$PWD/lib
+            '';
           };
 
           # For working on the website in site/.

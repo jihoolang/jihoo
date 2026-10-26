@@ -1,31 +1,41 @@
 # Testing
 
 ```sh
-cargo test                                  # everything
-cargo test --test programs                  # the programs in tests/
-JIHOO_TEST=maps cargo test --test programs  # those whose path has `maps`
-JIHOO_TEST_OPT=-O0 cargo test --test programs
-JIHOO_COMPILER=out/jihoo2 cargo test --test programs  # with another compiler
-cargo clippy --all-targets -- -D warnings
-nix flake check                             # what CI runs
+jihoo run tests/runner.jh                       # everything
+jihoo run tests/runner.jh -- run fail           # some suites
+JIHOO_TEST=maps jihoo run tests/runner.jh       # the files whose path has `maps`
+JIHOO_TEST_OPT=-O0 jihoo run tests/runner.jh -- run
+JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh  # with this compiler
+nix flake check                                 # what CI runs
 ```
 
-## Programs
+Run them from the checkout, in the dev shell (`nix develop`), where
+`jihoo` is the seed and `JIHOO_PATH` the checkout's `lib`.
 
-`crates/jihoo/tests/programs.rs` compiles every file in `tests/run/` with
-stage 1 (built once by the Rust bootstrap), runs it and compares its output, and compiles every file
-in `tests/fail/` and checks the error:
+## The runner
 
-- in `tests/run`, `//> text` lines are the expected standard output in
-  order, `// exit: N` the exit status (default 0; a trap is 132), and
-  `// args: a b` the program's arguments; `// link: tests/ffi/native.c`
-  adds link inputs relative to the checkout;
-- in `tests/fail`, each `// error: text` must appear in the error message.
+[`tests/runner.jh`](../../tests/runner.jh) tests a compiler:
+`JIHOO_COMPILER`, else `compiler/main.jh` built by the `jihoo` that runs
+the runner. Its suites:
 
-`JIHOO_COMPILER` names the compiler to test instead of the automatically
-bootstrapped stage 1, such as the compiler in jihoo
-([stage 1 or 2](self-hosting.md#bootstrap-and-packaging)); `nix flake
-check` runs these tests with the installed one.
+- **run**: every file in `tests/run/` is built and run, and its output
+  compared. `//> text` lines are the expected standard output in order,
+  `// exit: N` the exit status (default 0; a trap is 132), `// args: a b`
+  the program's arguments, and `// link: tests/ffi/native.c` adds link
+  inputs relative to the checkout.
+- **fail**: every file in `tests/fail/` must not compile, and each
+  `// error: text` must appear in the error message.
+- **examples**: the programs in `examples/` build and run.
+- **backend**: the C ABI (`tests/run/ffi.jh`) at `-O0` to `-O3` with
+  both backends; an object without `main` (`emit-obj --lib`) that C links,
+  statically and as a shared library; objects cross-compiled with no C
+  compiler; link errors; and a missing LLVM.
+- **selfhost**: the compiler builds `compiler/main.jh`, and the compiler it
+  builds writes the same `emit-llvm` output, errors included, for every
+  `.jh` file in the checkout on both targets
+  ([Self-hosting](self-hosting.md)).
+
+`nix flake check` runs every suite with the installed compiler.
 
 Add a `tests/run` program for every feature and every bug fixed, and a
 `tests/fail` one for every error the compiler should give, in particular
@@ -49,8 +59,8 @@ under `qemu-aarch64` (`nix-shell -p qemu`).
 ## Backend performance
 
 ```sh
-cargo build --release
-python3 scripts/benchmark_backends.py --compiler target/release/jihoo --selfhost --json /tmp/backends.json
+jihoo build -O2 compiler/main.jh -o out/jihoo
+python3 scripts/benchmark_backends.py --compiler out/jihoo --selfhost --json /tmp/backends.json
 ```
 
 The script builds the same runtime workloads through LLVM's C API and
