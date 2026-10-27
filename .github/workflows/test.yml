@@ -1,7 +1,8 @@
-# Builds the toolchain with Nix and runs every test: `nix flake check`
+# Builds the toolchain with Nix and runs the compiler tests: `nix flake check`
 # bootstraps the compiler from the released seed (stage 1, then stage 2, which
 # must write the same IR), runs tests/runner.jh with it, and builds and runs
 # the examples with the packaged toolchain, on x86_64 and aarch64 Linux.
+# The proof experiments are then compiled and run with the packaged compiler.
 name: Test
 
 on:
@@ -35,3 +36,7 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: nix flake check
         run: nix flake check -L
+      - name: Proof experiment smoke tests
+        run: |
+          nix build .#jihoo
+          bash scripts/check-proof-experiments.sh ./result/bin/jihoo

@@ -93,6 +93,8 @@ jihoo run tests/runner.jh                    # the tests
 | `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
 | `experimental/kernel` | an experimental jihoo port of Horn's certificate checker, with a compile-time example |
+| `experimental/proofs` | general theorems by structural induction and derivation reuse, checked at compile time |
+| `experimental/verified-codec` | generated enum codecs with compile-time certificates bound to the executable tables |
 | `docs` | the documentation, one Markdown file per page |
 | `site` | the website ([site/README.md](site/README.md)) |
 
@@ -119,6 +121,12 @@ expressions, array lengths and compile-time arguments. It supports loops,
 recursion, aggregates and the heap: `Vec`, `String`, `Map` and destructors
 work, and a `String` or `Vec` result becomes a static `str` or slice.
 External calls remain unavailable during evaluation.
+
+An experimental [proof development library](experimental/proofs/README.md)
+checks general Horn statements by structural induction and reuses derivations
+at compile time. A separate [generated codec experiment](experimental/verified-codec/README.md)
+connects ground certificates to executable enum lookup tables through a small
+trusted adapter. General source-level contracts remain open.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

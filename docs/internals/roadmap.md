@@ -150,6 +150,17 @@ uses that made it.
 
 ### Later
 
+- **Theorem-proving research**: `experimental/proofs` defines a proof-domain
+  addition relation, checks a general theorem by structural induction, and
+  reuses its derivation in a second theorem during compile-time evaluation.
+  Its restricted schematic checker adds a trust obligation beyond the ground
+  checker. Connecting proof-domain definitions to ordinary jihoo functions
+  remains open; this experiment adds no language syntax or runtime semantics.
+- **Checked metaprogramming research**: `experimental/verified-codec` reflects
+  payload-free enums, generates encoding/decoding tables, and checks ground
+  round-trip certificates against those exact tables at compile time. A small
+  trusted adapter executes the frozen tables. It does not verify arbitrary
+  generated function bodies; the unary proof encoding currently limits scale.
 - **Contracts** (which v0 had), checked by the kernel and the
   compile-time interpreter where possible. `experimental/kernel` contains
   a jihoo port of Horn's ground certificate checker and a compile-time
