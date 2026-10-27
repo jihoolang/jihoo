@@ -1,0 +1,53 @@
+import std.io
+
+struct Spec { value: i64 }
+struct State { spec: ref Spec }
+
+impl State {
+    fn consume(inout self, inout data: Vec(i64)) -> i64 {
+        data.push(self.spec.value)
+        data.len()
+    }
+
+    fn recurse(inout self, inout data: Vec(i64), n: i64) {
+        if n > 0 { bounce(&self, &data, n - 1) } else { self.consume(&data) }
+    }
+}
+
+fn bounce(inout state: State, inout data: Vec(i64), n: i64) {
+    state.recurse(&data, n)
+}
+
+fn first(a: str, ignored: str, n: i64) -> str {
+    if n > 0 { first(a, ignored, n - 1) } else { a }
+}
+
+fn exercise() -> i64 {
+    let spec = Spec { value: 7 }
+    var state = State { spec }
+    var data = Vec(i64).new()
+    state.consume(&data)
+    data.push(8)
+    state.recurse(&data, 3)
+    data.push(9)
+    state.consume(&data)
+    let a = String.from("kept")
+    var b = String.from("other")
+    let result = first(a.as_str(), b.as_str(), 3)
+    b.push('!')
+    assert(result == "kept", "result origin")
+    var input = io.StrReader.new("ab\nc")
+    var line = String.new()
+    assert(input.read_line(&line).unwrap() == 3, "read line")
+    line.clear()
+    assert(input.read_line(&line).unwrap() == 1, "read tail")
+    data.len() + line.len()
+}
+
+const RESULT = exercise()
+fn main() {
+    println(RESULT)
+    println(exercise())
+}
+//> 6
+//> 6

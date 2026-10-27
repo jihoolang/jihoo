@@ -1,0 +1,11 @@
+// error: `s` is changed here while it is borrowed
+fn save(inout dest: Vec(str), s: str) { dest.push(s) }
+fn bad() -> i64 {
+    var s = String.from("x")
+    var dest = Vec(str).new()
+    save(&dest, s.as_str())
+    s.push('!')
+    dest[0].len
+}
+const RESULT = bad()
+fn main() { println(RESULT) }

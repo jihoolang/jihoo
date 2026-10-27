@@ -1,0 +1,12 @@
+// error: `source` is changed here while it is borrowed
+fn save(inout dest: Vec(str), s: str, n: i64) {
+    if n > 0 { forward(&dest, s, n - 1) } else { dest.push(s) }
+}
+fn forward(inout dest: Vec(str), s: str, n: i64) { save(&dest, s, n) }
+fn main() {
+    var source = String.from("source")
+    var dest = Vec(str).new()
+    save(&dest, source.as_str(), 2)
+    source.push('!')
+    println(dest[0])
+}

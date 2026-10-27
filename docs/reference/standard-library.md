@@ -56,6 +56,36 @@ without copying.
 `starts_with`, `ends_with`, `find`, `contains`, `trim`, `split`, `lines`,
 `parse_int`, `+`; `for b in s` gives bytes.
 
+`import std.utf8` adds `s.chars()`, an iterator of `Result(u32, String)`
+Unicode scalar values. Invalid UTF-8 yields one error, then ends iteration.
+`utf8.decode(s, byte_offset)` returns `(scalar, byte_width)` or an error;
+`utf8.validate(s)` checks the whole string. `utf8.is_whitespace(scalar)`
+recognizes Unicode White_Space; byte-oriented `is_space` keeps its meaning.
+
+## Buffered input
+
+`std.io.BufRead` supplies `read_line(&out) -> Result(i64, String)`, appending
+one UTF-8 line to a `String`, including its newline. The count is in bytes;
+zero means end of input. An error restores the output's previous length;
+input already consumed is not restored.
+
+`io.StrReader.new(text)` borrows a string without copying it.
+`io.BufReader.open(path)` owns a file descriptor and a 64 KiB buffer;
+`with_capacity(path, bytes)` chooses a positive buffer size. The descriptor
+closes on drop. Lines may span buffers, and the final line needs no newline.
+Both readers reject invalid UTF-8 and work in native and freestanding code.
+Only the memory reader can be used during compile-time evaluation.
+
+```jihoo
+import std.io
+
+fn read() -> Result(i64, String) {
+    var input = io.StrReader.new("first\nsecond")
+    var line = String.new()
+    input.read_line(&line)
+}
+```
+
 ## `Map(K, V)`
 
 A hash map with open addressing, for keys with `Hash` and `Eq`. `new`,
@@ -73,6 +103,8 @@ patterns see through it.
 | module | |
 |--------|---|
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
+| `std.io` | printing and `BufRead`, `StrReader`, `BufReader` for buffered UTF-8 lines |
+| `std.utf8` | strict UTF-8 decoding, validation, scalar iteration and Unicode whitespace |
 | `std.thread` | `join(a, b)`, `each(lo, hi, f)`, `map(xs, f)`, `each_mut(&v, f)`, `cpu_count()`: work on several threads that borrows from the caller ([threads](../language/threads.md)) |
 | `std.arena` | `Arena(T)` and `Id(T)`, `Pool(T)` and `Handle(T)`, `Soa(T)`: data that refers to data by index ([data by index](../language/data-oriented.md)) |
 | `std.sync` | `Atomic(T)` (`new`, `load`, `store`, `add`, `sub`, `swap`, `compare_swap`, `into_inner`), `Mutex(T)` (`new`, `lock(f)`, `into_inner`), `Channel(T)` (`new`, `bounded(n)`, `send`, `recv`, `try_recv`, `close`, `iter`, `len`, `is_closed`) and `Once(T)` (`new`, `get`, `get_or_init(f)`, `into_inner`), shared by threads ([threads](../language/threads.md#sharing-changes-atomic-and-mutex)) |

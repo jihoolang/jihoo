@@ -151,7 +151,10 @@ uses that made it.
 ### Later
 
 - **Contracts** (which v0 had), checked by the kernel and the
-  compile-time interpreter where possible.
+  compile-time interpreter where possible. `experimental/kernel` contains
+  a jihoo port of Horn's ground certificate checker and a compile-time
+  certificate example. Translating jihoo semantics and contracts into
+  trusted theories and caller-selected goals remains a separate design.
 - **Formatting**: `print` with several values, and formatting options.
 - **Tail calls** that never grow the stack.
 - **Macros**, if reflection turns out not to cover what they would do.

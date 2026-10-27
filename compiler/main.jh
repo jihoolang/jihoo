@@ -141,17 +141,24 @@ fn drive() {
     if env.get("JIHOO_NO_ELAB").is_none() {
         // Every function is checked; their errors are reported together.
         var errors = Vec(diag.Diag).new()
+        var initialized = Vec(bool).new()
         for i in 0..prog.fns.len() {
             match elab.run(&prog.fns[i]) {
-                Ok(_) => {}
+                Ok(_) => initialized.push(true)
                 Err(d) => {
+                    initialized.push(false)
                     errors.push(d)
                     continue
                 }
             }
-            match check.run(prog.types, prog.fns[i]) {
-                Ok(_) => {}
-                Err(d) => errors.push(d)
+        }
+        let effects = check.infer_effects(prog.types, prog.fns)
+        for i, f in prog.fns {
+            if initialized[i] {
+                match check.run_with_effects(prog.types, f, effects) {
+                    Ok(_) => {}
+                    Err(d) => errors.push(d)
+                }
             }
         }
         if errors.len() > 0 {

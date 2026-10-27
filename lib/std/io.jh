@@ -1,6 +1,104 @@
 // Printing and reading.
 
 import std.sys
+import std.utf8
+
+pub trait BufRead {
+    // Append one UTF-8 line, including '\n'. Zero means end of input.
+    // On error, out is restored to its original length.
+    fn read_line(inout self, inout out: String) -> Result(i64, String)
+}
+
+pub struct StrReader {
+    text: str
+    pos: i64
+}
+
+impl StrReader {
+    pub fn new(text: str) -> StrReader {
+        StrReader { text, pos: 0 }
+    }
+}
+
+impl BufRead for StrReader {
+    fn read_line(inout self, inout out: String) -> Result(i64, String) {
+        let start = self.pos
+        while self.pos < self.text.len {
+            let b = self.text[self.pos]
+            self.pos += 1
+            if b == '\n' { break }
+        }
+        let line = self.text[start..self.pos]
+        utf8.validate(line)?
+        out.push_str(line)
+        Ok(self.pos - start)
+    }
+}
+
+// Owns a read-only file descriptor. The buffer is reused between lines.
+pub struct BufReader {
+    fd: i32
+    buffer: Vec(u8)
+    pos: i64
+    end: i64
+}
+
+impl BufReader {
+    pub fn open(path: str) -> Result(BufReader, String) {
+        Self.with_capacity(path, 65536)
+    }
+
+    pub fn with_capacity(path: str, capacity: i64) -> Result(BufReader, String) {
+        if capacity <= 0 { return Err("buffer capacity must be positive") }
+        let fd = sys.open_read(path)
+        if fd < 0 { return Err("cannot open " + path) }
+        Ok(BufReader { fd, buffer: Vec(u8).filled(capacity, 0), pos: 0, end: 0 })
+    }
+
+    fn append_line(inout self, inout out: String) -> Result((), String) {
+        loop {
+            if self.pos == self.end {
+                let n = unsafe { sys.read_fd(self.fd, &self.buffer[0], self.buffer.len()) }
+                if n < 0 { return Err("cannot read file") }
+                self.pos = 0
+                self.end = n
+                if n == 0 { return Ok(()) }
+            }
+            let start = self.pos
+            while self.pos < self.end {
+                let b = self.buffer[self.pos]
+                self.pos += 1
+                if b == '\n' { break }
+            }
+            let last = self.buffer[self.pos - 1]
+            let part = unsafe { make_str(&self.buffer[start], self.pos - start) }
+            out.push_str(part)
+            if last == '\n' { return Ok(()) }
+        }
+    }
+}
+
+impl BufRead for BufReader {
+    fn read_line(inout self, inout out: String) -> Result(i64, String) {
+        let start = out.len()
+        let result = self.append_line(&out)
+        let valid = match result {
+            Ok(_) => utf8.validate(out.as_str()[start..])
+            Err(e) => Err(e)
+        }
+        match valid {
+            Ok(_) => Ok(out.len() - start)
+            Err(e) => {
+                out.bytes.truncate(start)
+                Err(e)
+            }
+        }
+    }
+}
+
+impl Drop for BufReader {
+    fn drop(inout self) { sys.close(self.fd) }
+}
 
 pub fn print(comptime T: Show, x: T) {
     var s = String.new()

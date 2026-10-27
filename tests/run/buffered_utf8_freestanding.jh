@@ -1,0 +1,4 @@
+#![freestanding]
+import buffered_utf8
+fn main() { buffered_utf8.exercise() }
+//> buffered UTF-8 ok

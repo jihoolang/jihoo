@@ -92,6 +92,7 @@ jihoo run tests/runner.jh                    # the tests
 | `lib/std` | the standard library, in jihoo |
 | `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
+| `experimental/kernel` | an experimental jihoo port of Horn's certificate checker, with a compile-time example |
 | `docs` | the documentation, one Markdown file per page |
 | `site` | the website ([site/README.md](site/README.md)) |
 
@@ -118,6 +119,12 @@ expressions, array lengths and compile-time arguments. It supports loops,
 recursion, aggregates and the heap: `Vec`, `String`, `Map` and destructors
 work, and a `String` or `Vec` result becomes a static `str` or slice.
 External calls remain unavailable during evaluation.
+
+Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
+Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
+The borrow kernel infers argument escape effects for direct calls, including
+recursive functions, so methods on views keep only the borrows they can
+actually retain; unknown calls and raw memory effects remain conservative.
 
 [Reflection](docs/language/reflection.md): `inline for` and `inline if`
 unroll and select code at compile time, and builtins name a type's fields

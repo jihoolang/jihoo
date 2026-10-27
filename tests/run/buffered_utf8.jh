@@ -1,0 +1,66 @@
+import std.fs
+import std.io
+import std.utf8
+
+fn expect(ok: bool) { assert(ok, "buffered UTF-8 check failed") }
+
+fn lines(comptime R: io.BufRead, sink input: R) {
+    var r = input
+    var s = String.from("prefix:")
+    expect(r.read_line(&s).unwrap() == 8)
+    expect(s == "prefix:한글\r\n")
+    s.clear()
+    expect(r.read_line(&s).unwrap() == 1)
+    expect(s == "\n")
+    s.clear()
+    expect(r.read_line(&s).unwrap() == 4)
+    expect(s == "끝!")
+    expect(r.read_line(&s).unwrap() == 0)
+    expect(r.read_line(&s).unwrap() == 0)
+}
+
+pub fn exercise() {
+    let text = "한글\r\n\n끝!"
+    lines(io.StrReader.new(text))
+    let path = "/tmp/jihoo-buffered-utf8-test.txt"
+    fs.write_file(path, text).unwrap()
+    for capacity in 1..10 { lines(io.BufReader.with_capacity(path, capacity).unwrap()) }
+    expect(io.BufReader.with_capacity(path, 0).is_err())
+    expect(io.BufReader.open("/nonexistent/jihoo-buffered-file").is_err())
+    fs.write_file(path, "").unwrap()
+    var empty = io.BufReader.open(path).unwrap()
+    var out = String.new()
+    expect(empty.read_line(&out).unwrap() == 0)
+    // Invalid sequence crosses a buffer boundary; restore existing output.
+    fs.write_file(path, "a\xf0\x9f\n").unwrap()
+    var bad = io.BufReader.with_capacity(path, 1).unwrap()
+    out.push_str("kept")
+    expect(bad.read_line(&out).is_err())
+    expect(out == "kept")
+    fs.remove_file(path).unwrap()
+    let valid = ["", "ascii", "한글", "\xf0\x9f\x98\x80", "\xf4\x8f\xbf\xbf", "\xe0\xa0\x80"]
+    for s in valid { expect(utf8.validate(s).is_ok()) }
+    let invalid = ["\x80", "\xc0\x80", "\xc1\xbf", "\xc2", "\xe0\x9f\xbf", "\xed\xa0\x80", "\xf0\x8f\xbf\xbf", "\xf4\x90\x80\x80", "\xf5\x80\x80\x80", "\xff", "\xe2\x28\xa1"]
+    for s in invalid {
+        expect(utf8.validate(s).is_err())
+        var reader = io.StrReader.new(s)
+        expect(reader.read_line(&out).is_err())
+        expect(out == "kept")
+        var it = s.chars()
+        expect(it.next().unwrap().is_err())
+        expect(it.next().is_none())
+    }
+    expect(utf8.decode("a", -1).is_err())
+    expect(utf8.decode("a", 1).is_err())
+    var codes = Vec(u32).new()
+    for cp in "A한\xf0\x9f\x98\x80".chars() { codes.push(cp.unwrap()) }
+    expect(codes.len() == 3 && codes[0] == 65 && codes[1] == 0xd55c && codes[2] == 0x1f600)
+    let spaces = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]
+    for cp in spaces { expect(utf8.is_whitespace(cp as u32)) }
+    let nonspaces = [0, 0x08, 0x0e, 0x1c, 0x180e, 0x200b, 0x2060, 0xfeff, 0x10ffff]
+    for cp in nonspaces { expect(!utf8.is_whitespace(cp as u32)) }
+    println("buffered UTF-8 ok")
+}
+
+fn main() { exercise() }
+//> buffered UTF-8 ok

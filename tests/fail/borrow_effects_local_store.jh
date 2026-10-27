@@ -1,0 +1,11 @@
+// error: which goes away when the function returns
+struct Holder { value: str }
+fn save(inout h: Holder) {
+    let local = String.from("temporary")
+    h.value = local.as_str()
+}
+fn main() {
+    var h = Holder { value: "initial" }
+    save(&h)
+    println(h.value)
+}

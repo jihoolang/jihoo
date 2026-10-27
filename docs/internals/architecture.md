@@ -101,6 +101,17 @@ used later. Then it checks every access against the loans that last there:
 - a place borrowed may not be changed, moved or dropped;
 - a returned view may only borrow what the parameters point to.
 
+Before checking calls, the kernel derives a relation between argument
+origins, returned views and stores into mutable/interior view arguments.
+It propagates origins through MIR with a fixed point over function bodies,
+including recursive call cycles. Call sites use the resulting relations
+instead of assuming every call stores every input borrow. These relations
+are computed by the borrow kernel, not supplied by sema. Calls without a
+known body keep the conservative rule. Raw reads that can manufacture views
+retain all result origins; raw writes and calls exposing raw pointers retain
+all possible store origins. Compile-time snapshots compute their own effects
+from the reachable, prepared bodies before execution.
+
 The idea comes from proof checkers such as Horn: a large untrusted part
 (sema) produces something a small part checks in full, so a bug in the
 large part becomes a compile error and not a dangling pointer.

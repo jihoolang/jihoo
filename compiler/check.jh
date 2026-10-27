@@ -122,13 +122,17 @@ struct Ctx {
 }
 
 pub fn run(t: Types, f: mir.Function) -> Result((), Diag) {
+    run_with_effects(t, f, Vec(Effect).new())
+}
+
+pub fn run_with_effects(t: Types, f: mir.Function, effects: Vec(Effect)) -> Result((), Diag) {
     match f.body {
-        Some(body) => run_body(t, f, body)
+        Some(body) => run_body(t, f, body, effects)
         None => Ok(())
     }
 }
 
-fn run_body(t: Types, f: mir.Function, body: Body) -> Result((), Diag) {
+fn run_body(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Result((), Diag) {
     let n = body.locals.len()
     var w = (n + 63) / 64
     if w == 0 {
@@ -237,7 +241,7 @@ fn run_body(t: Types, f: mir.Function, body: Body) -> Result((), Diag) {
             for i, s in body.blocks[b].stmts {
                 stmt_loans(s, &held, lc, t, body, loan_at[b][i])
             }
-            term_loans(body.blocks[b].term, &held, lc, t, body)
+            term_loans(body.blocks[b].term, &held, lc, t, body, effects)
             for s in succs(body.blocks[b].term) {
                 let s = s as i64
                 if !seen[s] {
@@ -638,15 +642,16 @@ fn stores_views(t: Types, ty: u32) -> bool {
     }
 }
 
-fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body) {
+fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body, effects: Vec(Effect)) {
     match t {
-        Call(_, args, dest, _, _) => {
+        Call(callee, args, dest, _, _) => {
             var all = bits(lc.lw)
+            let effect = call_effect(callee, args.len(), effects)
             for a in args {
                 union(&all, op_loans(a, held, lc, ts, body))
             }
             // What a call is given can end up in mutable or interior views.
-            for a in args {
+            for ai, a in args {
                 match operand_place(a) {
                     Some(p) => {
                         if p.proj.len() == 0 {
@@ -654,14 +659,22 @@ fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body
                                 // The loans go to whatever the borrow points to.
                                 var targets = Vec(i64).new()
                                 pointees(p.local as i64, held, body, &targets)
+                                var stored = all.clone()
+                                if effect >= 0 {
+                                    stored = selected_loans(args, effects[effect].stored[ai], held, lc, ts, body)
+                                }
                                 for l in targets {
-                                    union(&held[l], all)
+                                    union(&held[l], stored)
                                 }
                             }
                         }
                     }
                     None => {}
                 }
+            }
+            var returned = all.clone()
+            if effect >= 0 {
+                returned = selected_loans(args, effects[effect].returned, held, lc, ts, body)
             }
             for a in args {
                 match a {
@@ -676,14 +689,197 @@ fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body
             let d = dest.local as i64
             if lc.is_view[d] {
                 if dest.proj.len() == 0 {
-                    held[d] = all
+                    held[d] = returned
                 } else {
-                    union(&held[d], all)
+                    union(&held[d], returned)
                 }
             }
         }
         _ => {}
     }
+}
+
+// A summary is a relation from argument origins to the returned view and
+// to each mutable/interior view argument. It is derived here from MIR,
+// never supplied by sema or trusted as a source annotation.
+#[derive(Clone)]
+pub struct Effect {
+    known: bool
+    returned: Bits
+    stored: Vec(Bits)
+}
+
+fn call_effect(c: mir.Callee, count: i64, effects: Vec(Effect)) -> i64 {
+    match c {
+        Fn(id) => {
+            let i = id as i64
+            if i < effects.len() && effects[i].known && effects[i].stored.len() == count { return i }
+        }
+        _ => {}
+    }
+    -1
+}
+
+fn selected_loans(args: Vec(Operand), origins: Bits, held: Vec(Bits), lc: LoanCtx, t: Types, body: Body) -> Bits {
+    var out = bits(lc.lw)
+    for i, a in args {
+        if get(origins, i) { union(&out, op_loans(a, held, lc, t, body)) }
+    }
+    out
+}
+
+// Does an operand expose a raw pointer, including a pointer field read
+// directly without first putting it in a temporary?
+fn raw_operand(t: Types, body: Body, o: Operand) -> bool {
+    match operand_place(o) {
+        None => false
+        Some(p) => {
+            if root_is_raw(t, body, p) { return true }
+            var ty = body.locals[p.local as i64].ty
+            var variant: Option(u32) = None
+            for pr in p.proj {
+                match pr {
+                    Deref => match t.pointee(ty) { Some(x) => ty = x, None => return true }
+                    Variant(v) => variant = Some(v)
+                    Field(i) => match variant {
+                        Some(v) => { ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]; variant = None }
+                        None => match t.kind(ty) {
+                            Str | Slice(_) | Closure(_) => return i == 0
+                            _ => ty = t.field_tys(ty)[i as i64]
+                        }
+                    }
+                    Index(_) => match t.kind(ty) { Array(e, _) => ty = e, _ => {} }
+                }
+            }
+            t.is_ptr(ty)
+        }
+    }
+}
+
+// Raw writes can hide a store through a container's pointer. Raw reads can
+// manufacture a returned view (Vec.index, String.as_str). Keep these effects
+// conservative; inference must not assume unsafe library internals are pure.
+fn raw_effects(t: Types, body: Body) -> (bool, bool) {
+    var read = false
+    var store = false
+    for blk in body.blocks {
+        for s in blk.stmts {
+            match s {
+                Assign(p, r, _) => {
+                    if root_is_raw(t, body, p) { store = true }
+                    match r {
+                        RefMut(q) => if root_is_raw(t, body, q) { store = true }
+                        _ => {}
+                    }
+                    // Ref/Addr places are not ordinary rvalue operands.
+                    match r {
+                        Ref(q) => if root_is_raw(t, body, q) { read = true }
+                        RefMut(q) => if root_is_raw(t, body, q) { read = true }
+                        Addr(_) | Offset(_, _) => read = true
+                        _ => {}
+                    }
+                    for o in elab.rvalue_operands(r) {
+                        if raw_operand(t, body, o) { read = true }
+                    }
+                }
+                _ => {}
+            }
+        }
+        match blk.term {
+            Call(_, args, _, _, _) => for a in args {
+                if raw_operand(t, body, a) { read = true; store = true }
+            }
+            _ => {}
+        }
+    }
+    (read, store)
+}
+
+fn infer_effect(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Effect {
+    let count = body.arg_count
+    let n = body.locals.len()
+    let w = max(1, (count + 63) / 64)
+    var views = Vec(bool).new()
+    var rooted = Vec(Bits).new()
+    var initial = Vec(Bits).new()
+    for l in body.locals {
+        views.push(t.is_view(l.ty))
+        rooted.push(bits(w))
+        initial.push(bits(w))
+    }
+    for a in 0..count { if views[a + 1] { set(&initial[a + 1], a) } }
+    let lc = LoanCtx { is_view: views, rooted, lw: w }
+    var incoming = Vec(Vec(Bits)).new()
+    var seen = Vec(bool).new()
+    for _ in body.blocks { incoming.push(initial.clone()); seen.push(false) }
+    seen[0] = true
+    var result = Effect { known: true, returned: bits(w), stored: Vec(Bits).new() }
+    for _ in 0..count { result.stored.push(bits(w)) }
+    let raw = raw_effects(t, body)
+    for a in 0..count {
+        if raw.0 && t.is_view(f.sig.ret) { set(&result.returned, a) }
+        if raw.1 {
+            for d in 0..count {
+                if stores_views(t, body.locals[d + 1].ty) { set(&result.stored[d], a) }
+            }
+        }
+    }
+    loop {
+        var changed = false
+        for b in 0..body.blocks.len() {
+            if !seen[b] { continue }
+            var held = incoming[b].clone()
+            for s in body.blocks[b].stmts { stmt_loans(s, &held, lc, t, body, -1) }
+            term_loans(body.blocks[b].term, &held, lc, t, body, effects)
+            match body.blocks[b].term {
+                Return => {
+                    union(&result.returned, held[mir.RET as i64])
+                    for a in 0..count {
+                        if stores_views(t, body.locals[a + 1].ty) { union(&result.stored[a], held[a + 1]) }
+                    }
+                }
+                _ => {}
+            }
+            for next in succs(body.blocks[b].term) {
+                let next = next as i64
+                if !seen[next] { seen[next] = true; changed = true }
+                for l in 0..n { if union(&incoming[next][l], held[l]) { changed = true } }
+            }
+        }
+        if !changed { break }
+    }
+    result
+}
+
+pub fn infer_effects(t: Types, functions: Vec(mir.Function)) -> Vec(Effect) {
+    var effects = Vec(Effect).new()
+    for f in functions {
+        let count = f.sig.params.len()
+        let w = max(1, (count + 63) / 64)
+        var e = Effect { known: f.body.is_some(), returned: bits(w), stored: Vec(Bits).new() }
+        for _ in 0..count { e.stored.push(bits(w)) }
+        effects.push(e)
+    }
+    // Least fixed point over a finite relation: recursive and mutually
+    // recursive functions gain every escaping origin, without trusting a
+    // provisional empty summary when the actual borrow checks run.
+    loop {
+        var changed = false
+        for i, f in functions {
+            match f.body {
+                Some(body) => {
+                    let e = infer_effect(t, f, body, effects)
+                    if union(&effects[i].returned, e.returned) { changed = true }
+                    for a in 0..e.stored.len() {
+                        if union(&effects[i].stored[a], e.stored[a]) { changed = true }
+                    }
+                }
+                None => {}
+            }
+        }
+        if !changed { break }
+    }
+    effects
 }
 
 // Loans held by some local that is still used later.

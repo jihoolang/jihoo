@@ -1,0 +1,10 @@
+// error: `source` is changed here while it is borrowed
+struct Holder { value: str }
+fn save(inout h: Holder, s: str) { h.value = s }
+fn main() {
+    var source = String.from("source")
+    var h = Holder { value: "initial" }
+    save(&h, source.as_str())
+    source.push('!')
+    println(h.value)
+}

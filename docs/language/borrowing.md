@@ -119,7 +119,7 @@ variables. The compiler follows what each one borrows:
 - A borrow held as a value (`ref T`, from a field or an `Option(ref T)`)
   can be passed where a `T` is borrowed; it is lent on.
 - A function returning a view returns something its arguments point to,
-  and the caller counts the result as borrowing those arguments.
+  and the caller tracks the arguments that can reach that result.
 - A function given an `inout` view may store the other arguments' views
   in it: after `v.push(s.as_str())` with `v: Vec(str)`, `s` is borrowed
   for as long as `v` is used, as if `v` held the borrow itself.
@@ -142,6 +142,14 @@ fn broken() -> str {
 ```
 
 ## How it is checked
+
+For direct calls with a known body, the borrow kernel infers which arguments
+can contribute borrows to the result or to a mutable/interior view argument.
+A method that only reads an existing reference and updates owned data does
+not keep every temporary argument borrowed afterward. Recursive functions
+are analyzed together until their effects stop changing. Indirect and
+external calls remain conservative, as do effects hidden by raw memory
+access. The same analysis applies during compile-time evaluation.
 
 The checks run on the compiler's intermediate representation, in a pass
 that does not trust the rest of the compiler: if the type checker let

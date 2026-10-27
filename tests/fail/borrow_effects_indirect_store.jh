@@ -1,0 +1,12 @@
+// error: `source` is changed here while it is borrowed
+fn save(inout dest: Vec(str), s: str) { dest.push(s) }
+fn invoke(f: fn(inout Vec(str), str), inout dest: Vec(str), s: str) {
+    f(&dest, s)
+}
+fn main() {
+    var source = String.from("source")
+    var dest = Vec(str).new()
+    invoke(save, &dest, source.as_str())
+    source.push('!')
+    println(dest[0])
+}

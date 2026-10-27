@@ -1,0 +1,69 @@
+// Strict UTF-8 decoding. Offsets and widths are measured in bytes.
+
+pub fn decode(s: str, at: i64) -> Result((u32, i64), String) {
+    if at < 0 || at >= s.len {
+        return Err("UTF-8 offset out of bounds")
+    }
+    let b = s[at]
+    if b < 0x80 { return Ok((b as u32, 1)) }
+    let width = if b >= 0xc2 && b <= 0xdf { 2 } else if b >= 0xe0 && b <= 0xef { 3 } else if b >= 0xf0 && b <= 0xf4 { 4 } else { 0 }
+    if width == 0 || s.len - at < width { return Err("invalid UTF-8") }
+    var cp = (b & (0x7f >> width)) as u32
+    for i in 1..width {
+        let c = s[at + i]
+        if c < 0x80 || c > 0xbf { return Err("invalid UTF-8") }
+        cp = (cp << 6) | (c & 0x3f) as u32
+    }
+    if (width == 2 && cp < 0x80) || (width == 3 && cp < 0x800) ||
+        (width == 4 && cp < 0x10000) || cp > 0x10ffff ||
+        (cp >= 0xd800 && cp <= 0xdfff) {
+        return Err("invalid UTF-8")
+    }
+    Ok((cp, width))
+}
+
+pub fn validate(s: str) -> Result((), String) {
+    var at = 0
+    while at < s.len {
+        let decoded = decode(s, at)?
+        at += decoded.1
+    }
+    Ok(())
+}
+
+// Unicode White_Space, also used by Rust's char::is_whitespace.
+pub fn is_whitespace(cp: u32) -> bool {
+    (cp >= 0x09 && cp <= 0x0d) || cp == 0x20 || cp == 0x85 ||
+        cp == 0xa0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) ||
+        cp == 0x2028 || cp == 0x2029 || cp == 0x202f || cp == 0x205f || cp == 0x3000
+}
+
+pub struct Chars {
+    text: str
+    at: i64
+}
+
+impl Iterator for Chars {
+    type Item = Result(u32, String)
+
+    // An invalid sequence yields one error, then ends iteration.
+    fn next(inout self) -> Option(Result(u32, String)) {
+        if self.at == self.text.len { return None }
+        match decode(self.text, self.at) {
+            Ok(decoded) => {
+                self.at += decoded.1
+                Some(Ok(decoded.0))
+            }
+            Err(e) => {
+                self.at = self.text.len
+                Some(Err(e))
+            }
+        }
+    }
+}
+
+impl str {
+    pub fn chars(self) -> Chars {
+        Chars { text: self, at: 0 }
+    }
+}
