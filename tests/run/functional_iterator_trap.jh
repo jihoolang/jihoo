@@ -1,0 +1,14 @@
+// exit: 132
+import std.iter
+
+fn main() {
+    iter.range(0, 4)
+        .map(fn(x) { println(x); x })
+        .filter(fn(x) { if x == 2 { trap() }; true })
+        .fold(0, fn(acc, x) { println(10 + x); acc + x })
+    //> 0
+    //> 10
+    //> 1
+    //> 11
+    //> 2
+}

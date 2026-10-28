@@ -8,6 +8,8 @@
 typedef int64_t (*Kernel)(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t functional(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t iterator(const int64_t *, int64_t, int64_t, int64_t, int64_t);
+extern int64_t iterator_take(const int64_t *, int64_t, int64_t, int64_t, int64_t);
+extern int64_t iterator_zip(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t staged(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t eager(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t handwritten(const int64_t *, int64_t, int64_t, int64_t, int64_t);
@@ -17,6 +19,8 @@ extern int64_t c_loop(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 static const char *names[] = {"functional", "staged", "iterator", "eager", "handwritten", "c"};
 static Kernel kernels[] = {functional, staged, iterator, eager, handwritten, c_loop};
 #define KERNEL_COUNT (sizeof(kernels) / sizeof(kernels[0]))
+static const char *extra_names[] = {"iterator_take", "iterator_zip"};
+static Kernel extra_kernels[] = {iterator_take, iterator_zip};
 static int counting;
 static uint64_t allocations, frees;
 extern void *__real_malloc(size_t);
@@ -64,6 +68,20 @@ static void verify(int wrapping) {
                 exit(1);
             }
         }
+        int64_t taken = 0, take_total = 0, zip_total = 0;
+        for (int64_t i = 0; i < n && taken < n / 2; ++i) {
+            int64_t y = xs[i] * scale + offset;
+            if (y > limit) { take_total += y; ++taken; }
+        }
+        for (int64_t i = 0; i < n / 2; ++i) {
+            int64_t y = xs[i] * scale + offset + i;
+            if (y > limit) zip_total += y;
+        }
+        if (iterator_take(xs, n, scale, offset, limit) != take_total ||
+            iterator_zip(xs, n, scale, offset, limit) != zip_total) {
+            fprintf(stderr, "trial %d: take/zip composition mismatch\n", trial);
+            exit(1);
+        }
         // Small inputs keep this order-sensitive fold in range in checked mode.
         int64_t m = n % 6, acc = 7;
         for (int64_t i = 0; i < m; ++i) {
@@ -72,7 +90,7 @@ static void verify(int wrapping) {
         }
         if (ordered(xs, m, scale, offset, limit) != acc) abort();
     }
-    puts("600 differential cases and 600 order-sensitive folds passed");
+    puts("600 differential cases, 1200 take/zip comparisons and 600 order-sensitive folds passed");
 }
 
 static double seconds(void) {
@@ -81,7 +99,43 @@ static double seconds(void) {
     return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
 }
 
+static void verify_allocations(void) {
+    int64_t xs[65];
+    for (int64_t i = 0; i < 65; ++i) xs[i] = i - 32;
+    int64_t expected = c_loop(xs, 65, 3, 1, 50);
+    putchar('{');
+    for (size_t k = 0; k < KERNEL_COUNT; ++k) {
+        allocations = frees = 0;
+        counting = 1;
+        int64_t actual = kernels[k](xs, 65, 3, 1, 50);
+        counting = 0;
+        int eager_kernel = strcmp(names[k], "eager") == 0;
+        if (actual != expected || (eager_kernel ? (!allocations || !frees) : (allocations || frees))) {
+            fprintf(stderr, "%s: wrong result or unexpected allocation counts\n", names[k]);
+            exit(1);
+        }
+        printf("%s\"%s\":{\"allocations\":%" PRIu64 ",\"frees\":%" PRIu64 "}",
+               k ? "," : "", names[k], allocations, frees);
+    }
+    for (size_t k = 0; k < sizeof(extra_kernels) / sizeof(extra_kernels[0]); ++k) {
+        allocations = frees = 0;
+        counting = 1;
+        extra_kernels[k](xs, 65, 3, 1, 50);
+        counting = 0;
+        if (allocations || frees) {
+            fprintf(stderr, "%s: unexpected allocation counts\n", extra_names[k]);
+            exit(1);
+        }
+        printf(",\"%s\":{\"allocations\":0,\"frees\":0}", extra_names[k]);
+    }
+    puts("}");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "check-allocations") == 0) {
+        verify_allocations();
+        return 0;
+    }
     if (argc == 3 && strcmp(argv[1], "check") == 0) {
         verify(atoi(argv[2]));
         return 0;

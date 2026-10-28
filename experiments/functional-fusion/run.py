@@ -16,6 +16,7 @@ import time
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 NAMES = ["functional", "staged", "iterator", "eager", "handwritten", "c"]
+COMPOSED = ("functional", "staged", "iterator", "iterator_take", "iterator_zip")
 
 
 def run(command):
@@ -32,7 +33,7 @@ def inspect_ir(path):
         r"^define [^\n]*@([\w.$]+)\([^\n]*\)[^\n]*\{\n(.*?)^\}",
         source, re.M | re.S))
     results = {}
-    for entry in NAMES[:-1]:
+    for entry in [*NAMES[:-1], "iterator_take", "iterator_zip"]:
         visited, pending, external, indirect = set(), [entry], set(), []
         while pending:
             name = pending.pop()
@@ -54,9 +55,9 @@ def inspect_ir(path):
         results[entry] = {"reachable_functions": sorted(visited),
                           "external_calls": sorted(external),
                           "indirect_calls": indirect}
-    # The experiment succeeds structurally only if both compositions have
+    # The experiment succeeds structurally only if the compositions have
     # no runtime callback calls and no external calls (including allocation).
-    for name in ("functional", "staged", "iterator"):
+    for name in COMPOSED:
         if results[name]["external_calls"] or results[name]["indirect_calls"]:
             raise RuntimeError(f"composition did not fuse completely: {results[name]}")
     return results
@@ -85,6 +86,8 @@ def main():
     parser.add_argument("--size", type=int, default=1_000_000)
     parser.add_argument("--iterations", type=int, default=64)
     parser.add_argument("--repeats", type=int, default=7)
+    parser.add_argument("--check-only", action="store_true",
+                        help="check correctness, allocations and IR without timing samples")
     parser.add_argument("--max-iterator-over-c", type=float,
                         help="optionally fail when the iterator/C median ratio exceeds this value")
     args = parser.parse_args()
@@ -92,13 +95,16 @@ def main():
         parser.error("size, iterations and repeats must be positive")
     if args.max_iterator_over_c is not None and args.max_iterator_over_c <= 0:
         parser.error("max-iterator-over-c must be positive")
+    if args.check_only and args.max_iterator_over_c is not None:
+        parser.error("--max-iterator-over-c requires timing; omit --check-only")
     compiler, output = args.compiler.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = {"host": platform.platform(), "compiler": str(compiler),
               "clang": run(["clang", "--version"]).splitlines()[0],
               "opt": run(["opt", "--version"]).strip(),
               "size": args.size, "iterations": args.iterations,
-              "repeats": args.repeats, "validation": {}}
+              "repeats": args.repeats, "timing_measured": not args.check_only,
+              "validation": {}, "allocations": {}}
     reference = output / "reference.o"
     run(["clang", "-O2", "-fwrapv", "-S", "-emit-llvm", HERE / "reference.c",
          "-o", output / "reference.raw.ll"])
@@ -122,6 +128,7 @@ def main():
                  "-Wl,--wrap=malloc,--wrap=realloc,--wrap=free", "-o", exe])
             validation = run([exe, "check", int(wrapping)]).strip()
             report["validation"][label] = validation
+            report["allocations"][label] = json.loads(run([exe, "check-allocations"]))
             print(f"{label}: {validation}", flush=True)
             if wrapping and level == 2:
                 report["build_seconds"] = time.perf_counter() - start
@@ -130,6 +137,10 @@ def main():
                 print(f"Machine code: {report['machine_code']}", flush=True)
                 (output / "kernels.asm").write_text(run(["llvm-objdump", "-d", obj]))
                 benchmark = exe
+    if args.check_only:
+        (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+        print(f"Correctness, allocations and IR passed without timing; artifacts: {output}", flush=True)
+        return
     samples = {name: [] for name in NAMES}
     metadata = {}
     expected = None

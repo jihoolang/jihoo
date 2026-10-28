@@ -45,17 +45,22 @@ regression maintenance continue throughout.
 
 #### A. Establish regression coverage for the existing implementations
 
-- Add a repository-level command selecting the compiler and running the
-  deterministic fusion, ground-checker, schematic-checker and codec suites.
-  Keep valid and invalid cases in ordinary CI on both supported targets.
-  The current proof/codec CI step runs only the two positive examples.
-- Separate local ground and schematic rejection cases from differential
-  validation against Horn. Local CI must not require `../horn`; the
-  differential job must select and record its reference revision explicitly.
-- Retain the recorded fusion measurements. Keep callback, trap, drop and
-  short-circuit order tests, and add compositions using `take`, `zip` and a
-  streaming parser workload. Inspect allocations and optimized IR for the
-  cases expected to fuse. Timing thresholds belong on a controlled host.
+Implemented: [`scripts/check-experiments.py`](../../scripts/check-experiments.py)
+selects the compiler and runs the local ground, schematic, codec and fusion
+suites, plus iterator semantics and compile-time closure regressions. CI
+invokes it on both supported targets and preserves reports and failing
+inputs. The local suites require neither Horn nor Rust; deterministic edits
+without an independent expected verdict remain in the differential suite.
+
+The optional Horn differential CI job is selected through `workflow_dispatch`.
+It checks a fixed reference commit and records that revision in the reports;
+the scripts reject a mismatched revision or modified reference sources.
+
+Fusion's `--check-only` mode checks O0/O2 under checked and wrapping arithmetic,
+compares `take` and `zip` compositions with C, counts allocations and inspects
+optimized IR without collecting timing samples. Semantic tests cover callback,
+trap and drop order, and streaming parser short-circuiting. Recorded timing
+results remain preserved; performance thresholds belong on a controlled host.
 
 Completion: one documented command runs local acceptance, rejection and
 fusion structure checks without sibling repositories or timing thresholds;

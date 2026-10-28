@@ -192,8 +192,9 @@ columns; `--width N` adjusts it. `--check` checks its layout without printing
 formatted source. The output is reparsed and must retain the same syntax tree.
 
 Next ([roadmap](docs/internals/roadmap.md)): bring the existing fusion,
-kernel, proof and codec experiments into supported use first. Add deterministic
-CI coverage, resolve the four-variant compile-time codec bottleneck, connect
+kernel, proof and codec experiments into supported use first. Deterministic
+regressions now run together with `scripts/check-experiments.py` and in CI,
+without Horn or Rust. Next resolve the four-variant codec bottleneck, connect
 general proofs to a bounded executable state-transition model, and migrate
 reusable code into libraries, examples, tests and benchmarks. Language server
 integration and further application-driven library work follow this milestone.

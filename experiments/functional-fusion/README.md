@@ -10,11 +10,11 @@ the updated closure lowerer. Neither version depends on Horn.
 
 The public iterator API and closure fixes are already integrated. The first
 [roadmap milestone](../../docs/internals/roadmap.md#1-bring-the-existing-experiments-into-supported-use)
-now schedules the remaining work: separate deterministic correctness,
-allocation and IR checks from timing; run those checks in CI; and extend
-coverage to `take`, `zip` and streaming parsers. Then move the maintained
-harness to `benchmarks/`, keeping semantic regressions in `tests/` and
-preserving the recorded measurements and their provenance.
+now includes deterministic correctness, allocation and IR checks in CI,
+separate from timing. Additional workloads cover `take`, `zip` and streaming
+parsers. The remaining migration moves the maintained harness to `benchmarks/`,
+keeping semantic regressions in `tests/` and preserving the recorded
+measurements and their provenance.
 
 ## Implementations
 
@@ -50,6 +50,20 @@ nix develop --command python3 experiments/functional-fusion/run.py --iterations 
 For a performance regression check on an otherwise idle host, add
 `--max-iterator-over-c 1.5`. The report is preserved even if this check fails.
 
+For deterministic CI checks without timing samples or thresholds:
+
+```sh
+nix develop --command python3 experiments/functional-fusion/run.py --check-only
+```
+
+This mode still runs every correctness configuration, checks allocation
+counts (including the eager allocating control), and inspects optimized IR.
+`iterator_take` and `iterator_zip` have separate C correctness oracles and
+zero-allocation checks; their optimized IR must retain no callbacks or
+external calls. They do not participate in the original timing comparison.
+The ordinary program suite also covers streaming line parsing through
+`map`, `filter`, `take` and `zip`, including unconsumed invalid input.
+
 Use `--compiler PATH` for another compiler. The script writes artifacts under
 `out/functional-fusion/results`, including raw and optimized LLVM IR,
 disassembly, and `report.json`. It uses jihoo's `emit-llvm`, LLVM 21 `opt`
@@ -58,8 +72,9 @@ LLVM into the compiler process. The C reference also passes through the O2
 IR pipeline. The C harness is always built at O2, without LTO.
 
 For both checked and wrapping arithmetic, at O0 and O2, the harness checks
-600 differential cases against C for all six implementations and 600
-order-sensitive folds. Cases include empty input, negative values and
+600 differential cases against C for all six original implementations,
+1,200 comparisons for the `take`/`zip` compositions, and 600 order-sensitive
+folds. Cases include empty input, negative values and
 scales, zero scales, and selection extremes; wrapping runs additionally
 use full-width random integers. Performance uses wrapping arithmetic/O2.
 Timed calls vary offset and threshold; every run's checksum is checked.
@@ -67,7 +82,7 @@ Run order rotates, with one warm-up round and seven measured rounds.
 
 Allocator wrappers count `malloc`/`realloc` and `free` during a separate
 single kernel call, excluding input setup. Timing excludes those counters.
-IR inspection follows reachable functions to check that the three composed
+IR inspection follows reachable functions to check that all five composed
 implementations retain no indirect or external calls. Object inspection
 compares their function bytes with the handwritten jihoo loop.
 

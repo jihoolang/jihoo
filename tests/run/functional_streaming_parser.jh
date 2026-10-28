@@ -1,0 +1,57 @@
+import std.io
+import std.iter
+
+// Parse lines only as the downstream iterator requests them. A file reader
+// can use the same adapter without collecting the input into a vector.
+struct Numbers(R: io.BufRead) { reader: R }
+
+impl(R: io.BufRead) Iterator for Numbers(R) {
+    type Item = i64
+
+    fn next(inout self) -> Option(i64) {
+        var line = String.new()
+        if self.reader.read_line(&line).unwrap() == 0 { return None }
+        Some(line.as_str().trim().parse_int().unwrap())
+    }
+}
+
+fn numbers(text: str) -> Numbers(io.StrReader) {
+    Numbers(io.StrReader) { reader: io.StrReader.new(text) }
+}
+
+fn main() {
+    // take must stop before the invalid final line is parsed.
+    println(numbers("1\r\n2\n3\n4\ninvalid\n")
+        .map(fn(x) { x * 3 })
+        .filter(fn(x) { x % 2 == 0 })
+        .take(2)
+        .fold(7, fn(acc, x) { acc * 10 + x }))
+    //> 772
+
+    // zip pulls the left input first. A finished left input must prevent
+    // the invalid right tail from being parsed, even on repeated next().
+    var pairs = numbers("10\n20").zip(numbers("1\n2\ninvalid\n"))
+    let first = pairs.next().unwrap()
+    println(first.0)
+    //> 10
+    println(first.1)
+    //> 1
+    let second = pairs.next().unwrap()
+    println(second.0)
+    //> 20
+    println(second.1)
+    //> 2
+    println(pairs.next().is_none())
+    //> true
+    println(pairs.next().is_none())
+    //> true
+
+    println(numbers("").fold(9, fn(acc, x) { acc + x }))
+    //> 9
+    println(numbers("invalid\n").take(0).count())
+    //> 0
+    println(numbers("2\n4\n6\n").zip(iter.range(1, 4))
+        .map(fn(pair) { pair.0 * pair.1 })
+        .fold(0, fn(acc, x) { acc + x }))
+    //> 28
+}

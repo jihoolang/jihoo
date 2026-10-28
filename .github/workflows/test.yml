@@ -2,7 +2,7 @@
 # bootstraps the compiler from the released seed (stage 1, then stage 2, which
 # must write the same IR), runs tests/runner.jh with it, and builds and runs
 # the examples with the packaged toolchain, on x86_64 and aarch64 Linux.
-# The proof experiments are then compiled and run with the packaged compiler.
+# Deterministic experiment regressions then run with the packaged compiler.
 name: Test
 
 on:
@@ -10,6 +10,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      horn_differential:
+        description: Also compare the proof checkers with the pinned Horn reference
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,7 +41,45 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: nix flake check
         run: nix flake check -L
-      - name: Proof experiment smoke tests
+      - name: Experiment regression tests
         run: |
           nix build .#jihoo
-          bash scripts/check-proof-experiments.sh ./result/bin/jihoo
+          nix develop --command python3 scripts/check-experiments.py --compiler ./result/bin/jihoo
+      - name: Preserve experiment reports and failing inputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: experiments-${{ matrix.system }}
+          path: |
+            out/experiments/report.json
+            out/kernel
+            out/proofs
+            out/verified-codec
+            out/functional-fusion/results
+          if-no-files-found: ignore
+
+  horn-differential:
+    if: github.event_name == 'workflow_dispatch' && inputs.horn_differential
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: jihoo12/horn
+          ref: 18caf6d39088e1569beff678bc4461a28b8d2827
+          path: out/horn
+      - uses: cachix/install-nix-action@v31
+      - name: Compare experiment checkers with Horn
+        run: |
+          nix build .#jihoo
+          nix develop .#differential --command python3 scripts/check-experiments.py --compiler ./result/bin/jihoo --horn out/horn --horn-revision 18caf6d39088e1569beff678bc4461a28b8d2827
+      - name: Preserve differential reports and failing inputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: experiments-horn-differential
+          path: |
+            out/experiments/report.json
+            out/kernel
+            out/proofs
+          if-no-files-found: ignore

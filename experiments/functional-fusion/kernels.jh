@@ -10,6 +10,23 @@ export fn iterator(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i
         .fold(0, fn(acc, x) { acc + x })
 }
 
+// Additional compositions have separate C oracles; they are correctness
+// workloads rather than participants in the original timing comparison.
+export fn iterator_take(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    xs.iter().map(fn(x) { x * scale + offset })
+        .filter(fn(x) { x > limit }).take(n / 2)
+        .fold(0, fn(acc, x) { acc + x })
+}
+
+export fn iterator_zip(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    let xs = unsafe { make_slice(data, n) }
+    xs.iter().map(fn(x) { x * scale + offset }).zip(iter.range(0, n / 2))
+        .map(fn(pair) { pair.0 + pair.1 })
+        .filter(fn(x) { x > limit })
+        .fold(0, fn(acc, x) { acc + x })
+}
+
 // The C harness owns the input; these views stay inside each call.
 export fn functional(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
     let xs = unsafe { make_slice(data, n) }
