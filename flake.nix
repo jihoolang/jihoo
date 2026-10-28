@@ -200,14 +200,6 @@
 
           # For working on the website in site/.
           site = pkgs.mkShell { packages = [ pkgs.nodejs ]; };
-
-          # Rust is only an oracle for the optional Horn differential suites.
-          differential = pkgs.mkShell {
-            inputsFrom = [ self.devShells.${pkgs.stdenv.hostPlatform.system}.default ];
-            packages = [ pkgs.rustc pkgs.cargo ];
-            JIHOO_LLVM = "${llvm.llvm.lib}/lib/libLLVM-21.so";
-            JIHOO_LD = "${llvm.lld}/bin/ld.lld";
-          };
         });
     };
 }

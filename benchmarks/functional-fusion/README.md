@@ -1,20 +1,16 @@
-# Functional composition and fusion experiment
+# Functional composition and fusion benchmark
 
-This experiment asks whether jihoo can express a `map` → `filter` → `fold`
+This benchmark asks whether jihoo can express a `map` → `filter` → `fold`
 pipeline over runtime data and remove the functional abstraction at compile
 time. The initial run used the existing compiler without language or library
-changes. The experiment now also exercises the public `std.iter` API and
-the updated closure lowerer. Neither version depends on Horn.
+changes; it now also exercises the public `std.iter` API and the updated
+closure lowerer.
 
-## Next work and destination
-
-The public iterator API and closure fixes are already integrated. The first
-[roadmap milestone](../../docs/internals/roadmap.md#1-bring-the-existing-experiments-into-supported-use)
-now includes deterministic correctness, allocation and IR checks in CI,
-separate from timing. Additional workloads cover `take`, `zip` and streaming
-parsers. The remaining migration moves the maintained harness to `benchmarks/`,
-keeping semantic regressions in `tests/` and preserving the recorded
-measurements and their provenance.
+CI runs its deterministic correctness, allocation and IR checks
+(`--check-only`) on both targets, separately from timing. Semantic
+regressions for iterators and compile-time closure captures live in
+`tests/run`. The sections below record the measurements that shaped the
+iterator API, with their compiler and host provenance.
 
 ## Implementations
 
@@ -44,7 +40,7 @@ and a nonzero initial accumulator.
 From the repository root, with a current self-hosted compiler in `out/jihoo`:
 
 ```sh
-nix develop --command python3 experiments/functional-fusion/run.py --iterations 128
+nix develop --command python3 benchmarks/functional-fusion/run.py --iterations 128
 ```
 
 For a performance regression check on an otherwise idle host, add
@@ -53,7 +49,7 @@ For a performance regression check on an otherwise idle host, add
 For deterministic CI checks without timing samples or thresholds:
 
 ```sh
-nix develop --command python3 experiments/functional-fusion/run.py --check-only
+nix develop --command python3 benchmarks/functional-fusion/run.py --check-only
 ```
 
 This mode still runs every correctness configuration, checks allocation
@@ -135,7 +131,7 @@ After committing the feature as `cdaed59`, we repeated the original protocol
 ten times and then measured ten longer sessions on guest logical CPU 2:
 
 ```sh
-nix develop --command python3 experiments/functional-fusion/repeat.py --cpu 2
+nix develop --command python3 benchmarks/functional-fusion/repeat.py --cpu 2
 ```
 
 Both phases use 1,000,000 input elements. The original protocol uses seven
@@ -199,7 +195,7 @@ calls it, the original compiler reported `` `transform` is not a function ``.
 The updated compiler accepts the isolated reproducer and prints 42:
 
 ```sh
-out/jihoo run experiments/functional-fusion/comptime_capture.jh
+out/jihoo run benchmarks/functional-fusion/comptime_capture.jh
 ```
 
 The lowerer now preserves the function identity through immutable aliases

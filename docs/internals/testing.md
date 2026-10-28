@@ -21,7 +21,7 @@ Run them from the checkout, in the dev shell (`nix develop`), where
 the runner. Its suites:
 
 - **format**: `tests/format.py` formats the compiler, standard library,
-  examples, tests and experiments into a temporary tree. It checks exact
+  examples, tests and benchmarks into a temporary tree. It checks exact
   comment bytes, syntax trees with positions removed, idempotence, golden
   output, `fmt --check` and rejection of invalid syntax. Emitted LLVM IR must
   agree before and after formatting on both targets for the compiler, runtime
@@ -122,60 +122,30 @@ differences need repeated measurements.
 ## Functional pipelines
 
 ```sh
-python3 experiments/functional-fusion/run.py --compiler out/jihoo --iterations 128
+python3 benchmarks/functional-fusion/run.py --compiler out/jihoo --iterations 128
 ```
 
 This compares ordinary higher-order functions, comptime producers, the
 public iterator API, eager vectors, a handwritten jihoo loop, and C. It
 checks randomized results at O0/O2 with checked/wrapping arithmetic, records
 allocations and optimized IR, and measures interleaved runtimes. See the
-[experiment](../../experiments/functional-fusion/README.md) for the method,
+[benchmark](../../benchmarks/functional-fusion/README.md) for the method,
 recorded results, and the filter/fold fusion optimization. The program
-suite additionally checks callback order, ownership and compile-time use.
+suite additionally checks callback order, trap order, ownership,
+streaming parsers using `take` and `zip`, and compile-time use.
 
-## Experiment regressions
-
-```sh
-nix develop --command python3 scripts/check-experiments.py --compiler out/jihoo
-```
-
-This runs local ground and schematic acceptance/rejection cases, compile-time
-negative cases, the exhaustive codec table oracle, and fusion correctness,
-allocation and optimized-IR checks. It also runs the iterator and compile-time
-closure tests through the ordinary runner, including trap order and streaming
-parsers using `take` and `zip`. It requires the current compiler, Python and
-LLVM tools from the development shell; Horn and Rust are unnecessary.
-CI runs this command with the packaged compiler on x86_64 and aarch64 Linux.
-It collects no runtime timing samples and applies no timing thresholds.
-
-The combined report is `out/experiments/report.json`; each suite retains its
-own report, generated sources and failing inputs under `out/`. Reports record
-the selected compiler and its SHA-256. Inputs without an independent expected
-verdict, such as randomized certificate mutations, require differential
-validation rather than being assigned an assumed rejection:
-
-```sh
-nix develop .#differential --command python3 scripts/check-experiments.py --compiler out/jihoo --horn ../horn --horn-revision 18caf6d39088e1569beff678bc4461a28b8d2827
-```
-
-The differential shell adds Rust and Cargo. The scripts require the selected
-Horn commit and unmodified reference sources, compare successful reports as
-well as acceptance, and record the reference revision. The optional
-`horn_differential` input of the Test workflow runs this job with the pinned
-checkout. Ordinary push and pull-request checks remain independent of Horn.
+`--check-only` runs the correctness, allocation and optimized-IR checks
+without timing samples or thresholds. CI runs it with the packaged compiler
+on x86_64 and aarch64 Linux and keeps `out/functional-fusion/results`.
 
 ## Compile-time resource measurements
 
 ```sh
 python3 tests/comptime_report.py --compiler out/jihoo
-python3 experimental/verified-codec/scale.py --compiler out/jihoo
 ```
 
 The check suite validates the report schema and source spans, accounting
 totals, unchanged LLVM IR, and step/memory/depth and invalid-memory failures.
-The scaling command compares certificate and exhaustive codec construction at
-4, 16, 64 and 256 variants, recording frontend checking and full build time,
-peak compiler process RSS and separate proof-production/checking costs.
-Its single timing observations have no performance thresholds. See the
-[codec experiment](../../experimental/verified-codec/README.md#scaling-measurements)
-for current limits and the reproduction protocol.
+The [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs) repository
+uses these reports to measure its checked codec construction at 4 to 256
+variants.

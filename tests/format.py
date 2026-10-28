@@ -65,7 +65,7 @@ def main():
     args = parser.parse_args()
     compiler = args.compiler.resolve()
     files = []
-    for directory in ["compiler", "lib", "examples", "tests", "experimental", "experiments", "benchmarks"]:
+    for directory in ["compiler", "lib", "examples", "tests", "benchmarks"]:
         files.extend((path, path.relative_to(ROOT)) for path in sorted((ROOT / directory).rglob("*.jh")))
     if args.external:
         project = args.external.resolve()

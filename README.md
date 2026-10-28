@@ -94,10 +94,7 @@ jihoo run tests/runner.jh                    # the tests
 | `lib/std` | the standard library, in jihoo |
 | `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
-| `experiments/functional-fusion` | iterator fusion correctness, allocation and performance measurements; planned migration to `benchmarks/` |
-| `experimental/kernel` | an experimental jihoo port of Horn's certificate checker, with a compile-time example |
-| `experimental/proofs` | general theorems by structural induction and derivation reuse, checked at compile time |
-| `experimental/verified-codec` | generated enum codecs with compile-time certificates bound to the executable tables |
+| `benchmarks` | backend and iterator fusion benchmarks, with recorded measurements |
 | `docs` | the documentation, one Markdown file per page |
 | `site` | the website ([site/README.md](site/README.md)) |
 
@@ -128,11 +125,10 @@ External calls remain unavailable during evaluation.
 records evaluator steps, cumulative allocations and per-function costs;
 failures report resource use and the originating compile-time obligation.
 
-An experimental [proof development library](experimental/proofs/README.md)
-checks general Horn statements by structural induction and reuses derivations
-at compile time. A separate [generated codec experiment](experimental/verified-codec/README.md)
-connects ground certificates to executable enum lookup tables through a small
-trusted adapter. General source-level contracts remain open.
+Proof checking at compile time (a Horn certificate kernel, general theorems
+by induction, and enum codecs bound to checked tables) is developed in the
+separate [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs)
+repository. General source-level contracts remain open.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
@@ -194,12 +190,5 @@ Long argument, parameter and field lists wrap at a soft width of 100 byte
 columns; `--width N` adjusts it. `--check` checks its layout without printing
 formatted source. The output is reparsed and must retain the same syntax tree.
 
-Next ([roadmap](docs/internals/roadmap.md)): bring the existing fusion,
-kernel, proof and codec experiments into supported use first. Deterministic
-regressions now run together with `scripts/check-experiments.py` and in CI,
-without Horn or Rust. The four-variant certificate codec now passes within
-the original evaluator limits; an explicit exhaustive-checking API covers
-16, 64 and 256 variants. Next add stable wire tags, connect
-general proofs to a bounded executable state-transition model, and migrate
-reusable code into libraries, examples, tests and benchmarks. Language server
-integration and further application-driven library work follow this milestone.
+Next ([roadmap](docs/internals/roadmap.md)): a language server built on the
+compiler's checking and diagnostics, then application-driven library work.
