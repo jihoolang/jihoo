@@ -80,6 +80,7 @@ nix build                                    # ./result/bin/jihoo
 nix develop                                  # `jihoo` is the seed
 jihoo build -O2 compiler/main.jh -o out/jihoo
 out/jihoo run examples/hello.jh
+out/jihoo check examples/hello.jh              # no code generation or linking
 out/jihoo emit-mir examples/hello.jh
 jihoo run tests/runner.jh                    # the tests
 ```
@@ -177,4 +178,11 @@ up to v0.1.1.
 Errors come several per run, in source order, with notes on where a
 moved value went and where a conflicting borrow started.
 
-Next ([roadmap](docs/internals/roadmap.md)): contracts and formatting options.
+[`jihoo check`](docs/reference/command-line.md#checking-without-code-generation)
+checks types, moves, borrows and compile-time obligations without generating
+code or requiring LLVM or a linker. `--lib` checks modules without `main`.
+
+Next ([roadmap](docs/internals/roadmap.md)): structured diagnostics and editor
+tools, application-driven library work, reproducible safety and performance
+baselines, observable compile-time execution, and practical checked code
+generation.

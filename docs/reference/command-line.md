@@ -1,6 +1,7 @@
 # Command line
 
 ```text
+jihoo check <file.jh> [--lib]                check without generating code
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo emit-mir <file.jh>                      print the compiler's MIR
@@ -31,10 +32,37 @@ once the program has none.
 | `-I <dir>` | also look for modules in `<dir>` |
 | `-o <file>` | the output |
 | `--keep-ll` | keep the LLVM IR next to the output |
-| `--lib` | emit a library without an entry point, using `emit-obj` or `emit-llvm` |
+| `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
+
+## Checking without code generation
+
+```sh
+jihoo check app.jh
+jihoo check -I src src/main.jh --target aarch64
+jihoo check --lib src/parser.jh
+```
+
+`check` loads the root module and its imports, checks types, evaluates
+compile-time expressions, elaborates moves and drops, and checks borrowing.
+As with a build, non-generic functions are checked even when unused;
+generic bodies are checked for the instances the program requests.
+By default the root module must have a `main`; `--lib` removes that requirement.
+
+A successful check exits with status 0 and writes nothing. Source errors
+exit with status 1 and use the same diagnostics as compilation. Invalid
+command options exit with status 2. `check` rejects `-o`, `--keep-ll`, link
+inputs and program arguments because it produces no output file and does
+not run the program.
+
+Checking does not emit LLVM IR, load libLLVM, or invoke a C compiler or
+linker. External function declarations need no linked implementation for
+checking. Compile-time obligations still execute and may fail or reach the
+interpreter's limits. Checking does not establish that backend code
+generation or linking will succeed. `JIHOO_NO_ELAB`, the debug switch for
+unelaborated MIR dumps, never disables move or borrow checking in this mode.
 
 ## Environment
 

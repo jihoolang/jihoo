@@ -2,28 +2,129 @@
 
 ## Direction
 
-jihoo is memory-safe without lifetimes, and its generics are compile-time
-parameters. C and C++ have neither guarantee. Rust has safety but needs
-lifetimes and macros. Zig has `comptime` but no safety. Hylo and Mojo share
-the parameter conventions. What jihoo can do that none of them do comes from
-one rule: **every borrow ends inside the function that made it**. The
-roadmap follows from that rule:
+jihoo should make real systems programs easy to develop while retaining
+memory safety without lifetime annotations, a garbage collector or implicit
+reference counting. Compile-time generation with independently checked
+results is the research direction on that foundation.
 
-- **Safe compile-time code instead of macros.** A generic body is checked
-  per instance, so reflection over a type's fields is ordinary code, and
-  the borrow kernel checks what it produces. `derive` is library code.
-- **Concurrency that borrows.** A closure cannot outlive its scope, so a
-  thread started in a scope can borrow the caller's data without `'static`,
-  `Arc` or annotations.
-- **Data-oriented design as the default.** No stored references means data
-  refers to data by index. The compiler is written that way. The standard
-  library should make that style the easy one, with typed indices, arenas,
-  generational handles and struct-of-arrays layouts built by `comptime`.
-- **Errors that fit in one function.** Every borrow error can be explained
-  without leaving the function, and the messages should show it.
+Keep ownership and parameter conventions stable. Borrowing views remain
+tracked by the compiler; long-lived owned data refers to other data by
+typed indices and handles. Improve scoped concurrency, libraries and tools
+within that model before adding more language mechanisms.
 
-Features that weaken the rule, such as references stored in ordinary
-structs, are out of scope.
+Use two complementary applications to guide changes: the self-hosted
+compiler exercises large programs and generic data structures; Banana, the
+sibling `../banana` terminal, exercises C callbacks, graphics resources,
+streaming binary input and PTYs. A need found in an application starts as a
+small reproducer. Fix it in a library when possible, and change the language
+only when the existing model cannot express the required behavior safely.
+
+## Next
+
+This is the development order, with completion criteria rather than release
+dates. Safety and runtime performance checks apply throughout.
+
+### 1. Checking and editor tools
+
+Implemented: [`jihoo check`](../reference/command-line.md#checking-without-code-generation)
+loads imports, checks types, evaluates compile-time obligations, elaborates
+moves and drops, and checks borrows without generating LLVM IR or calling a
+linker. `--lib` checks modules without an entry point. The regression suite
+checks valid programs without LLVM or linkers and compares negative-case
+diagnostics with the existing compiler path.
+
+Next:
+
+- Structured diagnostics containing source ranges, notes and generic-instance
+  context, backed by the same diagnostics as the command line.
+- A source formatter that preserves comments and is idempotent.
+- A small language server that uses the compiler's checking and diagnostic
+  representation, starting with diagnostics and navigation.
+
+Completion: valid checks are silent and create no output files; invalid
+programs retain type, move and borrow diagnostics. Editor diagnostics use the
+same source ranges and notes. Formatting the compiler and library twice
+produces the same source, and formatted programs retain their behavior.
+
+### 2. Application-driven library work
+
+- Add an optional external regression command for a configurable Banana
+  checkout. Check its modules and run its parser, selection and PTY tests
+  against the compiler under development. Keep the compiler's ordinary test
+  suite independent of sibling repositories and graphical drivers.
+- Develop resource and callback wrappers in the application first. State
+  registration lifetime, thread and reentrancy requirements before exposing
+  a safe interface. Extract reusable pieces after their behavior is tested.
+- Extend binary I/O and structured OS errors so partial reads/writes, EOF,
+  interrupted operations and nonblocking readiness are explicit.
+- Add library formatting for several values and formatting options.
+
+Completion: the external regression command works with an explicitly selected
+compiler; core application behavior is tested without a display. Extracted
+wrappers have ownership and cleanup tests. Binary I/O tests cover partial
+operations and error recovery in the profiles that support them.
+
+Unicode shaping, IME integration and terminal conformance are application or
+specialized library work; they do not by themselves require new syntax.
+
+### 3. Safety and performance regression baselines
+
+- Keep negative cases for moves, borrow effects, drops, scoped threads and
+  callback boundaries alongside accepted programs. Continue stage 1/stage 2
+  comparisons and native/freestanding checks on both supported targets.
+- Measure frontend checking and full compilation separately on the compiler,
+  Banana and compile-time generation workloads. Record compiler revision,
+  target, options, elapsed time and peak process memory.
+- Extend the [functional pipeline measurements](../../experiments/functional-fusion/README.md)
+  to representative compositions and parser workloads. Inspect optimized IR
+  and allocations as well as runtime; preserve callback, trap and drop order.
+
+Completion: changes can be compared with a recorded baseline using a
+reproducible command. Structural and correctness checks run in CI; timing
+comparisons run on a controlled host with repeated samples. Self-hosting
+agreement is a regression check, not a proof of memory safety.
+
+### 4. Observable compile-time execution
+
+- Report interpreter steps, allocation consumption and call context for each
+  compile-time obligation, especially when it reaches a limit.
+- Distinguish the user obligation from the library operation at which the
+  limit was reached. Measure proof production and checking separately.
+- Profile the existing unary encoding, string serialization and repeated
+  parsing before changing representations. Preserve pointer provenance,
+  lifetime validation and deterministic constant persistence.
+- Consider explicit budget controls after reporting explains what each
+  budget measures. Raising a limit alone is not a scalability improvement.
+
+Completion: the current four-variant codec limit is a reproducible regression
+case with an understandable source context and resource report. Each
+optimization records its effect on larger inputs and keeps all invalid-memory
+and execution-limit cases rejected.
+
+### 5. Practical checked code generation
+
+Build on the [generated codec experiment](../../experimental/verified-codec/README.md):
+
+- Compare exhaustive compile-time checking with certificates for finite
+  tables. Use a proof system when the benefit warrants its cost.
+- Scale enum codecs to tens and then hundreds of variants, recording compile
+  time and resource use. Add explicit stable wire tags rather than deriving
+  protocol compatibility from enum declaration order.
+- Try a second bounded executable representation, such as a protocol
+  dispatch or state-transition table. The checker chooses the theory and
+  goals from the actual generated representation; the generator supplies
+  candidates and evidence.
+
+Completion: invalid, stale and unrelated evidence is rejected; safe callers
+cannot mutate checked data; runtime operations use exactly that data; and
+checking code disappears from optimized runtime code. Document the trusted
+adapter and the correspondence between its model and execution.
+
+Keep the [general theorem library](../../experimental/proofs/README.md) as a
+separate research track. Proof-domain induction does not establish properties
+of arbitrary jihoo functions or fixed-width machine arithmetic. General
+source contracts need semantics and obligations derived from actual functions
+before they receive language syntax.
 
 ## 0.1: the rewrite
 
@@ -83,9 +184,9 @@ Since 0.1:
   `std.iter`, with generic callback result inference and capture and
   forwarding of statically known closures.
 
-## Next
+## Completed milestones
 
-Each step builds on the ones before it.
+These capabilities are available already; they are not the next work queue.
 
 ### 1. Reflection, and `derive` in the library
 
@@ -106,8 +207,7 @@ are left:
   attribute to the library code. Privacy holds: reflection reads or builds
   another module's private fields only in the derived code of a type that
   asked for it.
-- Then: `Default` (once a field's type can be named at compile time),
-  derived bounds on generic types, and user-written derives.
+- `Default` uses `field_type` to name field types at compile time.
 
 ### 2. Concurrency that borrows
 
@@ -148,7 +248,7 @@ uses that made it.
 - Notes that show where a moved value went and where a borrow started.
 - More than one error per run.
 
-### Later
+## Research boundaries and deferred features
 
 - **Theorem-proving research**: `experimental/proofs` defines a proof-domain
   addition relation, checks a general theorem by structural induction, and
@@ -166,6 +266,12 @@ uses that made it.
   a jihoo port of Horn's ground certificate checker and a compile-time
   certificate example. Translating jihoo semantics and contracts into
   trusted theories and caller-selected goals remains a separate design.
-- **Formatting**: `print` with several values, and formatting options.
+- **Generic derives**: inferred derived bounds on generic types and
+  user-written derives, when concrete library users need them.
+- **Dynamic dispatch extensions**: traits with parameters, methods returning
+  borrows, and borrowed trait objects without allocation.
+- **Project tooling**: use the existing Nix setup while collecting concrete
+  requirements for project manifests, dependency management and caching.
+  A package registry is not an immediate milestone.
 - **Tail calls** that never grow the stack.
 - **Macros**, if reflection turns out not to cover what they would do.

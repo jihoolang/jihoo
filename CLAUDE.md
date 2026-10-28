@@ -34,6 +34,7 @@ compiler of the latest GitHub release). There is no Rust. Work inside
 ```sh
 jihoo build -O2 compiler/main.jh -o out/jihoo    # the current compiler, built by the seed
 out/jihoo run examples/hello.jh                  # compile + run
+out/jihoo check examples/hello.jh                # check without code generation
 out/jihoo run examples/calc.jh -- a b            # args after --
 out/jihoo build examples/freestanding.jh -o out/hello
 out/jihoo emit-mir examples/hello.jh             # the compiler's MIR
@@ -52,7 +53,7 @@ the previous pipeline for comparison. `import` searches the importing file's dir
 
 ```sh
 jihoo run tests/runner.jh                          # everything (tests compiler/ built by the seed)
-jihoo run tests/runner.jh -- run fail              # suites: run fail examples backend selfhost
+jihoo run tests/runner.jh -- check fail            # suites: check run fail examples backend selfhost
 JIHOO_TEST=maps jihoo run tests/runner.jh          # those whose path contains `maps`
 JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh # with a compiler already built
 nix flake check                                    # everything CI runs

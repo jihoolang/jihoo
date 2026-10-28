@@ -3,6 +3,7 @@
 ```sh
 jihoo run tests/runner.jh                       # everything
 jihoo run tests/runner.jh -- run fail           # some suites
+jihoo run tests/runner.jh -- check fail         # checking and diagnostics
 JIHOO_TEST=maps jihoo run tests/runner.jh       # the files whose path has `maps`
 JIHOO_TEST_OPT=-O0 jihoo run tests/runner.jh -- run
 JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh  # with this compiler
@@ -23,8 +24,14 @@ the runner. Its suites:
   `// exit: N` the exit status (default 0; a trap is 132), `// args: a b`
   the program's arguments, and `// link: tests/ffi/native.c` adds link
   inputs relative to the checkout.
+- **check**: every file in `tests/run/` and `examples/` passes `jihoo check`
+  with LLVM, C compiler, linker and backend settings pointing to unavailable
+  tools. Success is silent. Additional cases cover both targets, modules
+  without `main`, unresolved externals, rejected output/link/run options,
+  and absence of generated files.
 - **fail**: every file in `tests/fail/` must not compile, and each
-  `// error: text` must appear in the error message.
+  `// error: text` must appear in the error message. `check` must return the
+  same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

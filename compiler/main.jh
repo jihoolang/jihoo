@@ -26,7 +26,7 @@ import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output"
+const USAGE = "usage:\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -68,6 +68,7 @@ fn drive() {
             }
             break
         } else if a == "-o" {
+            if cmd == "check" { fail("error: check does not accept output options", 2) }
             i += 1
             if i < args.len() {
                 out = Some(args[i])
@@ -113,6 +114,9 @@ fn drive() {
         Some(f) => f
         None => fail("error: no source file\n\n" + USAGE, 2)
     }
+    if cmd == "check" && (keep_ll || link.len() > 0 || prog_args.len() > 0) {
+        fail("error: check does not accept output options, link inputs or program arguments", 2)
+    }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
         emit_syntax(file, cmd == "emit-ast")
         return
@@ -138,7 +142,9 @@ fn drive() {
         Ok(p) => p
         Err(d) => fail(sources.render(d).as_str(), 1)
     }
-    if env.get("JIHOO_NO_ELAB").is_none() {
+    // A check must always validate moves and borrows, even when the debug
+    // switch for dumping unelaborated MIR is set in the environment.
+    if cmd == "check" || env.get("JIHOO_NO_ELAB").is_none() {
         // Every function is checked; their errors are reported together.
         var errors = Vec(diag.Diag).new()
         var initialized = Vec(bool).new()
@@ -165,7 +171,9 @@ fn drive() {
             fail(sources.render(diag.Diag.several(errors)).as_str(), 1)
         }
     }
-    if cmd == "emit-mir" {
+    if cmd == "check" {
+        return
+    } else if cmd == "emit-mir" {
         var text = String.new()
         for f in prog.fns {
             text.push_str(mir.show_function(prog, f).as_str())
