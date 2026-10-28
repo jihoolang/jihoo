@@ -6,6 +6,16 @@ time. The initial run used the existing compiler without language or library
 changes. The experiment now also exercises the public `std.iter` API and
 the updated closure lowerer. Neither version depends on Horn.
 
+## Next work and destination
+
+The public iterator API and closure fixes are already integrated. The first
+[roadmap milestone](../../docs/internals/roadmap.md#1-bring-the-existing-experiments-into-supported-use)
+now schedules the remaining work: separate deterministic correctness,
+allocation and IR checks from timing; run those checks in CI; and extend
+coverage to `take`, `zip` and streaming parsers. Then move the maintained
+harness to `benchmarks/`, keeping semantic regressions in `tests/` and
+preserving the recorded measurements and their provenance.
+
 ## Implementations
 
 `stream.jh` implements push streams: a producer is a function taking a

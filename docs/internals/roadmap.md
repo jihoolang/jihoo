@@ -5,7 +5,7 @@
 jihoo should make real systems programs easy to develop while retaining
 memory safety without lifetime annotations, a garbage collector or implicit
 reference counting. Compile-time generation with independently checked
-results is the research direction on that foundation.
+results is the next implementation priority on that foundation.
 
 Keep ownership and parameter conventions stable. Borrowing views remain
 tracked by the compiler; long-lived owned data refers to other data by
@@ -24,7 +24,110 @@ only when the existing model cannot express the required behavior safely.
 This is the development order, with completion criteria rather than release
 dates. Safety and runtime performance checks apply throughout.
 
-### 1. Checking and editor tools
+### 1. Bring the existing experiments into supported use
+
+Finish the work exposed by `experiments/functional-fusion` and `experimental/`
+before starting the language server or unrelated library expansion. These
+are the next implementation inputs, not an indefinite research backlog.
+Moving directories or adding another demonstration does not complete this
+milestone: reusable code needs a supported home, regression coverage and a
+caller outside its original experiment.
+
+| Current directory | Intended outcome | Work required before migration |
+| --- | --- | --- |
+| [Functional fusion](../../experiments/functional-fusion/README.md) | A maintained benchmark under `benchmarks/`; compiler and `std.iter` regressions under `tests/` | Separate deterministic CI checks from timing and cover representative compositions |
+| [Ground kernel](../../experimental/kernel/README.md) | An importable checking library under `lib/`, with a CLI example | Stabilize the API and trust boundary, and make rejection tests independent of a sibling checkout |
+| [General proofs](../../experimental/proofs/README.md) | A proof-development library under `lib/`, with executable consumers | Exercise induction and derivation reuse beyond natural-number demonstrations and connect one bounded executable model |
+| [Verified codec](../../experimental/verified-codec/README.md) | A checked-generation library under `lib/`, with an example under `examples/` | Remove the four-variant bottleneck, define stable tags and retain evidence-to-table binding |
+
+Work through the following steps in order. Existing safety fixes and
+regression maintenance continue throughout.
+
+#### A. Establish regression coverage for the existing implementations
+
+- Add a repository-level command selecting the compiler and running the
+  deterministic fusion, ground-checker, schematic-checker and codec suites.
+  Keep valid and invalid cases in ordinary CI on both supported targets.
+  The current proof/codec CI step runs only the two positive examples.
+- Separate local ground and schematic rejection cases from differential
+  validation against Horn. Local CI must not require `../horn`; the
+  differential job must select and record its reference revision explicitly.
+- Retain the recorded fusion measurements. Keep callback, trap, drop and
+  short-circuit order tests, and add compositions using `take`, `zip` and a
+  streaming parser workload. Inspect allocations and optimized IR for the
+  cases expected to fuse. Timing thresholds belong on a controlled host.
+
+Completion: one documented command runs local acceptance, rejection and
+fusion structure checks without sibling repositories or timing thresholds;
+CI invokes it. The existing `std.iter` implementation and closure fixes are
+already integrated and must not be counted as new work.
+
+#### B. Resolve the compile-time codec bottleneck
+
+- Preserve the four-variant reverse codec as the first scalability
+  reproducer. Report interpreter steps, allocation consumption and call
+  context, distinguishing certificate production from checking.
+- Profile unary terms, serialization and repeated parsing; optimize the
+  measured costs while preserving pointer provenance, lifetime validation,
+  deterministic constant persistence and rejection of invalid memory.
+- Make four variants succeed, then measure 16, 64 and 256 variants. Record
+  checking time, full compile time, peak process memory and evaluator usage
+  for each size. Raising the evaluator limit alone does not complete this
+  work; any remaining limit needs a measured cause and a follow-up fix.
+- Compare exhaustive compile-time table checking with the certificate path.
+  Use the simpler path for the finite codec if measurements justify it, and
+  retain the certificate path as a tested consumer of the ground kernel.
+- Add explicit stable wire tags and tests for declaration reordering,
+  duplicate tags and unknown tags. Preserve immutable checked tables and
+  rejection of invalid, stale or unrelated evidence.
+
+Completion: the four-variant reproducer and the 16/64/256-variant cases pass
+with recorded resource use. Runtime operations use exactly the checked data,
+and optimized runtime code contains no proof producer or checker. Both
+checking paths agree on the existing exhaustive small-table corpus.
+
+#### C. Give the proof libraries an executable consumer
+
+- Use a finite state-transition table as the second checked representation.
+  Generate its theory and caller-selected goals from the exact immutable
+  table used at runtime. Test a safety invariant for every reachable state
+  using the schematic checker's induction and derivation reuse.
+- State the correspondence between runtime transitions and proof-domain
+  steps, including bounds and integer behavior. A theorem about constructor
+  trees alone does not establish a property of a jihoo function.
+- Reject changed transitions with stale evidence, missing reachable cases,
+  invalid induction assumptions and evidence for another table. Measure
+  proof construction and checking separately, and keep the runtime adapter
+  and all additional trust assumptions explicit.
+
+Completion: a consumer beyond the natural-number example uses the general
+proof API, and mutations of the executable representation invalidate its
+proof. The executable model and its limits are documented and tested. This
+is the concrete next step toward contracts; general source syntax requires
+obligations derived from actual function semantics.
+
+#### D. Migrate the supported pieces and close the experiments
+
+- Move the reusable checking, proof-development and codec modules into
+  `lib/`, with documented imports and separate ground/schematic trust
+  boundaries. Update examples, test commands, CI and all importing modules
+  together; normal use must not depend on `-I experimental/...`.
+- Move the fusion harness and reproduction scripts into `benchmarks/`,
+  preserving raw measurements and their compiler/host provenance. Keep
+  semantic regressions in `tests/` and reference the benchmark from the
+  performance documentation.
+- Leave only historical results or explicitly identified unsupported
+  prototypes in the experimental directories. Give each retained prototype
+  a concrete unresolved issue and a next reproducer; remove superseded code
+  only after its behavior and tests have a maintained replacement.
+
+Completion: documented library examples work with the packaged compiler
+outside this checkout; CI covers the supported APIs on x86_64 and aarch64.
+Every current experiment has either migrated with its checks or has a
+specific recorded reason and next action for what remains. A directory
+rename alone is not completion.
+
+### 2. Checking and editor tools
 
 Implemented: [`jihoo check`](../reference/command-line.md#checking-without-code-generation)
 loads imports, checks types, evaluates compile-time obligations, elaborates
@@ -63,7 +166,7 @@ programs retain type, move and borrow diagnostics. Editor diagnostics use the
 same source ranges and notes. Formatting the compiler and library twice
 produces the same source, and formatted programs retain their behavior.
 
-### 2. Application-driven library work
+### 3. Application-driven library work
 
 - Add an optional external regression command for a configurable Banana
   checkout. Check its modules and run its parser, selection and PTY tests
@@ -84,7 +187,7 @@ operations and error recovery in the profiles that support them.
 Unicode shaping, IME integration and terminal conformance are application or
 specialized library work; they do not by themselves require new syntax.
 
-### 3. Safety and performance regression baselines
+### 4. Safety and performance regression baselines
 
 - Keep negative cases for moves, borrow effects, drops, scoped threads and
   callback boundaries alongside accepted programs. Continue stage 1/stage 2
@@ -92,56 +195,13 @@ specialized library work; they do not by themselves require new syntax.
 - Measure frontend checking and full compilation separately on the compiler,
   Banana and compile-time generation workloads. Record compiler revision,
   target, options, elapsed time and peak process memory.
-- Extend the [functional pipeline measurements](../../experiments/functional-fusion/README.md)
-  to representative compositions and parser workloads. Inspect optimized IR
-  and allocations as well as runtime; preserve callback, trap and drop order.
+- Maintain the fusion and checked-generation baselines established in
+  milestone 1 as compiler and library implementations change.
 
 Completion: changes can be compared with a recorded baseline using a
 reproducible command. Structural and correctness checks run in CI; timing
 comparisons run on a controlled host with repeated samples. Self-hosting
 agreement is a regression check, not a proof of memory safety.
-
-### 4. Observable compile-time execution
-
-- Report interpreter steps, allocation consumption and call context for each
-  compile-time obligation, especially when it reaches a limit.
-- Distinguish the user obligation from the library operation at which the
-  limit was reached. Measure proof production and checking separately.
-- Profile the existing unary encoding, string serialization and repeated
-  parsing before changing representations. Preserve pointer provenance,
-  lifetime validation and deterministic constant persistence.
-- Consider explicit budget controls after reporting explains what each
-  budget measures. Raising a limit alone is not a scalability improvement.
-
-Completion: the current four-variant codec limit is a reproducible regression
-case with an understandable source context and resource report. Each
-optimization records its effect on larger inputs and keeps all invalid-memory
-and execution-limit cases rejected.
-
-### 5. Practical checked code generation
-
-Build on the [generated codec experiment](../../experimental/verified-codec/README.md):
-
-- Compare exhaustive compile-time checking with certificates for finite
-  tables. Use a proof system when the benefit warrants its cost.
-- Scale enum codecs to tens and then hundreds of variants, recording compile
-  time and resource use. Add explicit stable wire tags rather than deriving
-  protocol compatibility from enum declaration order.
-- Try a second bounded executable representation, such as a protocol
-  dispatch or state-transition table. The checker chooses the theory and
-  goals from the actual generated representation; the generator supplies
-  candidates and evidence.
-
-Completion: invalid, stale and unrelated evidence is rejected; safe callers
-cannot mutate checked data; runtime operations use exactly that data; and
-checking code disappears from optimized runtime code. Document the trusted
-adapter and the correspondence between its model and execution.
-
-Keep the [general theorem library](../../experimental/proofs/README.md) as a
-separate research track. Proof-domain induction does not establish properties
-of arbitrary jihoo functions or fixed-width machine arithmetic. General
-source contracts need semantics and obligations derived from actual functions
-before they receive language syntax.
 
 ## 0.1: the rewrite
 
@@ -265,24 +325,28 @@ uses that made it.
 - Notes that show where a moved value went and where a borrow started.
 - More than one error per run.
 
-## Research boundaries and deferred features
+## Verification boundaries and deferred features
 
-- **Theorem-proving research**: `experimental/proofs` defines a proof-domain
+- **General proof boundary**: `experimental/proofs` defines a proof-domain
   addition relation, checks a general theorem by structural induction, and
   reuses its derivation in a second theorem during compile-time evaluation.
   Its restricted schematic checker adds a trust obligation beyond the ground
   checker. Connecting proof-domain definitions to ordinary jihoo functions
-  remains open; this experiment adds no language syntax or runtime semantics.
-- **Checked metaprogramming research**: `experimental/verified-codec` reflects
+  starts with the bounded executable model in milestone 1C; arbitrary function
+  contracts still need a semantics. The current experiment adds no language
+  syntax or runtime semantics.
+- **Checked generation boundary**: `experimental/verified-codec` reflects
   payload-free enums, generates encoding/decoding tables, and checks ground
   round-trip certificates against those exact tables at compile time. A small
   trusted adapter executes the frozen tables. It does not verify arbitrary
-  generated function bodies; the unary proof encoding currently limits scale.
+  generated function bodies. Milestone 1B addresses the current unary encoding
+  bottleneck before promotion to a supported library.
 - **Contracts** (which v0 had), checked by the kernel and the
   compile-time interpreter where possible. `experimental/kernel` contains
   a jihoo port of Horn's ground certificate checker and a compile-time
   certificate example. Translating jihoo semantics and contracts into
-  trusted theories and caller-selected goals remains a separate design.
+  trusted theories and caller-selected goals needs an explicit semantics.
+  Milestone 1C delivers a bounded executable model before general syntax.
 - **Generic derives**: inferred derived bounds on generic types and
   user-written derives, when concrete library users need them.
 - **Dynamic dispatch extensions**: traits with parameters, methods returning

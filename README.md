@@ -94,6 +94,7 @@ jihoo run tests/runner.jh                    # the tests
 | `lib/std` | the standard library, in jihoo |
 | `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
+| `experiments/functional-fusion` | iterator fusion correctness, allocation and performance measurements; planned migration to `benchmarks/` |
 | `experimental/kernel` | an experimental jihoo port of Horn's certificate checker, with a compile-time example |
 | `experimental/proofs` | general theorems by structural induction and derivation reuse, checked at compile time |
 | `experimental/verified-codec` | generated enum codecs with compile-time certificates bound to the executable tables |
@@ -190,7 +191,9 @@ Long argument, parameter and field lists wrap at a soft width of 100 byte
 columns; `--width N` adjusts it. `--check` checks its layout without printing
 formatted source. The output is reparsed and must retain the same syntax tree.
 
-Next ([roadmap](docs/internals/roadmap.md)): language server integration,
-application-driven library work, reproducible safety and performance
-baselines, observable compile-time execution, and practical checked code
-generation.
+Next ([roadmap](docs/internals/roadmap.md)): bring the existing fusion,
+kernel, proof and codec experiments into supported use first. Add deterministic
+CI coverage, resolve the four-variant compile-time codec bottleneck, connect
+general proofs to a bounded executable state-transition model, and migrate
+reusable code into libraries, examples, tests and benchmarks. Language server
+integration and further application-driven library work follow this milestone.
