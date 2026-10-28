@@ -28,7 +28,11 @@ import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
+// The release this compiler belongs to; flake.nix checks that it matches
+// the package version.
+const VERSION = "0.2.0"
+
+const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -48,6 +52,14 @@ fn drive() {
         fail(USAGE, 2)
     }
     let cmd = args[1]
+    if cmd == "--version" || cmd == "-V" {
+        println("jihoo " + VERSION)
+        return
+    }
+    if cmd == "--help" || cmd == "-h" {
+        println(USAGE)
+        return
+    }
     var file: Option(str) = None
     var out: Option(str) = None
     var opt = "-O2"

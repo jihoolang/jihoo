@@ -9,7 +9,7 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      version = "0.1.3";
+      version = "0.2.0";
 
       # Only what the compiler needs, so that editing the website (or docs)
       # does not rebuild it.
@@ -112,6 +112,16 @@
               install -Dm755 stage2 $out/bin/jihoo
               ${wrapCompiler llvm}
               runHook postInstall
+            '';
+            # The compiler's VERSION (compiler/main.jh) must be this package's.
+            doInstallCheck = true;
+            installCheckPhase = ''
+              runHook preInstallCheck
+              [ "$($out/bin/jihoo --version)" = "jihoo ${version}" ] || {
+                echo "jihoo --version does not report ${version}" >&2
+                exit 1
+              }
+              runHook postInstallCheck
             '';
             meta = meta // {
               description = "The jihoo compiler and standard library";

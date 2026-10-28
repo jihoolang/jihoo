@@ -11,7 +11,11 @@ jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
 jihoo emit-tokens <file.jh>                   print the tokens of one file
 jihoo emit-ast <file.jh>                      print the syntax tree of one file
 jihoo emit-program <file.jh>                  print every module a program loads
+jihoo --version                               print the compiler's version
 ```
+
+`jihoo --version` (or `-V`) prints `jihoo` and the release the compiler
+belongs to, such as `jihoo 0.2.0`; `jihoo --help` prints the usage.
 
 `emit-tokens` prints one token per line (its byte range, whether a newline
 came before it, the token), and `emit-ast` the syntax tree as

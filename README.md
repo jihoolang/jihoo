@@ -100,9 +100,10 @@ jihoo run tests/runner.jh                    # the tests
 
 ## Status
 
-Version 0.1, a rewrite that broke compatibility with everything before it
-([why](docs/internals/redesign.md)). Native (libc) and freestanding (no
-libc, static) programs for x86_64 and aarch64 Linux.
+Version 0.2: the 0.1 rewrite, which broke compatibility with everything
+before it ([why](docs/internals/redesign.md)), with a self-hosted compiler
+and checking, diagnostic and formatting tools. Native (libc) and
+freestanding (no libc, static) programs for x86_64 and aarch64 Linux.
 
 Done: ownership with moves, destructors and drop flags; borrowing with
 parameter conventions, projections and views, checked by a separate borrow

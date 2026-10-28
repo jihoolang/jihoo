@@ -320,6 +320,23 @@ impl Tests {
         Ok(())
     }
 
+    // `--version` and `--help` as the first argument succeed on stdout.
+    fn version_and_help(self) -> Result((), String) {
+        for flag in ["--version", "-V"] {
+            let o = exec(self.compiler.as_str(), [flag])
+            if status(o) != 0 || !o.stdout.as_str().starts_with("jihoo ") || o.stdout.as_str().trim().len <= 6 {
+                return Err(flag + " does not print the version:\n" + o.stdout.as_str() + o.stderr.as_str())
+            }
+        }
+        for flag in ["--help", "-h"] {
+            let o = exec(self.compiler.as_str(), [flag])
+            if status(o) != 0 || !o.stdout.as_str().contains("usage:") {
+                return Err(flag + " does not print the usage:\n" + o.stderr.as_str())
+            }
+        }
+        Ok(())
+    }
+
     fn json_diagnostics(self) -> Result((), String) {
         let o = exec("python3", ["tests/diagnostics.py", "--compiler", self.compiler.as_str()])
         if !o.status.success() {
@@ -664,6 +681,8 @@ fn main() -> i32 {
         } else if s == "check" {
             let r = t.check_command()
             t.check("check: command, targets and no code generation", r)
+            let r = t.version_and_help()
+            t.check("check: --version and --help", r)
             let r = t.json_diagnostics()
             t.check("check: JSON diagnostics", r)
             t.suite_files("tests/run", "check")

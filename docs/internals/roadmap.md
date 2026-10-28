@@ -138,7 +138,9 @@ Done ([design](redesign.md)):
     n-body), within measurement noise of C compiled by clang at `-O2`, with
     bounds checks on.
 
-Since 0.1:
+## 0.2: self-hosting and tools
+
+Done, in the 0.1.x releases and since 0.1.3:
 
 - **The compiler in jihoo.** Every pass is ported, and the compiler in
   jihoo builds itself (stage 2) and writes the same LLVM IR as the Rust
@@ -161,6 +163,11 @@ Since 0.1:
 - **Functional composition**: lazy iterator adapters and consumers in
   `std.iter`, with generic callback result inference and capture and
   forwarding of statically known closures.
+- **Checking and editor tools**: `jihoo check` without code generation,
+  JSON source diagnostics, `jihoo fmt` with syntax preservation checks
+  (Next, step 1), compile-time resource reports, and `jihoo --version`.
+- **No experiments in the repository**: functional fusion is a benchmark,
+  and the proof work lives in jihoo-proofs (completed milestone 5).
 
 ## Completed milestones
 
