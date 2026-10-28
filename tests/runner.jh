@@ -18,7 +18,8 @@
 // - fail: each program in tests/fail must not compile, and the error must
 //   contain every `// error: text`, with the same diagnostics from check.
 // - check: valid programs pass without LLVM or linkers, produce no files
-//   or runtime output, and check supports modules and both targets.
+//   or runtime output, and check supports modules and both targets. Python
+//   independently parses JSON diagnostics and compares them with text errors.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, cross-compiled objects, link errors and a missing
@@ -314,6 +315,14 @@ impl Tests {
             if before[i] != after[i].as_str() { return Err(String.from("check changed output files")) }
         }
         fs.remove_file(source.as_str())?
+        Ok(())
+    }
+
+    fn json_diagnostics(self) -> Result((), String) {
+        let o = exec("python3", ["tests/diagnostics.py", "--compiler", self.compiler.as_str()])
+        if !o.status.success() {
+            return Err("JSON diagnostic validation failed:\n" + o.stdout.as_str() + o.stderr.as_str())
+        }
         Ok(())
     }
 
@@ -638,6 +647,8 @@ fn main() -> i32 {
         if s == "check" {
             let r = t.check_command()
             t.check("check: command, targets and no code generation", r)
+            let r = t.json_diagnostics()
+            t.check("check: JSON diagnostics", r)
             t.suite_files("tests/run", "check")
             t.suite_files("examples", "check")
         } else if s == "run" {

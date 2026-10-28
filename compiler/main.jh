@@ -26,7 +26,7 @@ import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output"
+const USAGE = "usage:\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -56,6 +56,7 @@ fn drive() {
     var link = Vec(str).new()
     var prog_args = Vec(str).new()
     var keep_ll = false
+    var json_errors = false
     // Without the standard library: for comparing sema between the two
     // compilers on small programs (not in the usage).
     var no_prelude = false
@@ -88,6 +89,10 @@ fn drive() {
                 Some(t) => tgt = t
                 None => fail("error: unknown target; use x86_64 or aarch64", 2)
             }
+        } else if a == "--error-format=json" {
+            json_errors = true
+        } else if a == "--error-format=text" {
+            json_errors = false
         } else if a == "--release" {
             checked = false
         } else if a == "--keep-ll" {
@@ -118,14 +123,14 @@ fn drive() {
         fail("error: check does not accept output options, link inputs or program arguments", 2)
     }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
-        emit_syntax(file, cmd == "emit-ast")
+        emit_syntax(file, cmd == "emit-ast", json_errors)
         return
     }
     var sources = diag.Sources.new()
     if cmd == "emit-program" {
         match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
             Ok(p) => print(astdump.program(p))
-            Err(d) => fail(sources.render(d).as_str(), 1)
+            Err(d) => source_error(sources, d, json_errors)
         }
         return
     }
@@ -133,14 +138,14 @@ fn drive() {
     // with `JIHOO_NO_ELAB` set).
     let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
         Ok(a) => a
-        Err(d) => fail(sources.render(d).as_str(), 1)
+        Err(d) => source_error(sources, d, json_errors)
     }
     if library && (cmd == "build" || cmd == "run") {
         fail("error: use `emit-obj --lib` to build a C-linkable library object", 2)
     }
     var prog = match sema.compile(a, tgt, checked, library) {
         Ok(p) => p
-        Err(d) => fail(sources.render(d).as_str(), 1)
+        Err(d) => source_error(sources, d, json_errors)
     }
     // A check must always validate moves and borrows, even when the debug
     // switch for dumping unelaborated MIR is set in the environment.
@@ -168,7 +173,7 @@ fn drive() {
             }
         }
         if errors.len() > 0 {
-            fail(sources.render(diag.Diag.several(errors)).as_str(), 1)
+            source_error(sources, diag.Diag.several(errors), json_errors)
         }
     }
     if cmd == "check" {
@@ -419,23 +424,34 @@ fn fail(msg: str, code: i32) -> never {
     sys.exit(code)
 }
 
+// Both formats consume the same diagnostic, including its related notes.
+fn source_error(sources: diag.Sources, d: diag.Diag, json_errors: bool) -> never {
+    if json_errors { fail(sources.render_json(d).as_str(), 1) }
+    fail(sources.render(d).as_str(), 1)
+}
+
 // The tokens of one file, one per line: its byte range, whether a newline
 // came before it, and the token; or its syntax tree.
-fn emit_syntax(file: str, ast: bool) {
+fn emit_syntax(file: str, ast: bool, json_errors: bool) {
     var sources = diag.Sources.new()
     let text = match fs.read_file(file) {
         Ok(t) => t
-        Err(_) => fail("error: cannot read " + file, 1)
+        Err(_) => {
+            if json_errors {
+                source_error(sources, diag.Diag.new(diag.Span.new(0, 0, 0), "cannot read " + file), true)
+            }
+            fail("error: cannot read " + file, 1)
+        }
     }
     let id = sources.add(file.to_string(), text)
     let toks = match lex.lex(id, sources.files[id as i64].text.as_str()) {
         Ok(t) => t
-        Err(d) => fail(sources.render(d).as_str(), 1)
+        Err(d) => source_error(sources, d, json_errors)
     }
     if ast {
         match parse.parse_module(id, toks) {
             Ok(m) => print(astdump.module(m))
-            Err(d) => fail(sources.render(d).as_str(), 1)
+            Err(d) => source_error(sources, d, json_errors)
         }
         return
     }

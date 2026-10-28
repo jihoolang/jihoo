@@ -28,7 +28,11 @@ the runner. Its suites:
   with LLVM, C compiler, linker and backend settings pointing to unavailable
   tools. Success is silent. Additional cases cover both targets, modules
   without `main`, unresolved externals, rejected output/link/run options,
-  and absence of generated files.
+  and absence of generated files. `tests/diagnostics.py` uses Python's JSON
+  parser to validate structured errors against the negative corpus and text
+  diagnostics, checking both ends of source ranges, related notes, Unicode,
+  invalid UTF-8, escaping and truncation. Python is supplied by the dev shell
+  and Nix test derivation, not required by the installed compiler.
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message. `check` must return the
   same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.

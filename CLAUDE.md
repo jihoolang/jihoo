@@ -35,6 +35,7 @@ compiler of the latest GitHub release). There is no Rust. Work inside
 jihoo build -O2 compiler/main.jh -o out/jihoo    # the current compiler, built by the seed
 out/jihoo run examples/hello.jh                  # compile + run
 out/jihoo check examples/hello.jh                # check without code generation
+out/jihoo check examples/hello.jh --error-format=json  # source diagnostics for editors
 out/jihoo run examples/calc.jh -- a b            # args after --
 out/jihoo build examples/freestanding.jh -o out/hello
 out/jihoo emit-mir examples/hello.jh             # the compiler's MIR

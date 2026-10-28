@@ -33,6 +33,7 @@ once the program has none.
 | `-o <file>` | the output |
 | `--keep-ll` | keep the LLVM IR next to the output |
 | `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
+| `--error-format=text\|json` | source diagnostic format (default `text`) |
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
@@ -63,6 +64,63 @@ checking. Compile-time obligations still execute and may fail or reach the
 interpreter's limits. Checking does not establish that backend code
 generation or linking will succeed. `JIHOO_NO_ELAB`, the debug switch for
 unelaborated MIR dumps, never disables move or borrow checking in this mode.
+
+## Structured source diagnostics
+
+```sh
+jihoo check app.jh --error-format=json
+jihoo check --lib src/parser.jh --error-format=json
+```
+
+`--error-format=json` writes one JSON document to standard error when a
+source error is reported. Loading, lexing, parsing, type checking,
+compile-time evaluation, move checking and borrow checking use the same
+diagnostic data as the default text format. It works with all compiler
+commands. `--error-format=text` explicitly selects the default; if repeated,
+the last format option before `--` wins.
+
+For example, a module without `main` produces a document with this shape:
+
+```json
+{
+  "version": 1,
+  "diagnostics": [
+    {
+      "severity": "error",
+      "message": "the program has no `main` function",
+      "span": {
+        "file": "input.jh",
+        "start": { "byte": 0, "line": 1, "column": 1 },
+        "end": { "byte": 0, "line": 1, "column": 1 }
+      },
+      "notes": []
+    }
+  ],
+  "error_count": 1,
+  "truncated": false
+}
+```
+
+- `version` identifies this document schema. Each diagnostic has a message,
+  primary span and ordered `notes`. Each note has `message` and `span`;
+  notes include move origins, conflicting borrows and generic-instance context.
+- A span contains the source path as loaded and its start and exclusive end.
+  `byte` is a zero-based byte offset; `line` and `column` are one-based, with
+  columns measured in bytes, matching text diagnostics. Editors using UTF-16
+  positions must convert from the source text. Ranges are clamped to the
+  available source; zero-width ranges are valid. A missing source or an
+  unlocated note has `span: null`.
+- Strings are escaped as JSON, with invalid UTF-8 replaced by U+FFFD. The
+  numeric offsets still refer to the original source bytes.
+- Errors retain text diagnostic order and the limit of 20 displayed errors.
+  `error_count` includes omitted errors; `truncated` says whether any were
+  omitted. Related notes are not counted as separate errors.
+
+Success remains silent in `check` mode, and source errors still exit with
+status 1. Command-line usage errors, backend/linker errors and a running
+program's own standard error remain text; this option formats source
+diagnostics only. Standard output retains the selected command's normal
+output, such as emitted IR or program output.
 
 ## Environment
 

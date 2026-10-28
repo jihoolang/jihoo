@@ -1,0 +1,22 @@
+// load-args: -I compiler
+// Exercise renderer inputs that source programs cannot all produce directly.
+import diag
+
+fn main() {
+    var sources = diag.Sources.new()
+    let file = sources.add("path\"\\\n가\xff.jh".to_string(), "\t가x\r\nsecond\n".to_string())
+    let d = diag.Diag.new(diag.Span.new(file, 1, 10),
+        "quote=\" slash=\\ controls=\0\t\n\r\x1f 가 \xff\xf0\x9f")
+        .note(Some(diag.Span.new(file, 0, 1)), "located note")
+        .note(None, "instance context")
+    println(sources.render_json(d))
+
+    var errors = Vec(diag.Diag).new()
+    for i in 0..23 {
+        errors.push(diag.Diag.new(diag.Span.new(file, i, i + 1), i.to_string()))
+    }
+    println(sources.render_json(diag.Diag.several(errors)))
+
+    println(sources.render_json(diag.Diag.new(diag.Span.new(99, 0, 1), "unknown source")))
+    println(sources.render_json(diag.Diag.new(diag.Span.new(file, 10, 1), "reversed range")))
+}

@@ -154,7 +154,7 @@
           tests = pkgs.stdenv.mkDerivation {
             pname = "jihoo-tests";
             inherit version src;
-            nativeBuildInputs = [ jihoo llvm.clang llvm.lld ];
+            nativeBuildInputs = [ jihoo llvm.clang llvm.lld pkgs.python3 ];
             dontConfigure = true;
             buildPhase = ''
               export JIHOO_PATH=$PWD/lib JIHOO_COMPILER=${jihoo}/bin/jihoo
@@ -188,6 +188,7 @@
               llvm.clang # native linker driver; C source link inputs
               llvm.lld # links freestanding programs
               llvm.llvm # opt, llc, llvm-dis for looking at what the compiler writes
+              pkgs.python3 # independent JSON diagnostic validation and benchmark scripts
             ];
             JIHOO_LLVM = "${llvm.llvm.lib}/lib/libLLVM-21.so";
             JIHOO_LD = "${llvm.lld}/bin/ld.lld";

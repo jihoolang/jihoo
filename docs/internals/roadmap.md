@@ -33,13 +33,19 @@ linker. `--lib` checks modules without an entry point. The regression suite
 checks valid programs without LLVM or linkers and compares negative-case
 diagnostics with the existing compiler path.
 
+Implemented: [`--error-format=json`](../reference/command-line.md#structured-source-diagnostics)
+reports source diagnostics with start/end byte positions, related notes and
+generic-instance context from the same data as text errors. An independent
+JSON parser checks the negative corpus, source locations, escaping and
+truncation. Command-line and backend errors remain text.
+
 Next:
 
-- Structured diagnostics containing source ranges, notes and generic-instance
-  context, backed by the same diagnostics as the command line.
 - A source formatter that preserves comments and is idempotent.
 - A small language server that uses the compiler's checking and diagnostic
   representation, starting with diagnostics and navigation.
+- Structured command-line and backend failures for clients that need a
+  machine-readable result for every unsuccessful invocation.
 
 Completion: valid checks are silent and create no output files; invalid
 programs retain type, move and borrow diagnostics. Editor diagnostics use the

@@ -181,8 +181,10 @@ moved value went and where a conflicting borrow started.
 [`jihoo check`](docs/reference/command-line.md#checking-without-code-generation)
 checks types, moves, borrows and compile-time obligations without generating
 code or requiring LLVM or a linker. `--lib` checks modules without `main`.
+`--error-format=json` reports source errors with byte ranges and related
+notes for editor integration; text remains the default.
 
-Next ([roadmap](docs/internals/roadmap.md)): structured diagnostics and editor
-tools, application-driven library work, reproducible safety and performance
+Next ([roadmap](docs/internals/roadmap.md)): formatting and editor tools,
+application-driven library work, reproducible safety and performance
 baselines, observable compile-time execution, and practical checked code
 generation.
