@@ -4,6 +4,7 @@
 jihoo run tests/runner.jh                       # everything
 jihoo run tests/runner.jh -- run fail           # some suites
 jihoo run tests/runner.jh -- check fail         # checking and diagnostics
+jihoo run tests/runner.jh -- format             # formatting and syntax preservation
 JIHOO_TEST=maps jihoo run tests/runner.jh       # the files whose path has `maps`
 JIHOO_TEST_OPT=-O0 jihoo run tests/runner.jh -- run
 JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh  # with this compiler
@@ -19,6 +20,16 @@ Run them from the checkout, in the dev shell (`nix develop`), where
 `JIHOO_COMPILER`, else `compiler/main.jh` built by the `jihoo` that runs
 the runner. Its suites:
 
+- **format**: `tests/format.py` formats the compiler, standard library,
+  examples, tests and experiments into a temporary tree. It checks exact
+  comment bytes, syntax trees with positions removed, idempotence, golden
+  output, `fmt --check` and rejection of invalid syntax. Emitted LLVM IR must
+  agree before and after formatting on both targets for the compiler, runtime
+  corpus and examples. Profile cases also check that spaces, line breaks and
+  leading block comments do not change the freestanding attribute's meaning.
+  `--external ../banana` additionally checks that
+  project's source files and compares its entry point's IR. Source files in
+  the checkout and external project are read without modification.
 - **run**: every file in `tests/run/` is built and run, and its output
   compared. `//> text` lines are the expected standard output in order,
   `// exit: N` the exit status (default 0; a trap is 132), `// args: a b`

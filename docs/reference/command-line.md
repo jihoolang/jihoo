@@ -1,6 +1,7 @@
 # Command line
 
 ```text
+jihoo fmt <file.jh> [--check]                format source or check its layout
 jihoo check <file.jh> [--lib]                check without generating code
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
@@ -37,6 +38,38 @@ once the program has none.
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
+
+## Source formatting
+
+```sh
+jihoo fmt src/main.jh                       # formatted source on stdout
+jihoo fmt src/main.jh --check               # verify layout without printing it
+```
+
+`fmt` parses one file and prints its formatted source. It uses four spaces
+per delimiter level, normalizes spaces between tokens, removes leading and
+trailing blank lines and retains at most one empty line between source
+elements. Nonempty and empty files end with one LF. Comments retain their
+exact bytes, including whitespace inside comment bodies; literals keep
+their original spelling and escapes.
+
+Existing line breaks between tokens remain in place because newlines can
+end statements or separate list elements. Compact blocks remain compact;
+the formatter does not wrap lines to a target width. Multiline block comment
+bodies are not reindented. Reformatting the output produces the same bytes.
+
+Before returning any source, the formatter re-lexes it and requires the same
+token kinds, spellings and newline-before flags as the input. It formats
+modules without loading imports, type checking or running compile-time
+expressions, and needs neither LLVM nor a linker. Syntax errors use normal
+source diagnostics, including `--error-format=json` when selected.
+
+`--check` writes nothing and exits with status 0 when the file is formatted.
+When layout differs, it exits with status 1 and prints `FILE: needs formatting`
+to standard error as text. Invalid syntax also exits with status 1; invalid
+options exit with status 2. `fmt` rejects `-o`, `--keep-ll`, link inputs and
+program arguments. It reads the source file without modifying it; no files
+or build artifacts are created.
 
 ## Checking without code generation
 

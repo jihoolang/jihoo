@@ -1,0 +1,24 @@
+// Comments, literals and meaningful newlines survive formatting.
+
+#[derive(Show)]
+struct Point {
+    x: i64
+    y: i64
+}
+
+fn main() {
+    var value = 1
+    let pointer = &value
+    unsafe { *pointer += 1 }
+    let total = 1 + // keep this comment
+        2 * 3
+    let text = "가  // not a comment /* either */ \x41"
+    /* outer /* nested */
+   comment body stays here */
+    println(text)
+    println(total)
+    println(value - -1)
+    let pair = (1, 2)
+    println(pair.0)
+    match value { -2..=9 => println(value), _ => {} }
+}

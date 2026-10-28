@@ -10,6 +10,10 @@ A program is compiled for one of two profiles, chosen by its root file:
   result is a small static executable. The whole standard library works the
   same.
 
+Module attributes follow the normal token and comment rules: spaces or line
+breaks between `#!`, `[`, `freestanding` and `]`, and leading block comments,
+do not change the selected profile.
+
 ```jihoo
 #![freestanding]
 

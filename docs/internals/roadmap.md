@@ -39,9 +39,17 @@ generic-instance context from the same data as text errors. An independent
 JSON parser checks the negative corpus, source locations, escaping and
 truncation. Command-line and backend errors remain text.
 
+Implemented: [`jihoo fmt`](../reference/command-line.md#source-formatting)
+normalizes indentation and token spacing while preserving comments, literal
+spellings and meaningful line breaks. `--check` detects files whose layout
+differs. It re-lexes its output before returning it; corpus tests compare
+comment bytes, syntax trees, idempotence and generated LLVM IR, including
+the compiler and standard library on both supported targets.
+
 Next:
 
-- A source formatter that preserves comments and is idempotent.
+- Formatter line wrapping and broader layout rules, with the same syntax
+  preservation checks. The initial command formats a single file to stdout.
 - A small language server that uses the compiler's checking and diagnostic
   representation, starting with diagnostics and navigation.
 - Structured command-line and backend failures for clients that need a

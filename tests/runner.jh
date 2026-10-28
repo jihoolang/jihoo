@@ -20,6 +20,8 @@
 // - check: valid programs pass without LLVM or linkers, produce no files
 //   or runtime output, and check supports modules and both targets. Python
 //   independently parses JSON diagnostics and compares them with text errors.
+// - format: source comments, syntax and emitted IR survive formatting;
+//   formatting is idempotent and fmt --check detects unformatted source.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, cross-compiled objects, link errors and a missing
@@ -326,6 +328,14 @@ impl Tests {
         Ok(())
     }
 
+    fn formatting(self) -> Result((), String) {
+        let o = exec("python3", ["tests/format.py", "--compiler", self.compiler.as_str()])
+        if !o.status.success() {
+            return Err("formatter validation failed:\n" + o.stdout.as_str() + o.stderr.as_str())
+        }
+        Ok(())
+    }
+
     fn example_one(self, path: str) -> Result((), String) {
         let src = fs.read_file(path)?
         let exe = self.temp(stem(path))
@@ -617,7 +627,7 @@ fn main() -> i32 {
         suites.push(args[i])
     }
     if suites.len() == 0 {
-        for s in ["check", "run", "fail", "examples", "backend", "selfhost"] {
+        for s in ["format", "check", "run", "fail", "examples", "backend", "selfhost"] {
             suites.push(s)
         }
     }
@@ -644,7 +654,10 @@ fn main() -> i32 {
         }
     }
     for s in suites {
-        if s == "check" {
+        if s == "format" {
+            let r = t.formatting()
+            t.check("format: comments, syntax, idempotence and LLVM IR", r)
+        } else if s == "check" {
             let r = t.check_command()
             t.check("check: command, targets and no code generation", r)
             let r = t.json_diagnostics()
@@ -662,7 +675,7 @@ fn main() -> i32 {
         } else if s == "selfhost" {
             t.selfhost()
         } else {
-            eprintln("unknown suite " + s + "; the suites are check, run, fail, examples, backend and selfhost")
+            eprintln("unknown suite " + s + "; the suites are format, check, run, fail, examples, backend and selfhost")
             return 2
         }
     }

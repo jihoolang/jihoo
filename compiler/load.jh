@@ -137,17 +137,19 @@ pub fn load(root: str, sink search: Vec(String), target: str, inout sources: dia
     }
 }
 
-// Whether `#![freestanding]` comes first in the file, after blank lines and
-// comments.
+// Read module attributes as tokens, just as the parser does. Whitespace
+// inside an attribute and leading block comments must not change profiles.
 fn is_freestanding(text: str) -> bool {
-    for line in text.lines() {
-        let t = line.trim()
-        if !(t.len == 0 || t.starts_with("//") || t.starts_with("#!")) {
-            return false
-        }
-        if t == "#![freestanding]" {
-            return true
-        }
+    let tokens = match lex.lex(0, text) {
+        Ok(t) => t
+        Err(_) => return false
+    }
+    var i = 0
+    while i + 3 < tokens.len() && tokens[i].tok == lex.Tok.HashBang {
+        if tokens[i + 1].tok != lex.Tok.LBracket || tokens[i + 2].tok != lex.Tok.Ident ||
+            tokens[i + 3].tok != lex.Tok.RBracket { return false }
+        if tokens[i + 2].text == "freestanding" { return true }
+        i += 4
     }
     false
 }

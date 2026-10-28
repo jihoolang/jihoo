@@ -21,12 +21,13 @@ import builtins
 import check
 import elab
 import fmt
+import format
 import llvm
 import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
+const USAGE = "usage:\n  jihoo fmt <file.jh> [--check]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -57,6 +58,7 @@ fn drive() {
     var prog_args = Vec(str).new()
     var keep_ll = false
     var json_errors = false
+    var format_check = false
     // Without the standard library: for comparing sema between the two
     // compilers on small programs (not in the usage).
     var no_prelude = false
@@ -69,7 +71,7 @@ fn drive() {
             }
             break
         } else if a == "-o" {
-            if cmd == "check" { fail("error: check does not accept output options", 2) }
+            if cmd == "check" || cmd == "fmt" { fail("error: " + cmd + " does not accept output options", 2) }
             i += 1
             if i < args.len() {
                 out = Some(args[i])
@@ -89,6 +91,8 @@ fn drive() {
                 Some(t) => tgt = t
                 None => fail("error: unknown target; use x86_64 or aarch64", 2)
             }
+        } else if a == "--check" && cmd == "fmt" {
+            format_check = true
         } else if a == "--error-format=json" {
             json_errors = true
         } else if a == "--error-format=text" {
@@ -121,6 +125,13 @@ fn drive() {
     }
     if cmd == "check" && (keep_ll || link.len() > 0 || prog_args.len() > 0) {
         fail("error: check does not accept output options, link inputs or program arguments", 2)
+    }
+    if cmd == "fmt" {
+        if keep_ll || link.len() > 0 || prog_args.len() > 0 {
+            fail("error: fmt does not accept output options, link inputs or program arguments", 2)
+        }
+        format_file(file, format_check, json_errors)
+        return
     }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
         emit_syntax(file, cmd == "emit-ast", json_errors)
@@ -422,6 +433,30 @@ fn object_and_link(ll: str, obj: str, exe: str, opt: str, tgt: target.Target, fr
 fn fail(msg: str, code: i32) -> never {
     eprintln(msg)
     sys.exit(code)
+}
+
+fn format_file(file: str, check_only: bool, json_errors: bool) {
+    var sources = diag.Sources.new()
+    let text = match fs.read_file(file) {
+        Ok(t) => t
+        Err(_) => {
+            if json_errors {
+                source_error(sources, diag.Diag.new(diag.Span.new(0, 0, 0), "cannot read " + file), true)
+            }
+            fail("error: cannot read " + file, 1)
+        }
+    }
+    let id = sources.add(file.to_string(), text)
+    let original = sources.files[id as i64].text.as_str()
+    let formatted = match format.source(id, original) {
+        Ok(s) => s
+        Err(d) => source_error(sources, d, json_errors)
+    }
+    if check_only {
+        if formatted != original { fail(file + ": needs formatting", 1) }
+    } else {
+        print(formatted)
+    }
 }
 
 // Both formats consume the same diagnostic, including its related notes.

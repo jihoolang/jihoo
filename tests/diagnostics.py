@@ -96,6 +96,8 @@ def main():
         ("emit-tokens", "tests/selfhost/lex/at.jh"),
         ("emit-ast", "tests/selfhost/parse/expect_name.jh"),
         ("emit-program", "tests/selfhost/load/bad_import.jh"),
+        ("fmt", "tests/selfhost/lex/at.jh"),
+        ("fmt", "tests/selfhost/parse/expect_name.jh"),
         ("build", "tests/fail/use_after_move.jh"),
         ("run", "tests/fail/use_after_move.jh"),
         ("emit-mir", "tests/fail/use_after_move.jh"),
@@ -122,7 +124,7 @@ def main():
     # Both renderers may be asked to report a file that could not be read.
     with tempfile.TemporaryDirectory(prefix="jihoo-diagnostics-") as directory:
         missing = Path(directory) / "missing.jh"
-        for command in ["check", "emit-tokens", "emit-ast"]:
+        for command in ["check", "fmt", "emit-tokens", "emit-ast"]:
             result = run(compiler, command, missing, "--error-format=json")
             assert result.returncode == 1 and not result.stdout
             value = document(result.stderr)
