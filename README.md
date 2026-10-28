@@ -186,9 +186,11 @@ code or requiring LLVM or a linker. `--lib` checks modules without `main`.
 notes for editor integration; text remains the default.
 [`jihoo fmt`](docs/reference/command-line.md#source-formatting) formats one
 source file while preserving comments, literals and meaningful line breaks.
-`--check` checks its layout without printing formatted source.
+Long argument, parameter and field lists wrap at a soft width of 100 byte
+columns; `--width N` adjusts it. `--check` checks its layout without printing
+formatted source. The output is reparsed and must retain the same syntax tree.
 
-Next ([roadmap](docs/internals/roadmap.md)): formatter layout improvements and editor tools,
+Next ([roadmap](docs/internals/roadmap.md)): language server integration,
 application-driven library work, reproducible safety and performance
 baselines, observable compile-time execution, and practical checked code
 generation.

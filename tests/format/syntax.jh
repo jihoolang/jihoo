@@ -1,0 +1,21 @@
+// load-args: -I compiler
+// Ignore positions while retaining every syntax distinction relevant to layout.
+import astdump
+import lex
+import parse
+
+fn syntax(text: str) -> String {
+    let tokens = lex.lex(0, text).unwrap()
+    let module = parse.parse_module(0, tokens).unwrap()
+    astdump.syntax(module)
+}
+
+fn main() {
+    assert(syntax("fn f(){return (1)}") != syntax("fn f(){return\n(1)}"), "return newline changes syntax")
+    assert(syntax("fn f(){let x=g(1)}") != syntax("fn f(){let x=g\n(1)}"), "call newline changes syntax")
+    assert(syntax("fn f(){value[0]}") != syntax("fn f(){value\n[0]}"), "index newline changes syntax")
+    assert(syntax("fn f(){\"1:2\"}") != syntax("fn f(){\"1:3\"}"), "literal contents are retained")
+    assert(syntax("fn f(x:i64){}") != syntax("fn f(inout x:i64){}"), "parameter modes are retained")
+    assert(syntax("fn f(){(1+2)}") == syntax("// comment\nfn f () { (1 + 2) }"), "positions and comments do not change syntax")
+    println("syntax comparison checks passed")
+}

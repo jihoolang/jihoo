@@ -27,7 +27,7 @@ import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo fmt <file.jh> [--check]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
+const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -59,6 +59,7 @@ fn drive() {
     var keep_ll = false
     var json_errors = false
     var format_check = false
+    var format_width = format.DEFAULT_WIDTH
     // Without the standard library: for comparing sema between the two
     // compilers on small programs (not in the usage).
     var no_prelude = false
@@ -90,6 +91,13 @@ fn drive() {
             match t {
                 Some(t) => tgt = t
                 None => fail("error: unknown target; use x86_64 or aarch64", 2)
+            }
+        } else if a == "--width" && cmd == "fmt" {
+            i += 1
+            if i >= args.len() { fail("error: --width requires an integer from 20 to 1000", 2) }
+            match parse_width(args[i]) {
+                Some(n) => format_width = n
+                None => fail("error: --width requires an integer from 20 to 1000", 2)
             }
         } else if a == "--check" && cmd == "fmt" {
             format_check = true
@@ -130,7 +138,7 @@ fn drive() {
         if keep_ll || link.len() > 0 || prog_args.len() > 0 {
             fail("error: fmt does not accept output options, link inputs or program arguments", 2)
         }
-        format_file(file, format_check, json_errors)
+        format_file(file, format_check, json_errors, format_width)
         return
     }
     if cmd == "emit-tokens" || cmd == "emit-ast" {
@@ -435,7 +443,17 @@ fn fail(msg: str, code: i32) -> never {
     sys.exit(code)
 }
 
-fn format_file(file: str, check_only: bool, json_errors: bool) {
+fn parse_width(text: str) -> Option(i64) {
+    var n = 0
+    for b in text {
+        if !is_digit(b) { return None }
+        n = n * 10 + (b - '0') as i64
+        if n > 1000 { return None }
+    }
+    if n < 20 { None } else { Some(n) }
+}
+
+fn format_file(file: str, check_only: bool, json_errors: bool, width: i64) {
     var sources = diag.Sources.new()
     let text = match fs.read_file(file) {
         Ok(t) => t
@@ -448,7 +466,7 @@ fn format_file(file: str, check_only: bool, json_errors: bool) {
     }
     let id = sources.add(file.to_string(), text)
     let original = sources.files[id as i64].text.as_str()
-    let formatted = match format.source(id, original) {
+    let formatted = match format.source(id, original, width) {
         Ok(s) => s
         Err(d) => source_error(sources, d, json_errors)
     }

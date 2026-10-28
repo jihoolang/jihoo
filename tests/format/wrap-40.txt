@@ -1,0 +1,37 @@
+// A narrow layout expands parameter, field, array and nested argument lists.
+struct Measurements {
+    first_measurement: i64,
+    second_measurement: i64,
+    third_measurement: i64
+}
+
+fn combine(
+    first_measurement: i64,
+    second_measurement: i64,
+    third_measurement: i64
+) -> i64 {
+    first_measurement + second_measurement + third_measurement
+}
+
+fn main() {
+    let first_measurement = 11
+    let second_measurement = 22
+    let third_measurement = 33
+    let data = Measurements {
+        first_measurement,
+        second_measurement,
+        third_measurement
+    }
+    let results = [
+        combine(
+            first_measurement,
+            second_measurement,
+            third_measurement
+        ),
+        combine(4, 5, 6),
+        combine(7, 8, 9)
+    ]
+    println(
+        results[0] + data.third_measurement
+    )
+}

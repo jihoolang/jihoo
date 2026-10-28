@@ -30,6 +30,11 @@ the runner. Its suites:
   `--external ../banana` additionally checks that
   project's source files and compares its entry point's IR. Source files in
   the checkout and external project are read without modification.
+  Wrapping cases cover narrow widths, nested lists, comments, tuple and enum
+  forms, and deterministic generated lists. A separate syntax-comparison
+  fixture checks that return, call and index newlines and parameter modes
+  remain distinct when positions are omitted. A 40-column golden and IR
+  comparisons check the parameter, array and field layout together.
 - **run**: every file in `tests/run/` is built and run, and its output
   compared. `//> text` lines are the expected standard output in order,
   `// exit: N` the exit status (default 0; a trap is 132), `// args: a b`

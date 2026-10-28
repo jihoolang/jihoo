@@ -8,7 +8,16 @@ import load
 type Span = diag.Span
 
 pub fn module(m: ast.Module) -> String {
-    var d = Dump { out: String.new() }
+    module_text(m, true)
+}
+
+// A structural representation for comparing syntax across source edits.
+pub fn syntax(m: ast.Module) -> String {
+    module_text(m, false)
+}
+
+fn module_text(m: ast.Module, spans: bool) -> String {
+    var d = Dump { out: String.new(), spans: spans }
     d.s("(module [")
     d.words(m.attrs)
     d.s("]")
@@ -18,12 +27,13 @@ pub fn module(m: ast.Module) -> String {
     }
     d.s(")\n")
     match d {
-        Dump { out } => out
+        Dump { out, .. } => out
     }
 }
 
 struct Dump {
     out: String
+    spans: bool
 }
 
 impl Dump {
@@ -38,6 +48,7 @@ impl Dump {
     }
 
     fn span(inout self, sp: Span) {
+        if !self.spans { return }
         self.out.push(' ')
         sp.lo.show(&self.out)
         self.out.push(':')

@@ -38,6 +38,7 @@ out/jihoo check examples/hello.jh                # check without code generation
 out/jihoo check examples/hello.jh --error-format=json  # source diagnostics for editors
 out/jihoo fmt examples/hello.jh                  # formatted source on stdout
 out/jihoo fmt examples/hello.jh --check          # check layout without rewriting
+out/jihoo fmt examples/hello.jh --width 80       # change the soft byte width
 out/jihoo run examples/calc.jh -- a b            # args after --
 out/jihoo build examples/freestanding.jh -o out/hello
 out/jihoo emit-mir examples/hello.jh             # the compiler's MIR

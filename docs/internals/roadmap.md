@@ -42,18 +42,21 @@ truncation. Command-line and backend errors remain text.
 Implemented: [`jihoo fmt`](../reference/command-line.md#source-formatting)
 normalizes indentation and token spacing while preserving comments, literal
 spellings and meaningful line breaks. `--check` detects files whose layout
-differs. It re-lexes its output before returning it; corpus tests compare
-comment bytes, syntax trees, idempotence and generated LLVM IR, including
-the compiler and standard library on both supported targets.
+differs. Parser-selected lists wrap at a soft width of 100 byte columns,
+configurable with `--width`. It re-lexes and reparses its output and requires
+the same syntax tree apart from positions. Corpus tests compare comment
+bytes, syntax trees, idempotence and generated LLVM IR, including the compiler
+and standard library on both supported targets. Narrow-width cases exercise
+nested lists and significant newlines.
 
 Next:
 
-- Formatter line wrapping and broader layout rules, with the same syntax
-  preservation checks. The initial command formats a single file to stdout.
 - A small language server that uses the compiler's checking and diagnostic
   representation, starting with diagnostics and navigation.
 - Structured command-line and backend failures for clients that need a
   machine-readable result for every unsuccessful invocation.
+- Additional formatter layout rules and project traversal, retaining syntax
+  preservation checks. The current command formats a single file to stdout.
 
 Completion: valid checks are silent and create no output files; invalid
 programs retain type, move and borrow diagnostics. Editor diagnostics use the

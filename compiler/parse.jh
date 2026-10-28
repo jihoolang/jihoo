@@ -43,10 +43,31 @@ pub struct Parser {
     toks: Vec(Token)
     i: i64
     depth: i64
+    collect_layout: bool
+    lists: Vec(u32)
+    separators: Vec(u32)
 }
 
 pub fn parse_module(file: u32, sink toks: Vec(Token)) -> Result(Module, Diag) {
-    var p = Parser { toks: toks, i: 0, depth: 0 }
+    match parse_with_layout(file, toks, false)? {
+        FormatModule { module, .. } => Ok(module)
+    }
+}
+
+pub struct FormatModule {
+    pub module: Module
+    // Opening delimiters and separators in lists, not blocks or for indices.
+    pub lists: Vec(u32)
+    pub separators: Vec(u32)
+}
+
+pub fn format_module(file: u32, sink toks: Vec(Token)) -> Result(FormatModule, Diag) {
+    parse_with_layout(file, toks, true)
+}
+
+fn parse_with_layout(file: u32, sink toks: Vec(Token), collect: bool) -> Result(FormatModule, Diag) {
+    var p = Parser { toks: toks, i: 0, depth: 0, collect_layout: collect,
+        lists: Vec(u32).new(), separators: Vec(u32).new() }
     var attrs = Vec(String).new()
     while p.at(Tok.HashBang) {
         p.bump()
@@ -61,7 +82,8 @@ pub fn parse_module(file: u32, sink toks: Vec(Token)) -> Result(Module, Diag) {
         }
         items.push(p.item()?)
     }
-    Ok(Module { file: file, attrs: attrs, items: items })
+    let module = Module { file: file, attrs: attrs, items: items }
+    match p { Parser { lists, separators, .. } => Ok(FormatModule { module, lists, separators }) }
 }
 
 // A closure's parameter list may turn out to be a function type's: each
@@ -176,6 +198,18 @@ impl Parser {
         Err(self.found(s.as_str()))
     }
 
+    fn list_open(inout self, t: Tok) -> Result(Span, Diag) {
+        let span = self.expect(t)?
+        if self.collect_layout { self.lists.push(span.lo) }
+        Ok(span)
+    }
+
+    fn comma(inout self) -> bool {
+        if !self.eat(Tok.Comma) { return false }
+        if self.collect_layout { self.separators.push(self.prev_span().lo) }
+        true
+    }
+
     fn ident(inout self) -> Result(String, Diag) {
         if !self.at(Tok.Ident) {
             return Err(self.found("expected a name, found "))
@@ -196,7 +230,11 @@ impl Parser {
     // Separators between list elements: a comma, or a newline before the
     // next element.
     fn sep(inout self, close: Tok) -> Result(bool, Diag) {
-        if self.eat(Tok.Comma) || self.eat(Tok.Semi) {
+        if self.comma() {
+            return Ok(true)
+        }
+        if self.eat(Tok.Semi) {
+            if self.collect_layout { self.separators.push(self.prev_span().lo) }
             return Ok(true)
         }
         if self.at(close) {
@@ -223,7 +261,7 @@ impl Parser {
             if self.eat(Tok.LParen) {
                 while !self.at(Tok.RParen) {
                     args.push(self.ident()?)
-                    if !self.eat(Tok.Comma) {
+                    if !self.comma() {
                         break
                     }
                 }
@@ -255,7 +293,7 @@ impl Parser {
                 self.bump()
                 let name = self.ident()?
                 let params = self.generic_params()?
-                self.expect(Tok.LBrace)?
+                self.list_open(Tok.LBrace)?
                 var fields = Vec(ast.Field).new()
                 while !self.at(Tok.RBrace) {
                     let fs = self.span()
@@ -275,16 +313,17 @@ impl Parser {
                 self.bump()
                 let name = self.ident()?
                 let params = self.generic_params()?
-                self.expect(Tok.LBrace)?
+                self.list_open(Tok.LBrace)?
                 var variants = Vec(ast.Variant).new()
                 while !self.at(Tok.RBrace) {
                     let vs = self.span()
                     let vname = self.ident()?
                     var fields = Vec(Ty).new()
-                    if self.eat(Tok.LParen) {
+                    if self.at(Tok.LParen) {
+                        self.list_open(Tok.LParen)?
                         while !self.at(Tok.RParen) {
                             fields.push(self.ty()?)
-                            if !self.eat(Tok.Comma) {
+                            if !self.comma() {
                                 break
                             }
                         }
@@ -418,7 +457,7 @@ impl Parser {
     }
 
     fn param_list(inout self) -> Result((Vec(Param), bool), Diag) {
-        self.expect(Tok.LParen)?
+        self.list_open(Tok.LParen)?
         var params = Vec(Param).new()
         var variadic = false
         while !self.at(Tok.RParen) {
@@ -440,7 +479,7 @@ impl Parser {
                 return Err(self.error("expected `:` and the parameter's type"))
             }
             params.push(Param { name: name, mode: mode, ty: ty, bounds: bounds, span: start.to(self.prev_span()) })
-            if !self.eat(Tok.Comma) {
+            if !self.comma() {
                 break
             }
         }
@@ -479,11 +518,11 @@ impl Parser {
                 }
             }
             LParen => {
-                self.bump()
+                self.list_open(Tok.LParen)?
                 var tys = Vec(Ty).new()
                 while !self.at(Tok.RParen) {
                     tys.push(self.ty()?)
-                    if !self.eat(Tok.Comma) {
+                    if !self.comma() {
                         break
                     }
                 }
@@ -544,7 +583,7 @@ impl Parser {
     }
 
     fn fn_ty_rest(inout self, allow_variadic: bool) -> Result((Vec(FnTyParam), Option(Box(Ty)), bool), Diag) {
-        self.expect(Tok.LParen)?
+        self.list_open(Tok.LParen)?
         var ps = Vec(FnTyParam).new()
         var variadic = false
         while !self.at(Tok.RParen) {
@@ -555,7 +594,7 @@ impl Parser {
             }
             let m = self.param_mode()
             ps.push(FnTyParam { mode: m, ty: self.ty()? })
-            if !self.eat(Tok.Comma) {
+            if !self.comma() {
                 break
             }
         }
@@ -770,7 +809,7 @@ impl Parser {
     }
 
     fn call_args(inout self) -> Result(Vec(Expr), Diag) {
-        self.expect(Tok.LParen)?
+        self.list_open(Tok.LParen)?
         var args = Vec(Expr).new()
         while !self.at(Tok.RParen) {
             args.push(self.expr()?)
@@ -832,7 +871,7 @@ impl Parser {
     }
 
     fn struct_lit(inout self, sink path: Expr) -> Result(Expr, Diag) {
-        self.expect(Tok.LBrace)?
+        self.list_open(Tok.LBrace)?
         var fields = Vec(FieldInit).new()
         while !self.at(Tok.RBrace) {
             let name = self.ident()?
@@ -899,7 +938,7 @@ impl Parser {
             }
             Ref | Inout => ExprKind.Type(self.ty()?)
             LParen => {
-                self.bump()
+                self.list_open(Tok.LParen)?
                 if self.eat(Tok.RParen) {
                     ExprKind.Unit
                 } else {
@@ -910,7 +949,7 @@ impl Parser {
                     }
                     var items = Vec(Expr).new()
                     items.push(first)
-                    while self.eat(Tok.Comma) {
+                    while self.comma() {
                         if self.at(Tok.RParen) {
                             break
                         }
@@ -921,7 +960,7 @@ impl Parser {
                 }
             }
             LBracket => {
-                self.bump()
+                self.list_open(Tok.LBracket)?
                 if self.eat(Tok.RBracket) {
                     ExprKind.Array(Vec(Expr).new())
                 } else {
@@ -1084,7 +1123,7 @@ impl Parser {
     // `fn(x, y: i64) -> T { ... }` is a closure; `fn(i64) -> T` is a type.
     fn lambda_or_type(inout self) -> Result(Expr, Diag) {
         let start = self.expect(Tok.Fn)?
-        self.expect(Tok.LParen)?
+        self.list_open(Tok.LParen)?
         var entries = Vec(LambdaEntry).new()
         while !self.at(Tok.RParen) {
             if self.at(Tok.Ident) && self.peek(1) == Tok.Colon {
@@ -1097,7 +1136,7 @@ impl Parser {
                 let m = self.param_mode()
                 entries.push(LambdaEntry.Typed(m, self.ty()?))
             }
-            if !self.eat(Tok.Comma) {
+            if !self.comma() {
                 break
             }
         }
@@ -1211,11 +1250,11 @@ impl Parser {
                 PatKind.Name(self.ident()?, true)
             }
             LParen => {
-                self.bump()
+                self.list_open(Tok.LParen)?
                 var ps = Vec(Pat).new()
                 while !self.at(Tok.RParen) {
                     ps.push(self.pattern()?)
-                    if !self.eat(Tok.Comma) {
+                    if !self.comma() {
                         break
                     }
                 }
@@ -1237,18 +1276,18 @@ impl Parser {
                     path.push(self.ident()?)
                 }
                 if self.at(Tok.LParen) {
-                    self.bump()
+                    self.list_open(Tok.LParen)?
                     var ps = Vec(Pat).new()
                     while !self.at(Tok.RParen) {
                         ps.push(self.pattern()?)
-                        if !self.eat(Tok.Comma) {
+                        if !self.comma() {
                             break
                         }
                     }
                     self.expect(Tok.RParen)?
                     PatKind.Variant(path, ps)
                 } else if self.at(Tok.LBrace) {
-                    self.bump()
+                    self.list_open(Tok.LBrace)?
                     var fields = Vec(FieldPat).new()
                     var rest = false
                     while !self.at(Tok.RBrace) {

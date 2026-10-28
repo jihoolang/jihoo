@@ -1,7 +1,7 @@
 # Command line
 
 ```text
-jihoo fmt <file.jh> [--check]                format source or check its layout
+jihoo fmt <file.jh> [--check] [--width N]    format source or check its layout
 jihoo check <file.jh> [--lib]                check without generating code
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
@@ -44,6 +44,7 @@ C compiler when linking a native program.
 ```sh
 jihoo fmt src/main.jh                       # formatted source on stdout
 jihoo fmt src/main.jh --check               # verify layout without printing it
+jihoo fmt src/main.jh --width 80            # a different soft width
 ```
 
 `fmt` parses one file and prints its formatted source. It uses four spaces
@@ -54,17 +55,31 @@ exact bytes, including whitespace inside comment bodies; literals keep
 their original spelling and escapes.
 
 Existing line breaks between tokens remain in place because newlines can
-end statements or separate list elements. Compact blocks remain compact;
-the formatter does not wrap lines to a target width. Multiline block comment
-bodies are not reindented. Reformatting the output produces the same bytes.
+end statements or separate list elements. Lists that exceed a soft width
+of 100 byte columns expand with a break after the opening delimiter, after
+each separator and before the closing delimiter. This covers arguments,
+parameters, arrays, tuples, struct fields and variant lists identified by
+the parser. Outer lists expand first; nested lists are reconsidered at their
+new indentation. Commas and semicolons retain their original spelling.
 
-Before returning any source, the formatter re-lexes it and requires the same
-token kinds, spellings and newline-before flags as the input. It formats
+`--width N` accepts decimal integers from 20 through 1000. It counts UTF-8
+bytes, like diagnostic columns. It is a soft target: long literals, comments
+and expressions without a supported list boundary may exceed it. Short
+lists remain compact. Function and statement blocks are not expanded just
+because they contain a comma, such as a `for` index. Inline comments keep
+their bytes and remain before the token they originally preceded; a new
+break may follow an inline block comment. Multiline block comment bodies
+are not reindented. Reformatting with the same width produces the same bytes.
+
+Before returning any source, the formatter re-lexes it, requires the same
+token kinds and spellings, and checks that no existing newline flag was
+removed. It then reparses the result and compares the complete syntax trees
+with source positions omitted. A changed tree is rejected. It formats
 modules without loading imports, type checking or running compile-time
 expressions, and needs neither LLVM nor a linker. Syntax errors use normal
 source diagnostics, including `--error-format=json` when selected.
 
-`--check` writes nothing and exits with status 0 when the file is formatted.
+`--check` uses the selected width, writes nothing and exits with status 0 when the file is formatted.
 When layout differs, it exits with status 1 and prints `FILE: needs formatting`
 to standard error as text. Invalid syntax also exits with status 1; invalid
 options exit with status 2. `fmt` rejects `-o`, `--keep-ll`, link inputs and

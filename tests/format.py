@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import random
 import subprocess
 import tempfile
 
@@ -105,7 +106,7 @@ def main():
         environment["JIHOO_PATH"] = str(mirror / "lib")
         # Same executable representation after formatting every imported module,
         # including the compiler and its standard library, on both targets.
-        programs = [ROOT / "compiler/main.jh", ROOT / "tests/format/input.jh"]
+        programs = [ROOT / "compiler/main.jh", ROOT / "tests/format/input.jh", ROOT / "tests/format/wrap.jh"]
         programs += sorted((ROOT / "tests/run").glob("*.jh"))
         programs += sorted((ROOT / "examples").glob("*.jh"))
         if args.external:
@@ -155,6 +156,71 @@ def main():
         result = run(compiler, "fmt", source, "-o")
         assert result.returncode == 2 and not result.stdout and b"fmt does not accept" in result.stderr
 
+        # Layout choices use parser list boundaries, then reparse identically.
+        wrapping = ROOT / "tests/format/wrap.jh"
+        golden = run(compiler, "fmt", wrapping, "--width", "40")
+        assert golden.returncode == 0 and not golden.stderr, golden.stderr
+        assert golden.stdout == (ROOT / "tests/format/wrap-40.txt").read_bytes(), golden.stdout
+        source.write_bytes(golden.stdout)
+        checked = run(compiler, "fmt", source, "--check", "--width", "40")
+        assert checked.returncode == 0 and not checked.stdout and not checked.stderr
+        changed = run(compiler, "fmt", wrapping, "--check", "--width", "40")
+        assert changed.returncode == 1 and not changed.stdout and b"needs formatting" in changed.stderr
+        comparison = run(compiler, "run", "tests/format/syntax.jh", "-I", "compiler")
+        assert comparison.returncode == 0 and not comparison.stderr, comparison.stderr
+        assert comparison.stdout == b"syntax comparison checks passed\n"
+        for target in ["x86_64", "aarch64"]:
+            original = run(compiler, "emit-llvm", wrapping, "--target", target)
+            actual = run(compiler, "emit-llvm", source, "--target", target)
+            assert original.returncode == actual.returncode == 0 and original.stdout == actual.stdout
+
+        cases = [
+            b"fn f(){let result=outer(inner(first_long_argument,second_long_argument),third_long_argument)}\n",
+            b"fn f(){let a=[first_long_name, /* inline */ second_long_name, third_long_name,]}\n",
+            b"fn f(){call(first_long_argument, // stays with the first argument\nsecond_long_argument,third_long_argument)}\n",
+            b"fn f(){call(/* before first */ first_long_argument, /* before last */ second_long_argument /* after last */)}\n",
+            b"fn f(){let r=S{field:for index, item in long_collection_name{use_pair(index,item)},other:long_value_name}}\n",
+            b"fn f(){call(fn(){return\n(1)},first_long_argument)}\n",
+            b"fn f(){call(fn(){let x=1\n(2)},first_long_argument)}\n",
+            b"fn f(){call(fn(){let x=1\n[2]},first_long_argument)}\n",
+            b"fn f(){call(fn(){let x=1\n?},first_long_argument)}\n",
+            b"fn f(x:fnptr(i64,i64,...)->i64){let a=[1;very_long_repeat_count]}\n",
+            b"fn f(){let r=(very_long_first, very_long_second,);let s=S{a:r.0,b:r.1}}\n",
+            b"enum E{First(i64,i64),Second(i64,i64)}\nfn f(){let E.First(a,b)=value}\n",
+            b"fn f(){let r=S{very_long_first:i64;very_long_second:i64}}\n",
+            "fn f(){call(가)}\n".encode(),  # invalid syntax remains an error
+        ]
+        rng = random.Random(73)
+        for _ in range(40):
+            values = [f"argument_{i}_with_a_long_name" for i in range(rng.randint(1, 7))]
+            nested = ",".join(values)
+            for _ in range(rng.randint(0, 4)):
+                nested = "combine(" + nested + ",last_argument)"
+            cases.append(("fn generated(){let result=[" + nested + ",final_argument]}\n").encode())
+        wrapped = 0
+        for text in cases:
+            source.write_bytes(text)
+            before = run(compiler, "emit-ast", source)
+            for width in [20, 40, 80, 1000]:
+                first = run(compiler, "fmt", source, "--width", str(width))
+                if before.returncode:
+                    assert first.returncode == before.returncode and first.stderr == before.stderr
+                    continue
+                assert first.returncode == 0 and not first.stderr, (text, width, first.stderr)
+                assert comments(first.stdout) == comments(text), (text, width)
+                target_file = mirror / "wrapped.jh"
+                target_file.write_bytes(first.stdout)
+                second = run(compiler, "fmt", target_file, "--width", str(width))
+                after = run(compiler, "emit-ast", target_file)
+                assert second.returncode == 0 and second.stdout == first.stdout, (text, width)
+                assert after.returncode == 0 and syntax(before.stdout) == syntax(after.stdout), (text, width)
+                wrapped += 1
+        for options in [["--width"], ["--width", "19"], ["--width", "1001"],
+                        ["--width", "-1"], ["--width", "abc"], ["--width", "20.5"],
+                        ["--width", "18446744073709551716"]]:
+            bad = run(compiler, "fmt", source, *options)
+            assert bad.returncode == 2 and not bad.stdout and b"--width" in bad.stderr, options
+
         # Profile selection must follow attribute syntax, not its whitespace.
         # Compare with the canonical freestanding example on both targets.
         canonical = (ROOT / "examples/freestanding.jh").read_bytes()
@@ -173,7 +239,7 @@ def main():
                 assert expected.stdout == original.stdout == actual.stdout, (attribute, target)
 
     print(f"Formatter: {valid} files preserve syntax/comments and are idempotent; "
-          f"{invalid} invalid files rejected; {compared} LLVM comparisons passed")
+          f"{invalid} invalid files rejected; {compared} LLVM comparisons; {wrapped} wrapping cases passed")
 
 
 if __name__ == "__main__":

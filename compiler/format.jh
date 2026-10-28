@@ -1,7 +1,7 @@
-// Source formatting without moving syntax across significant newlines.
-// Tokens and comment bodies retain their original bytes. The output is
-// re-lexed before returning: token spelling and newline flags must agree.
+// Source layout with grammar-selected list wrapping. Preserve token and
+// comment bytes, keep existing newlines, and verify syntax after new breaks.
 import diag
+import astdump
 import lex
 import parse
 
@@ -15,22 +15,61 @@ struct Layout {
     line_start: bool
 }
 
-pub fn source(file: u32, text: str) -> Result(String, Diag) {
+pub const DEFAULT_WIDTH: i64 = 100
+
+struct Group {
+    open: i64
+    close: i64
+    separators: Vec(i64)
+}
+
+pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
     let tokens = lex.lex(file, text)?
-    let parsed = parse.parse_module(file, tokens.clone())?
+    let parsed = parse.format_module(file, tokens.clone())?
+    let groups = list_groups(tokens, parsed.lists, parsed.separators)
+    var breaks = Vec(bool).filled(tokens.len(), false)
+    var formatted = layout(file, text, tokens, breaks)
+    loop {
+        let current = lex.lex(file, formatted.as_str())?
+        if !same_tokens(text, tokens, formatted.as_str(), current) {
+            return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter changed a token or removed a newline"))
+        }
+        let selected = overflowing(formatted.as_str(), current, groups, breaks, width)
+        if selected.is_empty() { break }
+        for index in selected {
+            let g = groups[index]
+            breaks[g.open + 1] = true
+            for separator in g.separators { breaks[separator + 1] = true }
+            breaks[g.close] = true
+        }
+        formatted = layout(file, text, tokens, breaks)
+    }
+    let checked = lex.lex(file, formatted.as_str())?
+    let after = match parse.parse_module(file, checked) {
+        Ok(m) => m
+        Err(_) => return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter produced invalid syntax"))
+    }
+    if astdump.syntax(parsed.module) != astdump.syntax(after).as_str() {
+        return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter changed the syntax tree"))
+    }
+    Ok(formatted)
+}
+
+fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String {
     var f = Layout { out: String.with_capacity(text.len), depth: 0, line_start: true }
     var end = 0
     var previous = Tok.Eof
     var previous_prefix = false
     for i, token in tokens {
         let kind = token.tok
-        let prefix = is_prefix(kind, previous, token.nl_before)
+        let prefix = is_prefix(kind, previous, token.nl_before || breaks[i])
         let comment = f.trivia(text[end..token.span.lo as i64])
         if kind == Tok.Eof { break }
+        if breaks[i] && !f.line_start { f.newline(1) }
         var indent = f.depth
         if f.line_start {
             var j = i
-            while j < tokens.len() && is_close(tokens[j].tok) && (j == i || !tokens[j].nl_before) {
+            while j < tokens.len() && is_close(tokens[j].tok) && (j == i || (!tokens[j].nl_before && !breaks[j])) {
                 indent -= 1
                 j += 1
             }
@@ -69,18 +108,96 @@ pub fn source(file: u32, text: str) -> Result(String, Diag) {
     var normalized = String.from(f.out.as_str()[0..last])
     normalized.push('\n')
     f.out = normalized
-    let checked = lex.lex(file, f.out.as_str())?
-    if checked.len() != tokens.len() {
-        return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter changed the token sequence"))
-    }
+    match f { Layout { out, .. } => out }
+}
+
+fn same_tokens(before: str, tokens: Vec(Token), after: str, checked: Vec(Token)) -> bool {
+    if checked.len() != tokens.len() { return false }
     for i, token in tokens {
         let other = checked[i]
-        if token.tok != other.tok || token.nl_before != other.nl_before ||
-            text[token.span.lo as i64..token.span.hi as i64] != f.out.as_str()[other.span.lo as i64..other.span.hi as i64] {
-            return Err(Diag.new(token.span, "formatter changed a token or a significant newline"))
+        if token.tok != other.tok || (token.nl_before && !other.nl_before) ||
+            before[token.span.lo as i64..token.span.hi as i64] != after[other.span.lo as i64..other.span.hi as i64] {
+            return false
         }
     }
-    match f { Layout { out, .. } => Ok(out) }
+    true
+}
+
+// Pair all delimiters, but only expand lists identified by the parser.
+// A for-loop index comma and a match-arm separator are not list boundaries.
+fn list_groups(tokens: Vec(Token), starts: Vec(u32), separators: Vec(u32)) -> Vec(Group) {
+    var known = Map(u32, bool).new()
+    var seps = Map(u32, bool).new()
+    for start in starts { known.insert(start, true) }
+    for sep in separators { seps.insert(sep, true) }
+    var stack = Vec(i64).new()
+    var closes = Vec(i64).filled(tokens.len(), -1)
+    var owners = Vec(i64).filled(tokens.len(), -1)
+    for i, token in tokens {
+        if !stack.is_empty() { owners[i] = stack[stack.len() - 1] }
+        if is_open(token.tok) { stack.push(i) }
+        if is_close(token.tok) {
+            let open = stack.pop().unwrap()
+            closes[open] = i
+        }
+    }
+    var groups = Vec(Group).new()
+    var indices = Vec(i64).filled(tokens.len(), -1)
+    for i, token in tokens {
+        if known.get(token.span.lo).is_some() && closes[i] > i + 1 {
+            indices[i] = groups.len()
+            groups.push(Group { open: i, close: closes[i], separators: Vec(i64).new() })
+        }
+    }
+    for i, token in tokens {
+        let owner = owners[i]
+        if owner >= 0 && indices[owner] >= 0 && seps.get(token.span.lo).is_some() {
+            groups[indices[owner]].separators.push(i)
+        }
+    }
+    groups
+}
+
+// Expand outer lists first, then reconsider children at their new columns.
+// Breaks are only added, so each pass expands at least one remaining group.
+fn overflowing(text: str, tokens: Vec(Token), groups: Vec(Group), breaks: Vec(bool), width: i64) -> Vec(i64) {
+    var lines = Vec(i64).filled(tokens.len(), 0)
+    var columns = Vec(i64).filled(tokens.len(), 0)
+    var widths = Vec(i64).new()
+    var cursor = 0
+    var line = 0
+    var column = 0
+    for i, token in tokens {
+        while cursor < token.span.lo as i64 {
+            if text[cursor] == '\n' { widths.push(column); column = 0; line += 1 }
+            else { column += 1 }
+            cursor += 1
+        }
+        lines[i] = line
+        columns[i] = column
+    }
+    widths.push(column)
+    var selected = Vec(i64).new()
+    var covered = -1
+    for i, g in groups {
+        if g.open < covered { continue }
+        var needed = !(tokens[g.open + 1].nl_before || breaks[g.open + 1]) ||
+            !(tokens[g.close].nl_before || breaks[g.close])
+        for sep in g.separators {
+            if !(tokens[sep + 1].nl_before || breaks[sep + 1]) { needed = true }
+        }
+        if !needed { continue }
+        var wide = false
+        for row in lines[g.open]..lines[g.close] + 1 {
+            var end = widths[row]
+            if row == lines[g.close] {
+                end = columns[g.close] + (tokens[g.close].span.hi - tokens[g.close].span.lo) as i64
+            }
+            if end > width { wide = true; break }
+        }
+        if wide { selected.push(i); covered = g.close }
+    }
+    selected
 }
 
 impl Layout {
