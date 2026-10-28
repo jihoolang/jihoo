@@ -16,6 +16,7 @@ type Value = Vec(u8)
 
 const MAX_STEPS: u64 = 1000000
 const MAX_MEMORY: u64 = 67108864
+const MAX_ALLOCATIONS: i64 = 1000000
 const MAX_DEPTH: u32 = 128
 
 struct Allocation {
@@ -43,10 +44,36 @@ struct Frame {
     locals: Vec(u64)
 }
 
+struct Cost { calls: u64, steps: u64, bytes: u64, allocations: u64 }
+
+pub struct FunctionCost {
+    pub name: String
+    pub span: Span
+    pub calls: u64
+    pub steps: u64
+    pub bytes: u64
+    pub allocations: u64
+}
+
+pub struct Report {
+    pub span: Span
+    pub success: bool
+    pub steps: u64
+    pub bytes: u64
+    pub allocations: u64
+    pub max_depth: u32
+    pub functions: Vec(FunctionCost)
+}
+
 pub struct Interpreter {
     memory: Vec(Allocation)
     used: u64
     steps: u64
+    max_depth: u32
+    trace_notes: u32
+    profile: bool
+    current: i64
+    costs: Vec(Cost)
     // The `Drop` impl of each type that has one: type -> function.
     drops: Map(u32, u32)
 }
@@ -131,21 +158,28 @@ fn float_value(v: Value, ty: u32, span: Span) -> Result(f64, Diag) {
 }
 
 impl Interpreter {
-    pub fn new() -> Interpreter {
-        Interpreter { memory: Vec(Allocation).new(), used: 0, steps: 0, drops: Map(u32, u32).new() }
+    pub fn new(profile: bool) -> Interpreter {
+        Interpreter { memory: Vec(Allocation).new(), used: 0, steps: 0,
+            max_depth: 0, trace_notes: 0, profile, current: 0, costs: Vec(Cost).new(),
+            drops: Map(u32, u32).new() }
     }
 
     fn tick(inout self, span: Span) -> Result((), Diag) {
         if self.steps >= MAX_STEPS { return Err(error(span, "compile-time evaluation exceeded its step limit")) }
         self.steps += 1
+        if self.profile { self.costs[self.current].steps += 1 }
         Ok(())
     }
 
     fn alloc(inout self, n: u64, readonly: bool, span: Span) -> Result(u64, Diag) {
-        if n > MAX_MEMORY || self.used > MAX_MEMORY - n || self.memory.len() >= 1000000 {
+        if n > MAX_MEMORY || self.used > MAX_MEMORY - n || self.memory.len() >= MAX_ALLOCATIONS {
             return Err(error(span, "compile-time evaluation exceeded its memory limit"))
         }
         self.used += n
+        if self.profile {
+            self.costs[self.current].bytes += n
+            self.costs[self.current].allocations += 1
+        }
         var initialized = Vec(bool).new()
         var pointers = Vec(bool).new()
         for _ in 0..n as i64 { initialized.push(false); pointers.push(false) }
@@ -762,15 +796,31 @@ impl Interpreter {
         if id as i64 >= fns.len() { return Err(error(span, "invalid compile-time function pointer")) }
         let f = fns[id as i64]
         let op = heap_op(f.symbol.as_str())
-        if op < 3 { return self.heap(&t, op, args, span) }
-        match f.body {
+        let previous = self.current
+        if self.profile {
+            self.current = id as i64
+            self.costs[self.current].calls += 1
+        }
+        let result = if op < 3 { self.heap(&t, op, args, span) } else { match f.body {
             Some(body) => self.execute(&t, fns, body, args, checked, depth, span)
             None => Err(error(span, ("external function `" + f.name.as_str() + "` cannot be called during compile-time evaluation").as_str()))
+        } }
+        self.current = previous
+        match result {
+            Ok(v) => Ok(v)
+            Err(d) => {
+                if self.trace_notes < 8 {
+                    self.trace_notes += 1
+                    return Err(d.note(Some(span), ("in compile-time call to `" + f.name.as_str() + "`").as_str()))
+                }
+                Err(d)
+            }
         }
     }
 
     fn execute(inout self, inout t: Types, fns: Vec(mir.Function), body: mir.Body, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
         if depth >= MAX_DEPTH { return Err(error(span, "compile-time evaluation exceeded its call depth limit")) }
+        self.max_depth = max(self.max_depth, depth + 1)
         self.tick(span)?
         var fr = Frame { locals: Vec(u64).new() }
         for l in body.locals { fr.locals.push(self.alloc(t.layout(l.ty).size, false, l.span)?) }
@@ -861,6 +911,46 @@ impl Interpreter {
 
     pub fn evaluate(inout self, inout t: Types, fns: Vec(mir.Function), sink drops: Map(u32, u32), buffer: Option(Buffer), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
         self.drops = drops
+        if self.profile {
+            for _ in 0..fns.len() + 1 { self.costs.push(Cost { calls: 0, steps: 0, bytes: 0, allocations: 0 }) }
+            self.current = fns.len()
+            self.costs[self.current].calls = 1
+        }
+        match self.evaluate_inner(&t, fns, buffer, root, checked, span) {
+            Ok(v) => Ok(v)
+            Err(d) => {
+                var resources = String.from("compile-time resources: ")
+                self.steps.show(&resources)
+                resources.push('/')
+                MAX_STEPS.show(&resources)
+                resources.push_str(" steps, ")
+                self.used.show(&resources)
+                resources.push('/')
+                MAX_MEMORY.show(&resources)
+                resources.push_str(" cumulative allocation bytes, ")
+                self.memory.len().show(&resources)
+                resources.push_str(" allocations, maximum active calls ")
+                self.max_depth.show(&resources)
+                resources.push('/')
+                MAX_DEPTH.show(&resources)
+                Err(d.note(Some(span), "while evaluating this compile-time obligation").note(None, resources.as_str()))
+            }
+        }
+    }
+
+    pub fn report(self, fns: Vec(mir.Function), span: Span, success: bool) -> Report {
+        var functions = Vec(FunctionCost).new()
+        for i, c in self.costs {
+            if c.calls == 0 { continue }
+            let name = if i < fns.len() { fns[i].symbol.clone() } else { String.from("comptime") }
+            let at = if i < fns.len() { fns[i].span } else { span }
+            functions.push(FunctionCost { name, span: at, calls: c.calls, steps: c.steps, bytes: c.bytes, allocations: c.allocations })
+        }
+        Report { span, success, steps: self.steps, bytes: self.used,
+            allocations: self.memory.len() as u64, max_depth: self.max_depth, functions }
+    }
+
+    fn evaluate_inner(inout self, inout t: Types, fns: Vec(mir.Function), buffer: Option(Buffer), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
         let ty = root.locals[0].ty
         let v = self.execute(&t, fns, root, Vec(Value).new(), checked, 0, span)?
         match buffer {
@@ -900,6 +990,58 @@ impl Interpreter {
         }
         Ok(sema.TypedConst { c: Const.Slice(data, len as i64, b.view), ty: b.view })
     }
+}
+
+// Costs are exclusive to the currently executing function. Calls into the
+// allocator are included, and retained local/heap storage is cumulative.
+pub fn report_json(reports: Vec(Report), sources: diag.Sources, target: str, checked: bool) -> String {
+    var out = String.from("{\"version\":1,\"target\":")
+    diag.json_string(&out, target)
+    out.push_str(",\"checked_arithmetic\":")
+    checked.show(&out)
+    out.push_str(",\"limits\":{\"steps\":")
+    MAX_STEPS.show(&out)
+    out.push_str(",\"allocation_bytes\":")
+    MAX_MEMORY.show(&out)
+    out.push_str(",\"allocations\":")
+    MAX_ALLOCATIONS.show(&out)
+    out.push_str(",\"active_calls\":")
+    MAX_DEPTH.show(&out)
+    out.push_str("},\"evaluations\":[")
+    for i, r in reports {
+        if i > 0 { out.push(',') }
+        out.push_str("{\"span\":")
+        sources.json_span(&out, r.span)
+        out.push_str(",\"success\":")
+        r.success.show(&out)
+        json_cost(&out, r.steps, r.bytes, r.allocations)
+        out.push_str(",\"max_active_calls\":")
+        r.max_depth.show(&out)
+        out.push_str(",\"functions\":[")
+        for j, f in r.functions {
+            if j > 0 { out.push(',') }
+            out.push_str("{\"name\":")
+            diag.json_string(&out, f.name.as_str())
+            out.push_str(",\"span\":")
+            sources.json_span(&out, f.span)
+            out.push_str(",\"calls\":")
+            f.calls.show(&out)
+            json_cost(&out, f.steps, f.bytes, f.allocations)
+            out.push('}')
+        }
+        out.push_str("]}")
+    }
+    out.push_str("]}\n")
+    out
+}
+
+fn json_cost(inout out: String, steps: u64, bytes: u64, allocations: u64) {
+    out.push_str(",\"steps\":")
+    steps.show(&out)
+    out.push_str(",\"allocation_bytes\":")
+    bytes.show(&out)
+    out.push_str(",\"allocations\":")
+    allocations.show(&out)
 }
 
 // Which allocator function a symbol names: 0 alloc, 1 realloc, 2 free,

@@ -163,3 +163,19 @@ Horn commit and unmodified reference sources, compare successful reports as
 well as acceptance, and record the reference revision. The optional
 `horn_differential` input of the Test workflow runs this job with the pinned
 checkout. Ordinary push and pull-request checks remain independent of Horn.
+
+## Compile-time resource measurements
+
+```sh
+python3 tests/comptime_report.py --compiler out/jihoo
+python3 experimental/verified-codec/scale.py --compiler out/jihoo
+```
+
+The check suite validates the report schema and source spans, accounting
+totals, unchanged LLVM IR, and step/memory/depth and invalid-memory failures.
+The scaling command compares certificate and exhaustive codec construction at
+4, 16, 64 and 256 variants, recording frontend checking and full build time,
+peak compiler process RSS and separate proof-production/checking costs.
+Its single timing observations have no performance thresholds. See the
+[codec experiment](../../experimental/verified-codec/README.md#scaling-measurements)
+for current limits and the reproduction protocol.

@@ -124,6 +124,9 @@ expressions, array lengths and compile-time arguments. It supports loops,
 recursion, aggregates and the heap: `Vec`, `String`, `Map` and destructors
 work, and a `String` or `Vec` result becomes a static `str` or slice.
 External calls remain unavailable during evaluation.
+[`--comptime-report PATH`](docs/reference/command-line.md#compile-time-resource-reports)
+records evaluator steps, cumulative allocations and per-function costs;
+failures report resource use and the originating compile-time obligation.
 
 An experimental [proof development library](experimental/proofs/README.md)
 checks general Horn statements by structural induction and reuses derivations
@@ -194,7 +197,9 @@ formatted source. The output is reparsed and must retain the same syntax tree.
 Next ([roadmap](docs/internals/roadmap.md)): bring the existing fusion,
 kernel, proof and codec experiments into supported use first. Deterministic
 regressions now run together with `scripts/check-experiments.py` and in CI,
-without Horn or Rust. Next resolve the four-variant codec bottleneck, connect
+without Horn or Rust. The four-variant certificate codec now passes within
+the original evaluator limits; an explicit exhaustive-checking API covers
+16, 64 and 256 variants. Next add stable wire tags, connect
 general proofs to a bounded executable state-transition model, and migrate
 reusable code into libraries, examples, tests and benchmarks. Language server
 integration and further application-driven library work follow this milestone.

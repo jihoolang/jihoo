@@ -16,6 +16,7 @@ import target
 import types
 import mir
 import sema
+import interp
 import body
 import builtins
 import check
@@ -27,7 +28,7 @@ import backend
 import os
 import pat
 
-const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)"
+const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -58,6 +59,7 @@ fn drive() {
     var prog_args = Vec(str).new()
     var keep_ll = false
     var json_errors = false
+    var comptime_report: Option(str) = None
     var format_check = false
     var format_width = format.DEFAULT_WIDTH
     // Without the standard library: for comparing sema between the two
@@ -101,6 +103,10 @@ fn drive() {
             }
         } else if a == "--check" && cmd == "fmt" {
             format_check = true
+        } else if a == "--comptime-report" {
+            i += 1
+            if i >= args.len() { fail("error: --comptime-report requires a path", 2) }
+            comptime_report = Some(args[i])
         } else if a == "--error-format=json" {
             json_errors = true
         } else if a == "--error-format=text" {
@@ -130,6 +136,9 @@ fn drive() {
     let file = match file {
         Some(f) => f
         None => fail("error: no source file\n\n" + USAGE, 2)
+    }
+    if comptime_report.is_some() && (cmd == "fmt" || cmd == "emit-tokens" || cmd == "emit-ast" || cmd == "emit-program") {
+        fail("error: --comptime-report requires checking or code generation", 2)
     }
     if cmd == "check" && (keep_ll || link.len() > 0 || prog_args.len() > 0) {
         fail("error: check does not accept output options, link inputs or program arguments", 2)
@@ -162,7 +171,33 @@ fn drive() {
     if library && (cmd == "build" || cmd == "run") {
         fail("error: use `emit-obj --lib` to build a C-linkable library object", 2)
     }
-    var prog = match sema.compile(a, tgt, checked, library) {
+    match comptime_report {
+        Some(path) => match os.canonical(path) {
+            Some(destination) => {
+                for source in sources.files {
+                    match os.canonical(source.path.as_str()) {
+                        Some(input) => if input == destination { fail("error: compile-time report would overwrite a source file", 2) }
+                        None => {}
+                    }
+                }
+            }
+            None => {}
+        }
+        None => {}
+    }
+    var evaluations = Vec(interp.Report).new()
+    let compiled = sema.compile(a, tgt, checked, library, comptime_report.is_some(), &evaluations)
+    match comptime_report {
+        Some(path) => {
+            let report = interp.report_json(evaluations, sources, tgt.name(), checked)
+            match fs.write_file(path, report.as_str()) {
+                Ok(_) => {}
+                Err(e) => fail(("error: cannot write compile-time report: " + e.as_str()).as_str(), 1)
+            }
+        }
+        None => {}
+    }
+    var prog = match compiled {
         Ok(p) => p
         Err(d) => source_error(sources, d, json_errors)
     }

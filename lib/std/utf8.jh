@@ -25,8 +25,8 @@ pub fn decode(s: str, at: i64) -> Result((u32, i64), String) {
 pub fn validate(s: str) -> Result((), String) {
     var at = 0
     while at < s.len {
-        let decoded = decode(s, at)?
-        at += decoded.1
+        if s[at] < 0x80 { at += 1 }
+        else { at += decode(s, at)?.1 }
     }
     Ok(())
 }

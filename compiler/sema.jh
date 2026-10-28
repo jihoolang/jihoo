@@ -8,6 +8,7 @@
 // Rust hashes them.
 
 import std.mem
+import interp
 import ast
 import diag
 import lex
@@ -360,6 +361,8 @@ pub struct Sema {
     queue: Vec(Pending)
     queue_head: i64
     pub eval_depth: u32
+    pub profile_comptime: bool
+    pub evaluations: Vec(interp.Report)
     pub lang: Lang
     pub freestanding: bool
     pub target: target.Target
@@ -415,6 +418,8 @@ impl Sema {
             queue: Vec(Pending).new()
             queue_head: 0
             eval_depth: 0
+            profile_comptime: false
+            evaluations: Vec(interp.Report).new()
             lang: Lang { drop: None, clone: None, option: None, result: None, string: None, vec: None, iterator: None, eq: None, ord: None, hash: None, show: None, derived: None, dyn_box: None, dyn_drop: None }
             freestanding: freestanding
             target: tgt
@@ -2783,8 +2788,15 @@ pub fn expr_as_ty(e: ast.Expr) -> Option(ast.Ty) {
     Some(ast.Ty { kind: kind, span: e.span })
 }
 
-pub fn compile(a: load.Ast, tgt: target.Target, checked: bool, library: bool) -> Result(mir.Program, Diag) {
+pub fn compile(a: load.Ast, tgt: target.Target, checked: bool, library: bool, profile: bool, inout reports: Vec(interp.Report)) -> Result(mir.Program, Diag) {
     var s = Sema.new(a, tgt, checked)
+    s.profile_comptime = profile
+    let result = compile_inner(&s, a, tgt, checked, library)
+    reports = mem.replace(&s.evaluations, Vec(interp.Report).new())
+    result
+}
+
+fn compile_inner(inout s: Sema, a: load.Ast, tgt: target.Target, checked: bool, library: bool) -> Result(mir.Program, Diag) {
     s.collect()?
     let root = a.root
     var entry: Option(u32) = None
@@ -2877,18 +2889,16 @@ pub fn compile(a: load.Ast, tgt: target.Target, checked: bool, library: bool) ->
             None => statics.push(mir.StaticDef { symbol: String.new(), ty: types.UNIT, value: Const.Zst(types.UNIT) })
         }
     }
-    match s {
-        Sema { out, types, freestanding, .. } => Ok(mir.Program {
-            fns: out
-            types: types
-            entry: entry
-            freestanding: freestanding
-            checked: checked
-            statics: statics
-            drop_impls: drop_impls
-            target: tgt
-        })
-    }
+    Ok(mir.Program {
+        fns: mem.replace(&s.out, Vec(mir.Function).new())
+        types: mem.replace(&s.types, Types.new())
+        entry: entry
+        freestanding: s.freestanding
+        checked: checked
+        statics: statics
+        drop_impls: drop_impls
+        target: tgt
+    })
 }
 
 // What a pointer into the syntax tree points to. Sema's tables point into

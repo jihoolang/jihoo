@@ -38,7 +38,7 @@ caller outside its original experiment.
 | [Functional fusion](../../experiments/functional-fusion/README.md) | A maintained benchmark under `benchmarks/`; compiler and `std.iter` regressions under `tests/` | Separate deterministic CI checks from timing and cover representative compositions |
 | [Ground kernel](../../experimental/kernel/README.md) | An importable checking library under `lib/`, with a CLI example | Stabilize the API and trust boundary, and make rejection tests independent of a sibling checkout |
 | [General proofs](../../experimental/proofs/README.md) | A proof-development library under `lib/`, with executable consumers | Exercise induction and derivation reuse beyond natural-number demonstrations and connect one bounded executable model |
-| [Verified codec](../../experimental/verified-codec/README.md) | A checked-generation library under `lib/`, with an example under `examples/` | Remove the four-variant bottleneck, define stable tags and retain evidence-to-table binding |
+| [Verified codec](../../experimental/verified-codec/README.md) | A checked-generation library under `lib/`, with an example under `examples/` | Define stable tags, scale the certificate representation and retain evidence-to-table binding |
 
 Work through the following steps in order. Existing safety fixes and
 regression maintenance continue throughout.
@@ -69,19 +69,26 @@ already integrated and must not be counted as new work.
 
 #### B. Resolve the compile-time codec bottleneck
 
-- Preserve the four-variant reverse codec as the first scalability
-  reproducer. Report interpreter steps, allocation consumption and call
-  context, distinguishing certificate production from checking.
-- Profile unary terms, serialization and repeated parsing; optimize the
-  measured costs while preserving pointer provenance, lifetime validation,
-  deterministic constant persistence and rejection of invalid memory.
-- Make four variants succeed, then measure 16, 64 and 256 variants. Record
-  checking time, full compile time, peak process memory and evaluator usage
-  for each size. Raising the evaluator limit alone does not complete this
-  work; any remaining limit needs a measured cause and a follow-up fix.
-- Compare exhaustive compile-time table checking with the certificate path.
-  Use the simpler path for the finite codec if measurements justify it, and
-  retain the certificate path as a tested consumer of the ground kernel.
+Implemented: [`--comptime-report`](../reference/command-line.md#compile-time-resource-reports)
+records per-invocation steps, cumulative allocation and exclusive function
+costs. Errors include the source obligation, resource use and call context.
+The four-variant reverse codec now passes within the unchanged limits after
+ASCII scanning/validation and small-arena initialization improvements.
+
+The explicit `codec.build_exhaustive` API generates, checks and freezes the
+same finite candidate. The [scaling command](../../experimental/verified-codec/scale.py)
+measures checking time, full compilation, peak process memory and evaluator
+use for 4, 16, 64 and 256 variants. All sizes pass through exhaustive checking;
+both paths agree with the independent Python oracle on 2,187 small-table rows.
+The certificate API and its stale/unrelated-evidence rejections remain tested.
+
+Remaining:
+
+- The unary/text certificate path reaches the step limit during checking
+  at 16 variants, and during production at 64 and 256. Follow the recorded
+  profiles to replace repeated unary serialization and parsing with a shared
+  representation; retain the trusted lookup semantics and reject mismatched
+  evidence. Raising the evaluator limit alone does not complete this work.
 - Add explicit stable wire tags and tests for declaration reordering,
   duplicate tags and unknown tags. Preserve immutable checked tables and
   rejection of invalid, stale or unrelated evidence.

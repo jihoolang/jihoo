@@ -35,6 +35,7 @@ once the program has none.
 | `--keep-ll` | keep the LLVM IR next to the output |
 | `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
 | `--error-format=text\|json` | source diagnostic format (default `text`) |
+| `--comptime-report <path>` | write interpreter resource measurements as a separate JSON file |
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
@@ -100,7 +101,7 @@ As with a build, non-generic functions are checked even when unused;
 generic bodies are checked for the instances the program requests.
 By default the root module must have a `main`; `--lib` removes that requirement.
 
-A successful check exits with status 0 and writes nothing. Source errors
+A successful check exits with status 0 and writes nothing by default. Source errors
 exit with status 1 and use the same diagnostics as compilation. Invalid
 command options exit with status 2. `check` rejects `-o`, `--keep-ll`, link
 inputs and program arguments because it produces no output file and does
@@ -112,6 +113,36 @@ checking. Compile-time obligations still execute and may fail or reach the
 interpreter's limits. Checking does not establish that backend code
 generation or linking will succeed. `JIHOO_NO_ELAB`, the debug switch for
 unelaborated MIR dumps, never disables move or borrow checking in this mode.
+
+## Compile-time resource reports
+
+```sh
+jihoo check app.jh --comptime-report resources.json
+jihoo build app.jh --comptime-report resources.json -o app
+```
+
+`--comptime-report` writes a versioned JSON document after semantic checking,
+including when an interpreter invocation failed. It records the target,
+arithmetic mode, evaluator limits and an `evaluations` array. Each invocation
+has its obligation's source span, success status, execution/validation steps,
+cumulative simulated allocation bytes, allocation count, maximum active MIR
+calls and per-function costs. Function costs are exclusive: their steps,
+allocation bytes and allocation counts add up to the invocation's totals.
+Calls to the provided allocator are counted separately from their callers.
+Repeated evaluation of the same expression appears as separate invocations.
+
+Allocation bytes include retained local storage and heap allocations, even
+after their lifetimes end. They measure the evaluator's cumulative allocation
+budget, not compiler process memory. The report excludes parsing, lowering,
+borrow checking, optimization and linking costs. Measure compiler time and
+process memory separately when comparing complete compilations.
+
+The option works with `check`, `build`, `run`, `emit-mir`, `emit-llvm` and
+`emit-obj`. It does not change interpreter limits or generated code. Reports
+use a separate file, so successful checks remain silent and JSON source
+diagnostics remain one document on stderr. A source-loading or syntax error
+before semantic checking does not produce a report. Existing report files
+are replaced; a loaded source file cannot be used as the report destination.
 
 ## Structured source diagnostics
 

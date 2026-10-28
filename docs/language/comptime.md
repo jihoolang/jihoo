@@ -123,6 +123,14 @@ steps, 128 active calls, and 64 MiB of cumulative simulated allocation.
 Nested evaluation dependencies are also bounded. These limits stop
 nonterminating calculations without hanging the compiler.
 
+Interpreter failures include the current resource consumption, the source
+obligation and up to eight compile-time call notes. Use
+[`--comptime-report PATH`](../reference/command-line.md#compile-time-resource-reports)
+to measure successful and failed invocations, including exclusive per-function
+steps and allocation costs. This leaves both the limits and program output
+unchanged. Allocations are cumulative simulated storage, not peak compiler
+process memory.
+
 Current limitations:
 
 - External functions, system calls, inline assembly, atomics, program

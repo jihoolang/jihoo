@@ -5382,7 +5382,22 @@ impl sema.Sema {
         self.eval_depth += 1
         let result = self.eval_const_inner(e, env, exp)
         self.eval_depth -= 1
-        result
+        match result {
+            Ok(v) => Ok(v)
+            Err(d) => {
+                // A nested obligation can fail while this expression is
+                // being lowered, before its own interpreter starts.
+                var attached = false
+                for n in d.notes {
+                    match n.span {
+                        Some(sp) => if sp.file == e.span.file && sp.lo == e.span.lo && sp.hi == e.span.hi { attached = true }
+                        None => {}
+                    }
+                }
+                if attached { Err(d) }
+                else { Err(d.note(Some(e.span), "required by this compile-time expression")) }
+            }
+        }
     }
 
     // Where a `String` or `Vec(T)` keeps its elements.
@@ -5511,11 +5526,16 @@ impl sema.Sema {
         for id, f in functions {
             if seen.contains(id as u32) { check.run_with_effects(self.types, f, effects)? }
         }
-        var interpreter = interp.Interpreter.new()
-        match root.body {
+        var interpreter = interp.Interpreter.new(self.profile_comptime)
+        let result = match root.body {
             Some(body) => interpreter.evaluate(&self.types, functions, drops, buffer, body, self.checked, e.span)
             None => Err(err(e.span, "compile-time expression has no body"))
         }
+        if self.profile_comptime {
+            let success = match result { Ok(_) => true, Err(_) => false }
+            self.evaluations.push(interpreter.report(functions, e.span, success))
+        }
+        result
     }
 
 }

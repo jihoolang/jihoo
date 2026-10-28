@@ -325,6 +325,10 @@ impl Tests {
         if !o.status.success() {
             return Err("JSON diagnostic validation failed:\n" + o.stdout.as_str() + o.stderr.as_str())
         }
+        let report = exec("python3", ["tests/comptime_report.py", "--compiler", self.compiler.as_str()])
+        if !report.status.success() {
+            return Err("compile-time resource report validation failed:\n" + report.stdout.as_str() + report.stderr.as_str())
+        }
         Ok(())
     }
 

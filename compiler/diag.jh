@@ -185,7 +185,7 @@ impl Sources {
         s.push_str("]}")
     }
 
-    fn json_span(self, inout s: String, span: Span) {
+    pub fn json_span(self, inout s: String, span: Span) {
         if span.file as i64 >= self.files.len() {
             s.push_str("null")
             return
@@ -268,7 +268,7 @@ fn repeat(inout s: String, b: u8, n: i64) {
 
 // Escape control bytes and keep valid UTF-8. Invalid parts use the same
 // replacement character as text diagnostics, so stderr is valid JSON/UTF-8.
-fn json_string(inout out: String, s: str) {
+pub fn json_string(inout out: String, s: str) {
     let digits = "0123456789abcdef"
     out.push('"')
     var i = 0
