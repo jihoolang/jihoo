@@ -31,9 +31,7 @@ fn main() {
         combine(4, 5, 6),
         combine(7, 8, 9)
     ]
-    println(
-        results[0] + data.third_measurement
-    )
+    println(results[0] + data.third_measurement)
 }
 
 fn checked(
@@ -42,4 +40,25 @@ fn checked(
 ) -> Result((), i64) {
     if first_value < 2 { return Err(1) }
     Ok(())
+}
+
+fn describe(
+    text: str,
+    code: i64
+) -> String {
+    text.to_string()
+}
+
+fn report(
+    code: i64
+) -> Result(i64, String) {
+    if code > 1 { return Err(describe(
+        "not accepted",
+        code
+    )) }
+    let shown = Some(describe(
+        "accepted",
+        code
+    ).as_str().len)
+    Ok(code)
 }

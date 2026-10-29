@@ -26,6 +26,9 @@ struct Open {
     // The indentation of the line it opened on, and of the lines inside it.
     outer: i64
     inner: i64
+    // Its first element follows on the same line, so a continuation line
+    // inside it is already indented by it: `f(a +` then `b)`.
+    hugging: bool
     after_impl: bool
 }
 
@@ -44,7 +47,10 @@ pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
     loop {
         let current = lex.lex(file, formatted.as_str())?
         if !same_tokens(text, tokens, formatted.as_str(), current) {
-            return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter changed a token or removed a newline"))
+            return Err(Diag.new(
+                diag.Span.new(file, 0, 0),
+                "formatter changed a token or removed a newline"
+            ))
         }
         let selected = overflowing(formatted.as_str(), current, groups, breaks, width)
         if selected.is_empty() { break }
@@ -59,7 +65,10 @@ pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
     let checked = lex.lex(file, formatted.as_str())?
     let after = match parse.parse_module(file, checked) {
         Ok(m) => m
-        Err(_) => return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter produced invalid syntax"))
+        Err(_) => return Err(Diag.new(
+            diag.Span.new(file, 0, 0),
+            "formatter produced invalid syntax"
+        ))
     }
     if astdump.syntax(parsed.module) != astdump.syntax(after).as_str() {
         return Err(Diag.new(diag.Span.new(file, 0, 0), "formatter changed the syntax tree"))
@@ -88,7 +97,8 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
             line += 1
             var j = i
             var k = opens.len()
-            while j < tokens.len() && is_close(tokens[j].tok) && (j == i || (!tokens[j].nl_before && !breaks[j])) {
+            while j < tokens.len() && is_close(tokens[j].tok) &&
+                (j == i || (!tokens[j].nl_before && !breaks[j])) {
                 if k > 0 {
                     k -= 1
                     indent = opens[k].outer
@@ -98,7 +108,8 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
             // A continuation line is indented once more, but what opens on
             // it nests from the statement's level.
             line_indent = indent
-            if !is_close(kind) && (kind == Tok.Dot || continues(previous)) {
+            let hugged = !opens.is_empty() && opens[opens.len() - 1].hugging
+            if !is_close(kind) && (kind == Tok.Dot || continues(previous)) && !hugged {
                 indent += 1
             }
         }
@@ -109,7 +120,8 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
             // Removing a gap must not turn two operators into one, make a
             // comment, or turn a tuple field followed by a dot into a float.
             let prev = tokens[i - 1].span
-            let pair = text[prev.lo as i64..prev.hi as i64] + text[token.span.lo as i64..token.span.hi as i64]
+            let pair = text[prev.lo as i64..prev.hi as i64] +
+                text[token.span.lo as i64..token.span.hi as i64]
             match lex.lex(file, pair.as_str()) {
                 Ok(joined) => {
                     if joined.len() != 3 || joined[0].tok != previous || joined[1].tok != kind ||
@@ -131,7 +143,14 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
                 k -= 1
             }
             let inner = if counted { line_indent + 1 } else { f.depth }
-            opens.push(Open { counted, line, outer: line_indent, inner, after_impl: previous == Tok.Impl })
+            opens.push(Open {
+                counted,
+                line,
+                outer: line_indent,
+                inner,
+                hugging: i + 1 < tokens.len() && !(tokens[i + 1].nl_before || breaks[i + 1]),
+                after_impl: previous == Tok.Impl
+            })
             f.depth = inner
         }
         if is_close(kind) {
@@ -159,7 +178,8 @@ fn same_tokens(before: str, tokens: Vec(Token), after: str, checked: Vec(Token))
     for i, token in tokens {
         let other = checked[i]
         if token.tok != other.tok || (token.nl_before && !other.nl_before) ||
-            before[token.span.lo as i64..token.span.hi as i64] != after[other.span.lo as i64..other.span.hi as i64] {
+            before[token.span.lo as i64..token.span.hi as i64] !=
+            after[other.span.lo as i64..other.span.hi as i64] {
             return false
         }
     }
@@ -201,9 +221,34 @@ fn list_groups(tokens: Vec(Token), starts: Vec(u32), separators: Vec(u32)) -> Ve
     groups
 }
 
+// A list whose only element is a named list, as in `Err(err(...))`,
+// `Ok(S { ... })` or `line(fmt.f(...).as_str())`, lets that one expand
+// instead: `Err(err(` ... `))`. After it may come `?` and calls without
+// arguments.
+fn overflows(tokens: Vec(Token), groups: Vec(Group), opening: Vec(i64), g: Group) -> bool {
+    if !g.separators.is_empty() { return false }
+    var j = g.open + 1
+    while j < g.close && (tokens[j].tok == Tok.Ident || tokens[j].tok == Tok.Dot) { j += 1 }
+    if j == g.open + 1 || opening[j] < 0 { return false }
+    j = groups[opening[j]].close + 1
+    while j < g.close {
+        let t = tokens[j].tok
+        if t == Tok.LParen && tokens[j + 1].tok == Tok.RParen { j += 2 }
+        else if t == Tok.Question || t == Tok.Dot || t == Tok.Ident { j += 1 }
+        else { return false }
+    }
+    true
+}
+
 // Expand outer lists first, then reconsider children at their new columns.
 // Breaks are only added, so each pass expands at least one remaining group.
-fn overflowing(text: str, tokens: Vec(Token), groups: Vec(Group), breaks: Vec(bool), width: i64) -> Vec(i64) {
+fn overflowing(
+    text: str,
+    tokens: Vec(Token),
+    groups: Vec(Group),
+    breaks: Vec(bool),
+    width: i64
+) -> Vec(i64) {
     var lines = Vec(i64).filled(tokens.len(), 0)
     var columns = Vec(i64).filled(tokens.len(), 0)
     var widths = Vec(i64).new()
@@ -220,6 +265,13 @@ fn overflowing(text: str, tokens: Vec(Token), groups: Vec(Group), breaks: Vec(bo
         columns[i] = column
     }
     widths.push(column)
+    // The indentation of each line: the column of its first token.
+    var starts = Vec(i64).filled(widths.len(), -1)
+    for i in 0..tokens.len() {
+        if starts[lines[i]] < 0 { starts[lines[i]] = columns[i] }
+    }
+    var opening = Vec(i64).filled(tokens.len(), -1)
+    for i, g in groups { opening[g.open] = i }
     var selected = Vec(i64).new()
     var covered = -1
     var covered_line = -1
@@ -234,11 +286,37 @@ fn overflowing(text: str, tokens: Vec(Token), groups: Vec(Group), breaks: Vec(bo
             if !(tokens[sep + 1].nl_before || breaks[sep + 1]) { needed = true }
         }
         if !needed { continue }
+        if overflows(tokens, groups, opening, g) { continue }
+        // One element that would not fit on a line of its own either stays
+        // where it is: expanding `("..." + name).as_str()` gains nothing.
+        let last = tokens[g.close - 1]
+        let element = columns[g.close - 1] +
+            (last.span.hi - last.span.lo) as i64 - columns[g.open + 1]
+        if g.separators.is_empty() && lines[g.open + 1] == lines[g.close - 1] &&
+            starts[lines[g.open]] + 4 + element > width {
+            continue
+        }
         // Only the rows that hold this list's own delimiters and separators
         // get shorter when it expands; longer rows inside it belong to an
         // element, and a nested list there is measured on its own.
-        let close_end = columns[g.close] + (tokens[g.close].span.hi - tokens[g.close].span.lo) as i64
-        var wide = close_end > width
+        // The closing delimiter takes the closers, `?` and calls without
+        // arguments right after it along to its line: `f(a, b).as_str())`.
+        var end = g.close
+        while end + 1 < tokens.len() && lines[end + 1] == lines[g.close] {
+            let next = tokens[end + 1].tok
+            if next == Tok.RParen || next == Tok.RBracket || next == Tok.Question {
+                end += 1
+            } else if next == Tok.Dot && end + 4 < tokens.len() && tokens[end + 2].tok == Tok.Ident &&
+                tokens[end + 3].tok == Tok.LParen && tokens[end + 4].tok == Tok.RParen {
+                end += 4
+            } else {
+                break
+            }
+        }
+        let close_end = columns[end] + (tokens[end].span.hi - tokens[end].span.lo) as i64
+        // Parameters also expand for what follows them: `) -> Result(T, E) {`.
+        let params = g.open >= 2 && tokens[g.open - 2].tok == Tok.Fn
+        var wide = close_end > width || (params && widths[lines[g.close]] > width)
         if lines[g.open] != lines[g.close] && widths[lines[g.open]] > width { wide = true }
         for sep in g.separators {
             if lines[sep] != lines[g.close] && widths[lines[sep]] > width { wide = true }
@@ -284,8 +362,10 @@ impl Layout {
                     var depth = 1
                     i += 2
                     while depth > 0 {
-                        if i + 1 < text.len && text[i] == '/' && text[i + 1] == '*' { depth += 1; i += 2 }
-                        else if i + 1 < text.len && text[i] == '*' && text[i + 1] == '/' { depth -= 1; i += 2 }
+                        if i + 1 < text.len && text[i] == '/' &&
+                            text[i + 1] == '*' { depth += 1; i += 2 }
+                        else if i + 1 < text.len && text[i] == '*' &&
+                            text[i + 1] == '/' { depth -= 1; i += 2 }
                         else { i += 1 }
                     }
                 }
@@ -303,20 +383,22 @@ fn is_close(t: Tok) -> bool { t == Tok.RParen || t == Tok.RBracket || t == Tok.R
 
 fn ends_value(t: Tok) -> bool {
     match t {
-        Ident | Int | Float | Str | Char | True | False | RParen | RBracket | RBrace | Question => true
+        Ident | Int | Float | Str | Char | True | False |
+            RParen | RBracket | RBrace | Question => true
         _ => false
     }
 }
 
 fn is_prefix(t: Tok, prev: Tok, newline: bool) -> bool {
-    t == Tok.Bang || ((t == Tok.Minus || t == Tok.Star || t == Tok.Amp) && (newline || !ends_value(prev)))
+    t == Tok.Bang || ((t == Tok.Minus || t == Tok.Star || t == Tok.Amp) &&
+        (newline || !ends_value(prev)))
 }
 
 fn continues(t: Tok) -> bool {
     match t {
         Assign | OpAssign | Arrow | FatArrow | Colon | Plus | Minus | Star | Slash | Percent |
-        PlusWrap | MinusWrap | StarWrap | Amp | Pipe | Caret | Shl | Shr | EqEq | NotEq |
-        Lt | Le | Gt | Ge | AndAnd | OrOr | As => true
+            PlusWrap | MinusWrap | StarWrap | Amp | Pipe | Caret | Shl | Shr | EqEq | NotEq |
+            Lt | Le | Gt | Ge | AndAnd | OrOr | As => true
         _ => false
     }
 }

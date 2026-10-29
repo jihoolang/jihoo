@@ -56,11 +56,13 @@ jihoo fmt src/main.jh --width 80            # a different soft width
 spaces per line that leaves a delimiter open: several delimiters opened on
 one line, as in `f(match x {` or `Ok(S {`, add one level together, and a
 line that starts with closing delimiters returns to the indentation of the
-line that opened them. It normalizes spaces between tokens, removes leading and
-trailing blank lines and retains at most one empty line between source
-elements. Nonempty and empty files end with one LF. Comments retain their
-exact bytes, including whitespace inside comment bodies; literals keep
-their original spelling and escapes.
+line that opened them. A continuation line inside a delimiter whose first
+element is on the delimiter's line is indented by that delimiter alone.
+It normalizes spaces between tokens, removes leading and trailing blank
+lines and retains at most one empty line between source elements.
+Nonempty and empty files end with one LF. Comments retain their exact
+bytes, including whitespace inside comment bodies; literals keep their
+original spelling and escapes.
 
 Existing line breaks between tokens remain in place because newlines can
 end statements or separate list elements. Lists that exceed a soft width
@@ -69,7 +71,16 @@ each separator and before the closing delimiter. This covers arguments,
 parameters, arrays, tuples, struct fields and variant lists identified by
 the parser. Outer lists expand first; nested lists are reconsidered at their
 new indentation, and only the lines holding a list's own delimiters and
-separators make it overflow. Commas and semicolons retain their original spelling.
+separators make it overflow, with any `?`, closing delimiters and calls
+without arguments that follow it, as in `f(a, b).as_str())`. Parameter
+lists also expand for a long return type after them. A list whose only
+element is a call or struct literal, as in `Err(err(span, message))`, lets
+that element expand instead (`Err(err(` ... `))`), and a single element
+that would not fit on a line of its own either is left in place. Long
+expressions without a list, such as string concatenations and conditions,
+keep their own line breaks: break them after an operator such as `+` or
+`&&`, and the continuation is indented. Commas and semicolons retain their
+original spelling.
 
 `--width N` accepts decimal integers from 20 through 1000. It counts UTF-8
 bytes, like diagnostic columns. It is a soft target: long literals, comments
