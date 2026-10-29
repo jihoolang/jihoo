@@ -184,12 +184,14 @@ moved value went and where a conflicting borrow started.
 checks types, moves, borrows and compile-time obligations without generating
 code or requiring LLVM or a linker. `--lib` checks modules without `main`.
 `--error-format=json` reports source errors with byte ranges and related
-notes for editor integration; text remains the default.
-[`jihoo fmt`](docs/reference/command-line.md#source-formatting) formats one
-source file while preserving comments, literals and meaningful line breaks.
+notes for editor integration, and every other failure (usage, files, the
+backend and linker) in the same document; text remains the default.
+[`jihoo fmt`](docs/reference/command-line.md#source-formatting) formats
+source files while preserving comments, literals and meaningful line breaks.
 Long argument, parameter and field lists wrap at a soft width of 100 byte
-columns; `--width N` adjusts it. `--check` checks its layout without printing
-formatted source. The output is reparsed and must retain the same syntax tree.
+columns; `--width N` adjusts it. `--check` checks layout without printing
+formatted source and `--write` rewrites files, including every `.jh` file in
+the directories given. The output is reparsed and must retain the same syntax tree.
 
 Next ([roadmap](docs/internals/roadmap.md)): a language server built on the
 compiler's checking and diagnostics, then application-driven library work.

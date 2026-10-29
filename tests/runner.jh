@@ -359,16 +359,9 @@ impl Tests {
 
     // The compiler and the standard library are formatted.
     fn formatted_sources(self) -> Result((), String) {
-        var files = Vec(String).new()
-        jh_files("compiler", false, &files)
-        jh_files("lib/std", false, &files)
-        var unformatted = String.new()
-        for f in files {
-            let o = exec(self.compiler.as_str(), ["fmt", f.as_str(), "--check"])
-            if !o.status.success() { unformatted.push_str(o.stderr.as_str()) }
-        }
-        if !unformatted.is_empty() {
-            return Err("run `jihoo fmt` on these files:\n" + unformatted.as_str())
+        let o = exec(self.compiler.as_str(), ["fmt", "compiler", "lib/std", "--check"])
+        if !o.status.success() {
+            return Err("run `jihoo fmt compiler lib/std --write`:\n" + o.stderr.as_str())
         }
         Ok(())
     }

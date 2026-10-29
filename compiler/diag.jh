@@ -11,6 +11,11 @@ impl Span {
         Span { file: file, lo: lo as u32, hi: hi as u32 }
     }
 
+    // No place in any source.
+    pub fn nowhere() -> Span {
+        Span { file: 0xffffffff, lo: 0, hi: 0 }
+    }
+
     pub fn to(self, other: Span) -> Span {
         if self.file != other.file {
             return self
@@ -25,12 +30,34 @@ pub struct Note {
     pub msg: String
 }
 
+// What failed: the program's source, or the command around it.
+pub enum Kind {
+    Source
+    Usage
+    Io
+    Backend
+    Format
+}
+
+impl Kind {
+    pub fn name(self) -> str {
+        match self {
+            Source => "source"
+            Usage => "usage"
+            Io => "io"
+            Backend => "backend"
+            Format => "format"
+        }
+    }
+}
+
 pub struct Diag {
     pub span: Span
     pub msg: String
     pub notes: Vec(Note)
     // Further errors of the same run, reported after this one.
     pub more: Vec(Diag)
+    pub kind: Kind
 }
 
 // At most this many errors are shown.
@@ -38,7 +65,23 @@ pub const MAX_ERRORS: i64 = 20
 
 impl Diag {
     pub fn new(span: Span, msg: str) -> Diag {
-        Diag { span: span, msg: msg.to_string(), notes: Vec(Note).new(), more: Vec(Diag).new() }
+        Diag {
+            span: span,
+            msg: msg.to_string(),
+            notes: Vec(Note).new(),
+            more: Vec(Diag).new(),
+            kind: Source
+        }
+    }
+
+    // A failure outside the program's source, at `span` if it has one.
+    pub fn failure(kind: Kind, span: Option(Span), msg: str) -> Diag {
+        var d = Diag.new(match span {
+            Some(sp) => sp
+            None => Span.nowhere()
+        }, msg)
+        d.kind = kind
+        d
     }
 
     // The first of several errors, carrying the others, in source order.
@@ -167,26 +210,10 @@ impl Sources {
         s
     }
 
-    // A failure that is not in a program's source: a command-line usage
-    // error, a file that cannot be read or written, a backend or linker
-    // error, or a file that needs formatting. It has the same schema as
-    // source diagnostics, its `kind` saying which.
-    pub fn render_failure_json(self, kind: str, msg: str, span: Option(Span)) -> String {
-        var s = String.from("{\"version\":1,\"diagnostics\":[{\"severity\":\"error\",\"kind\":")
-        json_string(&s, kind)
-        s.push_str(",\"message\":")
-        json_string(&s, msg)
-        s.push_str(",\"span\":")
-        match span {
-            Some(sp) => self.json_span(&s, sp)
-            None => s.push_str("null")
-        }
-        s.push_str(",\"notes\":[]}],\"error_count\":1,\"truncated\":false}")
-        s
-    }
-
     fn json_one(self, inout s: String, d: Diag) {
-        s.push_str("{\"severity\":\"error\",\"kind\":\"source\",\"message\":")
+        s.push_str("{\"severity\":\"error\",\"kind\":")
+        json_string(&s, d.kind.name())
+        s.push_str(",\"message\":")
         json_string(&s, d.msg.as_str())
         s.push_str(",\"span\":")
         self.json_span(&s, d.span)
@@ -235,8 +262,10 @@ impl Sources {
 
     fn render_one(self, inout s: String, d: Diag) {
         s.push_str("error: ")
-        s.push_str(self.where_(d.span).as_str())
-        s.push_str(": ")
+        if (d.span.file as i64) < self.files.len() {
+            s.push_str(self.where_(d.span).as_str())
+            s.push_str(": ")
+        }
         s.push_str(d.msg.as_str())
         self.snippet(&s, d.span)
         for n in d.notes {

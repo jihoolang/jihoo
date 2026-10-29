@@ -1,7 +1,7 @@
 # Command line
 
 ```text
-jihoo fmt <file.jh> [--check] [--width N]    format source or check its layout
+jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout
 jihoo check <file.jh> [--lib]                check without generating code
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
@@ -50,9 +50,16 @@ C compiler when linking a native program.
 jihoo fmt src/main.jh                       # formatted source on stdout
 jihoo fmt src/main.jh --check               # verify layout without printing it
 jihoo fmt src/main.jh --width 80            # a different soft width
+jihoo fmt src tests --check                 # every .jh file under src and tests
+jihoo fmt src --write                       # rewrite the files that need it
 ```
 
-`fmt` parses one file and prints its formatted source. It indents four
+`fmt` parses one file and prints its formatted source. Given several files
+or a directory, it requires `--check` or `--write`. A directory contributes
+its `.jh` files and those of the directories in it, in sorted order; entries
+whose names start with `.` are skipped, and a directory reached again through
+a symbolic link is visited once. Files named on the command line are
+formatted whatever their extension. It indents four
 spaces per line that leaves a delimiter open: several delimiters opened on
 one line, as in `f(match x {` or `Ok(S {`, add one level together, and a
 line that starts with closing delimiters returns to the indentation of the
@@ -99,12 +106,17 @@ modules without loading imports, type checking or running compile-time
 expressions, and needs neither LLVM nor a linker. Syntax errors use normal
 source diagnostics, including `--error-format=json` when selected.
 
-`--check` uses the selected width, writes nothing and exits with status 0 when the file is formatted.
+`--check` uses the selected width, writes nothing and exits with status 0 when every file is formatted.
 When layout differs, it exits with status 1 and prints `FILE: needs formatting`
-to standard error, or a `format` diagnostic with `--error-format=json`. Invalid syntax also exits with status 1; invalid
+to standard error for each such file, or a `format` diagnostic with
+`--error-format=json`. `--write` replaces the files whose layout differs
+and leaves the others untouched. With either option, every file is
+processed before failures are reported, in file order: files that need
+formatting, syntax errors, and files that cannot be read or written, all
+in one JSON document when it is selected. Invalid syntax also exits with status 1; invalid
 options exit with status 2. `fmt` rejects `-o`, `--keep-ll`, link inputs and
-program arguments. It reads the source file without modifying it; no files
-or build artifacts are created.
+program arguments. Without `--write` it reads the source files without
+modifying them; it never creates files or build artifacts.
 
 ## Checking without code generation
 

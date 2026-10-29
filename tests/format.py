@@ -2,6 +2,7 @@
 """Check formatting, syntax preservation, comments, idempotence and emitted IR."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -66,7 +67,9 @@ def main():
     compiler = args.compiler.resolve()
     files = []
     for directory in ["compiler", "lib", "examples", "tests", "benchmarks"]:
-        files.extend((path, path.relative_to(ROOT)) for path in sorted((ROOT / directory).rglob("*.jh")))
+        # A directory named like a source, as the loader tests have, is traversed.
+        files.extend((path, path.relative_to(ROOT)) for path in sorted((ROOT / directory).rglob("*.jh"))
+                     if not path.is_dir())
     if args.external:
         project = args.external.resolve()
         files.extend((path, Path("external") / path.relative_to(project))
@@ -220,6 +223,46 @@ def main():
                         ["--width", "18446744073709551716"]]:
             bad = run(compiler, "fmt", source, *options)
             assert bad.returncode == 2 and not bad.stdout and b"--width" in bad.stderr, options
+
+        # Several files and directories are checked or rewritten together.
+        project = mirror / "project"
+        (project / "sub").mkdir(parents=True)
+        (project / ".hidden").mkdir()
+        unformatted = b"fn main() {\n  let x=1\n}\n"
+        formatted_text = b"fn main() {\n    let x = 1\n}\n"
+        (project / "a.jh").write_bytes(unformatted)
+        (project / "sub/b.jh").write_bytes(formatted_text)
+        (project / "sub/c.jh").write_bytes(b"fn main( {\n")
+        (project / ".hidden/d.jh").write_bytes(unformatted)
+        (project / "notes.txt").write_bytes(b"not jihoo")
+        (project / "sub/loop").symlink_to("..")
+        printed = run(compiler, "fmt", project)
+        assert printed.returncode == 2 and not printed.stdout and b"--check or --write" in printed.stderr
+        both = run(compiler, "fmt", project, "--check", "--write")
+        assert both.returncode == 2 and b"not both" in both.stderr
+        check = run(compiler, "fmt", project, "--check")
+        lines = check.stderr.decode().splitlines()
+        assert check.returncode == 1 and not check.stdout, check
+        assert lines[0] == f"{project / 'a.jh'}: needs formatting", lines
+        assert lines[1].startswith(f"error: {project / 'sub/c.jh'}:1:10: "), lines
+        assert b"hidden" not in check.stderr and b"loop" not in check.stderr
+        structured = run(compiler, "fmt", project, "--check", "--error-format=json")
+        value = json.loads(structured.stderr)
+        assert structured.returncode == 1 and value["error_count"] == 2, value
+        assert [d["kind"] for d in value["diagnostics"]] == ["format", "source"], value
+        explicit = run(compiler, "fmt", project / "sub/b.jh", project / "a.jh", "--check")
+        assert explicit.returncode == 1 and explicit.stderr.decode().count("needs formatting") == 1
+        written = run(compiler, "fmt", project, "--write")
+        assert written.returncode == 1 and not written.stdout and b"sub/c.jh:1:10" in written.stderr
+        assert (project / "a.jh").read_bytes() == formatted_text
+        assert (project / "sub/b.jh").read_bytes() == formatted_text
+        assert (project / ".hidden/d.jh").read_bytes() == unformatted
+        assert (project / "notes.txt").read_bytes() == b"not jihoo"
+        (project / "sub/c.jh").unlink()
+        again = run(compiler, "fmt", project, "--check")
+        assert again.returncode == 0 and not again.stdout and not again.stderr, again
+        missing = run(compiler, "fmt", project / "missing.jh", project, "--check")
+        assert missing.returncode == 1 and b"error: cannot read" in missing.stderr
 
         # Profile selection must follow attribute syntax, not its whitespace.
         # Compare with the canonical freestanding example on both targets.

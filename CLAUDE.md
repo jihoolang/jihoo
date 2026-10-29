@@ -39,6 +39,7 @@ out/jihoo check examples/hello.jh --error-format=json  # source diagnostics for 
 out/jihoo fmt examples/hello.jh                  # formatted source on stdout
 out/jihoo fmt examples/hello.jh --check          # check layout without rewriting
 out/jihoo fmt examples/hello.jh --width 80       # change the soft byte width
+out/jihoo fmt compiler lib/std --write           # rewrite every file that needs it
 out/jihoo run examples/calc.jh -- a b            # args after --
 out/jihoo build examples/freestanding.jh -o out/hello
 out/jihoo emit-mir examples/hello.jh             # the compiler's MIR
@@ -66,8 +67,8 @@ nix flake check                                    # everything CI runs
 - `tests/run/*.jh`: `//> text` lines are expected stdout in order, `// exit: N`
   the exit status (a trap is 132), `// args: a b` the arguments.
 - `compiler/` and `lib/std` are formatted: the `format` suite runs
-  `fmt --check` on them, so replace an edited file with the output of
-  `out/jihoo fmt` (it prints; it does not rewrite). Break long expressions
+  `fmt --check` on them, so after editing run
+  `out/jihoo fmt compiler lib/std --write`. Break long expressions
   without a list after an operator such as `+` or `&&`.
 - `tests/fail/*.jh`: each `// error: text` must appear in the compile error.
   Add one for every error the compiler should give, especially borrow rules.

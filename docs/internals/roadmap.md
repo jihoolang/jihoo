@@ -52,14 +52,15 @@ configurable with `--width`. It re-lexes and reparses its output and requires
 the same syntax tree apart from positions. Corpus tests compare comment
 bytes, syntax trees, idempotence and generated LLVM IR, including the compiler
 and standard library on both supported targets. Narrow-width cases exercise
-nested lists and significant newlines.
+nested lists and significant newlines. Given directories or several files,
+`fmt --check` reports every file that needs formatting and `fmt --write`
+rewrites them; the suite checks the compiler and library that way.
 
 Next:
 
 - A small language server that uses the compiler's checking and diagnostic
   representation, starting with diagnostics and navigation.
-- Additional formatter layout rules and project traversal, retaining syntax
-  preservation checks. The current command formats a single file to stdout.
+- Additional formatter layout rules, retaining syntax preservation checks.
 
 Completion: valid checks are silent and create no output files; invalid
 programs retain type, move and borrow diagnostics. Editor diagnostics use the
