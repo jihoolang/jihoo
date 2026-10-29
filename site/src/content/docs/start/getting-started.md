@@ -44,8 +44,8 @@ freestanding ones. If they are not found under their usual names, set
 `JIHOO_LLVM` to the shared library, `JIHOO_CC` and `JIHOO_LD`.
 
 ```sh
-curl -L https://github.com/jihoolang/jihoo/releases/download/v0.1.3/jihoo-v0.1.3-x86_64-linux.tar.gz | tar xz
-jihoo-v0.1.3-x86_64-linux/bin/jihoo run hello.jh
+curl -L https://github.com/jihoolang/jihoo/releases/download/v0.3.0/jihoo-v0.3.0-x86_64-linux.tar.gz | tar xz
+jihoo-v0.3.0-x86_64-linux/bin/jihoo run hello.jh
 ```
 
 ### From source
