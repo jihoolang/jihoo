@@ -167,8 +167,26 @@ impl Sources {
         s
     }
 
+    // A failure that is not in a program's source: a command-line usage
+    // error, a file that cannot be read or written, a backend or linker
+    // error, or a file that needs formatting. It has the same schema as
+    // source diagnostics, its `kind` saying which.
+    pub fn render_failure_json(self, kind: str, msg: str, span: Option(Span)) -> String {
+        var s = String.from("{\"version\":1,\"diagnostics\":[{\"severity\":\"error\",\"kind\":")
+        json_string(&s, kind)
+        s.push_str(",\"message\":")
+        json_string(&s, msg)
+        s.push_str(",\"span\":")
+        match span {
+            Some(sp) => self.json_span(&s, sp)
+            None => s.push_str("null")
+        }
+        s.push_str(",\"notes\":[]}],\"error_count\":1,\"truncated\":false}")
+        s
+    }
+
     fn json_one(self, inout s: String, d: Diag) {
-        s.push_str("{\"severity\":\"error\",\"message\":")
+        s.push_str("{\"severity\":\"error\",\"kind\":\"source\",\"message\":")
         json_string(&s, d.msg.as_str())
         s.push_str(",\"span\":")
         self.json_span(&s, d.span)

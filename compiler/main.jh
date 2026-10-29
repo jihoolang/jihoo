@@ -32,7 +32,7 @@ import pat
 // the package version.
 const VERSION = "0.2.1"
 
-const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   source diagnostics (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
+const USAGE = "usage:\n  jihoo fmt <file.jh> [--check] [--width N]                format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -49,6 +49,7 @@ fn run(_arg: *u8) -> *u8 {
 fn drive() {
     let args = env.args()
     if args.len() < 2 {
+        if json_requested() { usage("no command") }
         fail(USAGE, 2)
     }
     let cmd = args[1]
@@ -87,7 +88,7 @@ fn drive() {
             break
         } else if a == "-o" {
             if cmd == "check" || cmd == "fmt" {
-                fail("error: " + cmd + " does not accept output options", 2)
+                usage(cmd + " does not accept output options")
             }
             i += 1
             if i < args.len() {
@@ -106,20 +107,20 @@ fn drive() {
             }
             match t {
                 Some(t) => tgt = t
-                None => fail("error: unknown target; use x86_64 or aarch64", 2)
+                None => usage("unknown target; use x86_64 or aarch64")
             }
         } else if a == "--width" && cmd == "fmt" {
             i += 1
-            if i >= args.len() { fail("error: --width requires an integer from 20 to 1000", 2) }
+            if i >= args.len() { usage("--width requires an integer from 20 to 1000") }
             match parse_width(args[i]) {
                 Some(n) => format_width = n
-                None => fail("error: --width requires an integer from 20 to 1000", 2)
+                None => usage("--width requires an integer from 20 to 1000")
             }
         } else if a == "--check" && cmd == "fmt" {
             format_check = true
         } else if a == "--comptime-report" {
             i += 1
-            if i >= args.len() { fail("error: --comptime-report requires a path", 2) }
+            if i >= args.len() { usage("--comptime-report requires a path") }
             comptime_report = Some(args[i])
         } else if a == "--error-format=json" {
             json_errors = true
@@ -141,7 +142,7 @@ fn drive() {
         } else if a.ends_with(".jh") && file.is_none() {
             file = Some(a)
         } else if a.starts_with("-") && !a.starts_with("-l") && !a.starts_with("-L") {
-            fail("error: unknown option `" + a + "`\n\n" + USAGE, 2)
+            usage_help("unknown option `" + a + "`")
         } else {
             link.push(a)
         }
@@ -149,18 +150,18 @@ fn drive() {
     }
     let file = match file {
         Some(f) => f
-        None => fail("error: no source file\n\n" + USAGE, 2)
+        None => usage_help("no source file")
     }
     if comptime_report.is_some() &&
         (cmd == "fmt" || cmd == "emit-tokens" || cmd == "emit-ast" || cmd == "emit-program") {
-        fail("error: --comptime-report requires checking or code generation", 2)
+        usage("--comptime-report requires checking or code generation")
     }
     if cmd == "check" && (keep_ll || link.len() > 0 || prog_args.len() > 0) {
-        fail("error: check does not accept output options, link inputs or program arguments", 2)
+        usage("check does not accept output options, link inputs or program arguments")
     }
     if cmd == "fmt" {
         if keep_ll || link.len() > 0 || prog_args.len() > 0 {
-            fail("error: fmt does not accept output options, link inputs or program arguments", 2)
+            usage("fmt does not accept output options, link inputs or program arguments")
         }
         format_file(file, format_check, json_errors, format_width)
         return
@@ -184,17 +185,16 @@ fn drive() {
         Err(d) => source_error(sources, d, json_errors)
     }
     if library && (cmd == "build" || cmd == "run") {
-        fail("error: use `emit-obj --lib` to build a C-linkable library object", 2)
+        usage("use `emit-obj --lib` to build a C-linkable library object")
     }
     match comptime_report {
         Some(path) => match os.canonical(path) {
             Some(destination) => {
                 for source in sources.files {
                     match os.canonical(source.path.as_str()) {
-                        Some(input) => if input == destination { fail(
-                            "error: compile-time report would overwrite a source file",
-                            2
-                        ) }
+                        Some(input) => if input == destination {
+                            usage("compile-time report would overwrite a source file")
+                        }
                         None => {}
                     }
                 }
@@ -210,8 +210,10 @@ fn drive() {
             let report = interp.report_json(evaluations, sources, tgt.name(), checked)
             match fs.write_file(path, report.as_str()) {
                 Ok(_) => {}
-                Err(e) => fail(("error: cannot write compile-time report: " +
-                    e.as_str()).as_str(), 1)
+                Err(e) => failure(
+                    "io",
+                    ("cannot write compile-time report: " + e.as_str()).as_str()
+                )
             }
         }
         None => {}
@@ -262,7 +264,7 @@ fn drive() {
         match out {
             Some(o) => match fs.write_file(o, ll.as_str()) {
                 Ok(_) => {}
-                Err(e) => fail(("error: cannot write " + o + ": " + e.as_str()).as_str(), 1)
+                Err(e) => failure("io", ("cannot write " + o + ": " + e.as_str()).as_str())
             }
             None => print(ll)
         }
@@ -275,7 +277,7 @@ fn drive() {
         }
         match backend.object(ll.as_str(), output.as_str(), opt, tgt, freestanding) {
             Ok(_) => {}
-            Err(e) => fail(("error: " + e.as_str()).as_str(), 1)
+            Err(e) => failure("backend", e.as_str())
         }
     } else if cmd == "build" || cmd == "run" {
         let freestanding = prog.freestanding
@@ -294,7 +296,7 @@ fn drive() {
         }
         match link_exe(ll.as_str(), exe.as_str(), opt, tgt, freestanding, link, keep_ll) {
             Ok(_) => {}
-            Err(e) => fail(("error: " + e.as_str()).as_str(), 1)
+            Err(e) => failure("backend", e.as_str())
         }
         if cmd == "run" {
             let status = process.run(exe.as_str(), prog_args.as_slice())
@@ -306,12 +308,11 @@ fn drive() {
                     Code(c) => sys.exit(c)
                     Signal(sig) => sys.exit(128 + sig)
                 }
-                Err(e) => fail(("error: cannot run " + exe.as_str() + ": " +
-                    e.as_str()).as_str(), 1)
+                Err(e) => failure("io", ("cannot run " + exe.as_str() + ": " + e.as_str()).as_str())
             }
         }
     } else {
-        fail("error: unknown command `" + cmd + "`\n\n" + USAGE, 2)
+        usage_help("unknown command `" + cmd + "`")
     }
 }
 
@@ -532,6 +533,46 @@ fn fail(msg: str, code: i32) -> never {
     sys.exit(code)
 }
 
+// Whether the last `--error-format` option before `--` selects JSON. It is
+// looked up again when a failure is reported, so that options given after
+// the one that failed still apply.
+fn json_requested() -> bool {
+    let args = env.args()
+    var json = false
+    for i in 1..args.len() {
+        let a = args[i]
+        if a == "--" { break }
+        if a == "--error-format=json" {
+            json = true
+        } else if a == "--error-format=text" {
+            json = false
+        }
+    }
+    json
+}
+
+// A failure outside the program's source (`kind` is `io` or `backend`),
+// exiting with status 1.
+fn failure(kind: str, msg: str) -> never {
+    if json_requested() { fail(diag.Sources.new().render_failure_json(kind, msg, None).as_str(), 1) }
+    fail("error: " + msg, 1)
+}
+
+// An invalid command line, exiting with status 2.
+fn usage(msg: str) -> never {
+    if json_requested() { fail(
+        diag.Sources.new().render_failure_json("usage", msg, None).as_str(),
+        2
+    ) }
+    fail("error: " + msg, 2)
+}
+
+// An invalid command line, followed by the usage in text.
+fn usage_help(msg: str) -> never {
+    if json_requested() { usage(msg) }
+    fail("error: " + msg + "\n\n" + USAGE, 2)
+}
+
 fn parse_width(text: str) -> Option(i64) {
     var n = 0
     for b in text {
@@ -546,13 +587,7 @@ fn format_file(file: str, check_only: bool, json_errors: bool, width: i64) {
     var sources = diag.Sources.new()
     let text = match fs.read_file(file) {
         Ok(t) => t
-        Err(_) => {
-            if json_errors {
-                source_error(sources, diag.Diag.new(diag.Span.new(0, 0, 0), "cannot read " +
-                    file), true)
-            }
-            fail("error: cannot read " + file, 1)
-        }
+        Err(_) => failure("io", "cannot read " + file)
     }
     let id = sources.add(file.to_string(), text)
     let original = sources.files[id as i64].text.as_str()
@@ -561,7 +596,18 @@ fn format_file(file: str, check_only: bool, json_errors: bool, width: i64) {
         Err(d) => source_error(sources, d, json_errors)
     }
     if check_only {
-        if formatted != original { fail(file + ": needs formatting", 1) }
+        if formatted != original {
+            if json_errors {
+                // Located at the first byte that differs.
+                var at = 0
+                while at < original.len && at < formatted.len() && original[at] == formatted.as_str()[at] {
+                    at += 1
+                }
+                let span = Some(diag.Span.new(id, at, at))
+                fail(sources.render_failure_json("format", "needs formatting", span).as_str(), 1)
+            }
+            fail(file + ": needs formatting", 1)
+        }
     } else {
         print(formatted)
     }
@@ -569,6 +615,8 @@ fn format_file(file: str, check_only: bool, json_errors: bool, width: i64) {
 
 // Both formats consume the same diagnostic, including its related notes.
 fn source_error(sources: diag.Sources, d: diag.Diag, json_errors: bool) -> never {
+    // Before any source was read, the error is that the root file could not be.
+    if sources.files.len() == 0 { failure("io", d.msg.as_str()) }
     if json_errors { fail(sources.render_json(d).as_str(), 1) }
     fail(sources.render(d).as_str(), 1)
 }
@@ -579,13 +627,7 @@ fn emit_syntax(file: str, ast: bool, json_errors: bool) {
     var sources = diag.Sources.new()
     let text = match fs.read_file(file) {
         Ok(t) => t
-        Err(_) => {
-            if json_errors {
-                source_error(sources, diag.Diag.new(diag.Span.new(0, 0, 0), "cannot read " +
-                    file), true)
-            }
-            fail("error: cannot read " + file, 1)
-        }
+        Err(_) => failure("io", "cannot read " + file)
     }
     let id = sources.add(file.to_string(), text)
     let toks = match lex.lex(id, sources.files[id as i64].text.as_str()) {

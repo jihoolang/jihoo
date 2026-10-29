@@ -40,7 +40,9 @@ Implemented: [`--error-format=json`](../reference/command-line.md#structured-sou
 reports source diagnostics with start/end byte positions, related notes and
 generic-instance context from the same data as text errors. An independent
 JSON parser checks the negative corpus, source locations, escaping and
-truncation. Command-line and backend errors remain text.
+truncation. Command-line, file, backend and linker failures and `fmt --check`
+results use the same document, with a `kind` for each diagnostic, so every
+unsuccessful invocation has a machine-readable result.
 
 Implemented: [`jihoo fmt`](../reference/command-line.md#source-formatting)
 normalizes indentation and token spacing while preserving comments, literal
@@ -56,8 +58,6 @@ Next:
 
 - A small language server that uses the compiler's checking and diagnostic
   representation, starting with diagnostics and navigation.
-- Structured command-line and backend failures for clients that need a
-  machine-readable result for every unsuccessful invocation.
 - Additional formatter layout rules and project traversal, retaining syntax
   preservation checks. The current command formats a single file to stdout.
 

@@ -38,7 +38,7 @@ once the program has none.
 | `-o <file>` | the output |
 | `--keep-ll` | keep the LLVM IR next to the output |
 | `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
-| `--error-format=text\|json` | source diagnostic format (default `text`) |
+| `--error-format=text\|json` | diagnostic format for every failure (default `text`) |
 | `--comptime-report <path>` | write interpreter resource measurements as a separate JSON file |
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
@@ -101,7 +101,7 @@ source diagnostics, including `--error-format=json` when selected.
 
 `--check` uses the selected width, writes nothing and exits with status 0 when the file is formatted.
 When layout differs, it exits with status 1 and prints `FILE: needs formatting`
-to standard error as text. Invalid syntax also exits with status 1; invalid
+to standard error, or a `format` diagnostic with `--error-format=json`. Invalid syntax also exits with status 1; invalid
 options exit with status 2. `fmt` rejects `-o`, `--keep-ll`, link inputs and
 program arguments. It reads the source file without modifying it; no files
 or build artifacts are created.
@@ -185,6 +185,7 @@ For example, a module without `main` produces a document with this shape:
   "diagnostics": [
     {
       "severity": "error",
+      "kind": "source",
       "message": "the program has no `main` function",
       "span": {
         "file": "input.jh",
@@ -199,8 +200,8 @@ For example, a module without `main` produces a document with this shape:
 }
 ```
 
-- `version` identifies this document schema. Each diagnostic has a message,
-  primary span and ordered `notes`. Each note has `message` and `span`;
+- `version` identifies this document schema. Each diagnostic has a `kind`,
+  a message, primary span and ordered `notes`. Each note has `message` and `span`;
   notes include move origins, conflicting borrows and generic-instance context.
 - A span contains the source path as loaded and its start and exclusive end.
   `byte` is a zero-based byte offset; `line` and `column` are one-based, with
@@ -214,11 +215,23 @@ For example, a module without `main` produces a document with this shape:
   `error_count` includes omitted errors; `truncated` says whether any were
   omitted. Related notes are not counted as separate errors.
 
-Success remains silent in `check` mode, and source errors still exit with
-status 1. Command-line usage errors, backend/linker errors and a running
-program's own standard error remain text; this option formats source
-diagnostics only. Standard output retains the selected command's normal
-output, such as emitted IR or program output.
+Every unsuccessful invocation writes one document of this schema, and
+`kind` says what failed:
+
+| kind | exit status | |
+|------|-------------|---|
+| `source` | 1 | an error in the program's source, with its span and notes |
+| `usage` | 2 | an invalid command line, such as an unknown option or command; the usage text is left out |
+| `io` | 1 | a file that cannot be read or written, or a program `run` cannot start |
+| `backend` | 1 | LLVM, object emission or the linker failed; the message keeps the tool's output |
+| `format` | 1 | `fmt --check` found a file that needs formatting; the zero-width span is at the first byte that differs |
+
+A failure other than `source` has one diagnostic with no notes, and its span
+is `null` unless stated above. The option applies wherever it appears before
+`--`, including after the option that failed. Success remains silent in
+`check` mode. A running program's own standard error and exit status are not
+the compiler's and remain unchanged. Standard output retains the selected
+command's normal output, such as emitted IR or program output.
 
 ## Environment
 

@@ -12,6 +12,9 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
+KINDS = {"source", "usage", "io", "backend", "format"}
+
+
 def run(compiler, *args, env=None):
     return subprocess.run(
         [str(compiler), *map(str, args)], cwd=ROOT, capture_output=True,
@@ -28,6 +31,7 @@ def document(data):
     assert value["truncated"] == (value["error_count"] > 20), value
     for diagnostic in diagnostics:
         assert diagnostic["severity"] == "error", diagnostic
+        assert diagnostic["kind"] in KINDS, diagnostic
         assert isinstance(diagnostic["message"], str), diagnostic
         for note in diagnostic["notes"]:
             assert isinstance(note["message"], str), note
@@ -129,7 +133,49 @@ def main():
             assert result.returncode == 1 and not result.stdout
             value = document(result.stderr)
             assert value["diagnostics"][0]["span"] is None, value
+            assert value["diagnostics"][0]["kind"] == "io", value
             assert "cannot read" in value["diagnostics"][0]["message"], value
+
+        # Every unsuccessful invocation has one document: usage errors,
+        # backend and linker errors, and files that need formatting.
+        failures = [
+            (["check"], 2, "usage", "no source file"),
+            (["check", "examples/hello.jh", "--bogus"], 2, "usage", "unknown option `--bogus`"),
+            (["check", "examples/hello.jh", "-o", "x"], 2, "usage", "check does not accept"),
+            (["frobnicate", "examples/hello.jh"], 2, "usage", "unknown command `frobnicate`"),
+            (["build", "examples/hello.jh", "--target", "sparc"], 2, "usage", "unknown target"),
+            (["build", "examples/hello.jh", "no-such-input.o", "-o", Path(directory) / "x"],
+             1, "backend", "no-such-input.o"),
+            (["emit-llvm", "examples/hello.jh", "-o", Path(directory) / "none" / "x.ll"],
+             1, "io", "cannot write"),
+        ]
+        for arguments, code, kind, message in failures:
+            text = run(compiler, *arguments)
+            # The format option may come after the failing option.
+            result = run(compiler, *arguments, "--error-format=json")
+            assert text.returncode == result.returncode == code, (arguments, result)
+            assert not text.stderr.startswith(b"{"), arguments
+            value = document(result.stderr)
+            assert len(value["diagnostics"]) == 1, value
+            diagnostic = value["diagnostics"][0]
+            assert diagnostic["kind"] == kind, (arguments, value)
+            assert message in diagnostic["message"], (arguments, value)
+            assert diagnostic["span"] is None and "usage:" not in diagnostic["message"], value
+        # After `--`, the option belongs to the program.
+        result = run(compiler, "check", "--", "--error-format=json")
+        assert result.returncode == 2 and not result.stderr.startswith(b"{"), result
+
+        unformatted = Path(directory) / "unformatted.jh"
+        unformatted.write_bytes(b"fn main() {\n  let x = 1\n}\n")
+        text = run(compiler, "fmt", unformatted, "--check")
+        result = run(compiler, "fmt", unformatted, "--check", "--error-format=json")
+        assert text.returncode == result.returncode == 1 and b"needs formatting" in text.stderr
+        value = document(result.stderr)
+        diagnostic = value["diagnostics"][0]
+        assert diagnostic["kind"] == "format", value
+        span = diagnostic["span"]
+        assert span["file"] == str(unformatted) and span["start"] == position(
+            unformatted.read_bytes(), 14), span
 
         # UTF-8 before an error must not be mistaken for UTF-16 columns.
         source = Path(directory) / '가"\\name.jh'
@@ -153,6 +199,7 @@ def main():
     assert rendered.returncode == 0 and not rendered.stderr, rendered.stderr
     values = [document(line) for line in rendered.stdout.splitlines()]
     assert len(values) == 4
+    assert all(d["kind"] == "source" for v in values for d in v["diagnostics"])
     diagnostic = values[0]["diagnostics"][0]
     assert diagnostic["message"] == 'quote=" slash=\\ controls=\0\t\n\r\x1f 가 \ufffd\ufffd'
     span = diagnostic["span"]
