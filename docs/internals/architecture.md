@@ -25,6 +25,8 @@ it bootstraps the next ([Self-hosting](self-hosting.md)).
 | `check.jh` | the borrow kernel: exclusivity and the lifetimes of views |
 | `llvm.jh` | MIR to LLVM IR text |
 | `backend.jh` | LLVM 21 C API: verification, optimization and object emission |
+| `format.jh` | `jihoo fmt`: layout from tokens and parser list boundaries |
+| `lsp.jh`, `json.jh` | `jihoo lsp`: the language server and the JSON it reads and writes |
 | `main.jh` | the `jihoo` command |
 
 ## Sema

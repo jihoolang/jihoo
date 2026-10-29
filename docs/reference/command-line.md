@@ -3,6 +3,7 @@
 ```text
 jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout
 jihoo check <file.jh> [--lib]                check without generating code
+jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo emit-mir <file.jh>                      print the compiler's MIR
@@ -244,6 +245,47 @@ is `null` unless stated above. The option applies wherever it appears before
 `check` mode. A running program's own standard error and exit status are not
 the compiler's and remain unchanged. Standard output retains the selected
 command's normal output, such as emitted IR or program output.
+
+## Language server
+
+```sh
+jihoo lsp
+jihoo lsp -I src --target aarch64
+```
+
+`lsp` speaks the [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
+on standard input and output, for editors that start it as a server. It
+takes no files; `-I` and `--target` apply to every document. It provides:
+
+- **Diagnostics.** Each open document is checked as `check --lib` would
+  check it, with the editor's unsaved text used for every open document in
+  place of the file on disk, so a document checks against the open versions
+  of the modules it imports. Checks run when a document is opened, changed
+  or saved, once the server has no further messages waiting, so a burst of
+  edits is checked once. An error is published at its own range when it is
+  in the checked document; otherwise at the first note located there, such
+  as the use of a generic instance, with the error's own location in
+  `relatedInformation`; otherwise in the file it belongs to. Notes become
+  `relatedInformation`, and notes without a location are appended to the
+  message.
+- **Go to definition**, from the syntax trees the loader builds: a local
+  binding in scope (a parameter, `let`/`var`, a `for`, `match` or closure
+  binding), then items of the module and of its imports, the prelude and
+  the modules it makes visible, then variants, fields and methods by name.
+  `module.name` looks in that module, `Type.name` among that type's
+  variants, fields and methods, and `value.name` among every field and
+  method of that name, since the receiver's type is not resolved; such a
+  request may return several locations.
+- **Formatting** of a whole document with `fmt`'s default width, as one edit.
+  A document with syntax errors is left unchanged.
+
+Positions use UTF-8 byte offsets when the client lists `utf-8` among its
+`positionEncodings`, and the protocol's default UTF-16 code units otherwise.
+Documents are synchronized in full. Other requests return the protocol's
+`MethodNotFound` error. A check runs on the server's single thread, so a
+document that takes long to check (the compiler itself takes seconds) delays
+replies until it finishes. The server exits with status 0 after `shutdown`
+and `exit`, and 1 when its input ends or `exit` comes first.
 
 ## Environment
 

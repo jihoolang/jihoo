@@ -56,10 +56,18 @@ nested lists and significant newlines. Given directories or several files,
 `fmt --check` reports every file that needs formatting and `fmt --write`
 rewrites them; the suite checks the compiler and library that way.
 
+Implemented: [`jihoo lsp`](../reference/command-line.md#language-server),
+a Language Server Protocol server that checks open documents, unsaved text
+included, with the compiler's loader, checker and diagnostics, publishes
+errors with their notes as related information, finds definitions in the
+loaded syntax trees and formats documents. A client test drives it over
+the protocol in both position encodings.
+
 Next:
 
-- A small language server that uses the compiler's checking and diagnostic
-  representation, starting with diagnostics and navigation.
+- Definitions resolved by sema rather than by name, so that `value.method`
+  finds the receiver type's method; hover with types; checks that do not
+  block replies.
 - Additional formatter layout rules, retaining syntax preservation checks.
 
 Completion: valid checks are silent and create no output files; invalid

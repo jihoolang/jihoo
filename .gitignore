@@ -5,3 +5,4 @@
 /backend-llvm/compile_commands.json
 .cache/
 vgcore.*
+__pycache__/

@@ -19,7 +19,8 @@
 //   contain every `// error: text`, with the same diagnostics from check.
 // - check: valid programs pass without LLVM or linkers, produce no files
 //   or runtime output, and check supports modules and both targets. Python
-//   independently parses JSON diagnostics and compares them with text errors.
+//   independently parses JSON diagnostics and compares them with text errors,
+//   and drives the language server as an editor would.
 // - format: source comments, syntax and emitted IR survive formatting;
 //   formatting is idempotent and fmt --check detects unformatted source.
 // - examples: each program in examples builds and runs.
@@ -341,6 +342,10 @@ impl Tests {
         let o = exec("python3", ["tests/diagnostics.py", "--compiler", self.compiler.as_str()])
         if !o.status.success() {
             return Err("JSON diagnostic validation failed:\n" + o.stdout.as_str() + o.stderr.as_str())
+        }
+        let server = exec("python3", ["tests/lsp.py", "--compiler", self.compiler.as_str()])
+        if !server.status.success() {
+            return Err("language server validation failed:\n" + server.stdout.as_str() + server.stderr.as_str())
         }
         let report = exec("python3", ["tests/comptime_report.py", "--compiler", self.compiler.as_str()])
         if !report.status.success() {
@@ -695,7 +700,7 @@ fn main() -> i32 {
             let r = t.version_and_help()
             t.check("check: --version and --help", r)
             let r = t.json_diagnostics()
-            t.check("check: JSON diagnostics", r)
+            t.check("check: JSON diagnostics and the language server", r)
             t.suite_files("tests/run", "check")
             t.suite_files("examples", "check")
         } else if s == "run" {

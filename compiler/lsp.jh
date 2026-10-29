@@ -1,0 +1,1067 @@
+// A small language server (`jihoo lsp`): the Language Server Protocol over
+// stdin and stdout. It checks open documents with the compiler's own
+// loading, checking and diagnostics, finds definitions in the syntax trees
+// the loader builds, and formats documents with `format`.
+//
+// Each open document is checked as the root of a library (`check --lib`),
+// with the editor's unsaved text in place of the files on disk. Checking
+// waits until no more messages are pending, so a burst of edits is checked
+// once.
+
+import std.mem
+import std.sys
+import ast
+import check
+import diag
+import format
+import interp
+import json
+import lex
+import load
+import os
+import sema
+import target
+
+type Json = json.Json
+type Diag = diag.Diag
+type Span = diag.Span
+
+extern fn poll(fds: *PollFd, n: u64, timeout: i32) -> i32
+
+struct PollFd {
+    fd: i32
+    events: i16
+    revents: i16
+}
+
+// The protocol's error codes.
+const METHOD_NOT_FOUND: i64 = -32601
+const INVALID_PARAMS: i64 = -32602
+const NOT_INITIALIZED: i64 = -32002
+
+struct Doc {
+    uri: String
+    path: String
+    text: String
+    // Whether it changed since it was last checked.
+    dirty: bool
+    // The documents its last check published diagnostics to.
+    published: Vec(String)
+}
+
+struct Server {
+    search: Vec(String)
+    tgt: target.Target
+    version: String
+    docs: Vec(Doc)
+    // Positions count UTF-8 bytes when the client accepts it, otherwise
+    // UTF-16 code units, the protocol's default.
+    utf8: bool
+    initialized: bool
+    shutdown: bool
+    input: Input
+}
+
+// Standard input, buffered.
+struct Input {
+    buf: Vec(u8)
+    pos: i64
+    end: i64
+}
+
+impl Input {
+    // Reads more; false at the end of input.
+    fn fill(inout self) -> bool {
+        if self.pos == self.end {
+            self.pos = 0
+            self.end = 0
+        }
+        if self.end == self.buf.len() {
+            // Keep what is unread at the start, and grow if it fills the buffer.
+            let n = self.end - self.pos
+            for i in 0..n { self.buf[i] = self.buf[self.pos + i] }
+            self.pos = 0
+            self.end = n
+            if n == self.buf.len() {
+                for _ in 0..n { self.buf.push(0) }
+            }
+        }
+        let n = unsafe { sys.read_fd(0, &self.buf[self.end], self.buf.len() - self.end) }
+        if n <= 0 { return false }
+        self.end += n
+        true
+    }
+
+    fn line(inout self) -> Option(String) {
+        var s = String.new()
+        loop {
+            if self.pos == self.end && !self.fill() { return None }
+            let b = self.buf[self.pos]
+            self.pos += 1
+            if b == '\n' { break }
+            if b != '\r' { s.push(b) }
+        }
+        Some(s)
+    }
+
+    fn bytes(inout self, n: i64) -> Option(String) {
+        var s = String.with_capacity(n)
+        while s.len() < n {
+            if self.pos == self.end && !self.fill() { return None }
+            let take = min(n - s.len(), self.end - self.pos)
+            s.push_str(unsafe { make_str(&self.buf[self.pos], take) })
+            self.pos += take
+        }
+        Some(s)
+    }
+
+    // One message's content, or None at the end of input.
+    fn message(inout self) -> Option(String) {
+        var length = -1
+        loop {
+            let l = self.line()?
+            if l.is_empty() {
+                if length >= 0 { break }
+                continue
+            }
+            let lower = l.as_str()
+            if lower.len > 15 && ascii_lower(lower[0..15]) == "content-length:" {
+                match lower[15..].trim().parse_int() {
+                    Some(n) => length = n
+                    None => {}
+                }
+            }
+        }
+        self.bytes(length)
+    }
+
+    // Whether a message is already waiting.
+    fn pending(self) -> bool {
+        if self.pos < self.end { return true }
+        var p = PollFd { fd: 0, events: 1, revents: 0 }
+        unsafe { poll(&p, 1, 0) > 0 }
+    }
+}
+
+fn ascii_lower(s: str) -> String {
+    var out = String.new()
+    for b in s {
+        out.push(if b >= 'A' && b <= 'Z' { b + 32 } else { b })
+    }
+    out
+}
+
+pub fn serve(sink search: Vec(String), tgt: target.Target, version: str) -> i32 {
+    var s = Server {
+        search: search,
+        tgt: tgt,
+        version: version.to_string(),
+        docs: Vec(Doc).new(),
+        utf8: false,
+        initialized: false,
+        shutdown: false,
+        input: Input { buf: Vec(u8).filled(65536, 0), pos: 0, end: 0 }
+    }
+    loop {
+        let text = match s.input.message() {
+            Some(t) => t
+            None => return 1
+        }
+        match json.parse(text.as_str()) {
+            Some(m) => {
+                let method = m.at(["method"]).str_or("")
+                if method == "exit" { return if s.shutdown { 0 } else { 1 } }
+                s.handle(m, method.as_str())
+            }
+            None => send(json.obj().with("jsonrpc", json.text("2.0")).with("id", Json.Null).with(
+                "error",
+                json.obj().with("code", json.int(-32700)).with("message", json.text("parse error"))
+            ))
+        }
+        if !s.input.pending() { s.check_dirty() }
+    }
+}
+
+fn send(m: Json) {
+    let body = m.to_text()
+    var out = String.from("Content-Length: ")
+    body.len().show(&out)
+    out.push_str("\r\n\r\n")
+    out.push_str(body.as_str())
+    sys.write_fd(1, out.as_str())
+}
+
+fn reply(id: Json, sink result: Json) {
+    send(json.obj().with("jsonrpc", json.text("2.0")).with("id", id.clone()).with("result", result))
+}
+
+fn reply_error(id: Json, code: i64, msg: str) {
+    send(json.obj().with("jsonrpc", json.text("2.0")).with("id", id.clone()).with(
+        "error",
+        json.obj().with("code", json.int(code)).with("message", json.text(msg))
+    ))
+}
+
+fn notify(method: str, sink params: Json) {
+    send(json.obj().with("jsonrpc", json.text("2.0")).with("method", json.text(method)).with(
+        "params",
+        params
+    ))
+}
+
+impl Server {
+    fn handle(inout self, m: Json, method: str) {
+        let id = m.at(["id"])
+        let request = m.get("id").is_some()
+        let params = m.at(["params"])
+        if method == "initialize" {
+            self.utf8 = false
+            match params.at(["capabilities", "general", "positionEncodings"]) {
+                Arr(encodings) => {
+                    for e in encodings {
+                        if e.str_or("") == "utf-8" { self.utf8 = true }
+                    }
+                }
+                _ => {}
+            }
+            self.initialized = true
+            let caps = json.obj().with("positionEncoding", json.text(if self.utf8 {
+                "utf-8"
+            } else {
+                "utf-16"
+            })).with(
+                "textDocumentSync",
+                json.obj().with("openClose", Json.Bool(true)).with("change", json.int(1)).with(
+                    "save",
+                    json.obj().with("includeText", Json.Bool(false))
+                )
+            ).with("definitionProvider", Json.Bool(true)).with(
+                "documentFormattingProvider",
+                Json.Bool(true)
+            )
+            reply(id, json.obj().with("capabilities", caps).with(
+                "serverInfo",
+                json.obj().with("name", json.text("jihoo")).with("version", json.text(
+                    self.version.as_str()
+                ))
+            ))
+            return
+        }
+        if !self.initialized {
+            if request { reply_error(id, NOT_INITIALIZED, "the server is not initialized") }
+            return
+        }
+        if method == "shutdown" {
+            self.shutdown = true
+            reply(id, Json.Null)
+        } else if method == "textDocument/didOpen" {
+            let uri = params.at(["textDocument", "uri"]).str_or("")
+            let text = params.at(["textDocument", "text"]).str_or("")
+            self.close(uri.as_str())
+            self.docs.push(Doc {
+                path: uri_path(uri.as_str()),
+                uri: uri,
+                text: text,
+                dirty: true,
+                published: Vec(String).new()
+            })
+        } else if method == "textDocument/didChange" {
+            let uri = params.at(["textDocument", "uri"]).str_or("")
+            // Full synchronization: the last change is the whole text.
+            match params.at(["contentChanges"]) {
+                Arr(changes) => if changes.len() > 0 {
+                    let text = changes[changes.len() - 1].at(["text"]).str_or("")
+                    for i in 0..self.docs.len() {
+                        if self.docs[i].uri == uri {
+                            self.docs[i].text = text.clone()
+                            self.docs[i].dirty = true
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else if method == "textDocument/didSave" {
+            // Other documents may import the saved one.
+            for i in 0..self.docs.len() { self.docs[i].dirty = true }
+        } else if method == "textDocument/didClose" {
+            let uri = params.at(["textDocument", "uri"]).str_or("")
+            self.close(uri.as_str())
+        } else if method == "textDocument/definition" {
+            let uri = params.at(["textDocument", "uri"]).str_or("")
+            let line = params.at(["position", "line"]).int_or(-1)
+            let character = params.at(["position", "character"]).int_or(-1)
+            match self.doc(uri.as_str()) {
+                Some(i) => {
+                    let found = self.definition(i, line, character)
+                    reply(id, found)
+                }
+                None => reply(id, Json.Null)
+            }
+        } else if method == "textDocument/formatting" {
+            let uri = params.at(["textDocument", "uri"]).str_or("")
+            match self.doc(uri.as_str()) {
+                Some(i) => {
+                    let edits = self.formatting(i)
+                    reply(id, edits)
+                }
+                None => reply_error(id, INVALID_PARAMS, "the document is not open")
+            }
+        } else if request {
+            reply_error(id, METHOD_NOT_FOUND, ("unsupported request " + method).as_str())
+        }
+    }
+
+    fn doc(self, uri: str) -> Option(i64) {
+        for i, d in self.docs {
+            if d.uri == uri { return Some(i) }
+        }
+        None
+    }
+
+    // Forgets a document and the diagnostics its checks published.
+    fn close(inout self, uri: str) {
+        match self.doc(uri) {
+            Some(i) => {
+                for u in self.docs[i].published {
+                    notify("textDocument/publishDiagnostics", json.obj().with("uri", json.text(
+                        u.as_str()
+                    )).with("diagnostics", Json.Arr(Vec(Json).new())))
+                }
+                let _ = self.docs.remove(i)
+            }
+            None => {}
+        }
+    }
+
+    fn overlay(self) -> Map(String, String) {
+        var m = Map(String, String).new()
+        for d in self.docs {
+            m.insert(load.file_key(d.path.as_str()), d.text.clone())
+        }
+        m
+    }
+
+    fn check_dirty(inout self) {
+        for i in 0..self.docs.len() {
+            if self.docs[i].dirty {
+                self.docs[i].dirty = false
+                self.check(i)
+                // Edits that arrived meanwhile are handled first.
+                if self.input.pending() { return }
+            }
+        }
+    }
+
+    // Checks a document and publishes its diagnostics, grouped by the
+    // document each belongs to.
+    fn check(inout self, i: i64) {
+        var sources = diag.Sources.new()
+        let path = self.docs[i].path.clone()
+        let errors = self.diagnostics(path.as_str(), &sources)
+        var uris = Vec(String).new()
+        var lists = Vec(Vec(Json)).new()
+        for d in errors {
+            let place = where_shown(d, path.as_str(), sources)
+            if place.file as i64 >= sources.files.len() { continue }
+            let uri = path_uri(sources.files[place.file as i64].path.as_str())
+            var at = -1
+            for j, u in uris {
+                if u == uri { at = j }
+            }
+            if at < 0 {
+                uris.push(uri.clone())
+                lists.push(Vec(Json).new())
+                at = uris.len() - 1
+            }
+            lists[at].push(self.lsp_diagnostic(d, place, sources))
+        }
+        // The document itself is always published, so fixed errors go away.
+        let own = self.docs[i].uri.clone()
+        var has_own = false
+        for u in uris {
+            if u == own { has_own = true }
+        }
+        if !has_own {
+            uris.push(own)
+            lists.push(Vec(Json).new())
+        }
+        // Clear the documents the previous check published to.
+        for u in self.docs[i].published {
+            var still = false
+            for v in uris {
+                if v == u { still = true }
+            }
+            if !still {
+                notify("textDocument/publishDiagnostics", json.obj().with("uri", json.text(
+                    u.as_str()
+                )).with("diagnostics", Json.Arr(Vec(Json).new())))
+            }
+        }
+        for j, u in uris {
+            notify(
+                "textDocument/publishDiagnostics",
+                json.obj().with("uri", json.text(u.as_str())).with(
+                    "diagnostics",
+                    Json.Arr(lists[j].clone())
+                )
+            )
+        }
+        self.docs[i].published = uris
+    }
+
+    // The errors of checking `path` as a library, each on its own.
+    fn diagnostics(self, path: str, inout sources: diag.Sources) -> Vec(Diag) {
+        let overlay = self.overlay()
+        let result = analyze(path, self.search.clone(), self.tgt, &sources, overlay)
+        var out = Vec(Diag).new()
+        match result {
+            Ok(_) => {}
+            Err(d) => {
+                var d = d
+                let more = mem.take(&d.more)
+                out.push(d)
+                for m in more.into_iter() { out.push(m) }
+            }
+        }
+        out
+    }
+
+    fn lsp_diagnostic(self, d: Diag, place: Span, sources: diag.Sources) -> Json {
+        var related = Vec(Json).new()
+        var msg = d.msg.clone()
+        if place.file != d.span.file || place.lo != d.span.lo {
+            related.push(json.obj().with("location", self.location(d.span, sources)).with(
+                "message",
+                json.text("the error is here")
+            ))
+        }
+        for n in d.notes {
+            match n.span {
+                Some(sp) => {
+                    if (sp.file as i64) < sources.files.len() {
+                        related.push(json.obj().with("location", self.location(sp, sources)).with(
+                            "message",
+                            json.text(n.msg.as_str())
+                        ))
+                    }
+                }
+                None => {
+                    msg.push_str("\n")
+                    msg.push_str(n.msg.as_str())
+                }
+            }
+        }
+        var j = json.obj().with("range", self.range(place, sources)).with("severity", json.int(1)).with(
+            "source",
+            json.text("jihoo")
+        ).with("message", json.text(msg.as_str()))
+        if related.len() > 0 { j = j.with("relatedInformation", Json.Arr(related)) }
+        j
+    }
+
+    fn location(self, span: Span, sources: diag.Sources) -> Json {
+        json.obj().with(
+            "uri",
+            json.text(path_uri(sources.files[span.file as i64].path.as_str()).as_str())
+        ).with(
+            "range",
+            self.range(span, sources)
+        )
+    }
+
+    fn range(self, span: Span, sources: diag.Sources) -> Json {
+        let text = sources.files[span.file as i64].text.as_str()
+        let lo = min(span.lo as i64, text.len)
+        let hi = max(lo, min(span.hi as i64, text.len))
+        json.obj().with("start", self.position(text, lo)).with("end", self.position(text, hi))
+    }
+
+    // The protocol position of a byte offset.
+    fn position(self, text: str, offset: i64) -> Json {
+        var line = 0
+        var start = 0
+        for i in 0..offset {
+            if text[i] == '\n' {
+                line += 1
+                start = i + 1
+            }
+        }
+        json.obj().with("line", json.int(line)).with("character", json.int(self.units(
+            text[start..offset]
+        )))
+    }
+
+    // The length of `s` in the client's position units.
+    fn units(self, s: str) -> i64 {
+        if self.utf8 { return s.len }
+        var n = 0
+        var i = 0
+        while i < s.len {
+            let k = diag.utf8_at(s, i)
+            if k == 4 {
+                n += 2
+                i += 4
+            } else if k > 0 {
+                n += 1
+                i += k
+            } else {
+                n += 1
+                i -= k
+            }
+        }
+        n
+    }
+
+    // The byte offset of a protocol position, clamped to its line.
+    fn offset(self, text: str, line: i64, character: i64) -> i64 {
+        var i = 0
+        var l = 0
+        while l < line && i < text.len {
+            if text[i] == '\n' { l += 1 }
+            i += 1
+        }
+        var units = 0
+        while i < text.len && text[i] != '\n' && units < character {
+            let k = diag.utf8_at(text, i)
+            let size = if k > 0 { k } else { 0 - k }
+            units += if self.utf8 { size } else if k == 4 { 2 } else { 1 }
+            i += size
+        }
+        i
+    }
+
+    fn formatting(self, i: i64) -> Json {
+        let d = self.docs[i]
+        match format.source(0, d.text.as_str(), format.DEFAULT_WIDTH) {
+            Ok(formatted) => {
+                if formatted == d.text { return Json.Arr(Vec(Json).new()) }
+                // One edit replacing the whole document.
+                let text = d.text.as_str()
+                let range = json.obj().with("start", json.obj().with("line", json.int(0)).with(
+                    "character",
+                    json.int(0)
+                )).with("end", self.position(text, text.len))
+                var edits = Vec(Json).new()
+                edits.push(json.obj().with("range", range).with("newText", json.text(
+                    formatted.as_str()
+                )))
+                Json.Arr(edits)
+            }
+            // Syntax errors are reported as diagnostics; nothing changes.
+            Err(_) => Json.Null
+        }
+    }
+
+    // The definitions of the name at a position: a `Location`, an array
+    // of them, or null.
+    fn definition(self, i: i64, line: i64, character: i64) -> Json {
+        let d = self.docs[i]
+        let offset = self.offset(d.text.as_str(), line, character)
+        var sources = diag.Sources.new()
+        let overlay = self.overlay()
+        let a = match load.load_with(
+            d.path.as_str(),
+            load.default_search(self.search.clone()),
+            self.tgt.name(),
+            &sources,
+            false,
+            overlay
+        ) {
+            Ok(a) => a
+            Err(_) => return Json.Null
+        }
+        let found = resolve(a, sources, offset)
+        var locations = Vec(Json).new()
+        for sp in found {
+            locations.push(self.location(sp, sources))
+        }
+        if locations.len() == 0 { return Json.Null }
+        if locations.len() == 1 { return locations[0].clone() }
+        Json.Arr(locations)
+    }
+}
+
+// Loads, checks and elaborates `path` as the root of a library.
+pub fn analyze(
+    path: str,
+    sink search: Vec(String),
+    tgt: target.Target,
+    inout sources: diag.Sources,
+    overlay: Map(String, String)
+) -> Result((), Diag) {
+    let a = load.load_with(path, load.default_search(search), tgt.name(), &sources, false, overlay)?
+    var reports = Vec(interp.Report).new()
+    var prog = sema.compile(a, tgt, true, true, false, &reports)?
+    check.program(&prog)
+}
+
+// Where an error is shown for a check of the document at `path`: at its
+// own span when that is in the document, else at the first note that is
+// (the use of a generic instance, say), else at its own span elsewhere.
+fn where_shown(d: Diag, path: str, sources: diag.Sources) -> Span {
+    if in_file(d.span, path, sources) { return d.span }
+    for n in d.notes {
+        match n.span {
+            Some(sp) => if in_file(sp, path, sources) { return sp }
+            None => {}
+        }
+    }
+    d.span
+}
+
+fn in_file(span: Span, path: str, sources: diag.Sources) -> bool {
+    (span.file as i64) < sources.files.len() && sources.files[span.file as i64].path == path
+}
+
+// ---- file URIs ----
+
+fn uri_path(uri: str) -> String {
+    var rest = uri
+    if uri.starts_with("file://") { rest = uri[7..] }
+    var out = String.new()
+    var i = 0
+    while i < rest.len {
+        let b = rest[i]
+        if b == '%' && i + 2 < rest.len && hex_value(rest[i + 1]) >= 0 &&
+            hex_value(rest[i + 2]) >= 0 {
+            out.push((hex_value(rest[i + 1]) * 16 + hex_value(rest[i + 2])) as u8)
+            i += 3
+        } else {
+            out.push(b)
+            i += 1
+        }
+    }
+    out
+}
+
+fn hex_value(b: u8) -> i64 {
+    if is_digit(b) { return (b - '0') as i64 }
+    if b >= 'a' && b <= 'f' { return (b - 'a') as i64 + 10 }
+    if b >= 'A' && b <= 'F' { return (b - 'A') as i64 + 10 }
+    -1
+}
+
+fn path_uri(path: str) -> String {
+    let absolute = match os.canonical(path) {
+        Some(c) => c
+        None => path.to_string()
+    }
+    let digits = "0123456789ABCDEF"
+    var out = String.from("file://")
+    for b in absolute.as_str() {
+        if is_alpha(b) || is_digit(b) || b == '/' || b == '-' || b == '.' || b == '_' || b == '~' {
+            out.push(b)
+        } else {
+            out.push('%')
+            out.push(digits[(b >> 4) as i64])
+            out.push(digits[(b & 15) as i64])
+        }
+    }
+    out
+}
+
+// ---- definitions ----
+
+struct Binding {
+    name: String
+    span: Span
+}
+
+// The definitions of the identifier at `offset` in the root module: a
+// local binding in scope there, or items, variants, fields and methods of
+// the loaded modules, chosen by what qualifies the name.
+fn resolve(a: load.Ast, sources: diag.Sources, offset: i64) -> Vec(Span) {
+    var out = Vec(Span).new()
+    let root = a.modules[a.root as i64]
+    let file = root.ast.file
+    let text = sources.files[file as i64].text.as_str()
+    let toks = match lex.lex(file, text) {
+        Ok(t) => t
+        Err(_) => return out
+    }
+    var at = -1
+    for i, t in toks {
+        if t.tok == lex.Tok.Ident && t.span.lo as i64 <= offset && offset <= t.span.hi as i64 {
+            at = i
+        }
+    }
+    if at < 0 { return out }
+    let name = toks[at].text.as_str()
+    let off = toks[at].span.lo
+    // `q.name`
+    if at >= 2 && toks[at - 1].tok == lex.Tok.Dot && toks[at - 2].tok == lex.Tok.Ident {
+        let q = toks[at - 2].text.as_str()
+        var shadowed = false
+        for b in locals(root.ast, toks[at - 2].span.lo) {
+            if b.name == q { shadowed = true }
+        }
+        if !shadowed {
+            // A module: its item.
+            for imp in root.imports {
+                if imp.alias == q {
+                    items_named(a.modules[imp.module as i64], sources, name, &out)
+                    return out
+                }
+            }
+            // A type: its variants and methods.
+            for m in a.modules {
+                for it in m.ast.items {
+                    type_member(m, sources, it, q, name, &out)
+                }
+            }
+            if out.len() > 0 { return out }
+        }
+        // A value: fields and methods of that name anywhere.
+        for m in a.modules { members_named(m, sources, name, &out) }
+        return out
+    }
+    // A local in scope, the innermost.
+    var local: Option(Span) = None
+    for b in locals(root.ast, off) {
+        if b.name == name { local = Some(narrow(sources, b.span, name)) }
+    }
+    match local {
+        Some(sp) => {
+            out.push(sp)
+            return out
+        }
+        None => {}
+    }
+    // The module's own items and imports, then the prelude and what it
+    // makes visible.
+    items_named(root, sources, name, &out)
+    for imp in root.imports {
+        if imp.alias == name { out.push(Span.new(a.modules[imp.module as i64].ast.file, 0, 0)) }
+    }
+    if out.len() > 0 { return out }
+    match a.prelude {
+        Some(p) => {
+            let prelude = a.modules[p as i64]
+            items_named(prelude, sources, name, &out)
+            for imp in prelude.imports {
+                if imp.public { items_named(a.modules[imp.module as i64], sources, name, &out) }
+            }
+        }
+        None => {}
+    }
+    if out.len() > 0 { return out }
+    // A variant written alone, a field name in a literal or pattern.
+    for m in a.modules { variants_named(m, sources, name, &out) }
+    if out.len() > 0 { return out }
+    for m in a.modules { members_named(m, sources, name, &out) }
+    out
+}
+
+// The span of `name` itself within a declaration's span, found as a whole
+// word, or the declaration's start.
+fn narrow(sources: diag.Sources, span: Span, name: str) -> Span {
+    if span.file as i64 >= sources.files.len() { return span }
+    let text = sources.files[span.file as i64].text.as_str()
+    let lo = min(span.lo as i64, text.len)
+    let hi = min(max(span.hi as i64, lo), text.len)
+    var i = lo
+    while i + name.len <= hi {
+        if text[i..i + name.len] == name && (i == 0 || !word(text[i - 1])) &&
+            (i + name.len == text.len || !word(text[i + name.len])) {
+            return Span.new(span.file, i, i + name.len)
+        }
+        i += 1
+    }
+    Span.new(span.file, lo, lo)
+}
+
+fn word(b: u8) -> bool {
+    is_alpha(b) || is_digit(b) || b == '_'
+}
+
+fn item_name(it: ast.Item) -> Option(str) {
+    match it.kind {
+        Fn(f) => Some(f.name.as_str())
+        Struct(s) => Some(s.name.as_str())
+        Enum(e) => Some(e.name.as_str())
+        Trait(t) => Some(t.name.as_str())
+        Const(c) => Some(c.name.as_str())
+        Static(c) => Some(c.name.as_str())
+        TypeAlias(n, _) => Some(n.as_str())
+        _ => None
+    }
+}
+
+fn items_named(m: load.ModuleAst, sources: diag.Sources, name: str, inout out: Vec(Span)) {
+    for it in m.ast.items {
+        match item_name(it) {
+            Some(n) => if n == name {
+                match it.kind {
+                    Fn(f) => out.push(f.name_span)
+                    _ => out.push(narrow(sources, it.span, name))
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+fn variants_named(m: load.ModuleAst, sources: diag.Sources, name: str, inout out: Vec(Span)) {
+    for it in m.ast.items {
+        match it.kind {
+            Enum(e) => {
+                for v in e.variants {
+                    if v.name == name { out.push(narrow(sources, v.span, name)) }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// Struct fields and the methods of impls and traits.
+fn members_named(m: load.ModuleAst, sources: diag.Sources, name: str, inout out: Vec(Span)) {
+    for it in m.ast.items {
+        match it.kind {
+            Struct(s) => {
+                for f in s.fields {
+                    if f.name == name { out.push(narrow(sources, f.span, name)) }
+                }
+            }
+            Impl(i) => items_named_in(i.items, sources, name, &out)
+            Trait(t) => items_named_in(t.items, sources, name, &out)
+            _ => {}
+        }
+    }
+}
+
+fn items_named_in(items: Vec(ast.Item), sources: diag.Sources, name: str, inout out: Vec(Span)) {
+    for it in items {
+        match it.kind {
+            Fn(f) => if f.name == name { out.push(f.name_span) }
+            TypeAlias(n, _) => if n == name { out.push(narrow(sources, it.span, name)) }
+            _ => {}
+        }
+    }
+}
+
+// `ty.name`: a variant of the enum `ty`, or a method of an impl for it.
+fn type_member(
+    m: load.ModuleAst,
+    sources: diag.Sources,
+    it: ast.Item,
+    ty: str,
+    name: str,
+    inout out: Vec(Span)
+) {
+    match it.kind {
+        Enum(e) => if e.name == ty {
+            for v in e.variants {
+                if v.name == name { out.push(narrow(sources, v.span, name)) }
+            }
+        }
+        Impl(i) => match i.self_ty.kind {
+            Path(p, _) => if p.len() > 0 && p[p.len() - 1] == ty {
+                items_named_in(i.items, sources, name, &out)
+            }
+            _ => {}
+        }
+        Struct(s) => if s.name == ty {
+            for f in s.fields {
+                if f.name == name { out.push(narrow(sources, f.span, name)) }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn contains(span: Span, off: u32) -> bool {
+    span.lo <= off && off <= span.hi
+}
+
+// The bindings in scope at `off`, outermost first.
+fn locals(m: ast.Module, off: u32) -> Vec(Binding) {
+    var out = Vec(Binding).new()
+    for it in m.items {
+        if contains(it.span, off) { item_locals(it, off, &out) }
+    }
+    out
+}
+
+fn item_locals(it: ast.Item, off: u32, inout out: Vec(Binding)) {
+    match it.kind {
+        Fn(f) => {
+            for p in f.params {
+                out.push(Binding { name: p.name.clone(), span: p.span })
+            }
+            match f.body {
+                Some(b) => block_locals(b, off, &out)
+                None => {}
+            }
+        }
+        Impl(i) => {
+            for sub in i.items {
+                if contains(sub.span, off) { item_locals(sub, off, &out) }
+            }
+        }
+        Trait(t) => {
+            for sub in t.items {
+                if contains(sub.span, off) { item_locals(sub, off, &out) }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn block_locals(b: ast.Block, off: u32, inout out: Vec(Binding)) {
+    if !contains(b.span, off) { return }
+    for st in b.stmts {
+        if st.span.lo > off { break }
+        match st.kind {
+            Let(l) => {
+                if contains(l.value.span, off) {
+                    expr_locals(l.value, off, &out)
+                } else {
+                    pat_bindings(l.pat, &out)
+                }
+            }
+            Assign(x, y) => {
+                expr_locals(x, off, &out)
+                expr_locals(y, off, &out)
+            }
+            OpAssign(_, x, y) => {
+                expr_locals(x, off, &out)
+                expr_locals(y, off, &out)
+            }
+            Expr(e) => expr_locals(e, off, &out)
+        }
+    }
+    match b.tail {
+        Some(e) => expr_locals(e, off, &out)
+        None => {}
+    }
+}
+
+fn opt_locals(e: Option(Box(ast.Expr)), off: u32, inout out: Vec(Binding)) {
+    match e {
+        Some(x) => expr_locals(x, off, &out)
+        None => {}
+    }
+}
+
+fn expr_locals(e: ast.Expr, off: u32, inout out: Vec(Binding)) {
+    if !contains(e.span, off) { return }
+    match e.kind {
+        Block(b) => block_locals(b, off, &out)
+        Unsafe(b) => block_locals(b, off, &out)
+        Loop(b) => block_locals(b, off, &out)
+        If(c, t, f) => {
+            expr_locals(c, off, &out)
+            block_locals(t, off, &out)
+            opt_locals(f, off, &out)
+        }
+        InlineIf(c, t, f) => {
+            expr_locals(c, off, &out)
+            block_locals(t, off, &out)
+            opt_locals(f, off, &out)
+        }
+        While(c, b) => {
+            expr_locals(c, off, &out)
+            block_locals(b, off, &out)
+        }
+        Match(x, arms) => {
+            expr_locals(x, off, &out)
+            for arm in arms {
+                if contains(arm.span, off) {
+                    pat_bindings(arm.pat, &out)
+                    match arm.guard {
+                        Some(g) => expr_locals(g, off, &out)
+                        None => {}
+                    }
+                    expr_locals(arm.body, off, &out)
+                }
+            }
+        }
+        For(index, pat, iter, body) => {
+            expr_locals(iter, off, &out)
+            if !contains(iter.span, off) {
+                match index {
+                    Some(ix) => out.push(Binding { name: ix.name.clone(), span: ix.span })
+                    None => {}
+                }
+                pat_bindings(pat, &out)
+                block_locals(body, off, &out)
+            }
+        }
+        InlineFor(name, range, body) => {
+            expr_locals(range, off, &out)
+            if !contains(range.span, off) {
+                out.push(Binding { name: name.clone(), span: e.span })
+                block_locals(body, off, &out)
+            }
+        }
+        Lambda(params, _, body) => {
+            for p in params {
+                out.push(Binding { name: p.name.clone(), span: p.span })
+            }
+            block_locals(body, off, &out)
+        }
+        Call(f, args) => {
+            expr_locals(f, off, &out)
+            for x in args { expr_locals(x, off, &out) }
+        }
+        StructLit(p, fields) => {
+            expr_locals(p, off, &out)
+            for f in fields { expr_locals(f.value, off, &out) }
+        }
+        Tuple(xs) => {
+            for x in xs { expr_locals(x, off, &out) }
+        }
+        Array(xs) => {
+            for x in xs { expr_locals(x, off, &out) }
+        }
+        Field(x, _) => expr_locals(x, off, &out)
+        TupleField(x, _) => expr_locals(x, off, &out)
+        Unary(_, x) => expr_locals(x, off, &out)
+        Cast(x, _) => expr_locals(x, off, &out)
+        Try(x) => expr_locals(x, off, &out)
+        Move(x) => expr_locals(x, off, &out)
+        Comptime(x) => expr_locals(x, off, &out)
+        Return(x) => opt_locals(x, off, &out)
+        Index(x, y) => {
+            expr_locals(x, off, &out)
+            expr_locals(y, off, &out)
+        }
+        Binary(_, x, y) => {
+            expr_locals(x, off, &out)
+            expr_locals(y, off, &out)
+        }
+        ArrayRepeat(x, y) => {
+            expr_locals(x, off, &out)
+            expr_locals(y, off, &out)
+        }
+        Range(x, y) => {
+            opt_locals(x, off, &out)
+            opt_locals(y, off, &out)
+        }
+        _ => {}
+    }
+}
+
+// A capitalized name is taken for a variant (`None`), as names are
+// written, since telling them apart needs the matched type.
+fn pat_bindings(p: ast.Pat, inout out: Vec(Binding)) {
+    match p.kind {
+        Name(n, _) => if n.len() > 0 && !(n.as_str()[0] >= 'A' && n.as_str()[0] <= 'Z') {
+            out.push(Binding { name: n.clone(), span: p.span })
+        }
+        Tuple(ps) => {
+            for q in ps { pat_bindings(q, &out) }
+        }
+        Variant(_, ps) => {
+            for q in ps { pat_bindings(q, &out) }
+        }
+        Struct(_, fields, _) => {
+            for f in fields { pat_bindings(f.pat, &out) }
+        }
+        Or(ps) => {
+            for q in ps { pat_bindings(q, &out) }
+        }
+        _ => {}
+    }
+}

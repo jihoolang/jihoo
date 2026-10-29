@@ -121,6 +121,33 @@ struct Ctx {
     active: Bits
 }
 
+// Elaborates moves and drops in every function of a program, then checks
+// the borrows of those that elaborated; their errors are reported together.
+pub fn program(inout prog: mir.Program) -> Result((), Diag) {
+    var errors = Vec(Diag).new()
+    var initialized = Vec(bool).new()
+    for i in 0..prog.fns.len() {
+        match elab.run(&prog.fns[i]) {
+            Ok(_) => initialized.push(true)
+            Err(d) => {
+                initialized.push(false)
+                errors.push(d)
+            }
+        }
+    }
+    let effects = infer_effects(prog.types, prog.fns)
+    for i, f in prog.fns {
+        if initialized[i] {
+            match run_with_effects(prog.types, f, effects) {
+                Ok(_) => {}
+                Err(d) => errors.push(d)
+            }
+        }
+    }
+    if errors.len() > 0 { return Err(Diag.several(errors)) }
+    Ok(())
+}
+
 pub fn run(t: Types, f: mir.Function) -> Result((), Diag) {
     run_with_effects(t, f, Vec(Effect).new())
 }

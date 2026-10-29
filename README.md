@@ -193,5 +193,8 @@ columns; `--width N` adjusts it. `--check` checks layout without printing
 formatted source and `--write` rewrites files, including every `.jh` file in
 the directories given. The output is reparsed and must retain the same syntax tree.
 
-Next ([roadmap](docs/internals/roadmap.md)): a language server built on the
-compiler's checking and diagnostics, then application-driven library work.
+[`jihoo lsp`](docs/reference/command-line.md#language-server) is a language
+server built on the same checking and diagnostics: errors in unsaved
+documents, go to definition and formatting.
+
+Next ([roadmap](docs/internals/roadmap.md)): application-driven library work.

@@ -1,0 +1,324 @@
+// JSON values, as the language server reads and writes them. Numbers keep
+// their spelling, so that request ids are echoed back exactly.
+
+import diag
+
+pub enum Json {
+    Null
+    Bool(bool)
+    Num(String)
+    Str(String)
+    Arr(Vec(Json))
+    Obj(Vec(Member))
+}
+
+pub struct Member {
+    pub key: String
+    pub value: Json
+}
+
+impl Clone for Json {
+    fn clone(self) -> Json {
+        match self {
+            Null => Json.Null
+            Bool(b) => Json.Bool(b)
+            Num(n) => Json.Num(n.clone())
+            Str(s) => Json.Str(s.clone())
+            Arr(xs) => Json.Arr(xs.clone())
+            Obj(ms) => Json.Obj(ms.clone())
+        }
+    }
+}
+
+impl Clone for Member {
+    fn clone(self) -> Member {
+        Member { key: self.key.clone(), value: self.value.clone() }
+    }
+}
+
+impl Json {
+    // The member named `key` of an object.
+    pub fn get(self, key: str) -> Option(ref Json) {
+        match self {
+            Obj(ms) => {
+                for i in 0..ms.len() {
+                    if ms[i].key == key { return Some(ms[i].value) }
+                }
+                None
+            }
+            _ => None
+        }
+    }
+
+    // The member at a path of keys, or `Null`.
+    pub fn at(self, keys: [str]) -> Json {
+        var cur = self.clone()
+        for k in keys {
+            let next = match cur.get(k) {
+                Some(v) => v.clone()
+                None => return Json.Null
+            }
+            cur = next
+        }
+        cur
+    }
+
+    pub fn str_or(self, default: str) -> String {
+        match self {
+            Str(s) => s.clone()
+            _ => default.to_string()
+        }
+    }
+
+    pub fn int_or(self, default: i64) -> i64 {
+        match self {
+            Num(n) => match n.as_str().parse_int() {
+                Some(i) => i
+                None => default
+            }
+            _ => default
+        }
+    }
+
+    pub fn is_null(self) -> bool {
+        match self {
+            Null => true
+            _ => false
+        }
+    }
+
+    pub fn write(self, inout out: String) {
+        match self {
+            Null => out.push_str("null")
+            Bool(b) => out.push_str(if b { "true" } else { "false" })
+            Num(n) => out.push_str(n.as_str())
+            Str(s) => diag.json_string(&out, s.as_str())
+            Arr(xs) => {
+                out.push('[')
+                for i, x in xs {
+                    if i > 0 { out.push(',') }
+                    x.write(&out)
+                }
+                out.push(']')
+            }
+            Obj(ms) => {
+                out.push('{')
+                for i, m in ms {
+                    if i > 0 { out.push(',') }
+                    diag.json_string(&out, m.key.as_str())
+                    out.push(':')
+                    m.value.write(&out)
+                }
+                out.push('}')
+            }
+        }
+    }
+
+    pub fn to_text(self) -> String {
+        var s = String.new()
+        self.write(&s)
+        s
+    }
+}
+
+// Building objects: `obj().with("a", int(1))`.
+pub fn obj() -> Json {
+    Json.Obj(Vec(Member).new())
+}
+
+pub fn int(n: i64) -> Json {
+    Json.Num(n.to_string())
+}
+
+pub fn text(s: str) -> Json {
+    Json.Str(s.to_string())
+}
+
+impl Json {
+    pub fn with(sink self, key: str, sink value: Json) -> Json {
+        var j = self
+        match &j {
+            Obj(ms) => ms.push(Member { key: key.to_string(), value: value })
+            _ => {}
+        }
+        j
+    }
+}
+
+// The value `text` holds, if it is exactly one JSON value.
+pub fn parse(text: str) -> Option(Json) {
+    var p = Parser { text: text, pos: 0, depth: 0 }
+    let v = p.value()?
+    p.space()
+    if p.pos != text.len { return None }
+    Some(v)
+}
+
+struct Parser {
+    text: str
+    pos: i64
+    depth: i64
+}
+
+impl Parser {
+    fn space(inout self) {
+        while self.pos < self.text.len {
+            let b = self.text[self.pos]
+            if b != ' ' && b != '\t' && b != '\n' && b != '\r' { break }
+            self.pos += 1
+        }
+    }
+
+    fn eat(inout self, word: str) -> bool {
+        if self.pos + word.len <= self.text.len &&
+            self.text[self.pos..self.pos + word.len] == word {
+            self.pos += word.len
+            return true
+        }
+        false
+    }
+
+    fn value(inout self) -> Option(Json) {
+        self.space()
+        if self.pos >= self.text.len || self.depth > 512 { return None }
+        let b = self.text[self.pos]
+        if b == '{' {
+            self.pos += 1
+            self.depth += 1
+            var ms = Vec(Member).new()
+            self.space()
+            if self.eat("}") {
+                self.depth -= 1
+                return Some(Json.Obj(ms))
+            }
+            loop {
+                self.space()
+                let key = self.string()?
+                self.space()
+                if !self.eat(":") { return None }
+                let v = self.value()?
+                ms.push(Member { key: key, value: v })
+                self.space()
+                if self.eat("}") { break }
+                if !self.eat(",") { return None }
+            }
+            self.depth -= 1
+            Some(Json.Obj(ms))
+        } else if b == '[' {
+            self.pos += 1
+            self.depth += 1
+            var xs = Vec(Json).new()
+            self.space()
+            if self.eat("]") {
+                self.depth -= 1
+                return Some(Json.Arr(xs))
+            }
+            loop {
+                xs.push(self.value()?)
+                self.space()
+                if self.eat("]") { break }
+                if !self.eat(",") { return None }
+            }
+            self.depth -= 1
+            Some(Json.Arr(xs))
+        } else if b == '"' {
+            Some(Json.Str(self.string()?))
+        } else if self.eat("null") {
+            Some(Json.Null)
+        } else if self.eat("true") {
+            Some(Json.Bool(true))
+        } else if self.eat("false") {
+            Some(Json.Bool(false))
+        } else {
+            let start = self.pos
+            while self.pos < self.text.len {
+                let c = self.text[self.pos]
+                if !is_digit(c) && c != '-' && c != '+' && c != '.' && c != 'e' && c != 'E' {
+                    break
+                }
+                self.pos += 1
+            }
+            if self.pos == start { return None }
+            Some(Json.Num(self.text[start..self.pos].to_string()))
+        }
+    }
+
+    fn string(inout self) -> Option(String) {
+        if !self.eat("\"") { return None }
+        var s = String.new()
+        loop {
+            if self.pos >= self.text.len { return None }
+            let b = self.text[self.pos]
+            self.pos += 1
+            if b == '"' { break }
+            if b != '\\' {
+                s.push(b)
+                continue
+            }
+            if self.pos >= self.text.len { return None }
+            let e = self.text[self.pos]
+            self.pos += 1
+            if e == 'n' {
+                s.push('\n')
+            } else if e == 't' {
+                s.push('\t')
+            } else if e == 'r' {
+                s.push('\r')
+            } else if e == 'b' {
+                s.push(8)
+            } else if e == 'f' {
+                s.push(12)
+            } else if e == 'u' {
+                var c = self.hex4()?
+                // A surrogate pair is one character.
+                if c >= 0xd800 && c < 0xdc00 && self.eat("\\u") {
+                    let low = self.hex4()?
+                    if low < 0xdc00 || low >= 0xe000 { return None }
+                    c = 0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00)
+                }
+                push_utf8(&s, c)
+            } else {
+                s.push(e)
+            }
+        }
+        Some(s)
+    }
+
+    fn hex4(inout self) -> Option(i64) {
+        if self.pos + 4 > self.text.len { return None }
+        var n = 0
+        for _ in 0..4 {
+            let c = self.text[self.pos]
+            let d = if is_digit(c) {
+                (c - '0') as i64
+            } else if c >= 'a' && c <= 'f' {
+                (c - 'a') as i64 + 10
+            } else if c >= 'A' && c <= 'F' {
+                (c - 'A') as i64 + 10
+            } else {
+                return None
+            }
+            n = n * 16 + d
+            self.pos += 1
+        }
+        Some(n)
+    }
+}
+
+pub fn push_utf8(inout s: String, c: i64) {
+    if c < 0x80 {
+        s.push(c as u8)
+    } else if c < 0x800 {
+        s.push((0xc0 | (c >> 6)) as u8)
+        s.push((0x80 | (c & 63)) as u8)
+    } else if c < 0x10000 {
+        s.push((0xe0 | (c >> 12)) as u8)
+        s.push((0x80 | ((c >> 6) & 63)) as u8)
+        s.push((0x80 | (c & 63)) as u8)
+    } else {
+        s.push((0xf0 | (c >> 18)) as u8)
+        s.push((0x80 | ((c >> 12) & 63)) as u8)
+        s.push((0x80 | ((c >> 6) & 63)) as u8)
+        s.push((0x80 | (c & 63)) as u8)
+    }
+}

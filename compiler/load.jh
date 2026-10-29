@@ -105,10 +105,32 @@ pub fn load(
     inout sources: diag.Sources,
     no_prelude: bool
 ) -> Result(Ast, Diag) {
+    load_with(root, search, target, &sources, no_prelude, Map(String, String).new())
+}
+
+// The key of a file in an overlay: its canonical path, or the path itself
+// if it does not exist.
+pub fn file_key(path: str) -> String {
+    match os.canonical(path) {
+        Some(k) => k
+        None => path.to_string()
+    }
+}
+
+// Loads with some files' text given by `overlay`, by `file_key`, instead
+// of read: an editor's unsaved buffers.
+pub fn load_with(
+    root: str,
+    sink search: Vec(String),
+    target: str,
+    inout sources: diag.Sources,
+    no_prelude: bool,
+    overlay: Map(String, String)
+) -> Result(Ast, Diag) {
     // The profile decides which files the standard library's modules come
     // from, so it is read from the root's attributes first.
     var profile = "native"
-    match os.read_file(root) {
+    match read(root, overlay) {
         Ok(text) => {
             if is_freestanding(text.as_str()) {
                 profile = "freestanding"
@@ -123,7 +145,7 @@ pub fn load(
         by_path: Map(String, u32).new(),
         modules: Vec(ModuleAst).new()
     }
-    let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources)?
+    let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources, overlay)?
     var prelude: Option(u32) = None
     if !no_prelude {
         var p = Vec(String).new()
@@ -134,7 +156,8 @@ pub fn load(
                 f.as_str(),
                 "std.prelude",
                 Span.new(0, 0, 0),
-                &sources
+                &sources,
+                overlay
             )?)
             None => return Err(Diag.new(
                 Span.new(0, 0, 0),
@@ -152,7 +175,8 @@ pub fn load(
                 f.as_str(),
                 "std.derive",
                 Span.new(0, 0, 0),
-                &sources
+                &sources,
+                overlay
             )?)
             None => return Err(Diag.new(
                 Span.new(0, 0, 0),
@@ -237,17 +261,15 @@ impl Loader {
         path: str,
         name: str,
         at: Span,
-        inout sources: diag.Sources
+        inout sources: diag.Sources,
+        overlay: Map(String, String)
     ) -> Result(u32, Diag) {
-        let key = match os.canonical(path) {
-            Some(k) => k
-            None => path.to_string()
-        }
+        let key = file_key(path)
         match self.by_path.get(key) {
             Some(i) => return Ok(i)
             None => {}
         }
-        let text = match os.read_file(path) {
+        let text = match read(path, overlay) {
             Ok(t) => t
             Err(e) => return Err(Diag.new(at, ("cannot read " + path + ": " + e.as_str()).as_str()))
         }
@@ -282,7 +304,7 @@ impl Loader {
                 None => return Err(Diag.new(w.span, ("cannot find module `" + dotted.as_str() +
                     "`").as_str()))
             }
-            let m = self.load_file(p.as_str(), dotted.as_str(), w.span, &sources)?
+            let m = self.load_file(p.as_str(), dotted.as_str(), w.span, &sources, overlay)?
             let alias = match w.alias {
                 Some(a) => a.clone()
                 None => w.path[w.path.len() - 1].clone()
@@ -292,6 +314,16 @@ impl Loader {
         self.modules[idx as i64].imports = imports
         Ok(idx)
     }
+}
+
+fn read(path: str, overlay: Map(String, String)) -> Result(String, String) {
+    if overlay.len() > 0 {
+        match overlay.get(file_key(path)) {
+            Some(t) => return Ok(t.clone())
+            None => {}
+        }
+    }
+    os.read_file(path)
 }
 
 fn dots(path: Vec(String)) -> String {
