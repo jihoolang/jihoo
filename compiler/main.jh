@@ -280,6 +280,9 @@ fn drive() {
     } else if cmd == "build" || cmd == "run" {
         let freestanding = prog.freestanding
         let ll = llvm.emit(prog)
+        // Nothing refers to the syntax trees any more; LLVM can use their
+        // memory.
+        drop(a)
         var exe = String.new()
         match out {
             Some(o) => exe = String.from(o)
@@ -454,23 +457,24 @@ fn link_object(
         }
     }
     let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" +
-        exe[name_start(exe)..exe.len] + ".o"
-    let obj = os.join(os.temp_dir().as_str(), name.as_str())
-    let r = object_and_link(ll, obj.as_str(), exe, opt, tgt, freestanding, link)
-    os.remove(obj.as_str())
+        exe[name_start(exe)..exe.len] + "."
+    let stem = os.join(os.temp_dir().as_str(), name.as_str())
+    let objs = backend.objects(ll, stem.as_str(), opt, tgt, freestanding)?
+    let r = link_objects(objs, exe, opt, tgt, freestanding, link)
+    for o in objs {
+        os.remove(o.as_str())
+    }
     r
 }
 
-fn object_and_link(
-    ll: str,
-    obj: str,
+fn link_objects(
+    objs: Vec(String),
     exe: str,
     opt: str,
     tgt: target.Target,
     freestanding: bool,
     link: Vec(str)
 ) -> Result((), String) {
-    backend.object(ll, obj, opt, tgt, freestanding)?
     let driver = if freestanding {
         match env.get("JIHOO_LD") {
             Some(s) => s
@@ -498,7 +502,7 @@ fn object_and_link(
             c.push(tgt.triple())
         }
     }
-    c.push(obj)
+    for o in objs { c.push(o.as_str()) }
     for l in link { c.push(l) }
     if !freestanding {
         c.push("-lm")

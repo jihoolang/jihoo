@@ -2,6 +2,8 @@
 // bootstrap's crates/jihoo/src/backend.rs. No C or C++ shim is needed.
 import std.env
 import std.ffi
+import std.fs
+import std.thread
 import target
 
 struct Api {
@@ -30,6 +32,26 @@ struct Api {
     LLVMGetFirstFunction: fnptr(*u8) -> *u8
     LLVMGetNextFunction: fnptr(*u8) -> *u8
     LLVMSetSection: fnptr(*u8, *u8)
+    LLVMWriteBitcodeToMemoryBuffer: fnptr(*u8) -> *u8
+    LLVMGetBufferStart: fnptr(*u8) -> *u8
+    LLVMGetBufferSize: fnptr(*u8) -> u64
+    LLVMDisposeMemoryBuffer: fnptr(*u8)
+    LLVMCreateMemoryBufferWithMemoryRange: fnptr(*u8, u64, *u8, i32) -> *u8
+    LLVMParseBitcodeInContext2: fnptr(*u8, *u8, **u8) -> i32
+    LLVMIsDeclaration: fnptr(*u8) -> i32
+    LLVMGetLinkage: fnptr(*u8) -> i32
+    LLVMSetLinkage: fnptr(*u8, i32)
+    LLVMSetVisibility: fnptr(*u8, i32)
+    LLVMIsGlobalConstant: fnptr(*u8) -> i32
+    LLVMGetUnnamedAddress: fnptr(*u8) -> i32
+    LLVMGetFirstGlobal: fnptr(*u8) -> *u8
+    LLVMGetNextGlobal: fnptr(*u8) -> *u8
+    LLVMGetFirstBasicBlock: fnptr(*u8) -> *u8
+    LLVMGetNextBasicBlock: fnptr(*u8) -> *u8
+    LLVMGetFirstInstruction: fnptr(*u8) -> *u8
+    LLVMGetNextInstruction: fnptr(*u8) -> *u8
+    LLVMSetModuleInlineAsm2: fnptr(*u8, *u8, u64)
+    LLVMContextSetDiscardValueNames: fnptr(*u8, i32)
 }
 
 unsafe fn load_api(lib: ffi.Library) -> Result(Api, String) {
@@ -71,6 +93,30 @@ unsafe fn load_api(lib: ffi.Library) -> Result(Api, String) {
         LLVMGetFirstFunction: lib.symbol("LLVMGetFirstFunction")? as fnptr(*u8) -> *u8
         LLVMGetNextFunction: lib.symbol("LLVMGetNextFunction")? as fnptr(*u8) -> *u8
         LLVMSetSection: lib.symbol("LLVMSetSection")? as fnptr(*u8, *u8)
+        LLVMWriteBitcodeToMemoryBuffer:
+            lib.symbol("LLVMWriteBitcodeToMemoryBuffer")? as fnptr(*u8) -> *u8
+        LLVMGetBufferStart: lib.symbol("LLVMGetBufferStart")? as fnptr(*u8) -> *u8
+        LLVMGetBufferSize: lib.symbol("LLVMGetBufferSize")? as fnptr(*u8) -> u64
+        LLVMDisposeMemoryBuffer: lib.symbol("LLVMDisposeMemoryBuffer")? as fnptr(*u8)
+        LLVMCreateMemoryBufferWithMemoryRange:
+            lib.symbol("LLVMCreateMemoryBufferWithMemoryRange")? as fnptr(*u8, u64, *u8, i32) -> *u8
+        LLVMParseBitcodeInContext2:
+            lib.symbol("LLVMParseBitcodeInContext2")? as fnptr(*u8, *u8, **u8) -> i32
+        LLVMIsDeclaration: lib.symbol("LLVMIsDeclaration")? as fnptr(*u8) -> i32
+        LLVMGetLinkage: lib.symbol("LLVMGetLinkage")? as fnptr(*u8) -> i32
+        LLVMSetLinkage: lib.symbol("LLVMSetLinkage")? as fnptr(*u8, i32)
+        LLVMSetVisibility: lib.symbol("LLVMSetVisibility")? as fnptr(*u8, i32)
+        LLVMIsGlobalConstant: lib.symbol("LLVMIsGlobalConstant")? as fnptr(*u8) -> i32
+        LLVMGetUnnamedAddress: lib.symbol("LLVMGetUnnamedAddress")? as fnptr(*u8) -> i32
+        LLVMGetFirstGlobal: lib.symbol("LLVMGetFirstGlobal")? as fnptr(*u8) -> *u8
+        LLVMGetNextGlobal: lib.symbol("LLVMGetNextGlobal")? as fnptr(*u8) -> *u8
+        LLVMGetFirstBasicBlock: lib.symbol("LLVMGetFirstBasicBlock")? as fnptr(*u8) -> *u8
+        LLVMGetNextBasicBlock: lib.symbol("LLVMGetNextBasicBlock")? as fnptr(*u8) -> *u8
+        LLVMGetFirstInstruction: lib.symbol("LLVMGetFirstInstruction")? as fnptr(*u8) -> *u8
+        LLVMGetNextInstruction: lib.symbol("LLVMGetNextInstruction")? as fnptr(*u8) -> *u8
+        LLVMSetModuleInlineAsm2: lib.symbol("LLVMSetModuleInlineAsm2")? as fnptr(*u8, *u8, u64)
+        LLVMContextSetDiscardValueNames:
+            lib.symbol("LLVMContextSetDiscardValueNames")? as fnptr(*u8, i32)
     })
 }
 
@@ -103,8 +149,18 @@ impl Drop for Resources {
         unsafe {
             if self.machine != null { self.api.LLVMDisposeTargetMachine(self.machine) }
             if self.module != null { self.api.LLVMDisposeModule(self.module) }
-            self.api.LLVMContextDispose(self.ctx)
+            if self.ctx != null { self.api.LLVMContextDispose(self.ctx) }
         }
+    }
+}
+
+impl Resources {
+    // Frees the module and its context before its parts are emitted.
+    unsafe fn release(inout self) {
+        self.api.LLVMDisposeModule(self.module)
+        self.module = null
+        self.api.LLVMContextDispose(self.ctx)
+        self.ctx = null
     }
 }
 
@@ -115,6 +171,7 @@ unsafe fn message(api: Api, p: *u8) -> String {
     text
 }
 
+// One object for the whole module, at `path` (`emit-obj`).
 pub fn object(
     ir: str,
     path: str,
@@ -122,16 +179,43 @@ pub fn object(
     tgt: target.Target,
     freestanding: bool
 ) -> Result((), String) {
-    unsafe { emit_object(ir, path, opt, tgt, freestanding) }
+    unsafe { emit_objects(ir, path, false, opt, tgt, freestanding)? }
+    Ok(())
 }
 
-unsafe fn emit_object(
+// The objects of a program, to be linked in the returned order: `stem`
+// followed by the unit number and `.o`. A large module, once optimized
+// whole, is emitted in several units on separate threads.
+pub fn objects(
     ir: str,
-    path: str,
+    stem: str,
     opt: str,
     tgt: target.Target,
     freestanding: bool
-) -> Result((), String) {
+) -> Result(Vec(String), String) {
+    unsafe { emit_objects(ir, stem, true, opt, tgt, freestanding) }
+}
+
+// Instructions per code generation unit, and at most this many units. The
+// count depends on the module only, never on the host, so every host
+// writes the same objects.
+const UNIT_SIZE: i64 = 20000
+const MAX_UNITS: i64 = 8
+
+const EXTERNAL: i32 = 0
+const AVAILABLE_EXTERNALLY: i32 = 1
+const INTERNAL: i32 = 8
+const PRIVATE: i32 = 9
+const HIDDEN: i32 = 1
+
+unsafe fn emit_objects(
+    ir: str,
+    out: str,
+    split: bool,
+    opt: str,
+    tgt: target.Target,
+    freestanding: bool
+) -> Result(Vec(String), String) {
     let lib = open_llvm()?
     let api = load_api(lib)?
     var major: u32 = 0
@@ -169,32 +253,14 @@ unsafe fn emit_object(
         Aarch64 => "generic"
     }
     let level = (opt[2] - '0') as i32
-    r.machine = api.LLVMCreateTargetMachine(
-        llvm_target,
-        triple.as_str().ptr,
-        cpu.ptr,
-        "".ptr,
-        level,
-        2,
-        0
-    )
+    let machine = Machine { target: llvm_target, triple: triple.as_str().ptr, cpu, level }
+    r.machine = machine.create(api)
     if r.machine == null { return Err(String.from("LLVM cannot create target machine")) }
     let data = api.LLVMCreateTargetDataLayout(r.machine)
     api.LLVMSetModuleDataLayout(r.module, data)
     api.LLVMDisposeTargetData(data)
-    let options = api.LLVMCreatePassBuilderOptions()
-    // Explicitly enable clang's vectorizers at O2/O3.
-    api.LLVMPassBuilderOptionsSetLoopVectorization(options, (level >= 2) as i32)
-    api.LLVMPassBuilderOptionsSetSLPVectorization(options, (level >= 2) as i32)
-    let pipeline = ffi.c_string(("default<" + opt[1..opt.len] + ">").as_str())?
-    let error = api.LLVMRunPasses(r.module, pipeline.as_str().ptr, r.machine, options)
-    api.LLVMDisposePassBuilderOptions(options)
-    if error != null {
-        let p = api.LLVMGetErrorMessage(error)
-        let text = ffi.copy_c_string(p)
-        api.LLVMDisposeErrorMessage(p)
-        return Err("LLVM optimization: " + text.as_str())
-    }
+    let pipeline = "default<" + opt[1..opt.len] + ">"
+    run_passes(api, r.module, pipeline.as_str(), r.machine, level >= 2)?
     if freestanding {
         var f = api.LLVMGetFirstFunction(r.module)
         var i = 0
@@ -205,9 +271,251 @@ unsafe fn emit_object(
             i += 1
         }
     }
+    var paths = Vec(String).new()
+    let starts = if split { unit_starts(api, r.module) } else { Vec(i64).filled(1, 0) }
+    if starts.len() == 1 {
+        let path = if split { out + "0.o" } else { String.from(out) }
+        emit(api, r.machine, r.module, path.as_str())?
+        paths.push(path)
+        return Ok(paths)
+    }
+    // Every unit reads the optimized module into its own context: a context
+    // belongs to one thread.
+    let bitcode = api.LLVMWriteBitcodeToMemoryBuffer(r.module)
+    r.release()
+    return_free_memory()
+    for k in 0..starts.len() {
+        paths.push(out + k.to_string().as_str() + ".o")
+    }
+    let count = starts.len()
+    let s = Split { api, machine, starts, paths }
+    let result = s.halves(
+        api.LLVMGetBufferStart(bitcode),
+        api.LLVMGetBufferSize(bitcode),
+        0,
+        0,
+        count
+    )
+    api.LLVMDisposeMemoryBuffer(bitcode)
+    match result {
+        Ok(_) => Ok(s.paths.clone())
+        Err(e) => {
+            for p in s.paths { fs.remove_file(p.as_str()) }
+            Err(e)
+        }
+    }
+}
+
+// Gives memory freed so far back to the system, where glibc has
+// `malloc_trim`. New threads allocate from arenas of their own, which
+// cannot reuse what the front end and the optimizer freed in this one.
+unsafe fn return_free_memory() {
+    match ffi.Library.open("libc.so.6") {
+        Ok(libc) => match libc.symbol("malloc_trim") {
+            Ok(p) => {
+                let trim = p as fnptr(u64) -> i32
+                let _ = trim(0)
+            }
+            Err(_) => {}
+        }
+        Err(_) => {}
+    }
+}
+
+// What creates a target machine; each thread needs its own.
+struct Machine {
+    target: *u8
+    triple: *u8
+    cpu: str
+    level: i32
+}
+
+impl Machine {
+    unsafe fn create(self, api: Api) -> *u8 {
+        api.LLVMCreateTargetMachine(
+            self.target,
+            self.triple,
+            self.cpu.ptr,
+            "".ptr,
+            self.level,
+            2,
+            0
+        )
+    }
+}
+
+unsafe fn run_passes(
+    api: Api,
+    module: *u8,
+    pipeline: str,
+    machine: *u8,
+    vectorize: bool
+) -> Result((), String) {
+    let options = api.LLVMCreatePassBuilderOptions()
+    // Explicitly enable clang's vectorizers at O2/O3.
+    api.LLVMPassBuilderOptionsSetLoopVectorization(options, vectorize as i32)
+    api.LLVMPassBuilderOptionsSetSLPVectorization(options, vectorize as i32)
+    let text = ffi.c_string(pipeline)?
+    let error = api.LLVMRunPasses(module, text.as_str().ptr, machine, options)
+    api.LLVMDisposePassBuilderOptions(options)
+    if error != null {
+        let p = api.LLVMGetErrorMessage(error)
+        let text = ffi.copy_c_string(p)
+        api.LLVMDisposeErrorMessage(p)
+        return Err("LLVM optimization: " + text.as_str())
+    }
+    Ok(())
+}
+
+unsafe fn emit(api: Api, machine: *u8, module: *u8, path: str) -> Result((), String) {
     let output = ffi.c_string(path)?
-    if api.LLVMTargetMachineEmitToFile(r.machine, r.module, output.as_str().ptr, 1, &msg) != 0 {
+    var msg: *u8 = null
+    if api.LLVMTargetMachineEmitToFile(machine, module, output.as_str().ptr, 1, &msg) != 0 {
         return Err("LLVM object: " + message(api, msg).as_str())
     }
     Ok(())
+}
+
+// The index, among the defined functions in module order, of the first
+// function of each unit. Units are runs of consecutive functions of about
+// the same number of instructions, so that the linked program keeps the
+// order of a single object.
+unsafe fn unit_starts(api: Api, module: *u8) -> Vec(i64) {
+    var sizes = Vec(i64).new()
+    var total = 0
+    var f = api.LLVMGetFirstFunction(module)
+    while f != null {
+        if api.LLVMIsDeclaration(f) == 0 {
+            var n = 0
+            var b = api.LLVMGetFirstBasicBlock(f)
+            while b != null {
+                var i = api.LLVMGetFirstInstruction(b)
+                while i != null {
+                    n += 1
+                    i = api.LLVMGetNextInstruction(i)
+                }
+                b = api.LLVMGetNextBasicBlock(b)
+            }
+            sizes.push(n)
+            total += n
+        }
+        f = api.LLVMGetNextFunction(f)
+    }
+    var count = min(max(total / UNIT_SIZE, 1), MAX_UNITS)
+    match env.get("JIHOO_CODEGEN_UNITS") {
+        Some(s) => match s.parse_int() {
+            Some(n) => count = max(n, 1)
+            None => {}
+        }
+        None => {}
+    }
+    var starts = Vec(i64).filled(1, 0)
+    var before = 0
+    for i, n in sizes {
+        if i > 0 && starts.len() < count && before * count >= total * starts.len() {
+            starts.push(i)
+        }
+        before += n
+    }
+    starts
+}
+
+fn is_local(linkage: i32) -> bool {
+    linkage == INTERNAL || linkage == PRIVATE
+}
+
+// Keeps a definition or leaves it to other units: a local one becomes
+// hidden so that the other units can refer to it, and where it is not kept
+// the definition is dropped.
+unsafe fn give(api: Api, value: *u8, owned: bool) {
+    let local = is_local(api.LLVMGetLinkage(value))
+    if owned {
+        if local { api.LLVMSetLinkage(value, EXTERNAL) }
+    } else {
+        api.LLVMSetLinkage(value, AVAILABLE_EXTERNALLY)
+    }
+    if local { api.LLVMSetVisibility(value, HIDDEN) }
+}
+
+// Units are emitted by halving: each half reads its parent's module, keeps
+// its own functions and writes them for its two halves, so that only a
+// couple of modules' worth of memory is in use at any level. Global
+// variables and module assembly (a freestanding `_start`) belong to unit 0;
+// unnamed local constants are copied into every unit that uses one.
+struct Split {
+    api: Api
+    machine: Machine
+    starts: Vec(i64)
+    paths: Vec(String)
+}
+
+impl Split {
+    // Units `lo..hi` of the module in `bc`, which defines the functions of
+    // the units from `from` on (`from <= lo`), each half on a thread.
+    unsafe fn halves(
+        self,
+        bc: *u8,
+        bc_len: u64,
+        from: i64,
+        lo: i64,
+        hi: i64
+    ) -> Result((), String) {
+        let mid = lo + (hi - lo) / 2
+        let (a, b) = thread.join(
+            fn() { unsafe { self.units(bc, bc_len, from, lo, mid) } },
+            fn() { unsafe { self.units(bc, bc_len, from, mid, hi) } }
+        )
+        a?
+        b
+    }
+
+    unsafe fn units(self, bc: *u8, bc_len: u64, from: i64, lo: i64, hi: i64) -> Result((), String) {
+        let api = self.api
+        var r = Resources { api: api, ctx: api.LLVMContextCreate(), module: null, machine: null }
+        // Names of instructions and arguments do not reach the object.
+        api.LLVMContextSetDiscardValueNames(r.ctx, 1)
+        let buffer = api.LLVMCreateMemoryBufferWithMemoryRange(bc, bc_len, "jihoo".ptr, 0)
+        let failed = api.LLVMParseBitcodeInContext2(r.ctx, buffer, &r.module)
+        api.LLVMDisposeMemoryBuffer(buffer)
+        if failed != 0 { return Err(String.from("LLVM cannot read the optimized module")) }
+        let first = self.starts[lo]
+        let end = if hi < self.starts.len() { self.starts[hi] } else { -1 }
+        var i = self.starts[from]
+        var f = api.LLVMGetFirstFunction(r.module)
+        while f != null {
+            if api.LLVMIsDeclaration(f) == 0 {
+                give(api, f, i >= first && (end < 0 || i < end))
+                i += 1
+            }
+            f = api.LLVMGetNextFunction(f)
+        }
+        var g = api.LLVMGetFirstGlobal(r.module)
+        while g != null {
+            if api.LLVMIsDeclaration(g) == 0 {
+                let copied = is_local(api.LLVMGetLinkage(g)) && api.LLVMIsGlobalConstant(g) != 0 &&
+                    api.LLVMGetUnnamedAddress(g) != 0
+                if !copied { give(api, g, lo == 0) }
+            }
+            g = api.LLVMGetNextGlobal(g)
+        }
+        if lo > 0 { api.LLVMSetModuleInlineAsm2(r.module, "".ptr, 0) }
+        r.machine = self.machine.create(api)
+        if r.machine == null { return Err(String.from("LLVM cannot create target machine")) }
+        // Only removes what other units define and what nothing here uses.
+        run_passes(api, r.module, "elim-avail-extern,globaldce", r.machine, false)?
+        if hi - lo == 1 {
+            return emit(api, r.machine, r.module, self.paths[lo].as_str())
+        }
+        let part = api.LLVMWriteBitcodeToMemoryBuffer(r.module)
+        r.release()
+        let result = self.halves(
+            api.LLVMGetBufferStart(part),
+            api.LLVMGetBufferSize(part),
+            lo,
+            lo,
+            hi
+        )
+        api.LLVMDisposeMemoryBuffer(part)
+        result
+    }
 }

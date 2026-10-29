@@ -295,12 +295,25 @@ and `exit`, and 1 when its input ends or `exit` comes first.
 | `JIHOO_CC` | native linker driver and compiler for C source inputs (default `cc` on the host, `clang` for cross compilation) |
 | `JIHOO_LD` | freestanding linker (default `ld.lld`) |
 | `JIHOO_BACKEND` | `llvm` (default), or `clang` for comparison with the previous backend |
+| `JIHOO_CODEGEN_UNITS` | the number of code generation units for `build` and `run`, instead of one per 20,000 LLVM instructions (at most 8) |
 | `JIHOO_PATH` | more directories to find modules in, separated by `:` |
 
 The compiler builds LLVM IR in memory, parses and verifies it through LLVM
 21's C API, runs `default<O0>` through `default<O3>`, and emits an object
 with a target machine. Loop and SLP vectorization are enabled at `-O2`
 and `-O3`. It uses portable `x86-64`/`generic` CPUs and PIC code.
+
+`build` and `run` optimize the whole module at once, so inlining sees every
+function, and then emit a large module as several objects on separate
+threads: consecutive functions of about 20,000 instructions each, at most
+eight units, linked in their original order. The units are formed by
+halving, each half on a thread with its own LLVM context, so that a few
+copies of the module are in memory at once rather than one per unit. The number depends only on
+the module, so every host writes the same objects; a program small enough
+for one unit is emitted exactly as by `emit-obj`. In split modules, local
+functions and variables become hidden symbols, which the linker makes
+local again in the executable; unnamed constants are copied into each unit
+that uses them. `emit-obj` always writes a single object.
 
 Native objects are linked by `JIHOO_CC`, including libc startup code, libm
 and libdl. Freestanding objects are linked directly with `JIHOO_LD`,

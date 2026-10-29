@@ -26,8 +26,8 @@
 //   formatting is idempotent and fmt --check detects unformatted source.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
-//   objects that C links, cross-compiled objects, link errors and a missing
-//   LLVM.
+//   objects that C links, programs split into code generation units,
+//   cross-compiled objects, link errors and a missing LLVM.
 // - selfhost: the compiler builds itself, and the compiler it builds writes
 //   the same LLVM IR, errors included, for every .jh file of the checkout.
 
@@ -513,6 +513,49 @@ impl Tests {
         Ok(())
     }
 
+    // Programs split into several code generation units, which are small
+    // enough for one: cross-unit calls, globals, closures, `dyn` tables,
+    // threads, C callbacks and a freestanding `_start`.
+    fn codegen_units(self) -> Result((), String) {
+        let exe = self.temp("units")
+        let files = [
+            "tests/run/ffi.jh",
+            "tests/run/dyn_traits.jh",
+            "tests/run/closures.jh",
+            "tests/run/threads.jh",
+            "tests/run/dyn_threads_freestanding.jh"
+        ]
+        for file in files {
+            let src = read_file(file)?
+            var want = String.new()
+            for d in directives(src.as_str(), "//> ") {
+                want.push_str(d)
+                want.push('\n')
+            }
+            for opt in ["-O0", "-O2"] {
+                var a = Vec(str).new()
+                a.push("JIHOO_CODEGEN_UNITS=3")
+                a.push(self.compiler.as_str())
+                a.push("build")
+                a.push(opt)
+                a.push(file)
+                words(src.as_str(), "// link:", &a)
+                a.push("-o")
+                a.push(exe.as_str())
+                let built = exec("env", a.as_slice())
+                if !built.status.success() {
+                    return Err(file + ": three units " + opt + ": does not compile:\n" + built.stderr.as_str())
+                }
+                let r = exec(exe.as_str(), [])
+                if !r.status.success() || r.stdout != want.as_str() {
+                    return Err(file + ": three units " + opt + ": prints\n" + r.stdout.as_str() + r.stderr.as_str())
+                }
+            }
+        }
+        fs.remove_file(exe.as_str())
+        Ok(())
+    }
+
     // An object without `main` that C links, statically and as a shared
     // library that a jihoo program opens.
     fn c_links_export(self) -> Result((), String) {
@@ -662,6 +705,8 @@ impl Tests {
         self.check("backend: C ABI", r)
         let r = self.c_links_export()
         self.check("backend: C links an exported object", r)
+        let r = self.codegen_units()
+        self.check("backend: code generation units", r)
         let r = self.cross_objects()
         self.check("backend: cross-compiled objects", r)
         let r = self.link_errors()

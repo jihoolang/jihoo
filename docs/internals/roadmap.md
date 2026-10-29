@@ -150,11 +150,20 @@ emission about 6.7 s on the same IR). Every phase ran on one CPU.
   peak memory fell by about a quarter.
 - Phase timings from the compiler (`--time-passes` or similar), so later
   changes are measured per phase.
-- Code generation in parallel: the module split into a deterministic
-  number of units, each optimized and emitted by its own thread and LLVM
-  context, with a single-unit mode where cross-unit inlining matters.
-  `emit-llvm`, the stage 1/stage 2 comparison and diagnostics stay
-  deterministic.
+- Done: object emission in parallel. The module is still optimized whole,
+  so inlining is unchanged; a large one is then emitted as up to eight
+  units of consecutive functions, each on its own thread and LLVM context,
+  their number fixed by the module rather than the host. A full build of
+  the compiler takes 15.6 s instead of 20.9 s, and the compiler it builds
+  runs within measurement noise of a single-unit build (instruction and
+  cycle counts too, within 0.2% either way); small programs are emitted
+  exactly as before. Peak memory grows from 277 MiB to 374 MiB: the units
+  are formed by halving so that only two copies of the module are read at
+  once, freed memory is returned before the threads start, and the syntax
+  trees are dropped before the backend.
+- Optimization in parallel, the larger part of what remains (about 12.5 s):
+  only without changing what is inlined where, which rules out optimizing
+  units separately with `default<O2>`.
 - Borrow checks in parallel: after effect inference, each function's check
   is independent. `Types` must not change while they run (layout and drop
   caches filled beforehand), and errors are still reported in source order.

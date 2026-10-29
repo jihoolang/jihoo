@@ -6,7 +6,10 @@ source.jh ─► lex ─► parse ─► load ─► sema ─► MIR ─► elab
 
 The compiler writes LLVM IR as text in memory. `backend` loads LLVM 21's
 shared library, verifies and optimizes the module with the new pass manager,
-then emits an object through the target machine C API. Native linking uses
+then emits an object through the target machine C API. A large executable's
+module, once optimized whole, is emitted in up to eight units on separate
+threads, each reading the optimized bitcode into its own LLVM context and
+keeping its run of functions ([Command line](../reference/command-line.md#environment)). Native linking uses
 a C driver for libc startup files; freestanding linking calls `ld.lld`
 directly. The compiler needs no LLVM headers or C++ shim to build.
 `JIHOO_BACKEND=clang` retains the previous pipeline for comparisons.
