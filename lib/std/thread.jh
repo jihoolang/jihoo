@@ -8,6 +8,7 @@
 
 import std.os_thread
 import std.mem
+import std.sync
 
 // The compiler keeps the loans stored here until it calls `finish` before
 // the body borrowing the scope drops its locals. The registry owns every
@@ -189,6 +190,64 @@ pub fn each_mut(comptime T: type, inout xs: Vec(T), comptime f: fn(inout T)) {
     let n = xs.len
     // Each element is lent to one thread.
     each_in(0, n, levels(n), fn(i) { unsafe { f(&p[i]) } })
+}
+
+// Calls `f(i)` for each `i` in `lo..hi` on one thread per processor, each
+// taking the next index whenever it is free, so that a few costly indices
+// do not keep the others waiting. Put the costliest first. Taking an index
+// costs an atomic addition, so `each` suits many cheap, similar calls
+// better.
+pub fn each_uneven(lo: i64, hi: i64, comptime f: fn(i64)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each_uneven` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    take_each(lo, hi, f)
+}
+
+// `f` of each element of `xs`, in order, computed as `each_uneven` does.
+pub fn map_uneven(comptime T: type, comptime U: type, xs: [T], comptime f: fn(T) -> U) -> Vec(U) {
+    inline if captures_mut(f) {
+        compile_error("`thread.map_uneven` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    var out = Vec(U).with_capacity(xs.len)
+    let p = out.ptr
+    // Each index is written once, by one thread.
+    take_each(0, xs.len, fn(i) { unsafe { write(p + i, f(xs[i])) } })
+    out.len = xs.len
+    out
+}
+
+// Calls `f` on each element of `xs`, which it may change, as `each_uneven`
+// does.
+pub fn each_mut_uneven(comptime T: type, inout xs: Vec(T), comptime f: fn(inout T)) {
+    inline if captures_mut(f) {
+        compile_error("`thread.each_mut_uneven` calls its closure on several threads at once, so the closure cannot capture a `var` or a closure; borrow with `let` first")
+    }
+    let p = xs.ptr
+    // Each element is lent to one thread.
+    take_each(0, xs.len, fn(i) { unsafe { f(&p[i]) } })
+}
+
+// Each index of `lo..hi` taken once, by whichever worker asks first.
+fn take_each(lo: i64, hi: i64, comptime f: fn(i64)) {
+    let next = sync.Atomic(i64).new(lo)
+    workers(min(cpu_count(), hi - lo), fn() {
+        var i = next.add(1)
+        while i < hi {
+            f(i)
+            i = next.add(1)
+        }
+    })
+}
+
+// Runs `work` on `k` threads at once, this one among them.
+fn workers(k: i64, comptime work: fn()) {
+    if k <= 1 {
+        work()
+        return
+    }
+    let half = k / 2
+    join(fn() { workers(half, work) }, fn() { workers(k - half, work) })
 }
 
 // `lo..hi` split in two `depth` times, the halves run by `join`.

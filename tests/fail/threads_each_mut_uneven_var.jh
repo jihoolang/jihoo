@@ -1,0 +1,14 @@
+// The closure of `each_mut_uneven` may change its element, not a `var`.
+// error: `thread.each_mut_uneven` calls its closure on several threads at once
+import std.thread
+
+fn main() {
+    var xs = Vec(i64).new()
+    xs.push(1)
+    var count = 0
+    thread.each_mut_uneven(&xs, fn(x) {
+        x += 1
+        count += 1
+    })
+    println(count)
+}

@@ -1,4 +1,5 @@
 // std.thread: work on several threads that borrows what the caller owns.
+import std.sync
 import std.thread
 
 struct Grid {
@@ -64,6 +65,23 @@ fn main() {
             println("never")
         }
     })
+    // The `_uneven` forms hand out one index at a time, for work whose
+    // items cost very different amounts; results keep their order.
+    var depths = Vec(i64).new()
+    for i in 0..24 {
+        depths.push(24 - i)
+    }
+    let fibs = thread.map_uneven(depths.as_slice(), fn(d) { fib(d) })
+    println(fibs[0] + fibs[23])
+    //> 46369
+    thread.each_mut_uneven(&depths, fn(d) { d *= 2 })
+    println(depths[0] + depths[23])
+    //> 50
+    let sum = sync.Atomic(i64).new(0)
+    thread.each_uneven(0, 1000, fn(i) { sum.add(i) })
+    thread.each_uneven(3, 3, fn(i) { sum.add(1000000) })
+    println(sum.load())
+    //> 499500
     println(thread.cpu_count() >= 1)
     //> true
 }

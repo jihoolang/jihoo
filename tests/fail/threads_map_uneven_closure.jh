@@ -1,0 +1,10 @@
+// `map_uneven` rejects a captured closure, as `map` does.
+// error: `thread.map_uneven` calls its closure on several threads at once
+import std.thread
+
+fn main() {
+    let xs = [1, 2, 3]
+    let double = fn(x: i64) { x * 2 }
+    let ys = thread.map_uneven(xs[0..3], fn(x) { double(x) })
+    println(ys[0])
+}

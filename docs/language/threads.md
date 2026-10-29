@@ -21,11 +21,24 @@ fn main() {
 | `each(lo, hi, f)` | calls `f(i)` for each `i` in `lo..hi`, spread over the processors |
 | `map(xs, f)` | `f` of each element of the slice `xs`, as a `Vec`, in order |
 | `each_mut(&v, f)` | calls `f` on each element of the `Vec` `v`, which `f` may change |
+| `each_uneven`, `map_uneven`, `each_mut_uneven` | the same, handing out one item at a time |
 | `scope(f)` | lends a scope to `f`; joins all its threads before returning `f`'s owned result |
 | `cpu_count()` | the number of processors online |
 
 `each`, `map` and `each_mut` halve their range until there is a part per
-processor, and run the halves with `join`.
+processor, and run the halves with `join`. That suits many cheap items of
+similar cost. When a few items cost far more than the rest, as the
+functions of a program do for the compiler's borrow checks, the part
+holding them keeps the other threads waiting. The `_uneven` forms start a
+thread per processor instead, and each takes the next item whenever it is
+free, at the cost of an atomic addition per item. Put the costliest items
+first, so that none of them starts last; results still keep the input's
+order:
+
+```jihoo
+let order = largest_first(files)       // a Vec(i64) of indices into `files`
+let objects = thread.map_uneven(order.as_slice(), fn(i) { compile(files[i]) })
+```
 
 ## Scoped threads
 
@@ -114,11 +127,11 @@ changes it. Two rules prevent it:
   // error: `left` is used here while it is borrowed mutably
   ```
 
-- **A closure that `each`, `map` or `each_mut` call on several threads at
-  once cannot change what it captures.** These functions take it as a
-  `comptime` parameter and check it with `captures_mut(f)` (see below). A
-  closure borrows every `var` it uses mutably, even one it only reads, so
-  borrow with `let` first:
+- **A closure that `each`, `map`, `each_mut` or their `_uneven` forms call
+  on several threads at once cannot change what it captures.** These
+  functions take it as a `comptime` parameter and check it with
+  `captures_mut(f)` (see below). A closure borrows every `var` it uses
+  mutably, even one it only reads, so borrow with `let` first:
 
   ```jihoo
   var grid = make_grid()

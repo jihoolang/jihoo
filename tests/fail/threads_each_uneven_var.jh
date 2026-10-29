@@ -1,0 +1,9 @@
+// `each_uneven` also calls its closure on many threads at once.
+// error: `thread.each_uneven` calls its closure on several threads at once
+import std.thread
+
+fn main() {
+    var total = 0
+    thread.each_uneven(0, 10, fn(i) { total += i })
+    println(total)
+}
