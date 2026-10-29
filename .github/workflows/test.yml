@@ -2,8 +2,9 @@
 # bootstraps the compiler from the released seed (stage 1, then stage 2, which
 # must write the same IR), runs tests/runner.jh with it, and builds and runs
 # the examples with the packaged toolchain, on x86_64 and aarch64 Linux.
-# The fusion benchmark's deterministic checks then run with the packaged
-# compiler.
+# The fusion benchmark's deterministic checks and the compilation workloads'
+# structural checks (scripts/benchmark_compile.py --check-only) then run with
+# the packaged compiler.
 name: Test
 
 on:
@@ -47,4 +48,13 @@ jobs:
         with:
           name: functional-fusion-${{ matrix.system }}
           path: out/functional-fusion/results
+          if-no-files-found: ignore
+      - name: Compilation baseline checks
+        run: nix develop --command python3 scripts/benchmark_compile.py --check-only --target x86_64 --target aarch64 --compiler ./result/bin/jihoo --json out/compile/check.json
+      - name: Preserve compilation measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compile-${{ matrix.system }}
+          path: out/compile
           if-no-files-found: ignore

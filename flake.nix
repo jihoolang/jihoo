@@ -199,6 +199,7 @@
               llvm.lld # links freestanding programs
               llvm.llvm # opt, llc, llvm-dis for looking at what the compiler writes
               pkgs.python3 # independent JSON diagnostic validation and benchmark scripts
+              pkgs.time # peak compiler memory in scripts/benchmark_compile.py
             ];
             JIHOO_LLVM = "${llvm.llvm.lib}/lib/libLLVM-21.so";
             JIHOO_LD = "${llvm.lld}/bin/ld.lld";

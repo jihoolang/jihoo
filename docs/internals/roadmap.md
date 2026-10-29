@@ -108,12 +108,22 @@ specialized library work; they do not by themselves require new syntax.
 - Keep negative cases for moves, borrow effects, drops, scoped threads and
   callback boundaries alongside accepted programs. Continue stage 1/stage 2
   comparisons and native/freestanding checks on both supported targets.
-- Measure frontend checking and full compilation separately on the compiler,
-  Banana and compile-time generation workloads. Record compiler revision,
-  target, options, elapsed time and peak process memory.
+  `tests/fail` now also covers moves inside loops, dropping or reassigning a
+  borrowed value, and closures that capture where a C-compatible `fnptr`
+  is required.
+- Done: [compilation time and memory](testing.md#compilation-time-and-memory).
+  `scripts/benchmark_compile.py` measures `check` and full compilation
+  separately on the compiler, a compile-time generation program and the
+  fusion kernels, plus jihoo-proofs (`--proofs`) and Banana (`--external`)
+  when given their checkouts. Reports record compiler revision and version,
+  target, options, host, elapsed time and peak process memory per sample;
+  `--baseline` compares medians with a recorded report, and CI runs the
+  structural `--check-only` mode on both targets.
 - Maintain the [fusion benchmark](../../benchmarks/functional-fusion/README.md)
   and the compile-time costs jihoo-proofs records as compiler and library
-  implementations change.
+  implementations change. jihoo-proofs' examples currently fail to compile
+  with the checkout's library: its lexer still expects `read_line` to report
+  `String` errors rather than `os.Error`.
 
 Completion: changes can be compared with a recorded baseline using a
 reproducible command. Structural and correctness checks run in CI; timing

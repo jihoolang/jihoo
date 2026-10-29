@@ -1,0 +1,9 @@
+// A value moved in one iteration is gone in the next.
+// error: `s` is used here, but it may have been moved away before
+// error: moved here
+fn take(sink s: String) {}
+
+fn main() {
+    let s = String.from("x")
+    for i in 0..3 { take(s) }
+}

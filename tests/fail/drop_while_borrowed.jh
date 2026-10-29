@@ -1,0 +1,10 @@
+// Dropping a value ends it, which a live borrow of it forbids.
+// error: `v` is changed here while it is borrowed
+// error: the borrow starts here, and is used later
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    let s = v.as_slice()
+    drop(v)
+    println(s[0])
+}

@@ -141,6 +141,42 @@ streaming parsers using `take` and `zip`, and compile-time use.
 without timing samples or thresholds. CI runs it with the packaged compiler
 on x86_64 and aarch64 Linux and keeps `out/functional-fusion/results`.
 
+## Compilation time and memory
+
+```sh
+jihoo build -O2 compiler/main.jh -o out/jihoo
+python3 scripts/benchmark_compile.py --compiler out/jihoo --json /tmp/compile.json \
+  --baseline benchmarks/compile/baseline-x86_64.json
+```
+
+The script measures each workload twice: `jihoo check` (loading, types,
+compile-time evaluation, moves, drops and borrows) and full compilation
+(`build` at `-O2` for the host, `emit-obj` for another `--target` or a
+module without `main`). The built-in workloads are the compiler itself,
+[a compile-time generation program](../../benchmarks/compile/comptime.jh)
+(tables, maps, sorting and derived code evaluated by the interpreter) and the
+fusion benchmark's iterator kernels. `--proofs ../jihoo-proofs` adds that
+repository's proof and codec examples, and `--external NAME=ENTRY[:INCLUDE...]`
+any other program, such as Banana's entry point; their revisions are
+recorded too.
+
+Every sample is a new compiler process run through GNU `time` (in the dev
+shell), so peak resident memory belongs to the compiler rather than to the
+Python process that started it. Samples of all cases are interleaved. The
+report records the compiler's revision (marked `-dirty` when `compiler/`,
+`lib/` or `benchmarks/` differ from it) and version, each case's command,
+target and options, the host, every sample and the medians.
+
+`--baseline` compares median elapsed time and median peak memory with a
+recorded report and fails when either grows by more than 10%
+(`--max-time-regression`, `--max-memory-regression`); time differences under
+20 ms are ignored. Compare only reports taken on the same idle host;
+`benchmarks/compile/baseline-x86_64.json` is one such recording, a reference
+for that host rather than a threshold for others. `--check-only` runs every
+case once and checks that it succeeds, that `check` prints nothing and
+creates no files, and that full compilation writes its output, without
+thresholds. CI runs it for both targets with the packaged compiler.
+
 ## Compile-time resource measurements
 
 ```sh

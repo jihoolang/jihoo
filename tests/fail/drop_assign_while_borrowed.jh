@@ -1,0 +1,9 @@
+// Assigning drops the old value, which a live borrow of it forbids.
+// error: `s` goes away here while it is still borrowed
+// error: the borrow starts here, and is used later
+fn main() {
+    var s = String.from("x")
+    let v = s.as_str()
+    s = String.from("y")
+    println(v)
+}

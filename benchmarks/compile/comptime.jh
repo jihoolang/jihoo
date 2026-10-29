@@ -1,0 +1,106 @@
+// A compile-time generation workload for scripts/benchmark_compile.py:
+// tables, maps, sorting and derived code computed by the compile-time
+// interpreter, then checked at run time against the same functions.
+import std.sort
+
+#[derive(Clone, Eq, Ord, Hash, Show)]
+enum Op {
+    Add, Sub, Mul, Div, Rem, And, Or, Xor, Shl, Shr, Eq, Ne, Lt, Le, Gt, Ge,
+    Load, Store, Call, Ret, Jump, Branch, Move, Copy
+}
+
+#[derive(Clone, Eq, Ord, Hash, Show)]
+struct Instr {
+    op: Op,
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+fn crc_table() -> Vec(u32) {
+    var table = Vec(u32).new()
+    for n in 0..256 {
+        var c = n as u32
+        for k in 0..8 {
+            c = if c & 1 != 0 { 0xedb88320 ^ (c >> 1) } else { c >> 1 }
+        }
+        table.push(c)
+    }
+    table
+}
+
+fn primes(limit: i64) -> Vec(i64) {
+    var flags = Vec(bool).filled(limit, true)
+    var out = Vec(i64).new()
+    for n in 2..limit {
+        if flags[n] {
+            out.push(n)
+            var m = n * n
+            while m < limit {
+                flags[m] = false
+                m += n
+            }
+        }
+    }
+    out
+}
+
+fn words() -> String {
+    let text = "the quick brown fox jumps over the lazy dog the fox and the dog sleep"
+    var counts = Map(String, i64).new()
+    var keys = Vec(String).new()
+    for w in text.split(" ") {
+        let k = String.from(w)
+        let n = match counts.get(k.clone()) { Some(x) => x, None => 0 }
+        if n == 0 { keys.push(k.clone()) }
+        counts.insert(k, n + 1)
+    }
+    sort.sort(&keys)
+    var out = String.new()
+    for k in keys {
+        let n = match counts.get(k.clone()) { Some(x) => x, None => 0 }
+        out.push_str(k.as_str())
+        out.push('=')
+        out.push_str(n.to_string().as_str())
+        out.push(' ')
+    }
+    out
+}
+
+fn program() -> String {
+    var code = Vec(Instr).new()
+    for i in 0..48 {
+        let op = match i % 6 {
+            0 => Op.Add,
+            1 => Op.Load,
+            2 => Op.Mul,
+            3 => Op.Branch,
+            4 => Op.Store,
+            _ => Op.Xor,
+        }
+        code.push(Instr { op: op, a: (i * 7) % 13, b: (i * 5) % 11, c: i })
+    }
+    sort.sort(&code)
+    var out = String.new()
+    for ins in code {
+        out.push_str(ins.op.to_string().as_str())
+        out.push(';')
+    }
+    out
+}
+
+const CRC: [u32] = crc_table()
+const PRIMES: [i64] = primes(1500)
+const WORDS: str = words()
+const PROGRAM: str = program()
+
+fn main() {
+    let crc = crc_table()
+    let ps = primes(1500)
+    if CRC.len != crc.len() || PRIMES.len != ps.len() { trap() }
+    for i in 0..crc.len() { if CRC[i] != crc[i] { trap() } }
+    for i in 0..ps.len() { if PRIMES[i] != ps[i] { trap() } }
+    if WORDS != words().as_str() || PROGRAM != program().as_str() { trap() }
+    println(PRIMES.len)
+    println(WORDS)
+}

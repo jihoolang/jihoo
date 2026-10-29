@@ -178,6 +178,10 @@ vectorization at `-O2`/`-O3`. Native linking uses a C driver; freestanding
 linking uses lld. `JIHOO_BACKEND=clang` selects the previous backend for
 comparison. [Backend benchmarks](docs/internals/testing.md#backend-performance)
 compare compilation time and generated program speed.
+[Compilation baselines](docs/internals/testing.md#compilation-time-and-memory)
+measure checking and full compilation of the compiler and compile-time
+generation workloads, with elapsed time and peak memory, and compare them
+with a recorded report.
 
 The compiler is written in jihoo, in `compiler/`, and
 [self-hosted](docs/internals/self-hosting.md): the compiler of the latest

@@ -1,0 +1,9 @@
+// A function pointer has no environment, so a closure passed as one cannot
+// capture.
+// error: a `fnptr` cannot capture variables, and this closure uses `k`
+fn apply(f: fnptr(i64) -> i64) -> i64 { f(1) }
+
+fn main() {
+    let k = 3
+    println(apply(fn(x: i64) -> i64 { x + k }))
+}
