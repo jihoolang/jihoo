@@ -30,6 +30,9 @@ the runner. Its suites:
   `--external ../banana` additionally checks that
   project's source files and compares its entry point's IR. Source files in
   the checkout and external project are read without modification.
+  The files of `compiler/` and `lib/std` must already be formatted
+  (`fmt --check`); replace a file the suite names with the output of
+  `out/jihoo fmt`.
   Wrapping cases cover narrow widths, nested lists, comments, tuple and enum
   forms, and deterministic generated lists. A separate syntax-comparison
   fixture checks that return, call and index newlines and parameter modes

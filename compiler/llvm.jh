@@ -81,7 +81,13 @@ struct FnCx {
 
 impl FnCx {
     fn new(tmp: i64) -> FnCx {
-        FnCx { body: String.new(), tmp: tmp, locals: Vec(String).new(), sret: None, label: String.from("entry") }
+        FnCx {
+            body: String.new(),
+            tmp: tmp,
+            locals: Vec(String).new(),
+            sret: None,
+            label: String.from("entry")
+        }
     }
 
     fn t(inout self) -> String {
@@ -246,7 +252,9 @@ impl Gen {
         let triple = self.p.target.triple()
         var head = String.from("; jihoo\n")
         head.push_str(fmt.f("target triple = \"{}\"\n\n", [triple]).as_str())
-        self.globals.push_str("@jihoo.argc = internal global i64 0\n@jihoo.argv = internal global ptr null\n")
+        self.globals.push_str(
+            "@jihoo.argc = internal global i64 0\n@jihoo.argv = internal global ptr null\n"
+        )
         for i in 0..self.p.statics.len() {
             let name = self.p.statics[i].symbol.clone()
             let t = self.p.statics[i].ty
@@ -276,7 +284,10 @@ impl Gen {
                 }
                 _ => zeros
             }
-            self.globals.push_str(fmt.f("{} = internal global {}, align {}\n", [sym(name.as_str()).as_str(), init.as_str(), fmt.n(align as i128).as_str()]).as_str())
+            self.globals.push_str(fmt.f(
+                "{} = internal global {}, align {}\n",
+                [sym(name.as_str()).as_str(), init.as_str(), fmt.n(align as i128).as_str()]
+            ).as_str())
         }
         for i in 0..self.p.fns.len() {
             self.function(i as u32)
@@ -325,7 +336,8 @@ impl Gen {
             Direct(ps) => for p in ps {
                 var ty = p.ty.clone()
                 match self.p.target {
-                    Aarch64 => if attrs && ty.as_str().starts_with("[") && ty.as_str().ends_with("float]") { ty.push_str(" alignstack(8)") }
+                    Aarch64 => if attrs && ty.as_str().starts_with("[") &&
+                        ty.as_str().ends_with("float]") { ty.push_str(" alignstack(8)") }
                     _ => {}
                 }
                 tys.push(ty)
@@ -336,7 +348,13 @@ impl Gen {
                     X86_64 => if attrs {
                         let size = self.size(t)
                         let align = self.align(t)
-                        ty = fmt.f("ptr byval([{} x i8]) align {}", [fmt.n(size as i128).as_str(), fmt.n((if align < 8 { 8 as u64 } else { align }) as i128).as_str()])
+                        ty = fmt.f(
+                            "ptr byval([{} x i8]) align {}",
+                            [
+                                fmt.n(size as i128).as_str(),
+                                fmt.n((if align < 8 { 8 as u64 } else { align }) as i128).as_str()
+                            ]
+                        )
                     }
                     _ => {}
                 }
@@ -347,18 +365,31 @@ impl Gen {
     }
 
     fn c_sret(inout self, t: u32) -> String {
-        fmt.f("ptr noalias sret([{} x i8]) align {}", [fmt.n(self.size(t) as i128).as_str(), fmt.n(self.align(t) as i128).as_str()])
+        fmt.f(
+            "ptr noalias sret([{} x i8]) align {}",
+            [fmt.n(self.size(t) as i128).as_str(), fmt.n(self.align(t) as i128).as_str()]
+        )
     }
 
     fn c_alloca(inout self, inout cx: FnCx, size: u64, align: u64) -> String {
         let p = cx.t()
-        cx.line(fmt.f("{} = alloca [{} x i8], align {}", [p.as_str(), fmt.n((if size == 0 { 1 as u64 } else { size }) as i128).as_str(), fmt.n(align as i128).as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = alloca [{} x i8], align {}",
+            [
+                p.as_str(),
+                fmt.n((if size == 0 { 1 as u64 } else { size }) as i128).as_str(),
+                fmt.n(align as i128).as_str()
+            ]
+        ).as_str())
         p
     }
 
     fn c_copy(inout self, inout cx: FnCx, dst: str, src: str, size: u64) {
         if size == 0 { return }
-        cx.line(fmt.f("call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", [dst, src, fmt.n(size as i128).as_str()]).as_str())
+        cx.line(fmt.f(
+            "call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)",
+            [dst, src, fmt.n(size as i128).as_str()]
+        ).as_str())
     }
 
     // AAPCS64 rounds argument slots up to eight bytes. Copy through a
@@ -368,11 +399,17 @@ impl Gen {
         var src = at.clone()
         if part.offset + part.size > size {
             src = self.c_alloca(&cx, part.size, 16)
-            cx.line(fmt.f("store {} zeroinitializer, ptr {}, align 1", [part.ty.as_str(), src.as_str()]).as_str())
+            cx.line(fmt.f(
+                "store {} zeroinitializer, ptr {}, align 1",
+                [part.ty.as_str(), src.as_str()]
+            ).as_str())
             self.c_copy(&cx, src.as_str(), at.as_str(), size - part.offset)
         }
         let v = cx.t()
-        cx.line(fmt.f("{} = load {}, ptr {}, align 1", [v.as_str(), part.ty.as_str(), src.as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = load {}, ptr {}, align 1",
+            [v.as_str(), part.ty.as_str(), src.as_str()]
+        ).as_str())
         v
     }
 
@@ -380,10 +417,16 @@ impl Gen {
         let at = self.gep(&cx, ptr, part.offset)
         if part.offset + part.size > size {
             let src = self.c_alloca(&cx, part.size, 16)
-            cx.line(fmt.f("store {} {}, ptr {}, align 1", [part.ty.as_str(), value, src.as_str()]).as_str())
+            cx.line(fmt.f(
+                "store {} {}, ptr {}, align 1",
+                [part.ty.as_str(), value, src.as_str()]
+            ).as_str())
             self.c_copy(&cx, at.as_str(), src.as_str(), size - part.offset)
         } else {
-            cx.line(fmt.f("store {} {}, ptr {}, align 1", [part.ty.as_str(), value, at.as_str()]).as_str())
+            cx.line(fmt.f(
+                "store {} {}, ptr {}, align 1",
+                [part.ty.as_str(), value, at.as_str()]
+            ).as_str())
         }
     }
 
@@ -400,14 +443,29 @@ impl Gen {
         let symbol = self.p.fns[f as i64].symbol.clone()
         if self.p.fns[f as i64].body.is_none() {
             if sig.variadic { params.push(String.from("...")) }
-            self.declare(symbol.as_str(), fmt.f("declare {} {}({})", [rty.as_str(), sym(symbol.as_str()).as_str(), join(params, ", ").as_str()]).as_str())
+            self.declare(
+                symbol.as_str(),
+                fmt.f(
+                    "declare {} {}({})",
+                    [rty.as_str(), sym(symbol.as_str()).as_str(), join(params, ", ").as_str()]
+                ).as_str()
+            )
             return
         }
         var names = Vec(String).new()
         for i, ty in params { names.push(ty.as_str() + " %p" + fmt.n(i as i128).as_str()) }
         let linkage = if is_internal(self.p.fns[f as i64].linkage) { "internal " } else { "" }
         let attrs = if sig.ret == types.NEVER { " cold noreturn" } else { "" }
-        self.out.push_str(fmt.f("define {}{} {}({}){} {\nentry:\n", [linkage, rty.as_str(), sym(symbol.as_str()).as_str(), join(names, ", ").as_str(), attrs]).as_str())
+        self.out.push_str(fmt.f(
+            "define {}{} {}({}){} {\nentry:\n",
+            [
+                linkage,
+                rty.as_str(),
+                sym(symbol.as_str()).as_str(),
+                join(names, ", ").as_str(),
+                attrs
+            ]
+        ).as_str())
         let body = mem.replace(&self.p.fns[f as i64].body, None).unwrap()
         var cx = FnCx.new(0)
         if sret { cx.sret = Some(String.from("%p0")) }
@@ -476,7 +534,17 @@ impl Gen {
                     if ps.len() == 1 { value = v }
                     else {
                         let next = cx.t()
-                        cx.line(fmt.f("{} = insertvalue {} {}, {} {}, {}", [next.as_str(), ty.as_str(), value.as_str(), part.ty.as_str(), v.as_str(), fmt.n(i as i128).as_str()]).as_str())
+                        cx.line(fmt.f(
+                            "{} = insertvalue {} {}, {} {}, {}",
+                            [
+                                next.as_str(),
+                                ty.as_str(),
+                                value.as_str(),
+                                part.ty.as_str(),
+                                v.as_str(),
+                                fmt.n(i as i128).as_str()
+                            ]
+                        ).as_str())
                         value = next
                     }
                 }
@@ -485,9 +553,19 @@ impl Gen {
         }
     }
 
-    fn c_call(inout self, inout cx: FnCx, body: Body, sig: types.Sig, target: str, args: Vec(Operand), dst: str) {
+    fn c_call(
+        inout self,
+        inout cx: FnCx,
+        body: Body,
+        sig: types.Sig,
+        target: str,
+        args: Vec(Operand),
+        dst: str
+    ) {
         var actual = Vec(u32).new()
-        for i, o in args { actual.push(if i < sig.params.len() { sig.params[i] } else { self.operand_ty(body, o) }) }
+        for i, o in args { actual.push(
+            if i < sig.params.len() { sig.params[i] } else { self.operand_ty(body, o) }
+        ) }
         let plan = cabi.plan(&self.p.types, self.p.target, sig, actual)
         var values = Vec(String).new()
         var fixed = Vec(String).new()
@@ -515,7 +593,8 @@ impl Gen {
                     // AArch64's indirect storage belongs to the callee.
                     // SysV byval also promises at least eight-byte source
                     // alignment, even for a naturally byte-aligned struct.
-                    let copy = cabi.indirect(mode) && match self.p.target { Aarch64 => true, X86_64 => align < 8 }
+                    let copy = cabi.indirect(mode) &&
+                        match self.p.target { Aarch64 => true, X86_64 => align < 8 }
                     let slot_align = if copy && align < 8 { 8 as u64 } else { align }
                     var ptr: Option(String) = if copy { None } else { mem_of(v) }
                     if ptr.is_none() {
@@ -555,7 +634,10 @@ impl Gen {
                         var value = r.clone()
                         if ps.len() > 1 {
                             value = cx.t()
-                            cx.line(fmt.f("{} = extractvalue {} {}, {}", [value.as_str(), ty.as_str(), r.as_str(), fmt.n(i as i128).as_str()]).as_str())
+                            cx.line(fmt.f(
+                                "{} = extractvalue {} {}, {}",
+                                [value.as_str(), ty.as_str(), r.as_str(), fmt.n(i as i128).as_str()]
+                            ).as_str())
                         }
                         self.c_store_part(&cx, dst, size, part, value.as_str())
                     }
@@ -588,7 +670,10 @@ impl Gen {
             sret = true
             let s = fmt.n(self.size(ret) as i128)
             let a = fmt.n(self.align(ret) as i128)
-            params.push(fmt.f("ptr noalias sret([{} x i8]) align {} dereferenceable({})", [s.as_str(), a.as_str(), s.as_str()]))
+            params.push(fmt.f(
+                "ptr noalias sret([{} x i8]) align {} dereferenceable({})",
+                [s.as_str(), a.as_str(), s.as_str()]
+            ))
         }
         for i, t in sig.params {
             let pp = if i < pass.len() { pass[i] } else { ParamPass.Value }
@@ -619,7 +704,10 @@ impl Gen {
             if size > 0 {
                 deref = fmt.f(" dereferenceable({})", [fmt.n(size as i128).as_str()])
             }
-            s = fmt.f("ptr noalias{} align {}{}", [ro, fmt.n(align as i128).as_str(), deref.as_str()])
+            s = fmt.f(
+                "ptr noalias{} align {}{}",
+                [ro, fmt.n(align as i128).as_str(), deref.as_str()]
+            )
         }
         s
     }
@@ -636,7 +724,13 @@ impl Gen {
             if self.p.fns[f as i64].variadic {
                 ps.push(String.from("..."))
             }
-            self.declare(symbol.as_str(), fmt.f("declare {} {}({})", [rty.as_str(), sym(symbol.as_str()).as_str(), join(ps, ", ").as_str()]).as_str())
+            self.declare(
+                symbol.as_str(),
+                fmt.f(
+                    "declare {} {}({})",
+                    [rty.as_str(), sym(symbol.as_str()).as_str(), join(ps, ", ").as_str()]
+                ).as_str()
+            )
             return
         }
         // The body is taken out while the function is written, which reads
@@ -661,7 +755,16 @@ impl Gen {
             names.push(fmt.f("{} %p{}", [p.as_str(), fmt.n(pi as i128).as_str()]))
             pi += 1
         }
-        self.out.push_str(fmt.f("define {}{} {}({}){} {\n", [linkage, rty.as_str(), sym(symbol.as_str()).as_str(), join(names, ", ").as_str(), attrs]).as_str())
+        self.out.push_str(fmt.f(
+            "define {}{} {}({}){} {\n",
+            [
+                linkage,
+                rty.as_str(),
+                sym(symbol.as_str()).as_str(),
+                join(names, ", ").as_str(),
+                attrs
+            ]
+        ).as_str())
         self.out.push_str("entry:\n")
         // Allocas.
         for i, l in body.locals {
@@ -672,7 +775,8 @@ impl Gen {
             }
             let is_arg = l.kind == mir.LocalKind.Arg
             let arg_idx = i - 1
-            if is_arg && !self.is_scalar(t) && arg_idx >= 0 && arg_idx < pass.len() && pass[arg_idx] == ParamPass.Owned {
+            if is_arg && !self.is_scalar(t) && arg_idx >= 0 && arg_idx < pass.len() &&
+                pass[arg_idx] == ParamPass.Owned {
                 cx.locals.push("%p" + fmt.n(arg_idx as i128))
                 continue
             }
@@ -682,7 +786,10 @@ impl Gen {
             }
             let align = self.align(t)
             let name = "%l" + fmt.n(i as i128)
-            cx.line(fmt.f("{} = alloca [{} x i8], align {}", [name.as_str(), fmt.n(size as i128).as_str(), fmt.n(align as i128).as_str()]).as_str())
+            cx.line(fmt.f(
+                "{} = alloca [{} x i8], align {}",
+                [name.as_str(), fmt.n(size as i128).as_str(), fmt.n(align as i128).as_str()]
+            ).as_str())
             cx.locals.push(name)
         }
         // Store incoming arguments.
@@ -702,7 +809,10 @@ impl Gen {
                     let s = fmt.n(self.size(t) as i128)
                     let a = fmt.n(self.align(t) as i128)
                     let dst = cx.locals[i].clone()
-                    cx.line(fmt.f("call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)", [a.as_str(), dst.as_str(), a.as_str(), pa.as_str(), s.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)",
+                        [a.as_str(), dst.as_str(), a.as_str(), pa.as_str(), s.as_str()]
+                    ).as_str())
                 }
             }
         }
@@ -750,7 +860,10 @@ impl Gen {
             return String.from(ptr)
         }
         let r = cx.t()
-        cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [r.as_str(), ptr, fmt.n(off as i128).as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = getelementptr inbounds i8, ptr {}, i64 {}",
+            [r.as_str(), ptr, fmt.n(off as i128).as_str()]
+        ).as_str())
         r
     }
 
@@ -812,9 +925,15 @@ impl Gen {
                     let iv = self.load_scalar(&cx, it, ip.as_str())
                     let iv64 = self.widen_i64(&cx, iv.as_str(), it)
                     let off = cx.t()
-                    cx.line(fmt.f("{} = mul i64 {}, {}", [off.as_str(), iv64.as_str(), fmt.n(es as i128).as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = mul i64 {}, {}",
+                        [off.as_str(), iv64.as_str(), fmt.n(es as i128).as_str()]
+                    ).as_str())
                     let r = cx.t()
-                    cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [r.as_str(), ptr.as_str(), off.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = getelementptr inbounds i8, ptr {}, i64 {}",
+                        [r.as_str(), ptr.as_str(), off.as_str()]
+                    ).as_str())
                     ptr = r
                     t = e
                 }
@@ -832,7 +951,10 @@ impl Gen {
             return String.from(v)
         }
         let r = cx.t()
-        cx.line(fmt.f("{} = {} i{} {} to i64", [r.as_str(), if i.signed { "sext" } else { "zext" }, fmt.n(i.bits as i128).as_str(), v]).as_str())
+        cx.line(fmt.f(
+            "{} = {} i{} {} to i64",
+            [r.as_str(), if i.signed { "sext" } else { "zext" }, fmt.n(i.bits as i128).as_str(), v]
+        ).as_str())
         r
     }
 
@@ -892,8 +1014,14 @@ impl Gen {
         self.nstr += 1
         let ns = fmt.n(n as i128)
         // A zero after the bytes, so that a literal is also a C string.
-        self.globals.push_str(fmt.f("@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1\n", [ns.as_str(), fmt.n((s.len + 1) as i128).as_str(), esc(s).as_str()]).as_str())
-        self.globals.push_str(fmt.f("@.strv.{} = private unnamed_addr constant { ptr, i64 } { ptr @.str.{}, i64 {} }, align 8\n", [ns.as_str(), ns.as_str(), fmt.n(s.len as i128).as_str()]).as_str())
+        self.globals.push_str(fmt.f(
+            "@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1\n",
+            [ns.as_str(), fmt.n((s.len + 1) as i128).as_str(), esc(s).as_str()]
+        ).as_str())
+        self.globals.push_str(fmt.f(
+            "@.strv.{} = private unnamed_addr constant { ptr, i64 } { ptr @.str.{}, i64 {} }, align 8\n",
+            [ns.as_str(), ns.as_str(), fmt.n(s.len as i128).as_str()]
+        ).as_str())
         self.strs.insert(String.from(s), n)
         ("@.str." + ns.as_str(), s.len)
     }
@@ -958,7 +1086,10 @@ impl Gen {
                 self.nstr += 1
                 let bs = b.as_slice()
                 let s = unsafe { make_str(bs.ptr, bs.len) }
-                self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
+                self.globals.push_str(fmt.f(
+                    "@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n",
+                    [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]
+                ).as_str())
                 V.Mem("@.bytes." + n.as_str())
             }
             Slice(b, len, _) => {
@@ -966,8 +1097,14 @@ impl Gen {
                 self.nstr += 1
                 let bs = b.as_slice()
                 let s = unsafe { make_str(bs.ptr, bs.len) }
-                self.globals.push_str(fmt.f("@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n", [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]).as_str())
-                self.globals.push_str(fmt.f("@.slice.{} = private unnamed_addr constant { ptr, i64 } { ptr @.bytes.{}, i64 {} }, align 8\n", [n.as_str(), n.as_str(), fmt.n(len as i128).as_str()]).as_str())
+                self.globals.push_str(fmt.f(
+                    "@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n",
+                    [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]
+                ).as_str())
+                self.globals.push_str(fmt.f(
+                    "@.slice.{} = private unnamed_addr constant { ptr, i64 } { ptr @.bytes.{}, i64 {} }, align 8\n",
+                    [n.as_str(), n.as_str(), fmt.n(len as i128).as_str()]
+                ).as_str())
                 V.Mem("@.slice." + n.as_str())
             }
             Vtable(fs) => {
@@ -989,7 +1126,10 @@ impl Gen {
                     items.push_str("ptr ")
                     items.push_str(sym(self.p.fns[f as i64].symbol.as_str()).as_str())
                 }
-                self.globals.push_str(fmt.f("{} = private unnamed_addr constant [{} x ptr] [{}], align 8\n", [g.as_str(), fmt.n(fs.len() as i128).as_str(), items.as_str()]).as_str())
+                self.globals.push_str(fmt.f(
+                    "{} = private unnamed_addr constant [{} x ptr] [{}], align 8\n",
+                    [g.as_str(), fmt.n(fs.len() as i128).as_str(), items.as_str()]
+                ).as_str())
                 self.vtables.insert(key, g.clone())
                 V.Imm(g)
             }
@@ -1007,12 +1147,18 @@ impl Gen {
                 }
                 let s = fmt.n(self.size(t) as i128)
                 let a = fmt.n(self.align(t) as i128)
-                cx.line(fmt.f("call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)", [a.as_str(), dst, a.as_str(), src.as_str(), s.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "call void @llvm.memcpy.p0.p0.i64(ptr align {} {}, ptr align {} {}, i64 {}, i1 false)",
+                    [a.as_str(), dst, a.as_str(), src.as_str(), s.as_str()]
+                ).as_str())
             }
             Zero => {
                 let s = fmt.n(self.size(t) as i128)
                 let a = fmt.n(self.align(t) as i128)
-                cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr align {} {}, i8 0, i64 {}, i1 false)", [a.as_str(), dst, s.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "call void @llvm.memset.p0.i64(ptr align {} {}, i8 0, i64 {}, i1 false)",
+                    [a.as_str(), dst, s.as_str()]
+                ).as_str())
             }
         }
     }
@@ -1028,7 +1174,10 @@ impl Gen {
 
     fn panic_msg(inout self, inout cx: FnCx, msg: str) {
         let (g, n) = self.str_global(msg)
-        cx.line(fmt.f("call void @jihoo.panic(ptr {}, i64 {})", [g.as_str(), fmt.n(n as i128).as_str()]).as_str())
+        cx.line(fmt.f(
+            "call void @jihoo.panic(ptr {}, i64 {})",
+            [g.as_str(), fmt.n(n as i128).as_str()]
+        ).as_str())
         cx.line("unreachable")
     }
 
@@ -1120,13 +1269,19 @@ impl Gen {
                         }
                         if any {
                             let vn = fmt.n(vi as i128)
-                            cases.push_str(fmt.f(" i{} {}, label %v{}", [tb.as_str(), vn.as_str(), vn.as_str()]).as_str())
+                            cases.push_str(fmt.f(
+                                " i{} {}, label %v{}",
+                                [tb.as_str(), vn.as_str(), vn.as_str()]
+                            ).as_str())
                             blocks.push_str(fmt.f("v{}:\n", [vn.as_str()]).as_str())
                             blocks.push_str(inner.body.as_str())
                             blocks.push_str("  br label %done\n")
                         }
                     }
-                    cx.line(fmt.f("switch i{} {}, label %done [{} ]", [tb.as_str(), tag.as_str(), cases.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "switch i{} {}, label %done [{} ]",
+                        [tb.as_str(), tag.as_str(), cases.as_str()]
+                    ).as_str())
                     cx.body.push_str(blocks.as_str())
                     cx.body.push_str("done:\n")
                 } else {
@@ -1140,7 +1295,10 @@ impl Gen {
             _ => {}
         }
         cx.line("ret void")
-        self.out.push_str(fmt.f("define internal void {}(ptr %p) {\nentry:\n{}}\n\n", [g.as_str(), cx.body.as_str()]).as_str())
+        self.out.push_str(fmt.f(
+            "define internal void {}(ptr %p) {\nentry:\n{}}\n\n",
+            [g.as_str(), cx.body.as_str()]
+        ).as_str())
     }
 
     fn assign(inout self, inout cx: FnCx, body: Body, p: Place, r: Rvalue) {
@@ -1170,16 +1328,28 @@ impl Gen {
                 match op {
                     Neg => {
                         if is_float {
-                            cx.line(fmt.f("{} = fneg {} {}", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                            cx.line(fmt.f(
+                                "{} = fneg {} {}",
+                                [r.as_str(), lt.as_str(), av.as_str()]
+                            ).as_str())
                         } else {
-                            cx.line(fmt.f("{} = sub {} 0, {}", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                            cx.line(fmt.f(
+                                "{} = sub {} 0, {}",
+                                [r.as_str(), lt.as_str(), av.as_str()]
+                            ).as_str())
                         }
                     }
                     Not => {
                         if at == types.BOOL {
-                            cx.line(fmt.f("{} = xor i1 {}, true", [r.as_str(), av.as_str()]).as_str())
+                            cx.line(fmt.f(
+                                "{} = xor i1 {}, true",
+                                [r.as_str(), av.as_str()]
+                            ).as_str())
                         } else {
-                            cx.line(fmt.f("{} = xor {} {}, -1", [r.as_str(), lt.as_str(), av.as_str()]).as_str())
+                            cx.line(fmt.f(
+                                "{} = xor {} {}, -1",
+                                [r.as_str(), lt.as_str(), av.as_str()]
+                            ).as_str())
                         }
                     }
                 }
@@ -1201,7 +1371,10 @@ impl Gen {
                 let (_, el) = self.p.types.enum_layout(qt)
                 let tb = fmt.n(el.tag_bits as i128)
                 let tag = cx.t()
-                cx.line(fmt.f("{} = load i{}, ptr {}", [tag.as_str(), tb.as_str(), qp.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = load i{}, ptr {}",
+                    [tag.as_str(), tb.as_str(), qp.as_str()]
+                ).as_str())
                 let lt = self.scalar(t)
                 var bits: u32 = 64
                 match self.p.types.int(t) {
@@ -1211,7 +1384,10 @@ impl Gen {
                 var r = tag.clone()
                 if bits > el.tag_bits {
                     r = cx.t()
-                    cx.line(fmt.f("{} = zext i{} {} to {}", [r.as_str(), tb.as_str(), tag.as_str(), lt.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = zext i{} {} to {}",
+                        [r.as_str(), tb.as_str(), tag.as_str(), lt.as_str()]
+                    ).as_str())
                 }
                 self.store_scalar(&cx, t, r.as_str(), dst.as_str())
             }
@@ -1226,9 +1402,15 @@ impl Gen {
                 let es = self.size(e)
                 let r = cx.t()
                 if es == 0 {
-                    cx.line(fmt.f("{} = getelementptr i8, ptr {}, i64 0", [r.as_str(), av.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = getelementptr i8, ptr {}, i64 0",
+                        [r.as_str(), av.as_str()]
+                    ).as_str())
                 } else {
-                    cx.line(fmt.f("{} = getelementptr inbounds [{} x i8], ptr {}, i64 {}", [r.as_str(), fmt.n(es as i128).as_str(), av.as_str(), bv.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = getelementptr inbounds [{} x i8], ptr {}, i64 {}",
+                        [r.as_str(), fmt.n(es as i128).as_str(), av.as_str(), bv.as_str()]
+                    ).as_str())
                 }
                 cx.line(fmt.f("store ptr {}, ptr {}", [r.as_str(), dst.as_str()]).as_str())
             }
@@ -1254,7 +1436,10 @@ impl Gen {
         }
         if is_zero_imm(v) && !self.p.types.is_float(e) {
             let s = fmt.n(self.size(t) as i128)
-            cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr {}, i8 0, i64 {}, i1 false)", [dst, s.as_str()]).as_str())
+            cx.line(fmt.f(
+                "call void @llvm.memset.p0.i64(ptr {}, i8 0, i64 {}, i1 false)",
+                [dst, s.as_str()]
+            ).as_str())
             return
         }
         if n <= 16 {
@@ -1271,20 +1456,43 @@ impl Gen {
         let cur = cx.label.clone()
         cx.line(fmt.f("br label %{}.head", [id.as_str()]).as_str())
         cx.block((id.as_str() + ".head").as_str())
-        cx.line(fmt.f("{} = phi i64 [ 0, %{} ], [ {}, %{}.head ]", [i.as_str(), cur.as_str(), inext.as_str(), id.as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = phi i64 [ 0, %{} ], [ {}, %{}.head ]",
+            [i.as_str(), cur.as_str(), inext.as_str(), id.as_str()]
+        ).as_str())
         let off = cx.t()
-        cx.line(fmt.f("{} = mul i64 {}, {}", [off.as_str(), i.as_str(), fmt.n(es as i128).as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = mul i64 {}, {}",
+            [off.as_str(), i.as_str(), fmt.n(es as i128).as_str()]
+        ).as_str())
         let p = cx.t()
-        cx.line(fmt.f("{} = getelementptr inbounds i8, ptr {}, i64 {}", [p.as_str(), dst, off.as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = getelementptr inbounds i8, ptr {}, i64 {}",
+            [p.as_str(), dst, off.as_str()]
+        ).as_str())
         self.store(&cx, e, v, p.as_str())
         cx.line(fmt.f("{} = add i64 {}, 1", [inext.as_str(), i.as_str()]).as_str())
         let c = cx.t()
-        cx.line(fmt.f("{} = icmp ult i64 {}, {}", [c.as_str(), inext.as_str(), fmt.n(n as i128).as_str()]).as_str())
-        cx.line(fmt.f("br i1 {}, label %{}.head, label %{}.done", [c.as_str(), id.as_str(), id.as_str()]).as_str())
+        cx.line(fmt.f(
+            "{} = icmp ult i64 {}, {}",
+            [c.as_str(), inext.as_str(), fmt.n(n as i128).as_str()]
+        ).as_str())
+        cx.line(fmt.f(
+            "br i1 {}, label %{}.head, label %{}.done",
+            [c.as_str(), id.as_str(), id.as_str()]
+        ).as_str())
         cx.block((id.as_str() + ".done").as_str())
     }
 
-    fn aggregate(inout self, inout cx: FnCx, body: Body, kind: mir.Agg, ops: Vec(Operand), dst: str, t: u32) {
+    fn aggregate(
+        inout self,
+        inout cx: FnCx,
+        body: Body,
+        kind: mir.Agg,
+        ops: Vec(Operand),
+        dst: str,
+        t: u32
+    ) {
         match kind {
             Struct(_) => {
                 let offs = self.p.types.field_offsets(t)
@@ -1297,7 +1505,10 @@ impl Gen {
             }
             Variant(_, vi) => {
                 let (_, el) = self.p.types.enum_layout(t)
-                cx.line(fmt.f("store i{} {}, ptr {}", [fmt.n(el.tag_bits as i128).as_str(), fmt.n(vi as i128).as_str(), dst]).as_str())
+                cx.line(fmt.f(
+                    "store i{} {}, ptr {}",
+                    [fmt.n(el.tag_bits as i128).as_str(), fmt.n(vi as i128).as_str(), dst]
+                ).as_str())
                 let fts = self.p.types.variants(t).unwrap()[vi as i64].fields.clone()
                 for i, o in ops {
                     let v = self.operand(&cx, body, o)
@@ -1330,7 +1541,10 @@ impl Gen {
                 let lt = self.operand_ty(body, ops[1])
                 let lv = self.imm(&cx, lv, lt)
                 let p2 = self.gep(&cx, dst, 8)
-                cx.line(fmt.f("store {} {}, ptr {}", [if is_view { "i64" } else { "ptr" }, lv.as_str(), p2.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "store {} {}, ptr {}",
+                    [if is_view { "i64" } else { "ptr" }, lv.as_str(), p2.as_str()]
+                ).as_str())
             }
         }
     }
@@ -1371,24 +1585,48 @@ impl Gen {
             }
             _ => {
                 // Pointers and function pointers: comparisons.
-                cx.line(fmt.f("{} = icmp {} ptr {}, {}", [r.as_str(), icmp(op, false), a, b]).as_str())
+                cx.line(fmt.f(
+                    "{} = icmp {} ptr {}, {}",
+                    [r.as_str(), icmp(op, false), a, b]
+                ).as_str())
                 r
             }
         }
     }
 
-    fn int_binop(inout self, inout cx: FnCx, op: Op, i: types.IntTy, lt: str, sink r: String, a: str, b: str) -> String {
+    fn int_binop(
+        inout self,
+        inout cx: FnCx,
+        op: Op,
+        i: types.IntTy,
+        lt: str,
+        sink r: String,
+        a: str,
+        b: str
+    ) -> String {
         let s = i.signed
         let checked = (op == Op.Add || op == Op.Sub || op == Op.Mul) && self.p.checked
         if checked {
             let name = if op == Op.Add { "add" } else if op == Op.Sub { "sub" } else { "mul" }
             let f = fmt.f("llvm.{}{}.with.overflow.{}", [if s { "s" } else { "u" }, name, lt])
-            self.declare(f.as_str(), fmt.f("declare { {}, i1 } @{}({}, {})", [lt, f.as_str(), lt, lt]).as_str())
+            self.declare(
+                f.as_str(),
+                fmt.f("declare { {}, i1 } @{}({}, {})", [lt, f.as_str(), lt, lt]).as_str()
+            )
             let pair = cx.t()
-            cx.line(fmt.f("{} = call { {}, i1 } @{}({} {}, {} {})", [pair.as_str(), lt, f.as_str(), lt, a, lt, b]).as_str())
-            cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 0", [r.as_str(), lt, pair.as_str()]).as_str())
+            cx.line(fmt.f(
+                "{} = call { {}, i1 } @{}({} {}, {} {})",
+                [pair.as_str(), lt, f.as_str(), lt, a, lt, b]
+            ).as_str())
+            cx.line(fmt.f(
+                "{} = extractvalue { {}, i1 } {}, 0",
+                [r.as_str(), lt, pair.as_str()]
+            ).as_str())
             let o = cx.t()
-            cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 1", [o.as_str(), lt, pair.as_str()]).as_str())
+            cx.line(fmt.f(
+                "{} = extractvalue { {}, i1 } {}, 1",
+                [o.as_str(), lt, pair.as_str()]
+            ).as_str())
             self.check(&cx, o.as_str(), true, "integer overflow")
             return r
         }
@@ -1417,30 +1655,48 @@ impl Gen {
                     let m1 = cx.t()
                     cx.line(fmt.f("{} = icmp eq {} {}, -1", [m1.as_str(), lt, b]).as_str())
                     let safe_b = cx.t()
-                    cx.line(fmt.f("{} = select i1 {}, {} 1, {} {}", [safe_b.as_str(), m1.as_str(), lt, lt, b]).as_str())
+                    cx.line(fmt.f(
+                        "{} = select i1 {}, {} 1, {} {}",
+                        [safe_b.as_str(), m1.as_str(), lt, lt, b]
+                    ).as_str())
                     let q = cx.t()
-                    cx.line(fmt.f("{} = {} {} {}, {}", [q.as_str(), if div { "sdiv" } else { "srem" }, lt, a, safe_b.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = {} {} {}, {}",
+                        [q.as_str(), if div { "sdiv" } else { "srem" }, lt, a, safe_b.as_str()]
+                    ).as_str())
                     let alt = cx.t()
                     if div {
                         cx.line(fmt.f("{} = sub {} 0, {}", [alt.as_str(), lt, a]).as_str())
                     } else {
                         cx.line(fmt.f("{} = add {} 0, 0", [alt.as_str(), lt]).as_str())
                     }
-                    cx.line(fmt.f("{} = select i1 {}, {} {}, {} {}", [r.as_str(), m1.as_str(), lt, alt.as_str(), lt, q.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = select i1 {}, {} {}, {} {}",
+                        [r.as_str(), m1.as_str(), lt, alt.as_str(), lt, q.as_str()]
+                    ).as_str())
                 } else {
-                    cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), if div { "udiv" } else { "urem" }, lt, a, b]).as_str())
+                    cx.line(fmt.f(
+                        "{} = {} {} {}, {}",
+                        [r.as_str(), if div { "udiv" } else { "urem" }, lt, a, b]
+                    ).as_str())
                 }
                 r
             }
             Shl | Shr => {
                 let m = cx.t()
-                cx.line(fmt.f("{} = and {} {}, {}", [m.as_str(), lt, b, fmt.n((i.bits - 1) as i128).as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = and {} {}, {}",
+                    [m.as_str(), lt, b, fmt.n((i.bits - 1) as i128).as_str()]
+                ).as_str())
                 let inst = if op == Op.Shl { "shl" } else if s { "ashr" } else { "lshr" }
                 cx.line(fmt.f("{} = {} {} {}, {}", [r.as_str(), inst, lt, a, m.as_str()]).as_str())
                 r
             }
             Eq | Ne | Lt | Le | Gt | Ge => {
-                cx.line(fmt.f("{} = icmp {} {} {}, {}", [r.as_str(), icmp(op, s), lt, a, b]).as_str())
+                cx.line(fmt.f(
+                    "{} = icmp {} {} {}, {}",
+                    [r.as_str(), icmp(op, s), lt, a, b]
+                ).as_str())
                 r
             }
             _ => panic("logic op in codegen")
@@ -1453,9 +1709,15 @@ impl Gen {
         let ok = id.as_str() + ".ok"
         let fail = id.as_str() + ".fail"
         if bad {
-            cx.line(fmt.f("br i1 {}, label %{}, label %{}", [cond, fail.as_str(), ok.as_str()]).as_str())
+            cx.line(fmt.f(
+                "br i1 {}, label %{}, label %{}",
+                [cond, fail.as_str(), ok.as_str()]
+            ).as_str())
         } else {
-            cx.line(fmt.f("br i1 {}, label %{}, label %{}", [cond, ok.as_str(), fail.as_str()]).as_str())
+            cx.line(fmt.f(
+                "br i1 {}, label %{}, label %{}",
+                [cond, ok.as_str(), fail.as_str()]
+            ).as_str())
         }
         cx.block(fail.as_str())
         self.panic_msg(&cx, msg)
@@ -1476,12 +1738,28 @@ impl Gen {
                     if a.bits == b.bits {
                         return String.from(v)
                     }
-                    let inst = if b.bits < a.bits { "trunc" } else if a.signed { "sext" } else { "zext" }
-                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), inst, ft.as_str(), v, tt.as_str()]).as_str())
+                    let inst = if b.bits < a.bits {
+                        "trunc" } else if a.signed { "sext"
+                        } else {
+                            "zext"
+                        }
+                    cx.line(fmt.f(
+                        "{} = {} {} {} to {}",
+                        [r.as_str(), inst, ft.as_str(), v, tt.as_str()]
+                    ).as_str())
                     return r
                 }
                 Float(_) => {
-                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), if a.signed { "sitofp" } else { "uitofp" }, ft.as_str(), v, tt.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = {} {} {} to {}",
+                        [
+                            r.as_str(),
+                            if a.signed { "sitofp" } else { "uitofp" },
+                            ft.as_str(),
+                            v,
+                            tt.as_str()
+                        ]
+                    ).as_str())
                     return r
                 }
                 _ => {}
@@ -1496,16 +1774,34 @@ impl Gen {
             Float(a) => match tk {
                 Int(b) => {
                     // Saturating: NaN is 0, out of range is the nearest end.
-                    let f = fmt.f("llvm.fpto{}i.sat.{}.{}", [if b.signed { "s" } else { "u" }, tt.as_str(), ft.as_str()])
-                    self.declare(f.as_str(), fmt.f("declare {} @{}({})", [tt.as_str(), f.as_str(), ft.as_str()]).as_str())
-                    cx.line(fmt.f("{} = call {} @{}({} {})", [r.as_str(), tt.as_str(), f.as_str(), ft.as_str(), v]).as_str())
+                    let f = fmt.f(
+                        "llvm.fpto{}i.sat.{}.{}",
+                        [if b.signed { "s" } else { "u" }, tt.as_str(), ft.as_str()]
+                    )
+                    self.declare(
+                        f.as_str(),
+                        fmt.f("declare {} @{}({})", [tt.as_str(), f.as_str(), ft.as_str()]).as_str()
+                    )
+                    cx.line(fmt.f(
+                        "{} = call {} @{}({} {})",
+                        [r.as_str(), tt.as_str(), f.as_str(), ft.as_str(), v]
+                    ).as_str())
                     return r
                 }
                 Float(b) => {
                     if a == b {
                         return String.from(v)
                     }
-                    cx.line(fmt.f("{} = {} {} {} to {}", [r.as_str(), if b > a { "fpext" } else { "fptrunc" }, ft.as_str(), v, tt.as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "{} = {} {} {} to {}",
+                        [
+                            r.as_str(),
+                            if b > a { "fpext" } else { "fptrunc" },
+                            ft.as_str(),
+                            v,
+                            tt.as_str()
+                        ]
+                    ).as_str())
                     return r
                 }
                 _ => {}
@@ -1533,15 +1829,30 @@ impl Gen {
                 let lt = self.scalar(dt)
                 let ob = fmt.n(otherwise as i128)
                 if dt == types.BOOL && targets.len() == 1 && targets[0].value == 0 {
-                    cx.line(fmt.f("br i1 {}, label %bb{}, label %bb{}", [dv.as_str(), ob.as_str(), fmt.n(targets[0].block as i128).as_str()]).as_str())
+                    cx.line(fmt.f(
+                        "br i1 {}, label %bb{}, label %bb{}",
+                        [dv.as_str(), ob.as_str(), fmt.n(targets[0].block as i128).as_str()]
+                    ).as_str())
                     return
                 }
                 var cases = String.new()
                 for x in targets {
-                    let v = if dt == types.BOOL { String.from(if x.value != 0 { "true" } else { "false" }) } else { fmt.n(x.value) }
-                    cases.push_str(fmt.f(" {} {}, label %bb{}", [lt.as_str(), v.as_str(), fmt.n(x.block as i128).as_str()]).as_str())
+                    let v = if dt != types.BOOL {
+                        fmt.n(x.value)
+                    } else if x.value != 0 {
+                        String.from("true")
+                    } else {
+                        String.from("false")
+                    }
+                    cases.push_str(fmt.f(
+                        " {} {}, label %bb{}",
+                        [lt.as_str(), v.as_str(), fmt.n(x.block as i128).as_str()]
+                    ).as_str())
                 }
-                cx.line(fmt.f("switch {} {}, label %bb{} [{} ]", [lt.as_str(), dv.as_str(), ob.as_str(), cases.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "switch {} {}, label %bb{} [{} ]",
+                    [lt.as_str(), dv.as_str(), ob.as_str(), cases.as_str()]
+                ).as_str())
             }
             Return => {
                 let ret = self.p.fns[f as i64].sig.ret
@@ -1561,7 +1872,10 @@ impl Gen {
                 let cv = self.operand(&cx, body, cond)
                 let cv = self.imm(&cx, cv, ct)
                 let id = cx.id()
-                cx.line(fmt.f("br i1 {}, label %bb{}, label %{}.fail", [cv.as_str(), fmt.n(next as i128).as_str(), id.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "br i1 {}, label %bb{}, label %{}.fail",
+                    [cv.as_str(), fmt.n(next as i128).as_str(), id.as_str()]
+                ).as_str())
                 cx.block((id.as_str() + ".fail").as_str())
                 self.panic_msg(&cx, msg.as_str())
             }
@@ -1580,7 +1894,14 @@ impl Gen {
         pass
     }
 
-    fn call(inout self, inout cx: FnCx, body: Body, callee: Callee, args: Vec(Operand), dest: Place) {
+    fn call(
+        inout self,
+        inout cx: FnCx,
+        body: Body,
+        callee: Callee,
+        args: Vec(Operand),
+        dest: Place
+    ) {
         let (dptr, dt) = self.place(&cx, body, dest)
         match callee {
             Fn(f) => {
@@ -1588,7 +1909,18 @@ impl Gen {
                 let pass = self.p.fns[f as i64].pass.clone()
                 let target = sym(self.p.fns[f as i64].symbol.as_str())
                 let variadic = self.p.fns[f as i64].variadic
-                self.emit_call_inst(&cx, body, sig, pass, target.as_str(), variadic, None, args, dptr.as_str(), dt)
+                self.emit_call_inst(
+                    &cx,
+                    body,
+                    sig,
+                    pass,
+                    target.as_str(),
+                    variadic,
+                    None,
+                    args,
+                    dptr.as_str(),
+                    dt
+                )
             }
             Ptr(o) => {
                 let ot = self.operand_ty(body, o)
@@ -1599,7 +1931,18 @@ impl Gen {
                 let v = self.operand(&cx, body, o)
                 let fp = self.imm(&cx, v, ot)
                 let pass = self.value_passes(sig)
-                self.emit_call_inst(&cx, body, sig, pass, fp.as_str(), sig.variadic, None, args, dptr.as_str(), dt)
+                self.emit_call_inst(
+                    &cx,
+                    body,
+                    sig,
+                    pass,
+                    fp.as_str(),
+                    sig.variadic,
+                    None,
+                    args,
+                    dptr.as_str(),
+                    dt
+                )
             }
             Closure(o) => {
                 let ot = self.operand_ty(body, o)
@@ -1630,13 +1973,36 @@ impl Gen {
                 }
                 let s2 = types.Sig { params: params, ret: sig.ret, c_abi: false, variadic: false }
                 // The environment goes first.
-                self.emit_call_inst(&cx, body, s2, pass, fp.as_str(), false, Some(env), args, dptr.as_str(), dt)
+                self.emit_call_inst(
+                    &cx,
+                    body,
+                    s2,
+                    pass,
+                    fp.as_str(),
+                    false,
+                    Some(env),
+                    args,
+                    dptr.as_str(),
+                    dt
+                )
             }
             Intrinsic(i) => self.intrinsic(&cx, body, i, args, dptr.as_str(), dt)
         }
     }
 
-    fn emit_call_inst(inout self, inout cx: FnCx, body: Body, sig: types.Sig, pass: Vec(ParamPass), target: str, variadic: bool, sink env: Option(String), args: Vec(Operand), dptr: str, dt: u32) {
+    fn emit_call_inst(
+        inout self,
+        inout cx: FnCx,
+        body: Body,
+        sig: types.Sig,
+        pass: Vec(ParamPass),
+        target: str,
+        variadic: bool,
+        sink env: Option(String),
+        args: Vec(Operand),
+        dptr: str,
+        dt: u32
+    ) {
         if sig.c_abi { self.c_call(&cx, body, sig, target, args, dptr); return }
         let ret = sig.ret
         var actual = Vec(String).new()
@@ -1687,7 +2053,10 @@ impl Gen {
                         }
                         let a = self.align(pt)
                         let tmp = cx.t()
-                        cx.line(fmt.f("{} = alloca [{} x i8], align {}", [tmp.as_str(), fmt.n(s as i128).as_str(), fmt.n(a as i128).as_str()]).as_str())
+                        cx.line(fmt.f(
+                            "{} = alloca [{} x i8], align {}",
+                            [tmp.as_str(), fmt.n(s as i128).as_str(), fmt.n(a as i128).as_str()]
+                        ).as_str())
                         self.store(&cx, pt, v, tmp.as_str())
                         tmp
                     }
@@ -1715,10 +2084,16 @@ impl Gen {
             fnty = fmt.f("{} ({}...)", [rty.as_str(), prefix.as_str()])
         }
         if rty == "void" {
-            cx.line(fmt.f("call {} {}({})", [fnty.as_str(), target, join(actual, ", ").as_str()]).as_str())
+            cx.line(fmt.f(
+                "call {} {}({})",
+                [fnty.as_str(), target, join(actual, ", ").as_str()]
+            ).as_str())
         } else {
             let r = cx.t()
-            cx.line(fmt.f("{} = call {} {}({})", [r.as_str(), fnty.as_str(), target, join(actual, ", ").as_str()]).as_str())
+            cx.line(fmt.f(
+                "{} = call {} {}({})",
+                [r.as_str(), fnty.as_str(), target, join(actual, ", ").as_str()]
+            ).as_str())
             self.store_scalar(&cx, dt, r.as_str(), dptr)
         }
         if ret == types.NEVER {
@@ -1728,7 +2103,15 @@ impl Gen {
         }
     }
 
-    fn intrinsic(inout self, inout cx: FnCx, body: Body, i: Intrinsic, args: Vec(Operand), dptr: str, dt: u32) {
+    fn intrinsic(
+        inout self,
+        inout cx: FnCx,
+        body: Body,
+        i: Intrinsic,
+        args: Vec(Operand),
+        dptr: str,
+        dt: u32
+    ) {
         var vals = Vec(String).new()
         for o in args {
             let t = self.operand_ty(body, o)
@@ -1750,16 +2133,28 @@ impl Gen {
                     argl.push("i64 " + v.as_str())
                 }
                 let r = cx.t()
-                cx.line(fmt.f("{} = call i64 asm sideeffect \"{}\", \"{}\"({})", [r.as_str(), asm.as_str(), cons.as_str(), join(argl, ", ").as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = call i64 asm sideeffect \"{}\", \"{}\"({})",
+                    [r.as_str(), asm.as_str(), cons.as_str(), join(argl, ", ").as_str()]
+                ).as_str())
                 self.store_scalar(&cx, dt, r.as_str(), dptr)
             }
             Copy(e) => {
                 let es = self.size(e)
                 let n = cx.t()
-                cx.line(fmt.f("{} = mul i64 {}, {}", [n.as_str(), vals[2].as_str(), fmt.n(es as i128).as_str()]).as_str())
-                cx.line(fmt.f("call void @llvm.memmove.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", [vals[0].as_str(), vals[1].as_str(), n.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = mul i64 {}, {}",
+                    [n.as_str(), vals[2].as_str(), fmt.n(es as i128).as_str()]
+                ).as_str())
+                cx.line(fmt.f(
+                    "call void @llvm.memmove.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)",
+                    [vals[0].as_str(), vals[1].as_str(), n.as_str()]
+                ).as_str())
             }
-            Fill => cx.line(fmt.f("call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", [vals[0].as_str(), vals[1].as_str(), vals[2].as_str()]).as_str())
+            Fill => cx.line(fmt.f(
+                "call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)",
+                [vals[0].as_str(), vals[1].as_str(), vals[2].as_str()]
+            ).as_str())
             Sqrt(t) => self.math(&cx, "sqrt", t, vals, dptr, dt)
             Floor(t) => self.math(&cx, "floor", t, vals, dptr, dt)
             Ceil(t) => self.math(&cx, "ceil", t, vals, dptr, dt)
@@ -1770,9 +2165,26 @@ impl Gen {
                 let lt = self.scalar(t)
                 let suffix = if lt == "float" { "f32" } else { "f64" }
                 let f = "llvm.copysign." + suffix
-                self.declare(f.as_str(), fmt.f("declare {} @{}({}, {})", [lt.as_str(), f.as_str(), lt.as_str(), lt.as_str()]).as_str())
+                self.declare(
+                    f.as_str(),
+                    fmt.f(
+                        "declare {} @{}({}, {})",
+                        [lt.as_str(), f.as_str(), lt.as_str(), lt.as_str()]
+                    ).as_str()
+                )
                 let r = cx.t()
-                cx.line(fmt.f("{} = call {} @{}({} {}, {} {})", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str(), lt.as_str(), vals[1].as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = call {} @{}({} {}, {} {})",
+                    [
+                        r.as_str(),
+                        lt.as_str(),
+                        f.as_str(),
+                        lt.as_str(),
+                        vals[0].as_str(),
+                        lt.as_str(),
+                        vals[1].as_str()
+                    ]
+                ).as_str())
                 self.store_scalar(&cx, dt, r.as_str(), dptr)
             }
             Argc => {
@@ -1789,7 +2201,10 @@ impl Gen {
                 let lt = self.mem_scalar(t)
                 let a = fmt.n(self.align(t) as i128)
                 var r = cx.t()
-                cx.line(fmt.f("{} = load atomic {}, ptr {} seq_cst, align {}", [r.as_str(), lt.as_str(), vals[0].as_str(), a.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = load atomic {}, ptr {} seq_cst, align {}",
+                    [r.as_str(), lt.as_str(), vals[0].as_str(), a.as_str()]
+                ).as_str())
                 if t == types.BOOL {
                     let b = cx.t()
                     cx.line(fmt.f("{} = trunc i8 {} to i1", [b.as_str(), r.as_str()]).as_str())
@@ -1801,14 +2216,20 @@ impl Gen {
                 let lt = self.mem_scalar(t)
                 let a = fmt.n(self.align(t) as i128)
                 let v = self.widen_bool(&cx, t, vals[1].as_str())
-                cx.line(fmt.f("store atomic {} {}, ptr {} seq_cst, align {}", [lt.as_str(), v.as_str(), vals[0].as_str(), a.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "store atomic {} {}, ptr {} seq_cst, align {}",
+                    [lt.as_str(), v.as_str(), vals[0].as_str(), a.as_str()]
+                ).as_str())
             }
             AtomicRmw(op, t) => {
                 let lt = self.mem_scalar(t)
                 let v = self.widen_bool(&cx, t, vals[1].as_str())
                 var r = cx.t()
                 let o = if op == "swap" { "xchg" } else { op.as_str() }
-                cx.line(fmt.f("{} = atomicrmw {} ptr {}, {} {} seq_cst", [r.as_str(), o, vals[0].as_str(), lt.as_str(), v.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = atomicrmw {} ptr {}, {} {} seq_cst",
+                    [r.as_str(), o, vals[0].as_str(), lt.as_str(), v.as_str()]
+                ).as_str())
                 if t == types.BOOL {
                     let b = cx.t()
                     cx.line(fmt.f("{} = trunc i8 {} to i1", [b.as_str(), r.as_str()]).as_str())
@@ -1821,9 +2242,22 @@ impl Gen {
                 let e = self.widen_bool(&cx, t, vals[1].as_str())
                 let n = self.widen_bool(&cx, t, vals[2].as_str())
                 let pair = cx.t()
-                cx.line(fmt.f("{} = cmpxchg ptr {}, {} {}, {} {} seq_cst seq_cst", [pair.as_str(), vals[0].as_str(), lt.as_str(), e.as_str(), lt.as_str(), n.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = cmpxchg ptr {}, {} {}, {} {} seq_cst seq_cst",
+                    [
+                        pair.as_str(),
+                        vals[0].as_str(),
+                        lt.as_str(),
+                        e.as_str(),
+                        lt.as_str(),
+                        n.as_str()
+                    ]
+                ).as_str())
                 let r = cx.t()
-                cx.line(fmt.f("{} = extractvalue { {}, i1 } {}, 1", [r.as_str(), lt.as_str(), pair.as_str()]).as_str())
+                cx.line(fmt.f(
+                    "{} = extractvalue { {}, i1 } {}, 1",
+                    [r.as_str(), lt.as_str(), pair.as_str()]
+                ).as_str())
                 self.store_scalar(&cx, dt, r.as_str(), dptr)
             }
             Fence => cx.line("fence seq_cst")
@@ -1837,13 +2271,25 @@ impl Gen {
         let r = cx.t()
         if self.p.types.is_int(t) {
             let f = "llvm.abs." + lt.as_str()
-            self.declare(f.as_str(), fmt.f("declare {} @{}({}, i1)", [lt.as_str(), f.as_str(), lt.as_str()]).as_str())
-            cx.line(fmt.f("{} = call {} @{}({} {}, i1 false)", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]).as_str())
+            self.declare(
+                f.as_str(),
+                fmt.f("declare {} @{}({}, i1)", [lt.as_str(), f.as_str(), lt.as_str()]).as_str()
+            )
+            cx.line(fmt.f(
+                "{} = call {} @{}({} {}, i1 false)",
+                [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]
+            ).as_str())
         } else {
             let suffix = if lt == "float" { "f32" } else { "f64" }
             let f = fmt.f("llvm.{}.{}", [name, suffix])
-            self.declare(f.as_str(), fmt.f("declare {} @{}({})", [lt.as_str(), f.as_str(), lt.as_str()]).as_str())
-            cx.line(fmt.f("{} = call {} @{}({} {})", [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]).as_str())
+            self.declare(
+                f.as_str(),
+                fmt.f("declare {} @{}({})", [lt.as_str(), f.as_str(), lt.as_str()]).as_str()
+            )
+            cx.line(fmt.f(
+                "{} = call {} @{}({} {})",
+                [r.as_str(), lt.as_str(), f.as_str(), lt.as_str(), vals[0].as_str()]
+            ).as_str())
         }
         self.store_scalar(&cx, dt, r.as_str(), dptr)
     }
@@ -1881,7 +2327,10 @@ impl Gen {
                     } else if i.bits > 32 {
                         fmt.f("%code = trunc {} %r to i32", [lt.as_str()])
                     } else {
-                        fmt.f("%code = {} {} %r to i32", [if i.signed { "sext" } else { "zext" }, lt.as_str()])
+                        fmt.f(
+                            "%code = {} {} %r to i32",
+                            [if i.signed { "sext" } else { "zext" }, lt.as_str()]
+                        )
                     }
                 }
                 Bool => String.from("%code = zext i1 %r to i32")
@@ -1897,10 +2346,16 @@ impl Gen {
                 X86_64 => "231"
                 Aarch64 => "94"
             }
-            self.out.push_str(fmt.f("define void @jihoo.start(ptr %sp) {\nentry:\n  %argc = load i64, ptr %sp\n  store i64 %argc, ptr @jihoo.argc\n  %argv = getelementptr i8, ptr %sp, i64 8\n  store ptr %argv, ptr @jihoo.argv\n{}  %c64 = sext i32 %code to i64\n  %x = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 %c64)\n  unreachable\n}\n\n", [call.as_str(), exit_asm.as_str(), cons.as_str(), exit_no]).as_str())
+            self.out.push_str(fmt.f(
+                "define void @jihoo.start(ptr %sp) {\nentry:\n  %argc = load i64, ptr %sp\n  store i64 %argc, ptr @jihoo.argc\n  %argv = getelementptr i8, ptr %sp, i64 8\n  store ptr %argv, ptr @jihoo.argv\n{}  %c64 = sext i32 %code to i64\n  %x = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 %c64)\n  unreachable\n}\n\n",
+                [call.as_str(), exit_asm.as_str(), cons.as_str(), exit_no]
+            ).as_str())
             self.out.push_str(MEM_FUNCTIONS)
         } else {
-            self.out.push_str(fmt.f("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %a = sext i32 %argc to i64\n  store i64 %a, ptr @jihoo.argc\n  store ptr %argv, ptr @jihoo.argv\n{}  ret i32 %code\n}\n\n", [call.as_str()]).as_str())
+            self.out.push_str(fmt.f(
+                "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %a = sext i32 %argc to i64\n  store i64 %a, ptr @jihoo.argc\n  store ptr %argv, ptr @jihoo.argv\n{}  ret i32 %code\n}\n\n",
+                [call.as_str()]
+            ).as_str())
         }
     }
 
@@ -1916,9 +2371,32 @@ impl Gen {
         }
         let w = wasm.as_str()
         let c = wcons.as_str()
-        self.out.push_str(fmt.f("define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {\nentry:\n  %a = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 {})\n  %b = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr %m, i64 %n)\n  %d = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 1)\n  {}\n  unreachable\n}\n\n", [w, c, write_no, prefix.as_str(), fmt.n(plen as i128).as_str(), w, c, write_no, w, c, write_no, nl.as_str(), trap_call(self.p.target)]).as_str())
-        self.declare("llvm.memcpy.p0.p0.i64", "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)")
-        self.declare("llvm.memmove.p0.p0.i64", "declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1)")
+        self.out.push_str(fmt.f(
+            "define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {\nentry:\n  %a = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 {})\n  %b = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr %m, i64 %n)\n  %d = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 2, ptr {}, i64 1)\n  {}\n  unreachable\n}\n\n",
+            [
+                w,
+                c,
+                write_no,
+                prefix.as_str(),
+                fmt.n(plen as i128).as_str(),
+                w,
+                c,
+                write_no,
+                w,
+                c,
+                write_no,
+                nl.as_str(),
+                trap_call(self.p.target)
+            ]
+        ).as_str())
+        self.declare(
+            "llvm.memcpy.p0.p0.i64",
+            "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)"
+        )
+        self.declare(
+            "llvm.memmove.p0.p0.i64",
+            "declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1)"
+        )
         self.declare("llvm.memset.p0.i64", "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)")
         self.declare("llvm.trap", "declare void @llvm.trap() cold noreturn nounwind")
     }

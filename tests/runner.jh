@@ -357,6 +357,22 @@ impl Tests {
         Ok(())
     }
 
+    // The compiler and the standard library are formatted.
+    fn formatted_sources(self) -> Result((), String) {
+        var files = Vec(String).new()
+        jh_files("compiler", false, &files)
+        jh_files("lib/std", false, &files)
+        var unformatted = String.new()
+        for f in files {
+            let o = exec(self.compiler.as_str(), ["fmt", f.as_str(), "--check"])
+            if !o.status.success() { unformatted.push_str(o.stderr.as_str()) }
+        }
+        if !unformatted.is_empty() {
+            return Err("run `jihoo fmt` on these files:\n" + unformatted.as_str())
+        }
+        Ok(())
+    }
+
     fn example_one(self, path: str) -> Result((), String) {
         let src = fs.read_file(path)?
         let exe = self.temp(stem(path))
@@ -678,6 +694,8 @@ fn main() -> i32 {
         if s == "format" {
             let r = t.formatting()
             t.check("format: comments, syntax, idempotence and LLVM IR", r)
+            let r = t.formatted_sources()
+            t.check("format: compiler and standard library are formatted", r)
         } else if s == "check" {
             let r = t.check_command()
             t.check("check: command, targets and no code generation", r)

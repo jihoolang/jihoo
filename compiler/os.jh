@@ -155,7 +155,8 @@ pub fn with_stack(size: i64, f: fnptr(*u8) -> *u8) {
     var attr = [0 as u64; 8]
     var t: u64 = 0
     unsafe {
-        if pthread_attr_init(&attr[0]) != 0 || pthread_attr_setstacksize(&attr[0], size) != 0 || pthread_create(&t, &attr[0], f, null) != 0 {
+        if pthread_attr_init(&attr[0]) != 0 || pthread_attr_setstacksize(&attr[0], size) != 0 ||
+            pthread_create(&t, &attr[0], f, null) != 0 {
             f(null)
             return
         }

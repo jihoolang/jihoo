@@ -18,13 +18,19 @@ pub struct Sig {
 
 impl Clone for Sig {
     fn clone(self) -> Sig {
-        Sig { params: self.params.clone(), ret: self.ret, c_abi: self.c_abi, variadic: self.variadic }
+        Sig {
+            params: self.params.clone(),
+            ret: self.ret,
+            c_abi: self.c_abi,
+            variadic: self.variadic
+        }
     }
 }
 
 impl Eq for Sig {
     fn eq(self, other: Sig) -> bool {
-        self.ret == other.ret && self.params == other.params && self.c_abi == other.c_abi && self.variadic == other.variadic
+        self.ret == other.ret && self.params == other.params && self.c_abi == other.c_abi &&
+            self.variadic == other.variadic
     }
 }
 
@@ -381,7 +387,14 @@ impl Types {
 
     pub fn new_adt(inout self, sink name: String, decl: u32) -> u32 {
         let idx = self.adts.len() as u32
-        self.adts.push(AdtDef { name: name, decl: decl, body: AdtBody.Pending, has_drop: false, view: false, interior: false })
+        self.adts.push(AdtDef {
+            name: name,
+            decl: decl,
+            body: AdtBody.Pending,
+            has_drop: false,
+            view: false,
+            interior: false
+        })
         self.intern(TyKind.Adt(idx))
     }
 
@@ -759,7 +772,10 @@ impl Types {
             size = max(size, off)
             fields.push(offs)
         }
-        (Layout { size: round_up(size, align), align: align }, EnumLayout { tag_bits: tag_bits, fields: fields })
+        (
+            Layout { size: round_up(size, align), align: align },
+            EnumLayout { tag_bits: tag_bits, fields: fields }
+        )
     }
 
     pub fn show(self, t: u32) -> String {

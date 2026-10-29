@@ -65,7 +65,11 @@ pub fn format_module(file: u32, sink toks: Vec(Token)) -> Result(FormatModule, D
     parse_with_layout(file, toks, true)
 }
 
-fn parse_with_layout(file: u32, sink toks: Vec(Token), collect: bool) -> Result(FormatModule, Diag) {
+fn parse_with_layout(
+    file: u32,
+    sink toks: Vec(Token),
+    collect: bool
+) -> Result(FormatModule, Diag) {
     var p = Parser { toks: toks, i: 0, depth: 0, collect_layout: collect,
         lists: Vec(u32).new(), separators: Vec(u32).new() }
     var attrs = Vec(String).new()
@@ -301,7 +305,12 @@ impl Parser {
                     let fname = self.ident()?
                     self.expect(Tok.Colon)?
                     let ty = self.ty()?
-                    fields.push(ast.Field { name: fname, ty: ty, public: public, span: fs.to(self.prev_span()) })
+                    fields.push(ast.Field {
+                        name: fname,
+                        ty: ty,
+                        public: public,
+                        span: fs.to(self.prev_span())
+                    })
                     if !self.sep(Tok.RBrace)? {
                         break
                     }
@@ -329,7 +338,11 @@ impl Parser {
                         }
                         self.expect(Tok.RParen)?
                     }
-                    variants.push(ast.Variant { name: vname, fields: fields, span: vs.to(self.prev_span()) })
+                    variants.push(ast.Variant {
+                        name: vname,
+                        fields: fields,
+                        span: vs.to(self.prev_span())
+                    })
                     if !self.sep(Tok.RBrace)? {
                         break
                     }
@@ -352,7 +365,12 @@ impl Parser {
                     self_ty = self.ty()?
                 }
                 let items = self.item_block()?
-                ItemKind.Impl(ast.ImplDecl { params: params, trait_: trait_, self_ty: self_ty, items: items })
+                ItemKind.Impl(ast.ImplDecl {
+                    params: params,
+                    trait_: trait_,
+                    self_ty: self_ty,
+                    items: items
+                })
             }
             Trait => {
                 self.bump()
@@ -366,7 +384,12 @@ impl Parser {
                     }
                 }
                 let items = self.item_block()?
-                ItemKind.Trait(ast.TraitDecl { name: name, params: params, supertraits: supertraits, items: items })
+                ItemKind.Trait(ast.TraitDecl {
+                    name: name,
+                    params: params,
+                    supertraits: supertraits,
+                    items: items
+                })
             }
             Const | Static => {
                 let is_static = self.at(Tok.Static)
@@ -384,7 +407,9 @@ impl Parser {
                 let ty = if self.eat(Tok.Assign) { Some(self.ty()?) } else { None }
                 ItemKind.TypeAlias(name, ty)
             }
-            _ => return Err(self.found("expected an item (`fn`, `struct`, `enum`, `impl`, ...), found "))
+            _ => return Err(self.found(
+                "expected an item (`fn`, `struct`, `enum`, `impl`, ...), found "
+            ))
         }
         Ok(Item { span: start.to(self.prev_span()), public: public, attrs: attrs, kind: kind })
     }
@@ -441,7 +466,10 @@ impl Parser {
             return Err(Diag.new(name_span, "only extern functions can have `...` parameters"))
         }
         if is_extern && body.is_some() {
-            return Err(Diag.new(name_span, "an extern function cannot have a body; use `export fn` to define a C function"))
+            return Err(Diag.new(
+                name_span,
+                "an extern function cannot have a body; use `export fn` to define a C function"
+            ))
         }
         Ok(FnDecl {
             name: name
@@ -478,7 +506,13 @@ impl Parser {
             } else if name != "self" {
                 return Err(self.error("expected `:` and the parameter's type"))
             }
-            params.push(Param { name: name, mode: mode, ty: ty, bounds: bounds, span: start.to(self.prev_span()) })
+            params.push(Param {
+                name: name,
+                mode: mode,
+                ty: ty,
+                bounds: bounds,
+                span: start.to(self.prev_span())
+            })
             if !self.comma() {
                 break
             }
@@ -552,7 +586,8 @@ impl Parser {
                 let (ps, r, v) = self.fn_ty_rest(true)?
                 TyKind.FnPtr(ps, r, v)
             }
-            Ident if self.text() == "dyn" && (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn) => {
+            Ident if self.text() == "dyn" &&
+                (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn) => {
                 self.bump()
                 TyKind.Dyn(Box.new(self.ty()?))
             }
@@ -563,7 +598,8 @@ impl Parser {
                     self.bump()
                     path.push(self.ident()?)
                 }
-                let args = if self.at(Tok.LParen) && !self.nl() { Some(self.call_args()?) } else { None }
+                let args = if self.at(Tok.LParen) &&
+                    !self.nl() { Some(self.call_args()?) } else { None }
                 TyKind.Path(path, args)
             }
             _ => return Err(self.found("expected a type, found "))
@@ -582,7 +618,10 @@ impl Parser {
         }
     }
 
-    fn fn_ty_rest(inout self, allow_variadic: bool) -> Result((Vec(FnTyParam), Option(Box(Ty)), bool), Diag) {
+    fn fn_ty_rest(
+        inout self,
+        allow_variadic: bool
+    ) -> Result((Vec(FnTyParam), Option(Box(Ty)), bool), Diag) {
         self.list_open(Tok.LParen)?
         var ps = Vec(FnTyParam).new()
         var variadic = false
@@ -777,7 +816,8 @@ impl Parser {
     }
 
     fn range_end(self) -> bool {
-        self.at(Tok.RBracket) || self.at(Tok.RParen) || self.at(Tok.LBrace) || self.at(Tok.Comma) || self.nl()
+        self.at(Tok.RBracket) || self.at(Tok.RParen) || self.at(Tok.LBrace) ||
+            self.at(Tok.Comma) || self.nl()
     }
 
     fn unary(inout self, ns: bool) -> Result(Expr, Diag) {
@@ -926,11 +966,13 @@ impl Parser {
                     self.bump()
                     return self.inline_expr(start)
                 }
-                if (self.text() == "fnptr" && self.peek(1) == Tok.LParen) || (self.text() == "dyn" && (self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn)) {
-                    ExprKind.Type(self.ty()?)
-                } else {
-                    ExprKind.Name(self.ident()?)
-                }
+                if (self.text() == "fnptr" && self.peek(1) == Tok.LParen) ||
+                    (self.text() == "dyn" && (self.peek(1) == Tok.Ident ||
+                    self.peek(1) == Tok.Fn)) {
+                        ExprKind.Type(self.ty()?)
+                    } else {
+                        ExprKind.Name(self.ident()?)
+                    }
             }
             Type => {
                 self.bump()
@@ -1004,7 +1046,12 @@ impl Parser {
                     let guard = if self.eat(Tok.If) { Some(self.expr()?) } else { None }
                     self.expect(Tok.FatArrow)?
                     let body = self.arm_body()?
-                    arms.push(Arm { pat: pat, guard: guard, body: body, span: astart.to(self.prev_span()) })
+                    arms.push(Arm {
+                        pat: pat,
+                        guard: guard,
+                        body: body,
+                        span: astart.to(self.prev_span())
+                    })
                     if !self.sep(Tok.RBrace)? {
                         break
                     }
@@ -1028,7 +1075,10 @@ impl Parser {
                 var index: Option(ast.ForIndex) = None
                 if self.eat(Tok.Comma) {
                     match pat.kind {
-                        Name(n, false) => index = Some(ast.ForIndex { name: n.clone(), span: pat.span })
+                        Name(n, false) => index = Some(ast.ForIndex {
+                            name: n.clone(),
+                            span: pat.span
+                        })
                         _ => return Err(Diag.new(pat.span, "the index of a `for` loop is a name"))
                     }
                     pat = self.pattern()?
@@ -1067,7 +1117,10 @@ impl Parser {
             let span = s.span
             var stmts = Vec(Stmt).new()
             stmts.push(s)
-            return Ok(Expr { kind: ExprKind.Block(Block { stmts: stmts, tail: None, span: span }), span: span })
+            return Ok(Expr {
+                kind: ExprKind.Block(Block { stmts: stmts, tail: None, span: span }),
+                span: span
+            })
         }
         match s {
             Stmt { kind: Expr(e), span: _ } => Ok(e)
@@ -1101,7 +1154,10 @@ impl Parser {
             self.expect(Tok.In)?
             let it = self.expr_ns()?
             let b = self.block()?
-            return Ok(Expr { kind: ExprKind.InlineFor(name, Box.new(it), b), span: start.to(self.prev_span()) })
+            return Ok(Expr {
+                kind: ExprKind.InlineFor(name, Box.new(it), b),
+                span: start.to(self.prev_span())
+            })
         }
         self.expect(Tok.If)?
         let c = self.expr_ns()?
@@ -1117,7 +1173,10 @@ impl Parser {
                 els = Some(Box.new(Expr { kind: ExprKind.Block(b), span: sp }))
             }
         }
-        Ok(Expr { kind: ExprKind.InlineIf(Box.new(c), then, els), span: start.to(self.prev_span()) })
+        Ok(Expr {
+            kind: ExprKind.InlineIf(Box.new(c), then, els),
+            span: start.to(self.prev_span())
+        })
     }
 
     // `fn(x, y: i64) -> T { ... }` is a closure; `fn(i64) -> T` is a type.
@@ -1160,7 +1219,10 @@ impl Parser {
                 }
             }
             let body = self.block()?
-            return Ok(Expr { kind: ExprKind.Lambda(params, ret, body), span: start.to(self.prev_span()) })
+            return Ok(Expr {
+                kind: ExprKind.Lambda(params, ret, body),
+                span: start.to(self.prev_span())
+            })
         }
         var tys = Vec(FnTyParam).new()
         for e in entries.into_iter() {
@@ -1222,7 +1284,10 @@ impl Parser {
                     self.bump()
                     self.eat(Tok.Assign)
                     match self.pat_int() {
-                        Some(hi) => return Ok(Pat { kind: PatKind.Range(v, hi), span: start.to(self.prev_span()) })
+                        Some(hi) => return Ok(Pat {
+                            kind: PatKind.Range(v, hi),
+                            span: start.to(self.prev_span())
+                        })
                         None => return Err(self.error("expected the end of the range"))
                     }
                 }

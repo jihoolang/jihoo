@@ -642,7 +642,14 @@ fn stores_views(t: Types, ty: u32) -> bool {
     }
 }
 
-fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body, effects: Vec(Effect)) {
+fn term_loans(
+    t: Term,
+    inout held: Vec(Bits),
+    lc: LoanCtx,
+    ts: Types,
+    body: Body,
+    effects: Vec(Effect)
+) {
     match t {
         Call(callee, args, dest, _, _) => {
             var all = bits(lc.lw)
@@ -661,7 +668,14 @@ fn term_loans(t: Term, inout held: Vec(Bits), lc: LoanCtx, ts: Types, body: Body
                                 pointees(p.local as i64, held, body, &targets)
                                 var stored = all.clone()
                                 if effect >= 0 {
-                                    stored = selected_loans(args, effects[effect].stored[ai], held, lc, ts, body)
+                                    stored = selected_loans(
+                                        args,
+                                        effects[effect].stored[ai],
+                                        held,
+                                        lc,
+                                        ts,
+                                        body
+                                    )
                                 }
                                 for l in targets {
                                     union(&held[l], stored)
@@ -713,14 +727,22 @@ fn call_effect(c: mir.Callee, count: i64, effects: Vec(Effect)) -> i64 {
     match c {
         Fn(id) => {
             let i = id as i64
-            if i < effects.len() && effects[i].known && effects[i].stored.len() == count { return i }
+            if i < effects.len() && effects[i].known &&
+                effects[i].stored.len() == count { return i }
         }
         _ => {}
     }
     -1
 }
 
-fn selected_loans(args: Vec(Operand), origins: Bits, held: Vec(Bits), lc: LoanCtx, t: Types, body: Body) -> Bits {
+fn selected_loans(
+    args: Vec(Operand),
+    origins: Bits,
+    held: Vec(Bits),
+    lc: LoanCtx,
+    t: Types,
+    body: Body
+) -> Bits {
     var out = bits(lc.lw)
     for i, a in args {
         if get(origins, i) { union(&out, op_loans(a, held, lc, t, body)) }
@@ -742,7 +764,10 @@ fn raw_operand(t: Types, body: Body, o: Operand) -> bool {
                     Deref => match t.pointee(ty) { Some(x) => ty = x, None => return true }
                     Variant(v) => variant = Some(v)
                     Field(i) => match variant {
-                        Some(v) => { ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]; variant = None }
+                        Some(v) => {
+                            ty = t.variants(ty).unwrap()[v as i64].fields[i as i64]
+                            variant = None
+                        }
                         None => match t.kind(ty) {
                             Str | Slice(_) | Closure(_) => return i == 0
                             _ => ty = t.field_tys(ty)[i as i64]
@@ -835,7 +860,8 @@ fn infer_effect(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> 
                 Return => {
                     union(&result.returned, held[mir.RET as i64])
                     for a in 0..count {
-                        if stores_views(t, body.locals[a + 1].ty) { union(&result.stored[a], held[a + 1]) }
+                        if stores_views(t, body.locals[a +
+                            1].ty) { union(&result.stored[a], held[a + 1]) }
                     }
                 }
                 _ => {}
@@ -954,9 +980,16 @@ fn conflict(body: Body, q: Place, access: Access, span: Span, cx: Ctx) -> Result
         let what = name(body, q)
         let msg = match access {
             Dead => what + " goes away here while it is still borrowed"
-            _ => if l.mutable { what + " is used here while it is borrowed mutably" } else { what + " is changed here while it is borrowed" }
+            _ => if l.mutable {
+                what + " is used here while it is borrowed mutably"
+            } else {
+                what + " is changed here while it is borrowed"
+            }
         }
-        return Err(Diag.new(span, msg.as_str()).note(Some(l.span), "the borrow starts here, and is used later"))
+        return Err(Diag.new(span, msg.as_str()).note(
+            Some(l.span),
+            "the borrow starts here, and is used later"
+        ))
     }
     Ok(())
 }
@@ -1036,8 +1069,13 @@ fn check_term(t: Types, body: Body, term: Term, cx: Ctx, f: mir.Function) -> Res
                 // checked here as well.
                 let reborrow = starts_deref(l.place) && t.is_ref(root.ty)
                 if !through_param && !reborrow && !root_is_raw(t, body, l.place) {
-                    let what = if result { "the result borrows " } else { "a value stored through a parameter borrows " }
-                    return Err(Diag.new(l.span, (what + name(body, l.place).as_str() + ", which goes away when the function returns").as_str()))
+                    let what = if result {
+                        "the result borrows "
+                    } else {
+                        "a value stored through a parameter borrows "
+                    }
+                    return Err(Diag.new(l.span, (what + name(body, l.place).as_str() +
+                        ", which goes away when the function returns").as_str()))
                 }
             }
         }

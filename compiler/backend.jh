@@ -37,25 +37,37 @@ unsafe fn load_api(lib: ffi.Library) -> Result(Api, String) {
         LLVMGetVersion: lib.symbol("LLVMGetVersion")? as fnptr(*u32, *u32, *u32)
         LLVMContextCreate: lib.symbol("LLVMContextCreate")? as fnptr() -> *u8
         LLVMContextDispose: lib.symbol("LLVMContextDispose")? as fnptr(*u8)
-        LLVMCreateMemoryBufferWithMemoryRangeCopy: lib.symbol("LLVMCreateMemoryBufferWithMemoryRangeCopy")? as fnptr(*u8, u64, *u8) -> *u8
-        LLVMParseIRInContext: lib.symbol("LLVMParseIRInContext")? as fnptr(*u8, *u8, **u8, **u8) -> i32
+        LLVMCreateMemoryBufferWithMemoryRangeCopy:
+            lib.symbol("LLVMCreateMemoryBufferWithMemoryRangeCopy")? as fnptr(*u8, u64, *u8) -> *u8
+        LLVMParseIRInContext:
+            lib.symbol("LLVMParseIRInContext")? as fnptr(*u8, *u8, **u8, **u8) -> i32
         LLVMDisposeModule: lib.symbol("LLVMDisposeModule")? as fnptr(*u8)
         LLVMDisposeMessage: lib.symbol("LLVMDisposeMessage")? as fnptr(*u8)
         LLVMVerifyModule: lib.symbol("LLVMVerifyModule")? as fnptr(*u8, i32, **u8) -> i32
-        LLVMGetTargetFromTriple: lib.symbol("LLVMGetTargetFromTriple")? as fnptr(*u8, **u8, **u8) -> i32
-        LLVMCreateTargetMachine: lib.symbol("LLVMCreateTargetMachine")? as fnptr(*u8, *u8, *u8, *u8, i32, i32, i32) -> *u8
+        LLVMGetTargetFromTriple:
+            lib.symbol("LLVMGetTargetFromTriple")? as fnptr(*u8, **u8, **u8) -> i32
+        LLVMCreateTargetMachine: lib.symbol("LLVMCreateTargetMachine")? as
+            fnptr(*u8, *u8, *u8, *u8, i32, i32, i32) -> *u8
         LLVMDisposeTargetMachine: lib.symbol("LLVMDisposeTargetMachine")? as fnptr(*u8)
         LLVMCreateTargetDataLayout: lib.symbol("LLVMCreateTargetDataLayout")? as fnptr(*u8) -> *u8
         LLVMSetModuleDataLayout: lib.symbol("LLVMSetModuleDataLayout")? as fnptr(*u8, *u8)
         LLVMDisposeTargetData: lib.symbol("LLVMDisposeTargetData")? as fnptr(*u8)
         LLVMCreatePassBuilderOptions: lib.symbol("LLVMCreatePassBuilderOptions")? as fnptr() -> *u8
         LLVMDisposePassBuilderOptions: lib.symbol("LLVMDisposePassBuilderOptions")? as fnptr(*u8)
-        LLVMPassBuilderOptionsSetLoopVectorization: lib.symbol("LLVMPassBuilderOptionsSetLoopVectorization")? as fnptr(*u8, i32)
-        LLVMPassBuilderOptionsSetSLPVectorization: lib.symbol("LLVMPassBuilderOptionsSetSLPVectorization")? as fnptr(*u8, i32)
+        LLVMPassBuilderOptionsSetLoopVectorization:
+            lib.symbol("LLVMPassBuilderOptionsSetLoopVectorization")? as fnptr(*u8, i32)
+        LLVMPassBuilderOptionsSetSLPVectorization:
+            lib.symbol("LLVMPassBuilderOptionsSetSLPVectorization")? as fnptr(*u8, i32)
         LLVMRunPasses: lib.symbol("LLVMRunPasses")? as fnptr(*u8, *u8, *u8, *u8) -> *u8
         LLVMGetErrorMessage: lib.symbol("LLVMGetErrorMessage")? as fnptr(*u8) -> *u8
         LLVMDisposeErrorMessage: lib.symbol("LLVMDisposeErrorMessage")? as fnptr(*u8)
-        LLVMTargetMachineEmitToFile: lib.symbol("LLVMTargetMachineEmitToFile")? as fnptr(*u8, *u8, *u8, i32, **u8) -> i32
+        LLVMTargetMachineEmitToFile: lib.symbol("LLVMTargetMachineEmitToFile")? as fnptr(
+            *u8,
+            *u8,
+            *u8,
+            i32,
+            **u8
+        ) -> i32
         LLVMGetFirstFunction: lib.symbol("LLVMGetFirstFunction")? as fnptr(*u8) -> *u8
         LLVMGetNextFunction: lib.symbol("LLVMGetNextFunction")? as fnptr(*u8) -> *u8
         LLVMSetSection: lib.symbol("LLVMSetSection")? as fnptr(*u8, *u8)
@@ -103,11 +115,23 @@ unsafe fn message(api: Api, p: *u8) -> String {
     text
 }
 
-pub fn object(ir: str, path: str, opt: str, tgt: target.Target, freestanding: bool) -> Result((), String) {
+pub fn object(
+    ir: str,
+    path: str,
+    opt: str,
+    tgt: target.Target,
+    freestanding: bool
+) -> Result((), String) {
     unsafe { emit_object(ir, path, opt, tgt, freestanding) }
 }
 
-unsafe fn emit_object(ir: str, path: str, opt: str, tgt: target.Target, freestanding: bool) -> Result((), String) {
+unsafe fn emit_object(
+    ir: str,
+    path: str,
+    opt: str,
+    tgt: target.Target,
+    freestanding: bool
+) -> Result((), String) {
     let lib = open_llvm()?
     let api = load_api(lib)?
     var major: u32 = 0
@@ -145,7 +169,15 @@ unsafe fn emit_object(ir: str, path: str, opt: str, tgt: target.Target, freestan
         Aarch64 => "generic"
     }
     let level = (opt[2] - '0') as i32
-    r.machine = api.LLVMCreateTargetMachine(llvm_target, triple.as_str().ptr, cpu.ptr, "".ptr, level, 2, 0)
+    r.machine = api.LLVMCreateTargetMachine(
+        llvm_target,
+        triple.as_str().ptr,
+        cpu.ptr,
+        "".ptr,
+        level,
+        2,
+        0
+    )
     if r.machine == null { return Err(String.from("LLVM cannot create target machine")) }
     let data = api.LLVMCreateTargetDataLayout(r.machine)
     api.LLVMSetModuleDataLayout(r.module, data)

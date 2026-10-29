@@ -135,7 +135,17 @@ impl(T: type) Channel(T) {
         if n < 0 {
             panic("a channel's bound cannot be negative")
         }
-        Channel(T) { lock: 0, seq: 0, waiting: 0, closed: false, buf: null, head: 0, len: 0, cap: 0, bound: n }
+        Channel(T) {
+            lock: 0,
+            seq: 0,
+            waiting: 0,
+            closed: false,
+            buf: null,
+            head: 0,
+            len: 0,
+            cap: 0,
+            bound: n
+        }
     }
 
     // Puts `v` at the end of the queue, waiting while the channel is full.

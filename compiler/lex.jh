@@ -188,13 +188,29 @@ pub struct Token {
 
 impl Token {
     pub fn new(tok: Tok, span: Span, nl_before: bool) -> Token {
-        Token { tok: tok, span: span, nl_before: nl_before, text: String.new(), int: 0, float: 0.0, op: Op.Add }
+        Token {
+            tok: tok,
+            span: span,
+            nl_before: nl_before,
+            text: String.new(),
+            int: 0,
+            float: 0.0,
+            op: Op.Add
+        }
     }
 }
 
 impl Clone for Token {
     fn clone(self) -> Token {
-        Token { tok: self.tok, span: self.span, nl_before: self.nl_before, text: self.text.clone(), int: self.int, float: self.float, op: self.op }
+        Token {
+            tok: self.tok,
+            span: self.span,
+            nl_before: self.nl_before,
+            text: self.text.clone(),
+            int: self.int,
+            float: self.float,
+            op: self.op
+        }
     }
 }
 
@@ -356,7 +372,8 @@ pub fn lex(file: u32, src: str) -> Result(Vec(Token), Diag) {
                 var depth = 0
                 loop {
                     if i >= n {
-                        return Err(Diag.new(Span.new(file, start, start + 2), "unterminated comment"))
+                        return Err(Diag.new(Span.new(file, start, start +
+                            2), "unterminated comment"))
                     }
                     if src[i] == '/' && at(src, i + 1) == '*' {
                         depth += 1
@@ -433,7 +450,10 @@ pub fn lex(file: u32, src: str) -> Result(Vec(Token), Diag) {
                 b = at(src, i - 1)
             }
             if at(src, i) != '\'' {
-                return Err(Diag.new(Span.new(file, start, i), "a character literal is one byte between quotes"))
+                return Err(Diag.new(
+                    Span.new(file, start, i),
+                    "a character literal is one byte between quotes"
+                ))
             }
             i += 1
             t.tok = Tok.Char
@@ -604,7 +624,16 @@ fn punct(c: u8, c1: u8, c2: u8, inout t: Token) -> i64 {
 }
 
 // `+`, `+%`, `+=`, `+%=` and the same for `-` and `*`.
-fn arith(c1: u8, c2: u8, plain: Tok, wrap: Tok, plain_op: Op, wrap_op: Op, inout len: i64, inout op: Op) -> Tok {
+fn arith(
+    c1: u8,
+    c2: u8,
+    plain: Tok,
+    wrap: Tok,
+    plain_op: Op,
+    wrap_op: Op,
+    inout len: i64,
+    inout op: Op
+) -> Tok {
     if c1 == '%' && c2 == '=' {
         len = 3
         op = wrap_op
@@ -688,7 +717,13 @@ fn escape(file: u32, src: str, inout i: i64) -> Result(u8, Diag) {
     Ok(b)
 }
 
-fn number(file: u32, src: str, inout i: i64, allow_float: bool, inout t: Token) -> Result((), Diag) {
+fn number(
+    file: u32,
+    src: str,
+    inout i: i64,
+    allow_float: bool,
+    inout t: Token
+) -> Result((), Diag) {
     let start = i
     var radix: u64 = 10
     if at(src, i) == '0' && at(src, i + 1) == 'x' {
@@ -702,7 +737,8 @@ fn number(file: u32, src: str, inout i: i64, allow_float: bool, inout t: Token) 
         i += 2
     }
     var digits = String.new()
-    while (if radix == 10 { is_digit(at(src, i)) } else { is_alnum(at(src, i)) }) || at(src, i) == '_' {
+    while (if radix == 10 { is_digit(at(src, i)) } else { is_alnum(at(src, i)) }) ||
+        at(src, i) == '_' {
         if at(src, i) != '_' {
             digits.push(at(src, i))
         }

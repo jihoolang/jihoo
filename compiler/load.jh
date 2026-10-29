@@ -98,7 +98,13 @@ pub fn default_search(extra: Vec(String)) -> Vec(String) {
     s
 }
 
-pub fn load(root: str, sink search: Vec(String), target: str, inout sources: diag.Sources, no_prelude: bool) -> Result(Ast, Diag) {
+pub fn load(
+    root: str,
+    sink search: Vec(String),
+    target: str,
+    inout sources: diag.Sources,
+    no_prelude: bool
+) -> Result(Ast, Diag) {
     // The profile decides which files the standard library's modules come
     // from, so it is read from the root's attributes first.
     var profile = "native"
@@ -110,7 +116,13 @@ pub fn load(root: str, sink search: Vec(String), target: str, inout sources: dia
         }
         Err(_) => {}
     }
-    var l = Loader { search: search, target: target.to_string(), profile: profile.to_string(), by_path: Map(String, u32).new(), modules: Vec(ModuleAst).new() }
+    var l = Loader {
+        search: search,
+        target: target.to_string(),
+        profile: profile.to_string(),
+        by_path: Map(String, u32).new(),
+        modules: Vec(ModuleAst).new()
+    }
     let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources)?
     var prelude: Option(u32) = None
     if !no_prelude {
@@ -118,8 +130,16 @@ pub fn load(root: str, sink search: Vec(String), target: str, inout sources: dia
         p.push("std".to_string())
         p.push("prelude".to_string())
         match l.find(p, root) {
-            Some(f) => prelude = Some(l.load_file(f.as_str(), "std.prelude", Span.new(0, 0, 0), &sources)?)
-            None => return Err(Diag.new(Span.new(0, 0, 0), "cannot find the standard library (std/prelude.jh); set JIHOO_PATH or pass -I"))
+            Some(f) => prelude = Some(l.load_file(
+                f.as_str(),
+                "std.prelude",
+                Span.new(0, 0, 0),
+                &sources
+            )?)
+            None => return Err(Diag.new(
+                Span.new(0, 0, 0),
+                "cannot find the standard library (std/prelude.jh); set JIHOO_PATH or pass -I"
+            ))
         }
     }
     var derive: Option(u32) = None
@@ -128,12 +148,25 @@ pub fn load(root: str, sink search: Vec(String), target: str, inout sources: dia
         p.push("std".to_string())
         p.push("derive".to_string())
         match l.find(p, root) {
-            Some(f) => derive = Some(l.load_file(f.as_str(), "std.derive", Span.new(0, 0, 0), &sources)?)
-            None => return Err(Diag.new(Span.new(0, 0, 0), "cannot find std/derive.jh, which `#[derive(...)]` needs"))
+            Some(f) => derive = Some(l.load_file(
+                f.as_str(),
+                "std.derive",
+                Span.new(0, 0, 0),
+                &sources
+            )?)
+            None => return Err(Diag.new(
+                Span.new(0, 0, 0),
+                "cannot find std/derive.jh, which `#[derive(...)]` needs"
+            ))
         }
     }
     match l {
-        Loader { modules, .. } => Ok(Ast { modules: modules, root: root_idx, prelude: prelude, derive: derive })
+        Loader { modules, .. } => Ok(Ast {
+            modules: modules,
+            root: root_idx,
+            prelude: prelude,
+            derive: derive
+        })
     }
 }
 
@@ -185,7 +218,8 @@ impl Loader {
         for d in dirs {
             let base = os.join(d.as_str(), rel.as_str())
             // `a.x86_64.freestanding.jh`, `a.freestanding.jh`, `a.x86_64.jh`, `a.jh`
-            let both = base.as_str() + "." + self.target.as_str() + "." + self.profile.as_str() + ".jh"
+            let both = base.as_str() + "." + self.target.as_str() + "." +
+                self.profile.as_str() + ".jh"
             let profile = base.as_str() + "." + self.profile.as_str() + ".jh"
             let target = base.as_str() + "." + self.target.as_str() + ".jh"
             let plain = base.as_str() + ".jh"
@@ -198,7 +232,13 @@ impl Loader {
         None
     }
 
-    fn load_file(inout self, path: str, name: str, at: Span, inout sources: diag.Sources) -> Result(u32, Diag) {
+    fn load_file(
+        inout self,
+        path: str,
+        name: str,
+        at: Span,
+        inout sources: diag.Sources
+    ) -> Result(u32, Diag) {
         let key = match os.canonical(path) {
             Some(k) => k
             None => path.to_string()
@@ -219,17 +259,28 @@ impl Loader {
         var wanted = Vec(Wanted).new()
         for it in module.items {
             match it.kind {
-                Import(imp) => wanted.push(Wanted { path: imp.path.clone(), alias: imp.alias.clone(), public: it.public, span: it.span })
+                Import(imp) => wanted.push(Wanted {
+                    path: imp.path.clone(),
+                    alias: imp.alias.clone(),
+                    public: it.public,
+                    span: it.span
+                })
                 _ => {}
             }
         }
-        self.modules.push(ModuleAst { name: name.to_string(), path: path.to_string(), ast: module, imports: Vec(ModImport).new() })
+        self.modules.push(ModuleAst {
+            name: name.to_string(),
+            path: path.to_string(),
+            ast: module,
+            imports: Vec(ModImport).new()
+        })
         var imports = Vec(ModImport).new()
         for w in wanted {
             let dotted = dots(w.path)
             let p = match self.find(w.path, path) {
                 Some(p) => p
-                None => return Err(Diag.new(w.span, ("cannot find module `" + dotted.as_str() + "`").as_str()))
+                None => return Err(Diag.new(w.span, ("cannot find module `" + dotted.as_str() +
+                    "`").as_str()))
             }
             let m = self.load_file(p.as_str(), dotted.as_str(), w.span, &sources)?
             let alias = match w.alias {

@@ -166,7 +166,11 @@ impl Fb {
     pub fn new(id: u32, sink env: Env, ret: u32, ret_mode: ast.RetMode, span: Span) -> Fb {
         var fb = Fb {
             id: id
-            body: mir.Body { locals: Vec(mir.LocalDecl).new(), blocks: Vec(mir.Block).new(), arg_count: 0 }
+            body: mir.Body {
+                locals: Vec(mir.LocalDecl).new(),
+                blocks: Vec(mir.Block).new(),
+                arg_count: 0
+            }
             cur: 0
             scopes: Vec(Scope).new()
             loops: Vec(LoopCtx).new()
@@ -186,8 +190,21 @@ impl Fb {
         fb
     }
 
-    pub fn new_local(inout self, ty: u32, sink name: Option(String), mutable: bool, kind: LocalKind, span: Span) -> u32 {
-        self.body.locals.push(mir.LocalDecl { ty: ty, name: name, span: span, mutable: mutable, kind: kind })
+    pub fn new_local(
+        inout self,
+        ty: u32,
+        sink name: Option(String),
+        mutable: bool,
+        kind: LocalKind,
+        span: Span
+    ) -> u32 {
+        self.body.locals.push(mir.LocalDecl {
+            ty: ty,
+            name: name,
+            span: span,
+            mutable: mutable,
+            kind: kind
+        })
         (self.body.locals.len() - 1) as u32
     }
 
@@ -258,7 +275,14 @@ impl Fb {
         l
     }
 
-    pub fn declare(inout self, name: str, ty: u32, mutable: bool, kind: VarKind, span: Span) -> u32 {
+    pub fn declare(
+        inout self,
+        name: str,
+        ty: u32,
+        mutable: bool,
+        kind: VarKind,
+        span: Span
+    ) -> u32 {
         let borrow = match kind {
             Borrow => true
             _ => false
@@ -268,7 +292,10 @@ impl Fb {
         self.push(Stmt.StorageLive(l))
         let i = self.last_block_scope()
         self.scopes[i].locals.push(l)
-        self.scopes[i].vars.push(ScopeVar { name: name.to_string(), v: Var { local: l, kind: kind } })
+        self.scopes[i].vars.push(ScopeVar {
+            name: name.to_string(),
+            v: Var { local: l, kind: kind }
+        })
         l
     }
 
@@ -464,7 +491,8 @@ impl sema.Sema {
         if p.proj.len() > 0 {
             return Some("it is part of another value")
         }
-        if fb.body.locals[p.local as i64].kind == LocalKind.Arg && self.types.is_ref(fb.ty_of(p.local)) {
+        if fb.body.locals[p.local as i64].kind == LocalKind.Arg &&
+            self.types.is_ref(fb.ty_of(p.local)) {
             return Some("it is borrowed")
         }
         None
@@ -535,9 +563,20 @@ impl sema.Sema {
             if p.mode == ast.Mode.Comptime {
                 match env.get(p.name.as_str()) {
                     Some(Lambda(lf, _)) => {
-                        let l = fb.new_local(sig.params[pi], Some(p.name.clone()), false, LocalKind.Arg, p.span)
+                        let l = fb.new_local(
+                            sig.params[pi],
+                            Some(p.name.clone()),
+                            false,
+                            LocalKind.Arg,
+                            p.span
+                        )
                         fb.bind_var(p.name.as_str(), Var { local: l, kind: VarKind.Owned })
-                        lambdas.push(sema.ComptimeClosure { id: id, place: Place.local(l), lambda: lf, specialized: true })
+                        lambdas.push(sema.ComptimeClosure {
+                            id: id,
+                            place: Place.local(l),
+                            lambda: lf,
+                            specialized: true
+                        })
                         pi += 1
                     }
                     _ => {}
@@ -560,7 +599,11 @@ impl sema.Sema {
         for c in lambdas.into_iter() {
             self.comptime_closures.push(c)
         }
-        let ret_val_ty = if is_ret_value(d.ret_mode) { sig.ret } else { self.types.pointee(sig.ret).unwrap() }
+        let ret_val_ty = if is_ret_value(d.ret_mode) {
+            sig.ret
+        } else {
+            self.types.pointee(sig.ret).unwrap()
+        }
         match d.body {
             Some(body) => self.lower_body(&fb, body, ret_val_ty)?
             None => {}
@@ -588,7 +631,13 @@ impl sema.Sema {
                                 let checkpoint = self.instance(h.imp, h.args.clone(), span)?
                                 var args = Vec(Operand).new()
                                 args.push(copy_of(i as u32))
-                                let v = self.emit_call(&fb, mir.Callee.Fn(checkpoint), args, types.I64, span)?
+                                let v = self.emit_call(
+                                    &fb,
+                                    mir.Callee.Fn(checkpoint),
+                                    args,
+                                    types.I64,
+                                    span
+                                )?
                                 let local = self.place_of_val(v).local
                                 fb.thread_scopes.push((i as u32, finish, local))
                             }
@@ -620,7 +669,13 @@ impl sema.Sema {
         Ok(())
     }
 
-    fn write_return(inout self, inout fb: Fb, sink v: Val, ret_ty: u32, span: Span) -> Result((), Diag) {
+    fn write_return(
+        inout self,
+        inout fb: Fb,
+        sink v: Val,
+        ret_ty: u32,
+        span: Span
+    ) -> Result((), Diag) {
         if is_ret_value(fb.ret_mode) {
             let v = self.coerce(&fb, v, ret_ty, span)?
             let o = self.operand(&fb, v, span)?
@@ -632,7 +687,10 @@ impl sema.Sema {
         }
         let p = match v.vk.clone() {
             Place(p) => p
-            Op(_) => return Err(err(span, "a function returning `ref` or `inout` returns a place, not a new value"))
+            Op(_) => return Err(err(
+                span,
+                "a function returning `ref` or `inout` returns a place, not a new value"
+            ))
         }
         if v.temp {
             return Err(err(span, "this returns a borrow of a temporary value"))
@@ -643,7 +701,10 @@ impl sema.Sema {
         }
         if inout_ret {
             if !self.place_mutable(fb, p) {
-                return Err(err(span, "this place cannot be changed, so it cannot be returned as `inout`"))
+                return Err(err(
+                    span,
+                    "this place cannot be changed, so it cannot be returned as `inout`"
+                ))
             }
             fb.assign(Place.local(mir.RET), Rvalue.RefMut(p), span)
         } else {
@@ -667,7 +728,13 @@ impl sema.Sema {
         false
     }
 
-    pub fn block(inout self, inout fb: Fb, b: ast.Block, exp: Option(u32), want: bool) -> Result(Val, Diag) {
+    pub fn block(
+        inout self,
+        inout fb: Fb,
+        b: ast.Block,
+        exp: Option(u32),
+        want: bool
+    ) -> Result(Val, Diag) {
         let keep_place = fb.keep_place
         fb.keep_place = false
         // A block expected to give `()` throws its last value away.
@@ -714,22 +781,34 @@ impl sema.Sema {
                     let through = p.proj.len() > 0 && p.proj[0] == Proj.Deref
                     // A temporary, or a variable of the block (`let p =
                     // ...; *p`); the pointer itself is what must live on.
-                    let local_var = root_kind == LocalKind.Var && self.local_in_scopes(fb, p.local, fb.scopes.len() - 2)
+                    let local_var = root_kind == LocalKind.Var &&
+                        self.local_in_scopes(fb, p.local, fb.scopes.len() - 2)
                     if local_var && !through {
                         let name = match fb.body.locals[p.local as i64].name {
                             Some(n) => "`" + n.as_str() + "`"
                             None => String.from("a local value")
                         }
-                        return Err(err(t.span, ("this would return a borrow of " + name.as_str() + ", which ends with the function; a `ref` or `inout` result must be a part of the first parameter, or what a pointer points to").as_str()))
+                        let m = "this would return a borrow of " + name.as_str() +
+                            ", which ends with the function; a `ref` or `inout` result must be a part " +
+                            "of the first parameter, or what a pointer points to"
+                        return Err(err(t.span, m.as_str()))
                     }
                     if (root_kind == LocalKind.Temp || local_var) && through {
                         let n = fb.scopes.len()
                         let tmp = fb.new_local(rt, None, true, LocalKind.Temp, t.span)
                         fb.push(Stmt.StorageLive(tmp))
                         fb.scopes[n - 3].locals.push(tmp)
-                        let o = if self.types.has_refmut(rt) { Operand.Move(Place.local(p.local)) } else { copy_of(p.local) }
+                        let o = if self.types.has_refmut(rt) {
+                            Operand.Move(Place.local(p.local))
+                        } else {
+                            copy_of(p.local)
+                        }
                         fb.assign(Place.local(tmp), Rvalue.Use(o), t.span)
-                        result = Val { vk: VK.Place(Place { local: tmp, proj: p.proj.clone() }), ty: v.ty, temp: false }
+                        result = Val {
+                            vk: VK.Place(Place { local: tmp, proj: p.proj.clone() }),
+                            ty: v.ty,
+                            temp: false
+                        }
                     } else {
                         result = v
                     }
@@ -829,7 +908,10 @@ impl sema.Sema {
                         Op(_) => return Err(err(place.span, "cannot assign to this"))
                     }
                     if self.types.adt_index(pv.ty).is_some() {
-                        return Err(err(place.span, "internal: op-assign on a struct took the number path"))
+                        return Err(err(
+                            place.span,
+                            "internal: op-assign on a struct took the number path"
+                        ))
                     }
                     if !self.place_mutable(fb, p) {
                         return Err(err(place.span, self.not_mutable_msg(fb, p).as_str()))
@@ -850,7 +932,9 @@ impl sema.Sema {
                     let name = match op {
                         Add => "add_assign"
                         Sub => "sub_assign"
-                        _ => return Err(err(s.span, ("`" + op.text() + "=` is not defined for `" + self.types.show(pv.ty).as_str() + "`").as_str()))
+                        _ => return Err(err(s.span, ("`" + op.text() +
+                            "=` is not defined for `" + self.types.show(pv.ty).as_str() +
+                            "`").as_str()))
                     }
                     let recv = val_place(p, pv.ty)
                     var one = Vec(ast.Expr).new()
@@ -872,7 +956,8 @@ impl sema.Sema {
 
     pub fn not_mutable_msg(self, fb: Fb, p: Place) -> String {
         if fb.owned_env && fb.env_local == Some(p.local) {
-            return String.from("a `dyn fn` cannot change what it captured; it may be called from several places, or threads, at once")
+            return "a `dyn fn` cannot change what it captured; " +
+                "it may be called from several places, or threads, at once"
         }
         let l = fb.body.locals[p.local as i64]
         match l.name {
@@ -881,7 +966,8 @@ impl sema.Sema {
                     return "`" + n.as_str() + "` cannot be changed; declare it with `var`"
                 }
                 if p.proj[0] == Proj.Deref && l.kind == LocalKind.Arg {
-                    return "`" + n.as_str() + "` is borrowed read-only; make the parameter `inout` to change it"
+                    return "`" + n.as_str() +
+                        "` is borrowed read-only; make the parameter `inout` to change it"
                 }
                 if l.mutable {
                     return "this part of `" + n.as_str() + "` cannot be changed"
@@ -892,7 +978,15 @@ impl sema.Sema {
         }
     }
 
-    fn let_stmt(inout self, inout fb: Fb, kind: ast.LetKind, pat: ast.Pat, ty: Option(ast.Ty), value: ast.Expr, span: Span) -> Result((), Diag) {
+    fn let_stmt(
+        inout self,
+        inout fb: Fb,
+        kind: ast.LetKind,
+        pat: ast.Pat,
+        ty: Option(ast.Ty),
+        value: ast.Expr,
+        span: Span
+    ) -> Result((), Diag) {
         let env = fb.env.clone()
         var exp: Option(u32) = None
         match ty {
@@ -950,13 +1044,23 @@ impl sema.Sema {
 
     // `let x = v`: a borrow of a place that is not plain, else an owned
     // value.
-    pub fn bind_name(inout self, inout fb: Fb, name: str, sink v: Val, mutable: bool, span: Span) -> Result(u32, Diag) {
+    pub fn bind_name(
+        inout self,
+        inout fb: Fb,
+        name: str,
+        sink v: Val,
+        mutable: bool,
+        span: Span
+    ) -> Result(u32, Diag) {
         let known = match v.vk {
             Place(p) => self.known_closure(fb, p)
             _ => None
         }
         match self.types.kind(v.ty) {
-            Type => return Err(err(span, "types exist only while compiling; use `comptime` or a constant"))
+            Type => return Err(err(
+                span,
+                "types exist only while compiling; use `comptime` or a constant"
+            ))
             _ => {}
         }
         if self.types.is_ref(v.ty) {
@@ -983,7 +1087,12 @@ impl sema.Sema {
         fb.assign(Place.local(l), Rvalue.Use(o), span)
         if !mutable {
             match known {
-                Some((lf, specialized)) => self.comptime_closures.push(sema.ComptimeClosure { id: fb.id, place: Place.local(l), lambda: lf, specialized: specialized })
+                Some((lf, specialized)) => self.comptime_closures.push(sema.ComptimeClosure {
+                    id: fb.id,
+                    place: Place.local(l),
+                    lambda: lf,
+                    specialized: specialized
+                })
                 None => {}
             }
         }
@@ -1024,7 +1133,9 @@ impl sema.Sema {
                         _ => fields_only = false
                     }
                 }
-                if v.temp && fields_only && fb.body.locals[p.local as i64].kind == LocalKind.Temp && !self.types.is_plain(v.ty) && self.types.needs_drop(whole) {
+                if v.temp && fields_only &&
+                    fb.body.locals[p.local as i64].kind == LocalKind.Temp &&
+                    !self.types.is_plain(v.ty) && self.types.needs_drop(whole) {
                     let t = fb.temp(v.ty, span)
                     fb.assign(Place.local(t), Rvalue.Use(Operand.Move(p.clone())), span)
                     self.drop_others(&fb, Place.local(p.local), whole, p.proj, 0, span)?
@@ -1039,12 +1150,21 @@ impl sema.Sema {
 
     // The other parts of a temporary than the one at `path[at..]` (below
     // `base`, of type `ty`), dropped.
-    fn drop_others(inout self, inout fb: Fb, base: Place, ty: u32, path: Vec(Proj), at: i64, span: Span) -> Result((), Diag) {
+    fn drop_others(
+        inout self,
+        inout fb: Fb,
+        base: Place,
+        ty: u32,
+        path: Vec(Proj),
+        at: i64,
+        span: Span
+    ) -> Result((), Diag) {
         if at < path.len() {
             match self.types.adt_index(ty) {
                 Some(a) => {
                     if self.types.adts[a as i64].has_drop {
-                        return Err(err(span, ("cannot move a part out of a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                        return Err(err(span, ("cannot move a part out of a `" +
+                            self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
                     }
                 }
                 None => {}
@@ -1099,7 +1219,12 @@ impl sema.Sema {
 
     // An operand for a value; a part of a temporary moves out alone (for
     // patterns, which drop the other parts themselves).
-    pub fn operand_part(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Operand, Diag) {
+    pub fn operand_part(
+        inout self,
+        inout fb: Fb,
+        sink v: Val,
+        span: Span
+    ) -> Result(Operand, Diag) {
         let p = match v.vk.clone() {
             Op(o) => return Ok(o)
             Place(p) => p
@@ -1113,7 +1238,8 @@ impl sema.Sema {
         match self.place_movable(fb, p) {
             Some(why) => {
                 let what = self.describe_place(fb, p)
-                let m = "cannot move " + what.as_str() + " out of its place: " + why + "; use `.clone()` to copy it, or `std.mem.take`/`replace`"
+                let m = "cannot move " + what.as_str() + " out of its place: " + why +
+                    "; use `.clone()` to copy it, or `std.mem.take`/`replace`"
                 return Err(err(span, m.as_str()))
             }
             None => {}
@@ -1162,7 +1288,10 @@ impl sema.Sema {
                     let v = self.expr_mut(&fb, inner.deref())?
                     let p = match v.vk.clone() {
                         Place(p) => p
-                        Op(_) => return Err(err(e.span, "expected a place (a variable, a field, an element)"))
+                        Op(_) => return Err(err(
+                            e.span,
+                            "expected a place (a variable, a field, an element)"
+                        ))
                     }
                     if !self.place_mutable(fb, p) {
                         return Err(err(e.span, self.not_mutable_msg(fb, p).as_str()))
@@ -1188,10 +1317,12 @@ impl sema.Sema {
             Op(o) => match o {
                 Const(c) => match c {
                     Int(x, _) => {
-                        if self.types.is_int(to) && self.types.is_int(from) && self.int_fits(x, to) {
+                        if self.types.is_int(to) && self.types.is_int(from) &&
+                            self.int_fits(x, to) {
                             return Ok(val_op(int_const(x, to), to))
                         }
-                        if self.types.is_float(to) && self.types.is_int(from) && (x as f64) as i128 == x {
+                        if self.types.is_float(to) && self.types.is_int(from) &&
+                            (x as f64) as i128 == x {
                             return Ok(val_op(Operand.Const(Const.Float(x as f64, to)), to))
                         }
                     }
@@ -1223,7 +1354,10 @@ impl sema.Sema {
                 if inner == from {
                     let (p, temp) = self.as_place(&fb, v, span)
                     if temp {
-                        return Err(err(span, "this would borrow a temporary value, which does not live long enough"))
+                        return Err(err(
+                            span,
+                            "this would borrow a temporary value, which does not live long enough"
+                        ))
                     }
                     if m && !self.place_mutable(fb, p) {
                         return Err(err(span, self.not_mutable_msg(fb, p).as_str()))
@@ -1269,14 +1403,24 @@ impl sema.Sema {
                             let fp = self.types.ptr(from)
                             let a = self.rvalue(&fb, Rvalue.Addr(p), fp, span)
                             let ap = self.place_of_val(a)
-                            let c = self.rvalue(&fb, Rvalue.Cast(Operand.Copy(ap), pt, mir.CastKind.Ptr), pt, span)
+                            let c = self.rvalue(
+                                &fb,
+                                Rvalue.Cast(Operand.Copy(ap), pt, mir.CastKind.Ptr),
+                                pt,
+                                span
+                            )
                             addr = Operand.Copy(self.place_of_val(c))
                         }
                         let vt = self.view_ty(TyKind.Slice(e))
                         var ops = Vec(Operand).new()
                         ops.push(addr)
                         ops.push(int_const(n as i128, types.I64))
-                        return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.View(vt), ops), vt, span))
+                        return Ok(self.rvalue(
+                            &fb,
+                            Rvalue.Aggregate(mir.Agg.View(vt), ops),
+                            vt,
+                            span
+                        ))
                     }
                 }
                 _ => {}
@@ -1320,10 +1464,16 @@ impl sema.Sema {
                 if !is_dyn && self.find_impl(tr, from)?.is_some() {
                     return self.to_dyn(&fb, v, tr, to, span)
                 }
-                return Err(err(span, ("`" + self.types.show(from).as_str() + "` does not implement `" + self.traits[tr as i64].name.as_str() + "`, so it cannot become a `" + self.types.show(to).as_str() + "`").as_str()))
+                return Err(err(span, ("`" + self.types.show(from).as_str() +
+                    "` does not implement `" + self.traits[tr as i64].name.as_str() +
+                    "`, so it cannot become a `" + self.types.show(to).as_str() +
+                    "`").as_str()))
             }
             DynFn(_) => match self.types.kind(from) {
-                Closure(_) => return Err(err(span, "a closure that borrows cannot become a `dyn fn`: write the closure where the `dyn fn` is expected, so that it owns what it captures"))
+                Closure(_) => return Err(err(
+                    span,
+                    "a closure that borrows cannot become a `dyn fn`: write the closure where the `dyn fn` is expected, so that it owns what it captures"
+                ))
                 _ => {}
             }
             _ => {}
@@ -1345,11 +1495,15 @@ impl sema.Sema {
             Some(f) => match tk {
                 FnPtr(sig) => {
                     let fsig = self.out[f as i64].sig.clone()
-                    if sig.c_abi && !fsig.c_abi && !fsig.variadic && !sig.variadic && sig.ret == fsig.ret && sig.params.len() == fsig.params.len() {
+                    if sig.c_abi && !fsig.c_abi && !fsig.variadic && !sig.variadic &&
+                        sig.ret == fsig.ret && sig.params.len() == fsig.params.len() {
                         var fits = true
                         for i, t in sig.params {
                             let ft = fsig.params[i]
-                            let borrowed = match self.types.kind(ft) { Ref(inner) => inner == t, _ => false }
+                            let borrowed = match self.types.kind(ft) {
+                                Ref(inner) => inner == t
+                                _ => false
+                            }
                             if ft != t && !borrowed { fits = false }
                         }
                         if fits {
@@ -1374,7 +1528,12 @@ impl sema.Sema {
                             var ops = Vec(Operand).new()
                             ops.push(Operand.Const(Const.Fn(w)))
                             ops.push(null)
-                            return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Closure(to), ops), to, span))
+                            return Ok(self.rvalue(
+                                &fb,
+                                Rvalue.Aggregate(mir.Agg.Closure(to), ops),
+                                to,
+                                span
+                            ))
                         }
                     }
                     _ => {}
@@ -1462,7 +1621,9 @@ impl sema.Sema {
         for i, t in params {
             let l = fb.new_local(t, None, false, LocalKind.Arg, sp)
             if i > 0 {
-                args.push(if self.types.is_plain(t) { copy_of(l) } else { Operand.Move(Place.local(l)) })
+                args.push(if self.types.is_plain(t) {
+                    copy_of(l)
+                } else { Operand.Move(Place.local(l)) })
             }
         }
         fb.body.arg_count = params.len()
@@ -1527,7 +1688,13 @@ impl sema.Sema {
                     fb.want_mut = false
                     return self.tuple_field(&fb, bv?, i, span)
                 }
-                Index(base, idx) => return self.index_expr(&fb, base.deref(), idx.deref(), span, true)
+                Index(base, idx) => return self.index_expr(
+                    &fb,
+                    base.deref(),
+                    idx.deref(),
+                    span,
+                    true
+                )
                 Unary(op, inner) => match op {
                     Deref => {
                         let v = self.expr_mut(&fb, inner.deref())?
@@ -1535,7 +1702,14 @@ impl sema.Sema {
                             Ptr(_) => return self.auto_deref(&fb, v, span)
                             Adt(_) => {
                                 if self.find_method(v.ty, "deref_mut")?.is_some() {
-                                    return self.method_call_val(&fb, v, "deref_mut", Vec(Val).new(), span, None)
+                                    return self.method_call_val(
+                                        &fb,
+                                        v,
+                                        "deref_mut",
+                                        Vec(Val).new(),
+                                        span,
+                                        None
+                                    )
                                 }
                                 return self.expr(&fb, e, exp)
                             }
@@ -1550,7 +1724,13 @@ impl sema.Sema {
         self.expr_plain(&fb, e, exp, span)
     }
 
-    fn tuple_field(inout self, inout fb: Fb, sink bv: Val, i: u32, span: Span) -> Result(Val, Diag) {
+    fn tuple_field(
+        inout self,
+        inout fb: Fb,
+        sink bv: Val,
+        i: u32,
+        span: Span
+    ) -> Result(Val, Diag) {
         let ts = match self.types.kind(bv.ty) {
             Tuple(ts) => ts.clone()
             _ => {
@@ -1573,7 +1753,13 @@ impl sema.Sema {
         Ok(Val { vk: VK.Place(p.with(Proj.Field(i))), ty: ts[i as i64], temp: temp })
     }
 
-    fn expr_plain(inout self, inout fb: Fb, e: ast.Expr, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn expr_plain(
+        inout self,
+        inout fb: Fb,
+        e: ast.Expr,
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         match e.kind {
             Int(v) => {
                 var t = types.I64
@@ -1681,7 +1867,8 @@ impl sema.Sema {
                 }
                 if !v.temp {
                     match self.place_movable(fb, p) {
-                        Some(why) => return Err(err(span, ("cannot move " + self.describe_place(fb, p).as_str() + ": " + why).as_str()))
+                        Some(why) => return Err(err(span, ("cannot move " +
+                            self.describe_place(fb, p).as_str() + ": " + why).as_str()))
                         None => {}
                     }
                 }
@@ -1747,7 +1934,12 @@ impl sema.Sema {
                             var ops = Vec(Operand).new()
                             ops.push(Operand.Const(Const.Null(pt)))
                             ops.push(int_const(0, types.I64))
-                            return Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.View(vt), ops), vt, span))
+                            return Ok(self.rvalue(
+                                &fb,
+                                Rvalue.Aggregate(mir.Agg.View(vt), ops),
+                                vt,
+                                span
+                            ))
                         }
                     }
                     None => {}
@@ -1755,7 +1947,10 @@ impl sema.Sema {
                 if items.len() == 0 {
                     let et = match ee {
                         Some(t) => t
-                        None => return Err(err(span, "the type of an empty array must be known: write `let a: [T; 0] = []`"))
+                        None => return Err(err(
+                            span,
+                            "the type of an empty array must be known: write `let a: [T; 0] = []`"
+                        ))
                     }
                     let t = self.types.intern(TyKind.Array(et, 0))
                     return Ok(val_op(Operand.Const(Const.Zst(t)), t))
@@ -1794,7 +1989,10 @@ impl sema.Sema {
                     None => v
                 }
                 if !self.types.is_plain(v.ty) {
-                    return Err(err(el.span, "`[x; n]` copies `x`, so it must be a plain value; build the array with a loop"))
+                    return Err(err(
+                        el.span,
+                        "`[x; n]` copies `x`, so it must be a plain value; build the array with a loop"
+                    ))
                 }
                 let et = v.ty
                 let o = self.operand(&fb, v, el.span)?
@@ -1844,7 +2042,11 @@ impl sema.Sema {
                 Ok(if block_reached(fb, exit) { val_unit() } else { val_never() })
             }
             Return(v) => {
-                let ret_ty = if is_ret_value(fb.ret_mode) { fb.ty_of(mir.RET) } else { self.types.pointee(fb.ty_of(mir.RET)).unwrap() }
+                let ret_ty = if is_ret_value(fb.ret_mode) {
+                    fb.ty_of(mir.RET)
+                } else {
+                    self.types.pointee(fb.ty_of(mir.RET)).unwrap()
+                }
                 match v {
                     Some(v) => {
                         let val = self.expr(&fb, v.deref(), Some(ret_ty))?
@@ -1855,7 +2057,8 @@ impl sema.Sema {
                     }
                     None => {
                         if ret_ty != types.UNIT {
-                            return Err(err(span, ("this function returns `" + self.types.show(ret_ty).as_str() + "`").as_str()))
+                            return Err(err(span, ("this function returns `" +
+                                self.types.show(ret_ty).as_str() + "`").as_str()))
                         }
                     }
                 }
@@ -1878,7 +2081,10 @@ impl sema.Sema {
                 fb.term(Term.Goto(target))
                 Ok(val_never())
             }
-            Range(_, _) => Err(err(span, "a range only goes in a `for` loop or a slice (`xs[a..b]`)"))
+            Range(_, _) => Err(err(
+                span,
+                "a range only goes in a `for` loop or a slice (`xs[a..b]`)"
+            ))
             Type(_) => Err(err(span, "a type is not a value here"))
             Index(base, idx) => self.index_expr(&fb, base.deref(), idx.deref(), span, false)
             Try(inner) => self.try_expr(&fb, inner.deref(), span)
@@ -1957,7 +2163,13 @@ impl sema.Sema {
         }
     }
 
-    fn name_expr(inout self, inout fb: Fb, n: str, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn name_expr(
+        inout self,
+        inout fb: Fb,
+        n: str,
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         match fb.lookup(n) {
             Some(v) => {
                 let p = self.var_place(fb, v)
@@ -1995,7 +2207,10 @@ impl sema.Sema {
                 }
                 None => {}
             }
-            return Err(err(span, "the type of `null` must be known: a pointer type is expected here"))
+            return Err(err(
+                span,
+                "the type of `null` must be known: a pointer type is expected here"
+            ))
         }
         let module = fb.env.module
         match self.lookup(module, n) {
@@ -2039,7 +2254,10 @@ impl sema.Sema {
     // A `static` as a place, through its address.
     fn static_place(inout self, inout fb: Fb, i: u32, span: Span) -> Result(Val, Diag) {
         if fb.unsafe_depth == 0 {
-            return Err(err(span, "a `static` is shared by the whole program, so it is only used in `unsafe` code"))
+            return Err(err(
+                span,
+                "a `static` is shared by the whole program, so it is only used in `unsafe` code"
+            ))
         }
         let t = self.static_info(i)?.ty
         let pt = self.types.ptr(t)
@@ -2057,12 +2275,18 @@ impl sema.Sema {
             }
         }
         if generic && args.len() == 0 {
-            return Err(err(span, "a generic function cannot be used as a value without its compile-time arguments"))
+            return Err(err(
+                span,
+                "a generic function cannot be used as a value without its compile-time arguments"
+            ))
         }
         let id = self.instance(f, args, span)?
         for p in self.out[id as i64].pass {
             match p {
-                Owned => return Err(err(span, "a function with `sink` parameters of non-plain types cannot be used as a `fnptr` yet"))
+                Owned => return Err(err(
+                    span,
+                    "a function with `sink` parameters of non-plain types cannot be used as a `fnptr` yet"
+                ))
                 _ => {}
             }
         }
@@ -2092,7 +2316,10 @@ impl sema.Sema {
         match self.types.kind(v.ty).clone() {
             Ptr(inner) => {
                 if fb.unsafe_depth == 0 {
-                    return Err(err(span, "reading through a pointer is only allowed in `unsafe` code"))
+                    return Err(err(
+                        span,
+                        "reading through a pointer is only allowed in `unsafe` code"
+                    ))
                 }
                 let o = self.operand(&fb, v, span)?
                 var keep: Option(Place) = None
@@ -2126,7 +2353,14 @@ impl sema.Sema {
         }
     }
 
-    fn field_expr(inout self, inout fb: Fb, whole: ast.Expr, base: ast.Expr, name: str, exp: Option(u32)) -> Result(Val, Diag) {
+    fn field_expr(
+        inout self,
+        inout fb: Fb,
+        whole: ast.Expr,
+        base: ast.Expr,
+        name: str,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         let span = whole.span
         // A path: `module.item`, `Type.Variant`, `Type.CONST`.
         match sema.expr_path(whole) {
@@ -2144,7 +2378,15 @@ impl sema.Sema {
             Call(_, _) => {
                 let env = fb.env.clone()
                 match self.try_expr_ty(base, env)? {
-                    Some(t) => return self.type_member(&fb, t, name, Vec(ast.Expr).new(), exp, span, false)
+                    Some(t) => return self.type_member(
+                        &fb,
+                        t,
+                        name,
+                        Vec(ast.Expr).new(),
+                        exp,
+                        span,
+                        false
+                    )
                     None => {}
                 }
             }
@@ -2154,7 +2396,13 @@ impl sema.Sema {
         self.field_of(&fb, bv, name, span)
     }
 
-    pub fn field_of(inout self, inout fb: Fb, sink bv: Val, name: str, span: Span) -> Result(Val, Diag) {
+    pub fn field_of(
+        inout self,
+        inout fb: Fb,
+        sink bv: Val,
+        name: str,
+        span: Span
+    ) -> Result(Val, Diag) {
         var bv = self.auto_deref(&fb, bv, span)?
         for _ in 0..8 {
             match self.types.adt_index(bv.ty) {
@@ -2180,11 +2428,17 @@ impl sema.Sema {
                             let decl = self.types.adts[a as i64].decl
                             let decl_mod = self.adts[decl as i64].module
                             if !public && !self.same_package(decl_mod, fb.env.module) {
-                                return Err(err(span, ("the field `" + name + "` of `" + self.types.adts[a as i64].name.as_str() + "` is private").as_str()))
+                                return Err(err(span, ("the field `" + name + "` of `" +
+                                    self.types.adts[a as i64].name.as_str() +
+                                    "` is private").as_str()))
                             }
                             let temp = bv.temp
                             let (p, _) = self.as_place(&fb, bv, span)
-                            return Ok(Val { vk: VK.Place(p.with(Proj.Field(i as u32))), ty: ft, temp: temp })
+                            return Ok(Val {
+                                vk: VK.Place(p.with(Proj.Field(i as u32))),
+                                ty: ft,
+                                temp: temp
+                            })
                         }
                         None => {}
                     }
@@ -2232,11 +2486,18 @@ impl sema.Sema {
             }
             break
         }
-        Err(err(span, ("`" + self.types.show(bv.ty).as_str() + "` has no field `" + name + "`").as_str()))
+        Err(err(span, ("`" + self.types.show(bv.ty).as_str() + "` has no field `" + name +
+            "`").as_str()))
     }
 
     // A dotted path that names something other than a variable's field.
-    fn path_value(inout self, inout fb: Fb, p: Vec(String), exp: Option(u32), span: Span) -> Result(Option(Val), Diag) {
+    fn path_value(
+        inout self,
+        inout fb: Fb,
+        p: Vec(String),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Option(Val), Diag) {
         let env = fb.env.clone()
         let n = p.len()
         var head = Vec(String).new()
@@ -2246,13 +2507,27 @@ impl sema.Sema {
         // `Type.member`
         if self.path_is_type(head, env) {
             let t = self.resolve_path_ty_pub(head, env, span)?
-            return Ok(Some(self.type_member(&fb, t, p[n - 1].as_str(), Vec(ast.Expr).new(), exp, span, false)?))
+            return Ok(Some(self.type_member(
+                &fb,
+                t,
+                p[n - 1].as_str(),
+                Vec(ast.Expr).new(),
+                exp,
+                span,
+                false
+            )?))
         }
         // `Enum.Variant` with the enum's arguments inferred.
         match self.lookup_path(env.module, head) {
             Some((Adt(d), _)) => {
                 let t = self.infer_enum(d, exp, span)?
-                return Ok(Some(self.variant_value(&fb, t, p[n - 1].as_str(), Vec(ast.Expr).new(), span)?))
+                return Ok(Some(self.variant_value(
+                    &fb,
+                    t,
+                    p[n - 1].as_str(),
+                    Vec(ast.Expr).new(),
+                    span
+                )?))
             }
             _ => {}
         }
@@ -2264,13 +2539,19 @@ impl sema.Sema {
                 }
                 Fn(f) => Ok(Some(self.fn_value(f, Vec(CVal).new(), span)?))
                 Static(i) => Ok(Some(self.static_place(&fb, i, span)?))
-                _ => Err(err(span, ("`" + sema.join_path(p).as_str() + "` is not a value").as_str()))
+                _ => Err(err(span, ("`" + sema.join_path(p).as_str() +
+                    "` is not a value").as_str()))
             }
             None => Ok(None)
         }
     }
 
-    pub fn resolve_path_ty_pub(inout self, p: Vec(String), env: Env, span: Span) -> Result(u32, Diag) {
+    pub fn resolve_path_ty_pub(
+        inout self,
+        p: Vec(String),
+        env: Env,
+        span: Span
+    ) -> Result(u32, Diag) {
         let t = ast.Ty { kind: ast.TyKind.Path(p.clone(), None), span: span }
         self.resolve_ty(t, env)
     }
@@ -2293,7 +2574,8 @@ impl sema.Sema {
             return self.adt_instance(d, Vec(CVal).new(), span)
         }
         let n = self.adts[d as i64].name.clone()
-        Err(err(span, ("the arguments of `" + n.as_str() + "` cannot be inferred here; write them: `" + n.as_str() + "(...)`").as_str()))
+        Err(err(span, ("the arguments of `" + n.as_str() +
+            "` cannot be inferred here; write them: `" + n.as_str() + "(...)`").as_str()))
     }
 
     // A copy of an enum's variants. (`self.types.variants(t).unwrap().clone()`
@@ -2321,20 +2603,31 @@ impl sema.Sema {
 
     // `T.name` or `T.name(args)`: a variant, an associated function or a
     // constant of a type.
-    pub fn type_member(inout self, inout fb: Fb, t: u32, name: str, args: Vec(ast.Expr), exp: Option(u32), span: Span, call: bool) -> Result(Val, Diag) {
+    pub fn type_member(
+        inout self,
+        inout fb: Fb,
+        t: u32,
+        name: str,
+        args: Vec(ast.Expr),
+        exp: Option(u32),
+        span: Span,
+        call: bool
+    ) -> Result(Val, Diag) {
         if self.has_variant(t, name) {
             return self.variant_value(&fb, t, name, args, span)
         }
         match self.find_method(t, name)? {
             Some(h) => {
                 if !call {
-                    return Err(err(span, ("`" + self.types.show(t).as_str() + "." + name + "` is a function; call it").as_str()))
+                    return Err(err(span, ("`" + self.types.show(t).as_str() + "." + name +
+                        "` is a function; call it").as_str()))
                 }
                 return self.call_decl(&fb, h.imp, h.args.clone(), None, args, span, exp)
             }
             None => {}
         }
-        let d = err(span, ("`" + self.types.show(t).as_str() + "` has no variant or function `" + name + "`").as_str())
+        let d = err(span, ("`" + self.types.show(t).as_str() +
+            "` has no variant or function `" + name + "`").as_str())
         match self.unmet_bound(t, name)? {
             Some(m) => Err(d.note(None, m.as_str()))
             None => Err(d)
@@ -2343,7 +2636,15 @@ impl sema.Sema {
 
     // `Vec.new()`, `Box.new(x)`, `Option.Some(x)`: a generic type named
     // without arguments, which come from the expected type or the call.
-    fn generic_static_call(inout self, inout fb: Fb, d: u32, name: str, args: Vec(ast.Expr), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn generic_static_call(
+        inout self,
+        inout fb: Fb,
+        d: u32,
+        name: str,
+        args: Vec(ast.Expr),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         match exp {
             Some(e) => match self.types.adt_index(e) {
                 Some(a) => {
@@ -2382,10 +2683,18 @@ impl sema.Sema {
             }
             return self.call_decl(&fb, fid, Vec(CVal).new(), None, args, span, exp)
         }
-        Err(err(span, ("`" + self.adts[d as i64].name.as_str() + "` has no function `" + name + "`").as_str()))
+        Err(err(span, ("`" + self.adts[d as i64].name.as_str() + "` has no function `" + name +
+            "`").as_str()))
     }
 
-    pub fn variant_value(inout self, inout fb: Fb, t: u32, name: str, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    pub fn variant_value(
+        inout self,
+        inout fb: Fb,
+        t: u32,
+        name: str,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         let vs = self.variants_of(t)
         var vi = 0
         for i, v in vs {
@@ -2413,7 +2722,14 @@ impl sema.Sema {
         Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Variant(t, vi as u32), ops), t, span))
     }
 
-    fn struct_lit(inout self, inout fb: Fb, path: ast.Expr, fields: Vec(ast.FieldInit), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn struct_lit(
+        inout self,
+        inout fb: Fb,
+        path: ast.Expr,
+        fields: Vec(ast.FieldInit),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         let env = fb.env.clone()
         var known: Option(u32) = None
         var first_err: Option(Diag) = None
@@ -2482,7 +2798,8 @@ impl sema.Sema {
             }
             let i = match idx {
                 Some(i) => i
-                None => return Err(err(f.span, ("`" + self.types.show(t).as_str() + "` has no field `" + f.name.as_str() + "`").as_str()))
+                None => return Err(err(f.span, ("`" + self.types.show(t).as_str() +
+                    "` has no field `" + f.name.as_str() + "`").as_str()))
             }
             if !fs[i].public && !self.same_package(decl_mod, fb.env.module) {
                 return Err(err(f.span, ("the field `" + f.name.as_str() + "` is private").as_str()))
@@ -2500,14 +2817,22 @@ impl sema.Sema {
         for v in vals.into_iter() {
             match v {
                 Some(o) => ops.push(o)
-                None => return Err(err(span, ("the field `" + fs[i].name.as_str() + "` is missing").as_str()))
+                None => return Err(err(span, ("the field `" + fs[i].name.as_str() +
+                    "` is missing").as_str()))
             }
             i += 1
         }
         Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Struct(t), ops), t, span))
     }
 
-    fn index_expr(inout self, inout fb: Fb, base: ast.Expr, idx: ast.Expr, span: Span, write: bool) -> Result(Val, Diag) {
+    fn index_expr(
+        inout self,
+        inout fb: Fb,
+        base: ast.Expr,
+        idx: ast.Expr,
+        span: Span,
+        write: bool
+    ) -> Result(Val, Diag) {
         var bv = if write { self.expr_mut(&fb, base)? } else { self.expr(&fb, base, None)? }
         // A borrow held as a value (`ref Vec(T)`): what it points to.
         if self.types.is_ref(bv.ty) {
@@ -2571,7 +2896,12 @@ impl sema.Sema {
                 let len = Operand.Copy(bp.with(Proj.Field(1)))
                 self.bounds_check(&fb, copy_of(il), len, span)
                 let pt = self.types.ptr(types.U8)
-                let a = self.rvalue(&fb, Rvalue.Offset(Operand.Copy(bp.with(Proj.Field(0))), copy_of(il)), pt, span)
+                let a = self.rvalue(
+                    &fb,
+                    Rvalue.Offset(Operand.Copy(bp.with(Proj.Field(0))), copy_of(il)),
+                    pt,
+                    span
+                )
                 let ap = self.place_of_val(a)
                 // Bytes of a `str` are read only.
                 let v = Operand.Copy(ap.with(Proj.Deref))
@@ -2586,15 +2916,21 @@ impl sema.Sema {
                         Op(_) => {}
                     }
                 }
-                let name = if mutable && self.find_method(bv.ty, "index_mut")?.is_some() { "index_mut" } else { "index" }
+                let name = if mutable && self.find_method(bv.ty, "index_mut")?.is_some() {
+                    "index_mut"
+                } else {
+                    "index"
+                }
                 if self.find_method(bv.ty, name)?.is_none() {
-                    return Err(err(span, ("`" + self.types.show(bv.ty).as_str() + "` cannot be indexed (it has no `index` method)").as_str()))
+                    return Err(err(span, ("`" + self.types.show(bv.ty).as_str() +
+                        "` cannot be indexed (it has no `index` method)").as_str()))
                 }
                 var one = Vec(ast.Expr).new()
                 one.push(idx.clone())
                 self.method_call(&fb, bv, name, one, span, None)
             }
-            _ => Err(err(span, ("`" + self.types.show(bv.ty).as_str() + "` cannot be indexed").as_str()))
+            _ => Err(err(span, ("`" + self.types.show(bv.ty).as_str() +
+                "` cannot be indexed").as_str()))
         }
     }
 
@@ -2626,7 +2962,14 @@ impl sema.Sema {
         self.operand(&fb, v, e.span)
     }
 
-    fn slice_expr(inout self, inout fb: Fb, sink bv: Val, lo: Option(ast.Expr), hi: Option(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn slice_expr(
+        inout self,
+        inout fb: Fb,
+        sink bv: Val,
+        lo: Option(ast.Expr),
+        hi: Option(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         let bt = bv.ty
         var elem = types.U8
         var view = types.STR
@@ -2644,14 +2987,20 @@ impl sema.Sema {
             }
             Adt(_) => {
                 // `as_slice`/`as_str`, then slice that.
-                let name = if self.find_method(bt, "as_str")?.is_some() { "as_str" } else { "as_slice" }
+                let name = if self.find_method(bt, "as_str")?.is_some() {
+                    "as_str"
+                } else {
+                    "as_slice"
+                }
                 if self.find_method(bt, name)?.is_none() {
-                    return Err(err(span, ("`" + self.types.show(bt).as_str() + "` cannot be sliced").as_str()))
+                    return Err(err(span, ("`" + self.types.show(bt).as_str() +
+                        "` cannot be sliced").as_str()))
                 }
                 let v = self.method_call_val(&fb, bv, name, Vec(Val).new(), span, None)?
                 return self.slice_expr(&fb, v, lo, hi, span)
             }
-            _ => return Err(err(span, ("`" + self.types.show(bt).as_str() + "` cannot be sliced").as_str()))
+            _ => return Err(err(span, ("`" + self.types.show(bt).as_str() +
+                "` cannot be sliced").as_str()))
         }
         var bv = bv
         if is_array {
@@ -2671,13 +3020,26 @@ impl sema.Sema {
         let hi_l = self.operand_local(&fb, hi_o, types.I64, span)
         // 0 <= lo <= hi <= len
         let lenp1 = fb.temp(types.I64, span)
-        fb.assign(Place.local(lenp1), Rvalue.Bin(Op.Add, len.clone(), int_const(1, types.I64)), span)
+        fb.assign(
+            Place.local(lenp1),
+            Rvalue.Bin(Op.Add, len.clone(), int_const(1, types.I64)),
+            span
+        )
         self.bounds_check(&fb, copy_of(hi_l), copy_of(lenp1), span)
         let hip1 = fb.temp(types.I64, span)
-        fb.assign(Place.local(hip1), Rvalue.Bin(Op.Add, copy_of(hi_l), int_const(1, types.I64)), span)
+        fb.assign(
+            Place.local(hip1),
+            Rvalue.Bin(Op.Add, copy_of(hi_l), int_const(1, types.I64)),
+            span
+        )
         self.bounds_check(&fb, copy_of(lo_l), copy_of(hip1), span)
         let pt = self.types.ptr(elem)
-        let data = self.rvalue(&fb, Rvalue.Offset(Operand.Copy(bp.with(Proj.Field(0))), copy_of(lo_l)), pt, span)
+        let data = self.rvalue(
+            &fb,
+            Rvalue.Offset(Operand.Copy(bp.with(Proj.Field(0))), copy_of(lo_l)),
+            pt,
+            span
+        )
         let n = fb.temp(types.I64, span)
         fb.assign(Place.local(n), Rvalue.Bin(Op.Sub, copy_of(hi_l), copy_of(lo_l)), span)
         let dp = self.place_of_val(data)
@@ -2687,7 +3049,14 @@ impl sema.Sema {
         Ok(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.View(view), ops), view, span))
     }
 
-    fn unary_expr(inout self, inout fb: Fb, op: ast.UnOp, inner: ast.Expr, exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn unary_expr(
+        inout self,
+        inout fb: Fb,
+        op: ast.UnOp,
+        inner: ast.Expr,
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         match op {
             Neg => {
                 match inner.kind {
@@ -2726,7 +3095,8 @@ impl sema.Sema {
                     None => {}
                 }
                 if !ok {
-                    return Err(err(span, ("`-` needs a signed integer or a float, found `" + self.types.show(t).as_str() + "`").as_str()))
+                    return Err(err(span, ("`-` needs a signed integer or a float, found `" +
+                        self.types.show(t).as_str() + "`").as_str()))
                 }
                 let o = self.operand(&fb, v, span)?
                 Ok(self.rvalue(&fb, Rvalue.Un(mir.UnOp.Neg, o), t, span))
@@ -2735,7 +3105,8 @@ impl sema.Sema {
                 let v = self.expr(&fb, inner, exp)?
                 let t = v.ty
                 if t != types.BOOL && !self.types.is_int(t) {
-                    return Err(err(span, ("`!` needs a bool or an integer, found `" + self.types.show(t).as_str() + "`").as_str()))
+                    return Err(err(span, ("`!` needs a bool or an integer, found `" +
+                        self.types.show(t).as_str() + "`").as_str()))
                 }
                 let o = self.operand(&fb, v, span)?
                 Ok(self.rvalue(&fb, Rvalue.Un(mir.UnOp.Not, o), t, span))
@@ -2748,9 +3119,11 @@ impl sema.Sema {
                         if self.find_method(v.ty, "deref")?.is_some() {
                             return self.method_call_val(&fb, v, "deref", Vec(Val).new(), span, None)
                         }
-                        Err(err(span, ("`*` needs a pointer, found `" + self.types.show(v.ty).as_str() + "`").as_str()))
+                        Err(err(span, ("`*` needs a pointer, found `" +
+                            self.types.show(v.ty).as_str() + "`").as_str()))
                     }
-                    _ => Err(err(span, ("`*` needs a pointer, found `" + self.types.show(v.ty).as_str() + "`").as_str()))
+                    _ => Err(err(span, ("`*` needs a pointer, found `" +
+                        self.types.show(v.ty).as_str() + "`").as_str()))
                 }
             }
             Addr => {
@@ -2771,7 +3144,14 @@ impl sema.Sema {
         }
     }
 
-    fn logic(inout self, inout fb: Fb, op: Op, a: ast.Expr, b: ast.Expr, span: Span) -> Result(Val, Diag) {
+    fn logic(
+        inout self,
+        inout fb: Fb,
+        op: Op,
+        a: ast.Expr,
+        b: ast.Expr,
+        span: Span
+    ) -> Result(Val, Diag) {
         let r = fb.temp(types.BOOL, span)
         let av = self.expr(&fb, a, Some(types.BOOL))?
         let av = self.coerce(&fb, av, types.BOOL, a.span)?
@@ -2824,7 +3204,14 @@ impl sema.Sema {
     }
 
     // A binary operation on two values already lowered (numbers).
-    fn binary_vals(inout self, inout fb: Fb, op: Op, sink av: Val, sink bv: Val, span: Span) -> Result(Val, Diag) {
+    fn binary_vals(
+        inout self,
+        inout fb: Fb,
+        op: Op,
+        sink av: Val,
+        sink bv: Val,
+        span: Span
+    ) -> Result(Val, Diag) {
         let at = av.ty
         let shift = match op {
             Shl | Shr => true
@@ -2876,7 +3263,14 @@ impl sema.Sema {
         Ok(self.rvalue(&fb, Rvalue.Bin(op, ao, bo), at, span))
     }
 
-    pub fn binary_on(inout self, inout fb: Fb, op: Op, sink av: Val, b: ast.Expr, span: Span) -> Result(Val, Diag) {
+    pub fn binary_on(
+        inout self,
+        inout fb: Fb,
+        op: Op,
+        sink av: Val,
+        b: ast.Expr,
+        span: Span
+    ) -> Result(Val, Diag) {
         let at = av.ty
         // Operators on library types call their methods.
         let compound = match self.types.kind(at) {
@@ -2908,7 +3302,12 @@ impl sema.Sema {
                     let ao = self.operand(&fb, av, span)?
                     var bo = self.operand(&fb, bv, span)?
                     if bt != types.I64 {
-                        let c = self.rvalue(&fb, Rvalue.Cast(bo, types.I64, mir.CastKind.Numeric), types.I64, span)
+                        let c = self.rvalue(
+                            &fb,
+                            Rvalue.Cast(bo, types.I64, mir.CastKind.Numeric),
+                            types.I64,
+                            span
+                        )
                         bo = Operand.Copy(self.place_of_val(c))
                     }
                     if op == Op.Sub {
@@ -2967,9 +3366,12 @@ impl sema.Sema {
 
     fn op_err(self, op: Op, a: u32, b: u32, span: Span) -> Diag {
         if a == b {
-            return err(span, ("`" + op.text() + "` is not defined for `" + self.types.show(a).as_str() + "`").as_str())
+            return err(span, ("`" + op.text() + "` is not defined for `" +
+                self.types.show(a).as_str() + "`").as_str())
         }
-        err(span, ("`" + op.text() + "` needs both sides of the same type, found `" + self.types.show(a).as_str() + "` and `" + self.types.show(b).as_str() + "`").as_str())
+        let m = "`" + op.text() + "` needs both sides of the same type, found `" +
+            self.types.show(a).as_str() + "` and `" + self.types.show(b).as_str() + "`"
+        err(span, m.as_str())
     }
 
     fn cast(inout self, inout fb: Fb, inner: ast.Expr, to: u32, span: Span) -> Result(Val, Diag) {
@@ -3046,15 +3448,29 @@ impl sema.Sema {
                 let (p, _) = self.as_place(&fb, v, span)
                 let d = self.rvalue(&fb, Rvalue.Discriminant(p), types.I64, span)
                 let dp = self.place_of_val(d)
-                return Ok(self.rvalue(&fb, Rvalue.Cast(Operand.Copy(dp), to, mir.CastKind.Numeric), to, span))
+                return Ok(self.rvalue(
+                    &fb,
+                    Rvalue.Cast(Operand.Copy(dp), to, mir.CastKind.Numeric),
+                    to,
+                    span
+                ))
             }
-            return Err(err(span, ("cannot convert `" + self.types.show(from).as_str() + "` to `" + self.types.show(to).as_str() + "` with `as`").as_str()))
+            return Err(err(span, ("cannot convert `" + self.types.show(from).as_str() +
+                "` to `" + self.types.show(to).as_str() + "` with `as`").as_str()))
         }
         let o = self.operand(&fb, v, span)?
         Ok(self.rvalue(&fb, Rvalue.Cast(o, to, kind), to, span))
     }
 
-    fn if_expr(inout self, inout fb: Fb, c: ast.Expr, then: ast.Block, els: Option(Box(ast.Expr)), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn if_expr(
+        inout self,
+        inout fb: Fb,
+        c: ast.Expr,
+        then: ast.Block,
+        els: Option(Box(ast.Expr)),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         let cv = self.expr(&fb, c, Some(types.BOOL))?
         let cv = self.coerce(&fb, cv, types.BOOL, c.span)?
         let co = self.operand(&fb, cv, c.span)?
@@ -3144,7 +3560,15 @@ impl sema.Sema {
     }
 
     // `inline if`: only the selected branch is checked and lowered.
-    fn inline_if(inout self, inout fb: Fb, c: ast.Expr, then: ast.Block, els: Option(Box(ast.Expr)), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn inline_if(
+        inout self,
+        inout fb: Fb,
+        c: ast.Expr,
+        then: ast.Block,
+        els: Option(Box(ast.Expr)),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         let env = fb.env.clone()
         let r = self.const_expr(c, env, Some(types.BOOL))?
         let b = match r.c {
@@ -3171,7 +3595,14 @@ impl sema.Sema {
 
     // `inline for i in a..b`: the body once for each `i`, which is a
     // compile-time constant there, as a `comptime` parameter is.
-    fn inline_for(inout self, inout fb: Fb, name: str, it: ast.Expr, body: ast.Block, span: Span) -> Result(Val, Diag) {
+    fn inline_for(
+        inout self,
+        inout fb: Fb,
+        name: str,
+        it: ast.Expr,
+        body: ast.Block,
+        span: Span
+    ) -> Result(Val, Diag) {
         let bad = "`inline for` goes over a range with both ends, `a..b`"
         let (lo, hi) = match it.kind {
             Range(a, b) => match a {
@@ -3184,7 +3615,8 @@ impl sema.Sema {
             _ => return Err(err(it.span, bad))
         }
         if fb.lookup(name).is_some() {
-            return Err(err(span, ("`" + name + "` is already a variable here; name the `inline for` index differently").as_str()))
+            let m = "`" + name + "` is already a variable here; name the `inline for` index differently"
+            return Err(err(span, m.as_str()))
         }
         let env = fb.env.clone()
         let a = self.const_int(lo, env)?
@@ -3208,7 +3640,14 @@ impl sema.Sema {
     }
 
     // `==` calls `eq`, `<` and friends call `compare`, `+` calls `add`.
-    fn operator_method(inout self, inout fb: Fb, op: Op, sink av: Val, b: ast.Expr, span: Span) -> Result(Val, Diag) {
+    fn operator_method(
+        inout self,
+        inout fb: Fb,
+        op: Op,
+        sink av: Val,
+        b: ast.Expr,
+        span: Span
+    ) -> Result(Val, Diag) {
         let at = av.ty
         var post = 0
         let name = match op {
@@ -3236,7 +3675,8 @@ impl sema.Sema {
             Add => "add"
             Sub => "sub"
             Mul => "mul"
-            _ => return Err(err(span, ("`" + op.text() + "` is not defined for `" + self.types.show(at).as_str() + "`").as_str()))
+            _ => return Err(err(span, ("`" + op.text() + "` is not defined for `" +
+                self.types.show(at).as_str() + "`").as_str()))
         }
         var one = Vec(ast.Expr).new()
         one.push(b.clone())
@@ -3255,7 +3695,8 @@ impl sema.Sema {
         }
         if self.find_method(at, name)?.is_none() {
             let tr = if name == "eq" { "Eq" } else if name == "compare" { "Ord" } else { name }
-            return Err(err(span, ("`" + op.text() + "` needs `" + self.types.show(at).as_str() + "` to implement `" + tr + "`").as_str()))
+            return Err(err(span, ("`" + op.text() + "` needs `" + self.types.show(at).as_str() +
+                "` to implement `" + tr + "`").as_str()))
         }
         let r = self.method_call(&fb, av, name, one, span, None)?
         if post == 0 {
@@ -3271,13 +3712,19 @@ impl sema.Sema {
         let dp = self.place_of_val(d)
         let bop = if post == 2 || post == 4 { Op.Eq } else { Op.Ne }
         let k: i128 = if post == 3 || post == 4 { 2 } else { 0 }
-        Ok(self.rvalue(&fb, Rvalue.Bin(bop, Operand.Copy(dp), int_const(k, types.I64)), types.BOOL, span))
+        Ok(self.rvalue(
+            &fb,
+            Rvalue.Bin(bop, Operand.Copy(dp), int_const(k, types.I64)),
+            types.BOOL,
+            span
+        ))
     }
 
     fn try_expr(inout self, inout fb: Fb, inner: ast.Expr, span: Span) -> Result(Val, Diag) {
         let v = self.expr(&fb, inner, None)?
         let t = v.ty
-        let needs = "`?` needs an `Option` or a `Result`, found `" + self.types.show(t).as_str() + "`"
+        let needs = "`?` needs an `Option` or a `Result`, found `" +
+            self.types.show(t).as_str() + "`"
         let a = match self.types.adt_index(t) {
             Some(a) => a
             None => return Err(err(span, needs.as_str()))
@@ -3300,7 +3747,9 @@ impl sema.Sema {
             None => {}
         }
         if rd != Some(decl) || !is_ret_value(fb.ret_mode) {
-            return Err(err(span, ("`?` returns early with the `" + err_name + "`, so the function must return an `" + (if is_opt { "Option" } else { "Result" }) + "`").as_str()))
+            return Err(err(span, ("`?` returns early with the `" + err_name +
+                "`, so the function must return an `" +
+                (if is_opt { "Option" } else { "Result" }) + "`").as_str()))
         }
         // Own the value, then switch on it.
         let o = self.operand(&fb, v, span)?
@@ -3319,11 +3768,19 @@ impl sema.Sema {
             let et = vs[errv].fields[0]
             let rt = rvs[rerr].fields[0]
             if et != rt {
-                return Err(err(span, ("the error is `" + self.types.show(et).as_str() + "` but the function returns errors of type `" + self.types.show(rt).as_str() + "`").as_str()))
+                return Err(err(span, ("the error is `" + self.types.show(et).as_str() +
+                    "` but the function returns errors of type `" +
+                    self.types.show(rt).as_str() + "`").as_str()))
             }
-            payload.push(Operand.Move(Place.local(tmp).with(Proj.Variant(errv as u32)).with(Proj.Field(0))))
+            payload.push(Operand.Move(
+                Place.local(tmp).with(Proj.Variant(errv as u32)).with(Proj.Field(0))
+            ))
         }
-        fb.assign(Place.local(mir.RET), Rvalue.Aggregate(mir.Agg.Variant(ret_ty, rerr as u32), payload), span)
+        fb.assign(
+            Place.local(mir.RET),
+            Rvalue.Aggregate(mir.Agg.Variant(ret_ty, rerr as u32), payload),
+            span
+        )
         fb.push(Stmt.Forget(tmp))
         self.exit_to(&fb, 0)
         fb.term(Term.Return)
@@ -3332,7 +3789,13 @@ impl sema.Sema {
         let pt = if has { vs[ok].fields[0] } else { types.UNIT }
         let out = fb.temp(pt, span)
         if has {
-            fb.assign(Place.local(out), Rvalue.Use(Operand.Move(Place.local(tmp).with(Proj.Variant(ok as u32)).with(Proj.Field(0)))), span)
+            fb.assign(
+                Place.local(out),
+                Rvalue.Use(Operand.Move(
+                    Place.local(tmp).with(Proj.Variant(ok as u32)).with(Proj.Field(0))
+                )),
+                span
+            )
         }
         fb.push(Stmt.Forget(tmp))
         Ok(Val { vk: VK.Place(Place.local(out)), ty: pt, temp: true })
@@ -3340,13 +3803,30 @@ impl sema.Sema {
 
     // ---- loops ----
 
-    fn for_expr(inout self, inout fb: Fb, index: Option(ast.ForIndex), pat: ast.Pat, it: ast.Expr, body: ast.Block, span: Span) -> Result(Val, Diag) {
+    fn for_expr(
+        inout self,
+        inout fb: Fb,
+        index: Option(ast.ForIndex),
+        pat: ast.Pat,
+        it: ast.Expr,
+        body: ast.Block,
+        span: Span
+    ) -> Result(Val, Diag) {
         fb.push_scope(false)
         // `for i in a..b`
         match it.kind {
             Range(lo, hi) => match lo {
                 Some(lo) => match hi {
-                    Some(hi) => return self.for_range(&fb, index, pat, lo.deref(), hi.deref(), it.span, body, span)
+                    Some(hi) => return self.for_range(
+                        &fb,
+                        index,
+                        pat,
+                        lo.deref(),
+                        hi.deref(),
+                        it.span,
+                        body,
+                        span
+                    )
                     None => return Err(err(it.span, "a `for` range needs both ends"))
                 }
                 None => return Err(err(it.span, "a `for` range needs both ends"))
@@ -3356,7 +3836,17 @@ impl sema.Sema {
         self.for_iter(&fb, index, pat, it, body, span)
     }
 
-    fn for_range(inout self, inout fb: Fb, index: Option(ast.ForIndex), pat: ast.Pat, lo: ast.Expr, hi: ast.Expr, it_span: Span, body: ast.Block, span: Span) -> Result(Val, Diag) {
+    fn for_range(
+        inout self,
+        inout fb: Fb,
+        index: Option(ast.ForIndex),
+        pat: ast.Pat,
+        lo: ast.Expr,
+        hi: ast.Expr,
+        it_span: Span,
+        body: ast.Block,
+        span: Span
+    ) -> Result(Val, Diag) {
         var lv = self.expr(&fb, lo, None)?
         let hv = self.expr(&fb, hi, Some(lv.ty))?
         let is_int_lit = match lo.kind {
@@ -3368,7 +3858,9 @@ impl sema.Sema {
         }
         let t = lv.ty
         if !self.types.is_int(t) || hv.ty != t {
-            return Err(err(it_span, ("a range needs two integers of the same type, found `" + self.types.show(t).as_str() + "` and `" + self.types.show(hv.ty).as_str() + "`").as_str()))
+            return Err(err(it_span, ("a range needs two integers of the same type, found `" +
+                self.types.show(t).as_str() + "` and `" + self.types.show(hv.ty).as_str() +
+                "`").as_str()))
         }
         let lo_o = self.operand(&fb, lv, lo.span)?
         let hi_o = self.operand(&fb, hv, hi.span)?
@@ -3410,7 +3902,15 @@ impl sema.Sema {
     }
 
     // A loop over an iterator, or what gives one or a view.
-    fn for_iter(inout self, inout fb: Fb, index: Option(ast.ForIndex), pat: ast.Pat, it: ast.Expr, body: ast.Block, span: Span) -> Result(Val, Diag) {
+    fn for_iter(
+        inout self,
+        inout fb: Fb,
+        index: Option(ast.ForIndex),
+        pat: ast.Pat,
+        it: ast.Expr,
+        body: ast.Block,
+        span: Span
+    ) -> Result(Val, Diag) {
         var v = self.expr(&fb, it, None)?
         // A borrow held as a value (a `ref Vec(T)` field): what it points to.
         if self.types.is_ref(v.ty) {
@@ -3434,7 +3934,8 @@ impl sema.Sema {
             return r
         }
         if self.types.adt_index(v.ty).is_none() {
-            return Err(err(it.span, ("cannot loop over `" + self.types.show(v.ty).as_str() + "`").as_str()))
+            return Err(err(it.span, ("cannot loop over `" + self.types.show(v.ty).as_str() +
+                "`").as_str()))
         }
         // An iterator (`next`), or something with `iter()`.
         var iter_v = val_unit()
@@ -3442,14 +3943,20 @@ impl sema.Sema {
             iter_v = v
         } else if self.find_method(v.ty, "iter")?.is_some() {
             iter_v = self.method_call_val(&fb, v, "iter", Vec(Val).new(), it.span, None)?
-        } else if self.find_method(v.ty, "as_slice")?.is_some() || self.find_method(v.ty, "as_str")?.is_some() {
-            let name = if self.find_method(v.ty, "as_slice")?.is_some() { "as_slice" } else { "as_str" }
+        } else if self.find_method(v.ty, "as_slice")?.is_some() ||
+            self.find_method(v.ty, "as_str")?.is_some() {
+            let name = if self.find_method(v.ty, "as_slice")?.is_some() {
+                "as_slice"
+            } else {
+                "as_str"
+            }
             let sv = self.method_call_val(&fb, v, name, Vec(Val).new(), it.span, None)?
             let r = self.for_view(&fb, index, pat, sv, body, span)
             self.pop_scope(&fb)
             return r
         } else {
-            return Err(err(it.span, ("cannot loop over `" + self.types.show(v.ty).as_str() + "`: it has no `next` or `iter` method").as_str()))
+            return Err(err(it.span, ("cannot loop over `" + self.types.show(v.ty).as_str() +
+                "`: it has no `next` or `iter` method").as_str()))
         }
         let it_t = iter_v.ty
         let o = self.operand(&fb, iter_v, it.span)?
@@ -3466,7 +3973,14 @@ impl sema.Sema {
         let exit = fb.new_block()
         fb.goto(head)
         fb.push_scope(true)
-        let nv = self.method_call_val(&fb, val_place(Place.local(itl), it_t), "next", Vec(Val).new(), it.span, None)?
+        let nv = self.method_call_val(
+            &fb,
+            val_place(Place.local(itl), it_t),
+            "next",
+            Vec(Val).new(),
+            it.span,
+            None
+        )?
         let nt = nv.ty
         var ok = false
         match self.types.adt_index(nt) {
@@ -3474,7 +3988,8 @@ impl sema.Sema {
             None => {}
         }
         if !ok {
-            return Err(err(it.span, ("`next` must return an `Option`, found `" + self.types.show(nt).as_str() + "`").as_str()))
+            return Err(err(it.span, ("`next` must return an `Option`, found `" +
+                self.types.show(nt).as_str() + "`").as_str()))
         }
         let o = self.operand(&fb, nv, it.span)?
         let cur = fb.new_local(nt, None, true, LocalKind.Temp, span)
@@ -3495,7 +4010,11 @@ impl sema.Sema {
         fb.switch_to(bb)
         fb.push_scope(false)
         let et = vs[some as i64].fields[0]
-        let item = Val { vk: VK.Op(Operand.Move(Place.local(cur).with(Proj.Variant(some)).with(Proj.Field(0)))), ty: et, temp: false }
+        let item = Val {
+            vk: VK.Op(Operand.Move(Place.local(cur).with(Proj.Variant(some)).with(Proj.Field(0)))),
+            ty: et,
+            temp: false
+        }
         match index {
             Some(ix) => {
                 let il = fb.declare(ix.name.as_str(), types.I64, false, VarKind.Owned, ix.span)
@@ -3512,7 +4031,11 @@ impl sema.Sema {
         self.pop_scope(&fb)
         fb.goto(step)
         match idx {
-            Some(l) => fb.assign(Place.local(l), Rvalue.Bin(Op.AddWrap, copy_of(l), int_const(1, types.I64)), span)
+            Some(l) => fb.assign(
+                Place.local(l),
+                Rvalue.Bin(Op.AddWrap, copy_of(l), int_const(1, types.I64)),
+                span
+            )
             None => {}
         }
         fb.goto(head)
@@ -3523,7 +4046,15 @@ impl sema.Sema {
 
     // A loop over a slice or `str`, by index; elements are borrowed (or
     // copied, if plain).
-    fn for_view(inout self, inout fb: Fb, index: Option(ast.ForIndex), pat: ast.Pat, sink v: Val, body: ast.Block, span: Span) -> Result(Val, Diag) {
+    fn for_view(
+        inout self,
+        inout fb: Fb,
+        index: Option(ast.ForIndex),
+        pat: ast.Pat,
+        sink v: Val,
+        body: ast.Block,
+        span: Span
+    ) -> Result(Val, Diag) {
         let vt = v.ty
         let et = match self.types.kind(vt) {
             Slice(e) => e
@@ -3539,14 +4070,22 @@ impl sema.Sema {
         let exit = fb.new_block()
         fb.goto(head)
         let c = fb.temp(types.BOOL, span)
-        fb.assign(Place.local(c), Rvalue.Bin(Op.Lt, copy_of(i), Operand.Copy(Place.local(view).with(Proj.Field(1)))), span)
+        fb.assign(
+            Place.local(c),
+            Rvalue.Bin(Op.Lt, copy_of(i), Operand.Copy(Place.local(view).with(Proj.Field(1)))),
+            span
+        )
         let bb = fb.new_block()
         fb.term(Term.Switch(copy_of(c), switch1(0, exit), bb))
         fb.switch_to(bb)
         fb.push_scope(false)
         let pt = self.types.ptr(et)
         let a = fb.temp(pt, span)
-        fb.assign(Place.local(a), Rvalue.Offset(Operand.Copy(Place.local(view).with(Proj.Field(0))), copy_of(i)), span)
+        fb.assign(
+            Place.local(a),
+            Rvalue.Offset(Operand.Copy(Place.local(view).with(Proj.Field(0))), copy_of(i)),
+            span
+        )
         match index {
             Some(ix) => {
                 let il = fb.declare(ix.name.as_str(), types.I64, false, VarKind.Owned, ix.span)
@@ -3584,7 +4123,16 @@ impl sema.Sema {
         self.comptime_closures = kept
     }
 
-    fn lambda(inout self, inout fb: Fb, params: Vec(ast.LambdaParam), ret: Option(ast.Ty), body: ast.Block, exp: Option(u32), expected_params: Option(Vec(u32)), span: Span) -> Result(Val, Diag) {
+    fn lambda(
+        inout self,
+        inout fb: Fb,
+        params: Vec(ast.LambdaParam),
+        ret: Option(ast.Ty),
+        body: ast.Block,
+        exp: Option(u32),
+        expected_params: Option(Vec(u32)),
+        span: Span
+    ) -> Result(Val, Diag) {
         let scoped_work = fb.scoped_work
         fb.scoped_work = false
         let env = fb.env.clone()
@@ -3608,7 +4156,10 @@ impl sema.Sema {
         }
         match exp_sig.clone() {
             Some(sg) => {
-                if sg.variadic { return Err(err(span, "a variadic C function pointer needs an extern function, not a closure")) }
+                if sg.variadic { return Err(err(
+                    span,
+                    "a variadic C function pointer needs an extern function, not a closure"
+                )) }
                 if sg.params.len() != params.len() {
                     var m = String.from("a closure with ")
                     sg.params.len().show(&m)
@@ -3633,14 +4184,20 @@ impl sema.Sema {
             match p.ty {
                 Some(t) => {
                     let t = self.resolve_ty(t, env)?
-                    let c_value = match exp_sig.clone() { Some(sg) => want_ptr && sg.c_abi, None => false }
+                    let c_value = match exp_sig.clone() {
+                        Some(sg) => want_ptr && sg.c_abi
+                        None => false
+                    }
                     ptys.push(if c_value { t } else { self.param_local_ty(ast.Mode.Let, t).0 })
                 }
                 None => match exp_sig.clone() {
                     Some(sg) => ptys.push(sg.params[i])
                     None => match expected_params {
                         Some(ps) => ptys.push(ps[i])
-                        None => return Err(err(p.span, "the type of this closure parameter must be written"))
+                        None => return Err(err(
+                            p.span,
+                            "the type of this closure parameter must be written"
+                        ))
                     }
                 }
             }
@@ -3670,31 +4227,51 @@ impl sema.Sema {
                     let t = self.place_ty(fb, p)
                     let m = self.place_mutable(fb, p)
                     let known = self.known_closure(fb, p)
-                    caps.push(Capture { name: n.clone(), place: p, ty: t, mutable: m, closure: known })
+                    caps.push(Capture {
+                        name: n.clone(),
+                        place: p,
+                        ty: t,
+                        mutable: m,
+                        closure: known
+                    })
                 }
                 None => {}
             }
         }
         if want_ptr && caps.len() > 0 {
-            return Err(err(span, ("a `fnptr` cannot capture variables, and this closure uses `" + caps[0].name.as_str() + "`").as_str()))
+            let m = "a `fnptr` cannot capture variables, and this closure uses `" +
+                caps[0].name.as_str() + "`"
+            return Err(err(span, m.as_str()))
         }
         // A `dyn fn` owns what it captures: the values themselves, which
         // its body only reads.
         var env_fields = Vec(u32).new()
         for c in caps {
             if scoped_work && self.may_hold_closure(c.ty, 0) {
-                return Err(err(span, "a scoped thread cannot capture a borrowed closure; call a function or capture an owning `dyn fn` instead"))
+                return Err(err(
+                    span,
+                    "a scoped thread cannot capture a borrowed closure; call a function or capture an owning `dyn fn` instead"
+                ))
             }
-            if scoped_work && ((c.mutable && self.types.is_view(c.ty)) || self.may_hold_writable_view(c.ty, 0)) {
-                return Err(err(span, "a scoped thread cannot capture a mutable or interior value that holds borrows; store owned values instead"))
-            }
+            if scoped_work && ((c.mutable && self.types.is_view(c.ty)) ||
+                self.may_hold_writable_view(c.ty, 0)) {
+                    return Err(err(
+                        span,
+                        "a scoped thread cannot capture a mutable or interior value that holds borrows; store owned values instead"
+                    ))
+                }
             if owned {
                 if self.types.is_view(c.ty) {
-                    return Err(err(span, ("a `dyn fn` owns what it captures, so it cannot capture `" + c.name.as_str() + "`, which holds a borrow (`" + self.types.show(c.ty).as_str() + "`)").as_str()))
+                    let m = "a `dyn fn` owns what it captures, so it cannot capture `" +
+                        c.name.as_str() +
+                        "`, which holds a borrow (`" + self.types.show(c.ty).as_str() + "`)"
+                    return Err(err(span, m.as_str()))
                 }
                 env_fields.push(c.ty)
             } else {
-                env_fields.push(if c.mutable { self.types.refmut(c.ty) } else { self.types.refty(c.ty) })
+                env_fields.push(if c.mutable {
+                    self.types.refmut(c.ty)
+                } else { self.types.refty(c.ty) })
             }
         }
         let env_t = self.types.tuple(env_fields.clone())
@@ -3717,7 +4294,11 @@ impl sema.Sema {
             lparams.push(t)
         }
         let n = self.next_lambda()
-        var fname = if fb.id as i64 < self.out.len() { self.out[fb.id as i64].name.clone() } else { String.from("comptime") }
+        var fname = if fb.id as i64 < self.out.len() {
+            self.out[fb.id as i64].name.clone()
+        } else {
+            String.from("comptime")
+        }
         fname.push_str(".closure")
         n.show(&fname)
         var symbol = String.from("closure.")
@@ -3744,7 +4325,19 @@ impl sema.Sema {
             span: span
         })
         self.inst_info.push(None)
-        var lfb = self.lambda_fb(fb, id, env, r0, want_ptr, env_ref, caps, params, ptys, lparams.len(), span)
+        var lfb = self.lambda_fb(
+            fb,
+            id,
+            env,
+            r0,
+            want_ptr,
+            env_ref,
+            caps,
+            params,
+            ptys,
+            lparams.len(),
+            span
+        )
         lfb.owned_env = owned
         // The return type, if not known, is the body's.
         var rt = r0
@@ -3755,7 +4348,19 @@ impl sema.Sema {
             rt = if probe.ty == types.NEVER { types.UNIT } else { probe.ty }
             // Lower again with the type known.
             self.clear_closures(id)
-            lfb = self.lambda_fb(fb, id, env, rt, want_ptr, env_ref, caps, params, ptys, lparams.len(), span)
+            lfb = self.lambda_fb(
+                fb,
+                id,
+                env,
+                rt,
+                want_ptr,
+                env_ref,
+                caps,
+                params,
+                ptys,
+                lparams.len(),
+                span
+            )
             lfb.owned_env = owned
             self.out[id as i64].sig.ret = rt
         }
@@ -3796,8 +4401,15 @@ impl sema.Sema {
         let envl = if scoped_work { fb.temp(env_t, span) } else { fb.block_temp(env_t, span) }
         var ops = Vec(Operand).new()
         for i, c in caps {
-            let r = if scoped_work { fb.temp(env_fields[i], span) } else { fb.block_temp(env_fields[i], span) }
-            fb.assign(Place.local(r), if c.mutable { Rvalue.RefMut(c.place.clone()) } else { Rvalue.Ref(c.place.clone()) }, span)
+            let r = if scoped_work {
+                fb.temp(env_fields[i], span)
+            } else {
+                fb.block_temp(env_fields[i], span)
+            }
+            let borrow = if c.mutable {
+                Rvalue.RefMut(c.place.clone())
+            } else { Rvalue.Ref(c.place.clone()) }
+            fb.assign(Place.local(r), borrow, span)
             ops.push(Operand.Move(Place.local(r)))
         }
         fb.assign(Place.local(envl), Rvalue.Aggregate(mir.Agg.Struct(env_t), ops), span)
@@ -3812,7 +4424,12 @@ impl sema.Sema {
         cops.push(copy_of(er))
         let result = self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Closure(ct), cops), ct, span)
         match result.vk {
-            Place(p) => self.comptime_closures.push(sema.ComptimeClosure { id: fb.id, place: p.clone(), lambda: id, specialized: false })
+            Place(p) => self.comptime_closures.push(sema.ComptimeClosure {
+                id: fb.id,
+                place: p.clone(),
+                lambda: id,
+                specialized: false
+            })
             _ => {}
         }
         Ok(result)
@@ -3820,7 +4437,20 @@ impl sema.Sema {
 
     // The builder of a closure's body: its environment's captures and its
     // parameters bound.
-    fn lambda_fb(inout self, fb: Fb, id: u32, env: Env, ret: u32, want_ptr: bool, env_ref: u32, caps: Vec(Capture), params: Vec(ast.LambdaParam), ptys: Vec(u32), nparams: i64, span: Span) -> Fb {
+    fn lambda_fb(
+        inout self,
+        fb: Fb,
+        id: u32,
+        env: Env,
+        ret: u32,
+        want_ptr: bool,
+        env_ref: u32,
+        caps: Vec(Capture),
+        params: Vec(ast.LambdaParam),
+        ptys: Vec(u32),
+        nparams: i64,
+        span: Span
+    ) -> Fb {
         var lfb = Fb.new(id, env.clone(), ret, ast.RetMode.Value, span)
         lfb.unsafe_depth = fb.unsafe_depth
         if !want_ptr {
@@ -3832,7 +4462,12 @@ impl sema.Sema {
                 match c.closure {
                     Some((lf, specialized)) => {
                         let p = self.var_place(lfb, v)
-                        self.comptime_closures.push(sema.ComptimeClosure { id: id, place: p, lambda: lf, specialized: specialized })
+                        self.comptime_closures.push(sema.ComptimeClosure {
+                            id: id,
+                            place: p,
+                            lambda: lf,
+                            specialized: specialized
+                        })
                     }
                     None => {}
                 }
@@ -3867,12 +4502,27 @@ impl sema.Sema {
         }
     }
 
-    fn callback_arg(inout self, inout fb: Fb, a: ast.Expr, expected: Option(u32), pattern: Option(ast.Ty), env: Env) -> Result(Val, Diag) {
+    fn callback_arg(
+        inout self,
+        inout fb: Fb,
+        a: ast.Expr,
+        expected: Option(u32),
+        pattern: Option(ast.Ty),
+        env: Env
+    ) -> Result(Val, Diag) {
         if expected.is_none() {
             match a.kind {
                 Lambda(ps, ret, body) => match pattern {
                     Some(t) => match self.callback_params(t, env) {
-                        Some(inputs) => return self.lambda(&fb, ps.clone(), ret.clone(), body.clone(), None, Some(inputs), a.span)
+                        Some(inputs) => return self.lambda(
+                            &fb,
+                            ps.clone(),
+                            ret.clone(),
+                            body.clone(),
+                            None,
+                            Some(inputs),
+                            a.span
+                        )
                         None => {}
                     }
                     None => {}
@@ -3883,7 +4533,14 @@ impl sema.Sema {
         self.expr(&fb, a, expected)
     }
 
-    fn call_expr(inout self, inout fb: Fb, callee: ast.Expr, args: Vec(ast.Expr), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    fn call_expr(
+        inout self,
+        inout fb: Fb,
+        callee: ast.Expr,
+        args: Vec(ast.Expr),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         let env = fb.env.clone()
         match callee.kind {
             Name(n) => {
@@ -3892,7 +4549,13 @@ impl sema.Sema {
                         let p = self.var_place(fb, v)
                         let t = self.place_ty(fb, p)
                         match self.known_closure(fb, p) {
-                            Some((lf, true)) => return self.call_comptime_closure(&fb, p, lf, args, span)
+                            Some((lf, true)) => return self.call_comptime_closure(
+                                &fb,
+                                p,
+                                lf,
+                                args,
+                                span
+                            )
                             _ => {}
                         }
                         return self.call_value(&fb, val_place(p, t), args, span)
@@ -3900,13 +4563,25 @@ impl sema.Sema {
                     None => {}
                 }
                 if env.get(n.as_str()).is_some() {
-                    return Err(err(callee.span, ("`" + n.as_str() + "` is not a function").as_str()))
+                    return Err(err(callee.span, ("`" + n.as_str() +
+                        "` is not a function").as_str()))
                 }
                 match self.lookup(env.module, n.as_str()) {
                     Some(s) => match s {
-                        Fn(f) => return self.call_decl(&fb, f, Vec(CVal).new(), None, args, span, exp)
-                        Adt(_) => return Err(err(span, ("`" + n.as_str() + "(...)` is a type; build a value with `" + n.as_str() + " { ... }` or call one of its functions").as_str()))
-                        _ => return Err(err(callee.span, ("`" + n.as_str() + "` is not a function").as_str()))
+                        Fn(f) => return self.call_decl(
+                            &fb,
+                            f,
+                            Vec(CVal).new(),
+                            None,
+                            args,
+                            span,
+                            exp
+                        )
+                        Adt(_) => return Err(err(span, ("`" + n.as_str() +
+                            "(...)` is a type; build a value with `" + n.as_str() +
+                            " { ... }` or call one of its functions").as_str()))
+                        _ => return Err(err(callee.span, ("`" + n.as_str() +
+                            "` is not a function").as_str()))
                     }
                     None => {}
                 }
@@ -3950,27 +4625,59 @@ impl sema.Sema {
                             }
                             if p.len() > 1 {
                                 match self.lookup_path(env.module, p) {
-                                    Some((Fn(f), _)) => return self.call_decl(&fb, f, Vec(CVal).new(), None, args, span, exp)
+                                    Some((Fn(f), _)) => return self.call_decl(
+                                        &fb,
+                                        f,
+                                        Vec(CVal).new(),
+                                        None,
+                                        args,
+                                        span,
+                                        exp
+                                    )
                                     _ => {}
                                 }
                             }
                             match self.lookup_path(env.module, head) {
                                 Some((Adt(d), _)) => {
-                                    let shadowed = head.len() == 1 && env.get(head[0].as_str()).is_some()
+                                    let shadowed = head.len() == 1 &&
+                                        env.get(head[0].as_str()).is_some()
                                     if self.adts[d as i64].params().len() > 0 && !shadowed {
-                                        return self.generic_static_call(&fb, d, name.as_str(), args, exp, span)
+                                        return self.generic_static_call(
+                                            &fb,
+                                            d,
+                                            name.as_str(),
+                                            args,
+                                            exp,
+                                            span
+                                        )
                                     }
                                 }
                                 _ => {}
                             }
                             if self.path_is_type(head, env) {
                                 let t = self.resolve_path_ty_pub(head, env, span)?
-                                return self.type_member(&fb, t, name.as_str(), args, exp, span, true)
+                                return self.type_member(
+                                    &fb,
+                                    t,
+                                    name.as_str(),
+                                    args,
+                                    exp,
+                                    span,
+                                    true
+                                )
                             }
                             match self.lookup_path(env.module, head) {
                                 Some((Adt(d), _)) => {
                                     let t = self.infer_enum(d, exp, span)?
-                                    return self.type_member(&fb, t, name.as_str(), args, exp, span, true)
+                                    return self.type_member(
+                                        &fb,
+                                        t,
+                                        name.as_str(),
+                                        args,
+                                        exp,
+                                        span,
+                                        true
+                                    )
                                 }
                                 _ => {}
                             }
@@ -3980,13 +4687,25 @@ impl sema.Sema {
                 }
                 if p_is_type_call(base.deref()) {
                     match self.try_expr_ty(base.deref(), env)? {
-                        Some(t) => return self.type_member(&fb, t, name.as_str(), args, exp, span, true)
+                        Some(t) => return self.type_member(
+                            &fb,
+                            t,
+                            name.as_str(),
+                            args,
+                            exp,
+                            span,
+                            true
+                        )
                         None => {}
                     }
                 }
                 // A method call; a receiver passed `inout` is lowered as a
                 // place to change.
-                let recv = if self.method_name_inout(name.as_str()) { self.expr_mut(&fb, base.deref())? } else { self.expr(&fb, base.deref(), None)? }
+                let recv = if self.method_name_inout(name.as_str()) {
+                    self.expr_mut(&fb, base.deref())?
+                } else {
+                    self.expr(&fb, base.deref(), None)?
+                }
                 // A field holding a function value is called as one.
                 match self.types.adt_index(recv.ty) {
                     Some(a) => {
@@ -4013,7 +4732,8 @@ impl sema.Sema {
             _ => {
                 if self.try_expr_ty(callee, env)?.is_some() {
                     let t = self.try_expr_ty(callee, env)?.unwrap()
-                    return Err(err(span, ("`" + self.types.show(t).as_str() + "` is a type, not a function").as_str()))
+                    return Err(err(span, ("`" + self.types.show(t).as_str() +
+                        "` is a type, not a function").as_str()))
                 }
                 let v = self.expr(&fb, callee, None)?
                 self.call_value(&fb, v, args, span)
@@ -4021,7 +4741,13 @@ impl sema.Sema {
         }
     }
 
-    fn prelude_variant(inout self, inout fb: Fb, n: str, args: Vec(ast.Expr), span: Span) -> Result(Option(Val), Diag) {
+    fn prelude_variant(
+        inout self,
+        inout fb: Fb,
+        n: str,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Option(Val), Diag) {
         let decl = if n == "Some" || n == "None" {
             self.lang.option
         } else if n == "Ok" || n == "Err" {
@@ -4042,13 +4768,24 @@ impl sema.Sema {
             let vi = variant_index(self.types.variants(t).unwrap(), "Some")
             var ops = Vec(Operand).new()
             ops.push(o)
-            return Ok(Some(self.rvalue(&fb, Rvalue.Aggregate(mir.Agg.Variant(t, vi as u32), ops), t, span)))
+            return Ok(Some(self.rvalue(
+                &fb,
+                Rvalue.Aggregate(mir.Agg.Variant(t, vi as u32), ops),
+                t,
+                span
+            )))
         }
         Err(err(span, ("the type of `" + n + "` must be known here; write its type").as_str()))
     }
 
     // Calls a value: a `fnptr` or a closure.
-    fn call_value(inout self, inout fb: Fb, sink v: Val, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn call_value(
+        inout self,
+        inout fb: Fb,
+        sink v: Val,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         var closure = false
         let sig = match self.types.kind(v.ty) {
             DynFn(s) => {
@@ -4060,7 +4797,8 @@ impl sema.Sema {
                 closure = true
                 s.clone()
             }
-            _ => return Err(err(span, ("`" + self.types.show(v.ty).as_str() + "` is not a function").as_str()))
+            _ => return Err(err(span, ("`" + self.types.show(v.ty).as_str() +
+                "` is not a function").as_str()))
         }
         if (!sig.variadic && sig.params.len() != args.len()) || args.len() < sig.params.len() {
             var m = String.from("this function takes ")
@@ -4072,13 +4810,19 @@ impl sema.Sema {
         }
         var ops = Vec(Operand).new()
         let callee_op = self.operand(&fb, v, span)?
-        let ct = self.types.intern(if closure { TyKind.Closure(sig.clone()) } else { TyKind.FnPtr(sig.clone()) })
+        let ct = self.types.intern(if closure {
+            TyKind.Closure(sig.clone())
+        } else { TyKind.FnPtr(sig.clone()) })
         let cl = self.operand_local(&fb, callee_op, ct, span)
         for i, a in args {
             if i < sig.params.len() { ops.push(self.arg_for_local_ty(&fb, a, sig.params[i])?) }
             else { ops.push(self.c_vararg(&fb, a)?) }
         }
-        let callee = if closure { mir.Callee.Closure(copy_of(cl)) } else { mir.Callee.Ptr(copy_of(cl)) }
+        let callee = if closure {
+            mir.Callee.Closure(copy_of(cl))
+        } else {
+            mir.Callee.Ptr(copy_of(cl))
+        }
         self.emit_call(&fb, callee, ops, sig.ret, span)
     }
 
@@ -4090,7 +4834,10 @@ impl sema.Sema {
         }
         let t = v.ty
         if !self.c_type(t) {
-            return Err(err(a.span, "only C-compatible value types can be passed to a C function's `...`"))
+            return Err(err(
+                a.span,
+                "only C-compatible value types can be passed to a C function's `...`"
+            ))
         }
         let o = self.operand(&fb, v, a.span)?
         var to: Option(u32) = None
@@ -4156,7 +4903,14 @@ impl sema.Sema {
         l
     }
 
-    pub fn borrow_op(inout self, inout fb: Fb, sink p: Place, mutable: bool, rt: u32, span: Span) -> Operand {
+    pub fn borrow_op(
+        inout self,
+        inout fb: Fb,
+        sink p: Place,
+        mutable: bool,
+        rt: u32,
+        span: Span
+    ) -> Operand {
         // Borrowing through a borrow local hands on the same reference.
         if p.proj.len() == 1 && p.proj[0] == Proj.Deref && fb.ty_of(p.local) == rt && !mutable {
             return copy_of(p.local)
@@ -4166,7 +4920,14 @@ impl sema.Sema {
         if mutable { Operand.Move(Place.local(t)) } else { copy_of(t) }
     }
 
-    pub fn emit_call(inout self, inout fb: Fb, sink callee: mir.Callee, sink args: Vec(Operand), ret: u32, span: Span) -> Result(Val, Diag) {
+    pub fn emit_call(
+        inout self,
+        inout fb: Fb,
+        sink callee: mir.Callee,
+        sink args: Vec(Operand),
+        ret: u32,
+        span: Span
+    ) -> Result(Val, Diag) {
         var projection = true
         match callee.clone() {
             Fn(f) => projection = self.out[f as i64].returns_ref
@@ -4188,7 +4949,14 @@ impl sema.Sema {
         Ok(Val { vk: VK.Place(Place.local(dest)), ty: ret, temp: true })
     }
 
-    fn call_comptime_closure(inout self, inout fb: Fb, p: Place, lf: u32, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn call_comptime_closure(
+        inout self,
+        inout fb: Fb,
+        p: Place,
+        lf: u32,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         let sig = self.out[lf as i64].sig.clone()
         if sig.params.len() != args.len() + 1 {
             var m = String.from("this closure takes ")
@@ -4213,7 +4981,15 @@ impl sema.Sema {
     }
 
     // A method call `recv.name(args)`.
-    pub fn method_call(inout self, inout fb: Fb, sink recv: Val, name: str, args: Vec(ast.Expr), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    pub fn method_call(
+        inout self,
+        inout fb: Fb,
+        sink recv: Val,
+        name: str,
+        args: Vec(ast.Expr),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         var recv = recv
         for _ in 0..8 {
             if self.types.is_ptr(recv.ty) {
@@ -4226,12 +5002,21 @@ impl sema.Sema {
             // A borrow held as a value (`map.get(k).unwrap()`): the method
             // of what it points to, which takes it borrowed anyway, before
             // the borrow's own (`clone` would copy the borrow).
-            if self.types.is_ref(recv.ty) && self.find_method(self.types.pointee(recv.ty).unwrap(), name)?.is_some() {
+            if self.types.is_ref(recv.ty) &&
+                self.find_method(self.types.pointee(recv.ty).unwrap(), name)?.is_some() {
                 recv = self.auto_deref(&fb, recv, span)?
                 continue
             }
             match self.find_method(recv.ty, name)? {
-                Some(h) => return self.call_decl(&fb, h.imp, h.args.clone(), Some(recv), args, span, exp)
+                Some(h) => return self.call_decl(
+                    &fb,
+                    h.imp,
+                    h.args.clone(),
+                    Some(recv),
+                    args,
+                    span,
+                    exp
+                )
                 None => {}
             }
             if self.types.is_ref(recv.ty) {
@@ -4244,7 +5029,8 @@ impl sema.Sema {
             }
             break
         }
-        let d = err(span, ("`" + self.types.show(recv.ty).as_str() + "` has no method `" + name + "`").as_str())
+        let d = err(span, ("`" + self.types.show(recv.ty).as_str() + "` has no method `" +
+            name + "`").as_str())
         match self.unmet_bound(recv.ty, name)? {
             Some(m) => Err(d.note(None, m.as_str()))
             None => Err(d)
@@ -4252,18 +5038,35 @@ impl sema.Sema {
     }
 
     // A method call whose arguments are already values.
-    pub fn method_call_val(inout self, inout fb: Fb, sink recv: Val, name: str, sink args: Vec(Val), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    pub fn method_call_val(
+        inout self,
+        inout fb: Fb,
+        sink recv: Val,
+        name: str,
+        sink args: Vec(Val),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         let h = match self.find_method(recv.ty, name)? {
             Some(h) => h
-            None => return Err(err(span, ("`" + self.types.show(recv.ty).as_str() + "` has no method `" + name + "`").as_str()))
+            None => return Err(err(span, ("`" + self.types.show(recv.ty).as_str() +
+                "` has no method `" + name + "`").as_str()))
         }
         self.call_decl_vals(&fb, h.imp, h.args.clone(), Some(recv), args, span, exp)
     }
 
-    pub fn call_static(inout self, inout fb: Fb, t: u32, name: str, sink args: Vec(Val), span: Span) -> Result(Val, Diag) {
+    pub fn call_static(
+        inout self,
+        inout fb: Fb,
+        t: u32,
+        name: str,
+        sink args: Vec(Val),
+        span: Span
+    ) -> Result(Val, Diag) {
         let h = match self.find_method(t, name)? {
             Some(h) => h
-            None => return Err(err(span, ("`" + self.types.show(t).as_str() + "` has no function `" + name + "`").as_str()))
+            None => return Err(err(span, ("`" + self.types.show(t).as_str() +
+                "` has no function `" + name + "`").as_str()))
         }
         self.call_decl_vals(&fb, h.imp, h.args.clone(), None, args, span, None)
     }
@@ -4276,7 +5079,8 @@ impl sema.Sema {
                 Free => true
                 _ => false
             }
-            if d.name == name && !free && d.params.len() > 0 && d.params[0].name == "self" && d.params[0].mode == ast.Mode.Inout {
+            if d.name == name && !free && d.params.len() > 0 && d.params[0].name == "self" &&
+                d.params[0].mode == ast.Mode.Inout {
                 return true
             }
         }
@@ -4286,11 +5090,29 @@ impl sema.Sema {
     // A call of a declared function: infers its compile-time arguments,
     // makes the instance, and passes each argument as its parameter
     // says.
-    pub fn call_decl(inout self, inout fb: Fb, fid: u32, iargs: Vec(CVal), sink recv: Option(Val), args: Vec(ast.Expr), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    pub fn call_decl(
+        inout self,
+        inout fb: Fb,
+        fid: u32,
+        iargs: Vec(CVal),
+        sink recv: Option(Val),
+        args: Vec(ast.Expr),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         self.call_decl_inner(&fb, fid, iargs, recv, args, Vec(Val).new(), span, exp)
     }
 
-    pub fn call_decl_vals(inout self, inout fb: Fb, fid: u32, iargs: Vec(CVal), sink recv: Option(Val), sink vargs: Vec(Val), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    pub fn call_decl_vals(
+        inout self,
+        inout fb: Fb,
+        fid: u32,
+        iargs: Vec(CVal),
+        sink recv: Option(Val),
+        sink vargs: Vec(Val),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         self.call_decl_inner(&fb, fid, iargs, recv, Vec(ast.Expr).new(), vargs, span, exp)
     }
 
@@ -4344,7 +5166,14 @@ impl sema.Sema {
 
     // Move a fresh lambda's capture tuple into the job, rather than keeping
     // a pointer to a temporary closure environment on this thread's stack.
-    fn scoped_spawn(inout self, inout fb: Fb, sink recv: Option(Val), args: Vec(ast.Expr), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    fn scoped_spawn(
+        inout self,
+        inout fb: Fb,
+        sink recv: Option(Val),
+        args: Vec(ast.Expr),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         let has_recv = recv.is_some()
         let base = if has_recv { 1 } else { 2 }
         if args.len() != base && args.len() != base + 1 {
@@ -4365,7 +5194,12 @@ impl sema.Sema {
             }
         }
         let closure_ty: Option(u32) = match expected {
-            Some(t) => Some(self.types.intern(TyKind.Closure(types.Sig { params: Vec(u32).new(), ret: t, c_abi: false, variadic: false })))
+            Some(t) => Some(self.types.intern(TyKind.Closure(types.Sig {
+                params: Vec(u32).new(),
+                ret: t,
+                c_abi: false,
+                variadic: false
+            })))
             None => None
         }
         let recv = match recv {
@@ -4380,14 +5214,22 @@ impl sema.Sema {
             _ => return Err(err(span, "`Scope.spawn` needs a mutable scope"))
         }
         if !self.scope_receiver(fb, p, 0) {
-            return Err(err(span, "`Scope.spawn` needs a scope borrowed as an `inout Scope` parameter; pass captured or stored scopes to a helper first"))
+            return Err(err(
+                span,
+                "`Scope.spawn` needs a scope borrowed as an `inout Scope` parameter; pass captured or stored scopes to a helper first"
+            ))
         }
         let a = args[args.len() - 1]
         let (ps, ret, body) = match a.kind {
             Lambda(ps, ret, body) => (ps.clone(), ret.clone(), body.clone())
-            _ => return Err(err(a.span, "`Scope.spawn` takes a closure written here (`fn() { ... }`)"))
+            _ => return Err(err(
+                a.span,
+                "`Scope.spawn` takes a closure written here (`fn() { ... }`)"
+            ))
         }
-        if ps.len() != 0 { return Err(err(a.span, "a scoped thread's closure takes no parameters")) }
+        if ps.len() != 0 {
+            return Err(err(a.span, "a scoped thread's closure takes no parameters"))
+        }
         fb.scoped_work = true
         let captures = self.lambda(&fb, ps, ret, body, closure_ty, None, a.span)?
         let (lf, _) = self.last_lambda.unwrap()
@@ -4418,25 +5260,38 @@ impl sema.Sema {
 
     // Rust's `Args` (expressions or values already lowered) is the pair
     // `args`, `vargs`: one of them is empty.
-    fn call_decl_inner(inout self, inout fb: Fb, fid: u32, iargs: Vec(CVal), sink recv: Option(Val), args: Vec(ast.Expr), sink vargs: Vec(Val), span: Span, exp: Option(u32)) -> Result(Val, Diag) {
+    fn call_decl_inner(
+        inout self,
+        inout fb: Fb,
+        fid: u32,
+        iargs: Vec(CVal),
+        sink recv: Option(Val),
+        args: Vec(ast.Expr),
+        sink vargs: Vec(Val),
+        span: Span,
+        exp: Option(u32)
+    ) -> Result(Val, Diag) {
         let info_module = self.fns[fid as i64].module
         let decl = sema.at(self.fns[fid as i64].decl)
         let module = info_module
         if self.module_name(module) == "std.thread" && decl.name == "spawn" {
             return self.scoped_spawn(&fb, recv, args, span, exp)
         }
-        if !self.fns[fid as i64].public && !self.same_package(module, fb.env.module) && !self.same_owner_module(fid, fb.env.module) {
+        if !self.fns[fid as i64].public && !self.same_package(module, fb.env.module) &&
+            !self.same_owner_module(fid, fb.env.module) {
             return Err(err(span, ("`" + decl.name.as_str() + "` is private").as_str()))
         }
         if decl.is_unsafe && fb.unsafe_depth == 0 {
-            return Err(err(span, ("`" + decl.name.as_str() + "` is an unsafe function; call it in `unsafe` code").as_str()))
+            return Err(err(span, ("`" + decl.name.as_str() +
+                "` is an unsafe function; call it in `unsafe` code").as_str()))
         }
         let is_extern = match decl.kind {
             Extern => true
             _ => false
         }
         if is_extern && fb.unsafe_depth == 0 {
-            return Err(err(span, ("`" + decl.name.as_str() + "` is a C function; call it in `unsafe` code").as_str()))
+            return Err(err(span, ("`" + decl.name.as_str() +
+                "` is a C function; call it in `unsafe` code").as_str()))
         }
         let params = decl.params
         let has_self = params.len() > 0 && params[0].name == "self"
@@ -4444,7 +5299,9 @@ impl sema.Sema {
         let nrecv = if has_recv { 1 } else { 0 }
         let nargs0 = args.len() + vargs.len() + nrecv
         if has_recv && !has_self {
-            return Err(err(span, ("`" + decl.name.as_str() + "` is not a method (it has no `self`); call it as `Type." + decl.name.as_str() + "(...)`").as_str()))
+            return Err(err(span, ("`" + decl.name.as_str() +
+                "` is not a method (it has no `self`); call it as `Type." + decl.name.as_str() +
+                "(...)`").as_str()))
         }
         var ncomptime = 0
         var nct_all = 0
@@ -4559,7 +5416,10 @@ impl sema.Sema {
                                 let p = self.var_place(fb, v)
                                 let lf = match self.known_closure(fb, p) {
                                     Some((lf, _)) => lf
-                                    None => return Err(err(a.span, "a compile-time closure argument must have a statically known function"))
+                                    None => return Err(err(
+                                        a.span,
+                                        "a compile-time closure argument must have a statically known function"
+                                    ))
                                 }
                                 let lt = self.place_ty(fb, p)
                                 let envt = self.out[lf as i64].sig.params[0]
@@ -4587,13 +5447,19 @@ impl sema.Sema {
                     _ => {}
                 }
                 if !given {
-                    return Err(err(a.span, "a compile-time closure parameter takes a closure written here (`fn(x) { ... }`)"))
+                    return Err(err(
+                        a.span,
+                        "a compile-time closure parameter takes a closure written here (`fn(x) { ... }`)"
+                    ))
                 }
                 if pty.is_none() {
                     let v = vals[vals.len() - 1].clone().unwrap()
                     var binds = cargs.clone()
                     if !self.match_ty_env(p.ty.clone().unwrap(), v.ty, ct_params, env, &binds)? {
-                        return Err(err(a.span, "this closure does not fit the compile-time parameter's type"))
+                        return Err(err(
+                            a.span,
+                            "this closure does not fit the compile-time parameter's type"
+                        ))
                     }
                     cargs = binds
                 }
@@ -4651,7 +5517,9 @@ impl sema.Sema {
                                 pat = impl_self.clone().unwrap()
                             }
                             if !self.match_ty_env(pat, v.ty, ct_params, env, &binds)? {
-                                return Err(err(span, ("this argument has type `" + self.types.show(v.ty).as_str() + "`, which does not fit the parameter's type").as_str()))
+                                return Err(err(span, ("this argument has type `" +
+                                    self.types.show(v.ty).as_str() +
+                                    "`, which does not fit the parameter's type").as_str()))
                             }
                             cargs = binds
                         }
@@ -4693,7 +5561,9 @@ impl sema.Sema {
                             pat = impl_self.clone().unwrap()
                         }
                         if !self.match_ty_env(pat, v.ty, ct_params, env, &binds)? {
-                            return Err(err(sp, ("this argument has type `" + self.types.show(v.ty).as_str() + "`, which does not fit the parameter's type").as_str()))
+                            return Err(err(sp, ("this argument has type `" +
+                                self.types.show(v.ty).as_str() +
+                                "`, which does not fit the parameter's type").as_str()))
                         }
                         cargs = binds
                     }
@@ -4705,7 +5575,8 @@ impl sema.Sema {
         }
         for i, p in impl_params {
             if cargs[i].is_none() {
-                return Err(err(span, ("cannot infer `" + p.name.as_str() + "` of `" + decl.name.as_str() + "`; write the type's arguments").as_str()))
+                return Err(err(span, ("cannot infer `" + p.name.as_str() + "` of `" +
+                    decl.name.as_str() + "`; write the type's arguments").as_str()))
             }
         }
         var ci = nimpl
@@ -4729,7 +5600,9 @@ impl sema.Sema {
                 }
             }
             if cargs[ci].is_none() {
-                return Err(err(span, ("cannot infer the compile-time argument `" + p.name.as_str() + "` of `" + decl.name.as_str() + "`; pass it explicitly").as_str()))
+                return Err(err(span, ("cannot infer the compile-time argument `" +
+                    p.name.as_str() + "` of `" + decl.name.as_str() +
+                    "`; pass it explicitly").as_str()))
             }
             ci += 1
         }
@@ -4749,7 +5622,9 @@ impl sema.Sema {
                     Type(t) => {
                         for bnd in self.param_bounds(p, imodule)? {
                             if !self.implements(bnd, t)? {
-                                return Err(err(span, ("`" + self.types.show(t).as_str() + "` does not implement `" + self.traits[bnd as i64].name.as_str() + "`").as_str()))
+                                return Err(err(span, ("`" + self.types.show(t).as_str() +
+                                    "` does not implement `" +
+                                    self.traits[bnd as i64].name.as_str() + "`").as_str()))
                             }
                         }
                     }
@@ -4776,7 +5651,10 @@ impl sema.Sema {
                 Type(t) => {
                     for b in self.param_bounds(p, module)? {
                         if !self.implements(b, t)? {
-                            return Err(err(span, ("`" + self.types.show(t).as_str() + "` does not implement `" + self.traits[b as i64].name.as_str() + "`, which `" + decl.name.as_str() + "` requires of `" + p.name.as_str() + "`").as_str()))
+                            return Err(err(span, ("`" + self.types.show(t).as_str() +
+                                "` does not implement `" + self.traits[b as i64].name.as_str() +
+                                "`, which `" + decl.name.as_str() + "` requires of `" +
+                                p.name.as_str() + "`").as_str()))
                         }
                     }
                 }
@@ -4795,7 +5673,12 @@ impl sema.Sema {
             if p.mode == ast.Mode.Comptime {
                 match self.inst_env_get(id, p.name.as_str()) {
                     Some(Lambda(_, _)) => {
-                        let v = self.coerce(&fb, vals[pi].clone().unwrap(), fsig.params[li], spans[pi])?
+                        let v = self.coerce(
+                            &fb,
+                            vals[pi].clone().unwrap(),
+                            fsig.params[li],
+                            spans[pi]
+                        )?
                         let o = self.operand(&fb, v, spans[pi])?
                         ops.push(o)
                         li += 1
@@ -4831,7 +5714,8 @@ impl sema.Sema {
                     return Err(err(sp, self.not_mutable_msg(fb, pl).as_str()))
                 }
                 if v.temp && p.name != "self" {
-                    return Err(err(sp, "an `inout` argument must be a place, not a temporary value"))
+                    return Err(err(sp,
+                        "an `inout` argument must be a place, not a temporary value"))
                 }
                 op = self.borrow_op(&fb, pl, true, lt, sp)
             } else if borrow {
@@ -4884,7 +5768,14 @@ impl sema.Sema {
         }
     }
 
-    fn partial_env_self(inout self, env: Env, names: Vec(String), vals: Vec(Option(CVal)), nimpl: i64, impl_self: Option(ast.Ty)) -> Env {
+    fn partial_env_self(
+        inout self,
+        env: Env,
+        names: Vec(String),
+        vals: Vec(Option(CVal)),
+        nimpl: i64,
+        impl_self: Option(ast.Ty)
+    ) -> Env {
         var e = partial_env(env, names, vals)
         if nimpl > 0 && e.self_ty.is_none() {
             var all = true
@@ -4908,7 +5799,14 @@ impl sema.Sema {
 
     // Matches a parameter type against an argument's type, binding the
     // compile-time parameters it mentions.
-    fn match_ty_env(inout self, pat: ast.Ty, t: u32, params: Vec(ast.Param), env: Env, inout binds: Vec(Option(CVal))) -> Result(bool, Diag) {
+    fn match_ty_env(
+        inout self,
+        pat: ast.Ty,
+        t: u32,
+        params: Vec(ast.Param),
+        env: Env,
+        inout binds: Vec(Option(CVal))
+    ) -> Result(bool, Diag) {
         let k = self.types.kind(t).clone()
         match pat.kind {
             Path(p, None) => {
@@ -5094,7 +5992,15 @@ impl sema.Sema {
     }
 
     // A function type pattern against a closure's or `fnptr`'s signature.
-    fn match_fn_ty(inout self, ps: Vec(ast.FnTyParam), r: Option(Box(ast.Ty)), sig: types.Sig, params: Vec(ast.Param), env: Env, inout binds: Vec(Option(CVal))) -> Result(bool, Diag) {
+    fn match_fn_ty(
+        inout self,
+        ps: Vec(ast.FnTyParam),
+        r: Option(Box(ast.Ty)),
+        sig: types.Sig,
+        params: Vec(ast.Param),
+        env: Env,
+        inout binds: Vec(Option(CVal))
+    ) -> Result(bool, Diag) {
         if ps.len() != sig.params.len() {
             return Ok(false)
         }
@@ -5114,7 +6020,8 @@ impl sema.Sema {
                 }
                 Err(_) => {
                     let explicit_ref = match p.ty.kind { Ref(_, _) => true, _ => false }
-                    if p.mode != ast.Mode.Sink && self.types.is_ref(x) && (p.mode == ast.Mode.Inout || !explicit_ref) {
+                    if p.mode != ast.Mode.Sink && self.types.is_ref(x) &&
+                        (p.mode == ast.Mode.Inout || !explicit_ref) {
                         x = self.types.pointee(x).unwrap()
                     }
                     if !self.match_ty_env(p.ty, x, params, env, &binds)? { return Ok(false) }
@@ -5375,7 +6282,12 @@ fn variant_index(vs: Vec(types.VariantDef), name: str) -> i64 {
 // its coercions, generic instantiation and ownership rules. Runtime locals
 // are intentionally absent: only the compile-time environment is copied.
 impl sema.Sema {
-    pub fn eval_const_expr(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(sema.TypedConst, Diag) {
+    pub fn eval_const_expr(
+        inout self,
+        e: ast.Expr,
+        env: Env,
+        exp: Option(u32)
+    ) -> Result(sema.TypedConst, Diag) {
         if self.eval_depth >= 128 {
             return Err(err(e.span, "compile-time evaluation exceeded its dependency depth limit"))
         }
@@ -5390,7 +6302,8 @@ impl sema.Sema {
                 var attached = false
                 for n in d.notes {
                     match n.span {
-                        Some(sp) => if sp.file == e.span.file && sp.lo == e.span.lo && sp.hi == e.span.hi { attached = true }
+                        Some(sp) => if sp.file == e.span.file && sp.lo == e.span.lo &&
+                            sp.hi == e.span.hi { attached = true }
                         None => {}
                     }
                 }
@@ -5411,7 +6324,8 @@ impl sema.Sema {
             let v = self.types.field_tys(t)[0]
             let at = self.types.field_offsets(t)[0]
             let offs = self.types.field_offsets(v)
-            return Some(interp.Buffer { ptr: at + offs[0], len: at + offs[1], elem: types.U8, view: types.STR })
+            return Some(interp.Buffer { ptr: at + offs[0], len: at +
+                offs[1], elem: types.U8, view: types.STR })
         }
         if Some(decl) == self.lang.vec {
             let el = self.types.pointee(self.types.field_tys(t)[0]).unwrap()
@@ -5423,7 +6337,13 @@ impl sema.Sema {
     }
 
     // The `Drop` impls that a body's drops run, made into instances.
-    fn const_drops(inout self, body: mir.Body, inout drops: Map(u32, u32), inout ids: Vec(u32), span: Span) -> Result((), Diag) {
+    fn const_drops(
+        inout self,
+        body: mir.Body,
+        inout drops: Map(u32, u32),
+        inout ids: Vec(u32),
+        span: Span
+    ) -> Result((), Diag) {
         let dr = match self.lang.drop {
             Some(dr) => dr
             None => return Ok(())
@@ -5445,8 +6365,19 @@ impl sema.Sema {
         Ok(())
     }
 
-    fn eval_const_inner(inout self, e: ast.Expr, env: Env, exp: Option(u32)) -> Result(sema.TypedConst, Diag) {
-        var fb = Fb.new(4294967295, env.clone(), exp.unwrap_or(types.UNIT), ast.RetMode.Value, e.span)
+    fn eval_const_inner(
+        inout self,
+        e: ast.Expr,
+        env: Env,
+        exp: Option(u32)
+    ) -> Result(sema.TypedConst, Diag) {
+        var fb = Fb.new(
+            4294967295,
+            env.clone(),
+            exp.unwrap_or(types.UNIT),
+            ast.RetMode.Value,
+            e.span
+        )
         fb.push_scope(true)
         let v = self.expr(&fb, e, exp)?
         // A `String` or `Vec(T)` result becomes a `str` or `[T]` constant.
@@ -5528,7 +6459,15 @@ impl sema.Sema {
         }
         var interpreter = interp.Interpreter.new(self.profile_comptime)
         let result = match root.body {
-            Some(body) => interpreter.evaluate(&self.types, functions, drops, buffer, body, self.checked, e.span)
+            Some(body) => interpreter.evaluate(
+                &self.types,
+                functions,
+                drops,
+                buffer,
+                body,
+                self.checked,
+                e.span
+            )
             None => Err(err(e.span, "compile-time expression has no body"))
         }
         if self.profile_comptime {
@@ -5549,10 +6488,19 @@ impl sema.Sema {
 // the borrow checker sees the call as it sees any closure's.
 impl sema.Sema {
     // Moves a value of a type with the trait into a `dyn Trait`.
-    fn to_dyn(inout self, inout fb: Fb, sink v: Val, tr: u32, to: u32, span: Span) -> Result(Val, Diag) {
+    fn to_dyn(
+        inout self,
+        inout fb: Fb,
+        sink v: Val,
+        tr: u32,
+        to: u32,
+        span: Span
+    ) -> Result(Val, Diag) {
         let from = v.ty
         if self.types.is_view(from) {
-            return Err(err(span, ("a `" + self.types.show(to).as_str() + "` owns its value, and `" + self.types.show(from).as_str() + "` holds a borrow").as_str()))
+            return Err(err(span, ("a `" + self.types.show(to).as_str() +
+                "` owns its value, and `" + self.types.show(from).as_str() +
+                "` holds a borrow").as_str()))
         }
         let fns = self.vtable(tr, from, span)?
         let data = self.box_dyn(&fb, v, span)?
@@ -5563,7 +6511,14 @@ impl sema.Sema {
     }
 
     // A named function where a `dyn fn` is expected: nothing to own.
-    fn fn_to_dyn(inout self, inout fb: Fb, f: u32, sig: types.Sig, to: u32, span: Span) -> Result(Val, Diag) {
+    fn fn_to_dyn(
+        inout self,
+        inout fb: Fb,
+        f: u32,
+        sig: types.Sig,
+        to: u32,
+        span: Span
+    ) -> Result(Val, Diag) {
         var fns = Vec(u32).new()
         fns.push(self.dyn_destroy(types.UNIT, span)?)
         fns.push(self.closure_thunk(f, sig)?)
@@ -5614,7 +6569,8 @@ impl sema.Sema {
         for m in ms {
             let hit = match self.trait_method(tr, t, m.name.as_str(), m.fid)? {
                 Some(h) => h
-                None => return Err(err(span, ("`" + self.types.show(t).as_str() + "` has no method `" + m.name.as_str() + "`").as_str()))
+                None => return Err(err(span, ("`" + self.types.show(t).as_str() +
+                    "` has no method `" + m.name.as_str() + "`").as_str()))
             }
             let f = self.instance(hit.imp, hit.args, span)?
             fns.push(self.method_thunk(f, t, m, span)?)
@@ -5626,7 +6582,13 @@ impl sema.Sema {
     // A function for a table: it takes the `dyn` value's address (as a
     // closure takes its environment) and calls method `f` of `t` with the
     // value it points to as `self`.
-    fn method_thunk(inout self, f: u32, t: u32, m: sema.DynMethod, span: Span) -> Result(u32, Diag) {
+    fn method_thunk(
+        inout self,
+        f: u32,
+        t: u32,
+        m: sema.DynMethod,
+        span: Span
+    ) -> Result(u32, Diag) {
         let fsig = self.out[f as i64].sig.clone()
         let fpass = self.out[f as i64].pass.clone()
         var same = fsig.ret == m.sig.ret && fsig.params.len() == m.sig.params.len() + 1
@@ -5638,7 +6600,8 @@ impl sema.Sema {
             }
         }
         if !same {
-            return Err(err(span, ("`" + self.out[f as i64].name.as_str() + "` has another signature than the trait's `" + m.name.as_str() + "`").as_str()))
+            return Err(err(span, ("`" + self.out[f as i64].name.as_str() +
+                "` has another signature than the trait's `" + m.name.as_str() + "`").as_str()))
         }
         var params = Vec(u32).new()
         var pass = Vec(mir.ParamPass).new()
@@ -5666,22 +6629,38 @@ impl sema.Sema {
                     _ => false
                 }
                 let r = fb.temp(st, span)
-                fb.assign(Place.local(r), if mutable { Rvalue.RefMut(Place.deref(p)) } else { Rvalue.Ref(Place.deref(p)) }, span)
+                let borrow = if mutable {
+                    Rvalue.RefMut(Place.deref(p))
+                } else { Rvalue.Ref(Place.deref(p)) }
+                fb.assign(Place.local(r), borrow, span)
                 args.push(if mutable { Operand.Move(Place.local(r)) } else { copy_of(r) })
             }
             Value => args.push(Operand.Copy(Place.deref(p)))
-            Owned => return Err(err(span, "a method that takes `sink self` cannot be called through `dyn`"))
+            Owned => return Err(err(
+                span,
+                "a method that takes `sink self` cannot be called through `dyn`"
+            ))
         }
         for i in 1..locals.len() {
             let l = locals[i]
-            args.push(if self.types.is_plain(params[i]) { copy_of(l) } else { Operand.Move(Place.local(l)) })
+            args.push(if self.types.is_plain(params[i]) {
+                copy_of(l)
+            } else {
+                Operand.Move(Place.local(l))
+            })
         }
         let next = fb.new_block()
         fb.term(Term.Call(mir.Callee.Fn(f), args, Place.local(mir.RET), next, span))
         fb.switch_to(next)
         fb.term(Term.Return)
         let name = "dyn thunk for " + self.out[f as i64].name.as_str()
-        self.push_thunk(fb, name, types.Sig { params: params, ret: fsig.ret, c_abi: false, variadic: false }, pass, span)
+        self.push_thunk(
+            fb,
+            name,
+            types.Sig { params: params, ret: fsig.ret, c_abi: false, variadic: false },
+            pass,
+            span
+        )
         Ok(id)
     }
 
@@ -5709,14 +6688,24 @@ impl sema.Sema {
         args.push(copy_of(e))
         for i in 1..locals.len() {
             let l = locals[i]
-            args.push(if self.types.is_plain(params[i]) { copy_of(l) } else { Operand.Move(Place.local(l)) })
+            args.push(if self.types.is_plain(params[i]) {
+                copy_of(l)
+            } else {
+                Operand.Move(Place.local(l))
+            })
         }
         let next = fb.new_block()
         fb.term(Term.Call(mir.Callee.Fn(f), args, Place.local(mir.RET), next, span))
         fb.switch_to(next)
         fb.term(Term.Return)
         let name = "dyn thunk for " + self.out[f as i64].name.as_str()
-        self.push_thunk(fb, name, types.Sig { params: params, ret: sig.ret, c_abi: false, variadic: false }, pass, span)
+        self.push_thunk(
+            fb,
+            name,
+            types.Sig { params: params, ret: sig.ret, c_abi: false, variadic: false },
+            pass,
+            span
+        )
         id
     }
 
@@ -5733,7 +6722,14 @@ impl sema.Sema {
         p
     }
 
-    fn push_thunk(inout self, sink fb: Fb, sink name: String, sink sig: types.Sig, sink pass: Vec(mir.ParamPass), span: Span) {
+    fn push_thunk(
+        inout self,
+        sink fb: Fb,
+        sink name: String,
+        sink sig: types.Sig,
+        sink pass: Vec(mir.ParamPass),
+        span: Span
+    ) {
         let id = fb.id
         var symbol = String.from("dyn.")
         id.show(&symbol)
@@ -5755,7 +6751,15 @@ impl sema.Sema {
     }
 
     // `x.name(args)` on a `dyn Trait`.
-    fn dyn_method_call(inout self, inout fb: Fb, sink recv: Val, tr: u32, name: str, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn dyn_method_call(
+        inout self,
+        inout fb: Fb,
+        sink recv: Val,
+        tr: u32,
+        name: str,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         let ms = self.dyn_methods(tr, span)?
         for m in ms {
             if m.name == name {
@@ -5772,14 +6776,25 @@ impl sema.Sema {
         }
         let tn = self.types.show(recv.ty)
         if self.traits[tr as i64].fns.get(name).is_some() {
-            return Err(err(span, ("`" + tn.as_str() + "` cannot call `" + name + "`: only methods that take `self` or `inout self` can be called through `dyn`").as_str()))
+            let m = "`" + tn.as_str() + "` cannot call `" + name +
+                "`: only methods that take `self` or `inout self` can be called through `dyn`"
+            return Err(err(span, m.as_str()))
         }
         Err(err(span, ("`" + tn.as_str() + "` has no method `" + name + "`").as_str()))
     }
 
     // Calls function `slot` of a `dyn` value's table, with a borrow of the
     // value (mutable for `inout self`) as the closure's environment.
-    fn call_dyn(inout self, inout fb: Fb, sink v: Val, slot: i64, mutable: bool, sig: types.Sig, args: Vec(ast.Expr), span: Span) -> Result(Val, Diag) {
+    fn call_dyn(
+        inout self,
+        inout fb: Fb,
+        sink v: Val,
+        slot: i64,
+        mutable: bool,
+        sig: types.Sig,
+        args: Vec(ast.Expr),
+        span: Span
+    ) -> Result(Val, Diag) {
         if sig.params.len() != args.len() {
             var m = String.from("this function takes ")
             sig.params.len().show(&m)
@@ -5797,14 +6812,24 @@ impl sema.Sema {
         // before the call.
         let pp = self.types.ptr(types.BYTES)
         let a = fb.temp(pp, span)
-        fb.assign(Place.local(a), Rvalue.Cast(Operand.Copy(p.with(Proj.Field(1))), pp, mir.CastKind.Ptr), span)
+        fb.assign(
+            Place.local(a),
+            Rvalue.Cast(Operand.Copy(p.with(Proj.Field(1))), pp, mir.CastKind.Ptr),
+            span
+        )
         let s = fb.temp(pp, span)
-        fb.assign(Place.local(s), Rvalue.Offset(copy_of(a), int_const(slot as i128, types.I64)), span)
+        fb.assign(
+            Place.local(s),
+            Rvalue.Offset(copy_of(a), int_const(slot as i128, types.I64)),
+            span
+        )
         let code = fb.temp(types.BYTES, span)
         fb.assign(Place.local(code), Rvalue.Use(Operand.Copy(Place.deref(s))), span)
         let rt = if mutable { self.types.refmut(dt) } else { self.types.refty(dt) }
         let r = fb.temp(rt, span)
-        fb.assign(Place.local(r), if mutable { Rvalue.RefMut(p.clone()) } else { Rvalue.Ref(p.clone()) }, span)
+        fb.assign(Place.local(r), if mutable {
+            Rvalue.RefMut(p.clone())
+        } else { Rvalue.Ref(p.clone()) }, span)
         let ct = self.types.intern(TyKind.Closure(sig.clone()))
         let c = fb.temp(ct, span)
         var cops = Vec(Operand).new()

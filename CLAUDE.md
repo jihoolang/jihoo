@@ -65,6 +65,10 @@ nix flake check                                    # everything CI runs
 
 - `tests/run/*.jh`: `//> text` lines are expected stdout in order, `// exit: N`
   the exit status (a trap is 132), `// args: a b` the arguments.
+- `compiler/` and `lib/std` are formatted: the `format` suite runs
+  `fmt --check` on them, so replace an edited file with the output of
+  `out/jihoo fmt` (it prints; it does not rewrite). Break long expressions
+  without a list after an operator such as `+` or `&&`.
 - `tests/fail/*.jh`: each `// error: text` must appear in the compile error.
   Add one for every error the compiler should give, especially borrow rules.
 - `selfhost`: the tested compiler builds `compiler/main.jh`, and the result must

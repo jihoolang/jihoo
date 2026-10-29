@@ -70,7 +70,14 @@ impl Scope {
     }
 
     // The compiler supplies a fresh capture tuple and its lifted entry.
-    unsafe fn spawn_env(inout self, comptime E: type, comptime T: type, sink env: E, run: fnptr(*E) -> T, frame: ref i64) -> ScopedJoinHandle(T) {
+    unsafe fn spawn_env(
+        inout self,
+        comptime E: type,
+        comptime T: type,
+        sink env: E,
+        run: fnptr(*E) -> T,
+        frame: ref i64
+    ) -> ScopedJoinHandle(T) {
         unsafe {
             let task = mem.alloc(ScopedTask(E, T), 1)
             write(task, ScopedTask(E, T) {

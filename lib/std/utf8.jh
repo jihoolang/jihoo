@@ -6,7 +6,8 @@ pub fn decode(s: str, at: i64) -> Result((u32, i64), String) {
     }
     let b = s[at]
     if b < 0x80 { return Ok((b as u32, 1)) }
-    let width = if b >= 0xc2 && b <= 0xdf { 2 } else if b >= 0xe0 && b <= 0xef { 3 } else if b >= 0xf0 && b <= 0xf4 { 4 } else { 0 }
+    let width = if b >= 0xc2 && b <= 0xdf { 2 } else if b >= 0xe0 &&
+        b <= 0xef { 3 } else if b >= 0xf0 && b <= 0xf4 { 4 } else { 0 }
     if width == 0 || s.len - at < width { return Err("invalid UTF-8") }
     var cp = (b & (0x7f >> width)) as u32
     for i in 1..width {

@@ -330,7 +330,12 @@ impl Clone for Attr {
 
 impl Clone for Item {
     fn clone(self) -> Item {
-        Item { span: self.span, public: self.public, attrs: self.attrs.clone(), kind: self.kind.clone() }
+        Item {
+            span: self.span,
+            public: self.public,
+            attrs: self.attrs.clone(),
+            kind: self.kind.clone()
+        }
     }
 }
 
@@ -339,10 +344,28 @@ impl Clone for ItemKind {
         match self {
             Import(i) => ItemKind.Import(Import { path: i.path.clone(), alias: i.alias.clone() })
             Fn(f) => ItemKind.Fn(f.clone())
-            Struct(s) => ItemKind.Struct(StructDecl { name: s.name.clone(), params: s.params.clone(), fields: s.fields.clone() })
-            Enum(e) => ItemKind.Enum(EnumDecl { name: e.name.clone(), params: e.params.clone(), variants: e.variants.clone() })
-            Impl(i) => ItemKind.Impl(ImplDecl { params: i.params.clone(), trait_: i.trait_.clone(), self_ty: i.self_ty.clone(), items: i.items.clone() })
-            Trait(t) => ItemKind.Trait(TraitDecl { name: t.name.clone(), params: t.params.clone(), supertraits: t.supertraits.clone(), items: t.items.clone() })
+            Struct(s) => ItemKind.Struct(StructDecl {
+                name: s.name.clone(),
+                params: s.params.clone(),
+                fields: s.fields.clone()
+            })
+            Enum(e) => ItemKind.Enum(EnumDecl {
+                name: e.name.clone(),
+                params: e.params.clone(),
+                variants: e.variants.clone()
+            })
+            Impl(i) => ItemKind.Impl(ImplDecl {
+                params: i.params.clone(),
+                trait_: i.trait_.clone(),
+                self_ty: i.self_ty.clone(),
+                items: i.items.clone()
+            })
+            Trait(t) => ItemKind.Trait(TraitDecl {
+                name: t.name.clone(),
+                params: t.params.clone(),
+                supertraits: t.supertraits.clone(),
+                items: t.items.clone()
+            })
             Const(c) => ItemKind.Const(c.clone())
             Static(c) => ItemKind.Static(c.clone())
             TypeAlias(n, t) => ItemKind.TypeAlias(n.clone(), t.clone())
@@ -370,7 +393,13 @@ impl Clone for Variant {
 
 impl Clone for Param {
     fn clone(self) -> Param {
-        Param { name: self.name.clone(), mode: self.mode, ty: self.ty.clone(), bounds: self.bounds.clone(), span: self.span }
+        Param {
+            name: self.name.clone(),
+            mode: self.mode,
+            ty: self.ty.clone(),
+            bounds: self.bounds.clone(),
+            span: self.span
+        }
     }
 }
 
@@ -433,7 +462,12 @@ impl Clone for Stmt {
 impl Clone for StmtKind {
     fn clone(self) -> StmtKind {
         match self {
-            Let(l) => StmtKind.Let(LetStmt { kind: l.kind, pat: l.pat.clone(), ty: l.ty.clone(), value: l.value.clone() })
+            Let(l) => StmtKind.Let(LetStmt {
+                kind: l.kind,
+                pat: l.pat.clone(),
+                ty: l.ty.clone(),
+                value: l.value.clone()
+            })
             Assign(a, b) => StmtKind.Assign(a.clone(), b.clone())
             OpAssign(op, a, b) => StmtKind.OpAssign(op, a.clone(), b.clone())
             Expr(e) => StmtKind.Expr(e.clone())
@@ -449,7 +483,12 @@ impl Clone for Expr {
 
 impl Clone for Arm {
     fn clone(self) -> Arm {
-        Arm { pat: self.pat.clone(), guard: self.guard.clone(), body: self.body.clone(), span: self.span }
+        Arm {
+            pat: self.pat.clone(),
+            guard: self.guard.clone(),
+            body: self.body.clone(),
+            span: self.span
+        }
     }
 }
 

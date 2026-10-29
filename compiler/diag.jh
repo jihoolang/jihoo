@@ -44,7 +44,9 @@ impl Diag {
     // The first of several errors, carrying the others, in source order.
     pub fn several(sink errors: Vec(Diag)) -> Diag {
         var errors = errors
-        sort_by(&errors, fn(a, b) { a.span.file < b.span.file || (a.span.file == b.span.file && a.span.lo < b.span.lo) })
+        sort_by(&errors, fn(a, b) {
+            a.span.file < b.span.file || (a.span.file == b.span.file && a.span.lo < b.span.lo)
+        })
         var first: Option(Diag) = None
         var rest = Vec(Diag).new()
         for d in errors.into_iter() {

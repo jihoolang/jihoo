@@ -131,7 +131,10 @@ impl(K: Hash + Eq, V: type) Map(K, V) {
 
     fn grow(inout self) {
         let old_cap = self.cap
-        let old_state = mem.replace(&self.state, Vec.filled(if old_cap == 0 { 8 } else { old_cap * 2 }, 0 as u8))
+        let old_state = mem.replace(
+            &self.state,
+            Vec.filled(if old_cap == 0 { 8 } else { old_cap * 2 }, 0 as u8)
+        )
         let old_keys = self.keys
         let old_vals = self.vals
         self.cap = self.state.len()

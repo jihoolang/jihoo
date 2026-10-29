@@ -165,7 +165,10 @@ impl Interpreter {
     }
 
     fn tick(inout self, span: Span) -> Result((), Diag) {
-        if self.steps >= MAX_STEPS { return Err(error(span, "compile-time evaluation exceeded its step limit")) }
+        if self.steps >= MAX_STEPS { return Err(error(
+            span,
+            "compile-time evaluation exceeded its step limit"
+        )) }
         self.steps += 1
         if self.profile { self.costs[self.current].steps += 1 }
         Ok(())
@@ -183,7 +186,14 @@ impl Interpreter {
         var initialized = Vec(bool).new()
         var pointers = Vec(bool).new()
         for _ in 0..n as i64 { initialized.push(false); pointers.push(false) }
-        self.memory.push(Allocation { bytes: zero(n), initialized: initialized, pointers: pointers, live: true, readonly: readonly, heap: false })
+        self.memory.push(Allocation {
+            bytes: zero(n),
+            initialized: initialized,
+            pointers: pointers,
+            live: true,
+            readonly: readonly,
+            heap: false
+        })
         Ok((self.memory.len() as u64) << 32)
     }
 
@@ -193,13 +203,22 @@ impl Interpreter {
         // An empty access through a null or dangling pointer, such as an
         // empty `Vec`'s, touches no memory.
         if n == 0 && id < 0 { return Ok(()) }
-        if id < 0 || id >= self.memory.len() { return Err(error(span, "invalid pointer during compile-time evaluation")) }
+        if id < 0 || id >= self.memory.len() { return Err(error(
+            span,
+            "invalid pointer during compile-time evaluation"
+        )) }
         let a = self.memory[id]
-        if !a.live { return Err(error(span, "compile-time evaluation accessed a value outside its lifetime")) }
+        if !a.live { return Err(error(
+            span,
+            "compile-time evaluation accessed a value outside its lifetime"
+        )) }
         if off > a.bytes.len() as u64 || n > a.bytes.len() as u64 - off {
             return Err(error(span, "out-of-bounds memory access during compile-time evaluation"))
         }
-        if write && a.readonly { return Err(error(span, "cannot change constant memory during compile-time evaluation")) }
+        if write && a.readonly { return Err(error(
+            span,
+            "cannot change constant memory during compile-time evaluation"
+        )) }
         Ok(())
     }
 
@@ -228,7 +247,13 @@ impl Interpreter {
         for i in 0..n as i64 { self.memory[id].pointers[off + i] = true }
     }
 
-    fn pointer_fields(inout self, inout t: Types, addr: u64, ty: u32, span: Span) -> Result((), Diag) {
+    fn pointer_fields(
+        inout self,
+        inout t: Types,
+        addr: u64,
+        ty: u32,
+        span: Span
+    ) -> Result((), Diag) {
         self.tick(span)?
         let k = t.kind(ty).clone()
         match k {
@@ -237,20 +262,31 @@ impl Interpreter {
             Closure(_) | Dyn(_) | DynFn(_) => self.mark_pointer(addr, 2 * t.ptr_size)
             Array(el, n) => {
                 let stride = t.layout(el).size
-                if stride > 0 { for i in 0..n as i64 { self.pointer_fields(&t, addr + i as u64 * stride, el, span)? } }
+                if stride > 0 {
+                    for i in 0..n as i64 {
+                        self.pointer_fields(&t, addr + i as u64 * stride, el, span)?
+                    }
+                }
             }
             Adt(_) => match t.variants(ty) {
                 Some(vs) => {
                     let variants = vs.clone()
                     let layout = t.enum_layout(ty).1
                     let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
-                    if tag >= variants.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
+                    if tag >= variants.len() as u128 { return Err(error(
+                        span,
+                        "invalid enum tag during compile-time evaluation"
+                    )) }
                     let fields = variants[tag as i64].fields.clone()
-                    for i, f in fields { self.pointer_fields(&t, addr + layout.fields[tag as i64][i], f, span)? }
+                    for i, f in fields {
+                        self.pointer_fields(&t, addr + layout.fields[tag as i64][i], f, span)?
+                    }
                 }
                 None => {
                     let offs = t.field_offsets(ty)
-                    for i, f in t.field_tys(ty) { self.pointer_fields(&t, addr + offs[i], f, span)? }
+                    for i, f in t.field_tys(ty) {
+                        self.pointer_fields(&t, addr + offs[i], f, span)?
+                    }
                 }
             }
             Tuple(ts) => {
@@ -262,7 +298,14 @@ impl Interpreter {
         Ok(())
     }
 
-    fn write_typed(inout self, inout t: Types, addr: u64, v: Value, ty: u32, span: Span) -> Result((), Diag) {
+    fn write_typed(
+        inout self,
+        inout t: Types,
+        addr: u64,
+        v: Value,
+        ty: u32,
+        span: Span
+    ) -> Result((), Diag) {
         self.write(addr, v, span)?
         self.pointer_fields(&t, addr, ty, span)
     }
@@ -281,7 +324,9 @@ impl Interpreter {
             }
             Array(el, n) => {
                 let stride = t.layout(el).size
-                if stride > 0 { for i in 0..n as i64 { self.validate(&t, addr + i as u64 * stride, el, span)? } }
+                if stride > 0 {
+                    for i in 0..n as i64 { self.validate(&t, addr + i as u64 * stride, el, span)? }
+                }
                 return Ok(())
             }
             Adt(_) => {
@@ -290,12 +335,21 @@ impl Interpreter {
                     Some(vs) => {
                         let fields = vs.clone()
                         let layout = t.enum_layout(ty).1
-                        self.validate(&t, addr, if layout.tag_bits == 8 { types.U8 } else { types.U32 }, span)?
+                        self.validate(&t, addr, if layout.tag_bits == 8 {
+                            types.U8
+                        } else { types.U32 }, span)?
                         let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
-                        if tag >= fields.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
-                        for i, f in fields[tag as i64].fields { self.validate(&t, addr + layout.fields[tag as i64][i], f, span)? }
+                        if tag >= fields.len() as u128 { return Err(error(
+                            span,
+                            "invalid enum tag during compile-time evaluation"
+                        )) }
+                        for i, f in fields[tag as i64].fields {
+                            self.validate(&t, addr + layout.fields[tag as i64][i], f, span)?
+                        }
                     }
-                    None => { for i, f in t.field_tys(ty) { self.validate(&t, addr + offs[i], f, span)? } }
+                    None => {
+                        for i, f in t.field_tys(ty) { self.validate(&t, addr + offs[i], f, span)? }
+                    }
                 }
                 return Ok(())
             }
@@ -305,14 +359,31 @@ impl Interpreter {
         let off = (addr & 0xffffffff) as i64
         let opaque = match t.kind(ty) { Int(_) | Float(_) | Bool => true, _ => false }
         for i in 0..size as i64 {
-            if !self.memory[id].initialized[off + i] { return Err(error(span, "uninitialized memory during compile-time evaluation")) }
-            if opaque && self.memory[id].pointers[off + i] { return Err(error(span, "a compile-time pointer cannot be read as scalar bytes")) }
+            if !self.memory[id].initialized[off +
+                i] { return Err(error(
+                    span,
+                    "uninitialized memory during compile-time evaluation"
+                )) }
+            if opaque && self.memory[id].pointers[off +
+                i] { return Err(error(
+                    span,
+                    "a compile-time pointer cannot be read as scalar bytes"
+                )) }
         }
-        if ty == types.BOOL && self.memory[id].bytes[off] > 1 { return Err(error(span, "invalid bool during compile-time evaluation")) }
+        if ty == types.BOOL && self.memory[id].bytes[off] > 1 { return Err(error(
+            span,
+            "invalid bool during compile-time evaluation"
+        )) }
         Ok(())
     }
 
-    fn read_typed(inout self, inout t: Types, addr: u64, ty: u32, span: Span) -> Result(Value, Diag) {
+    fn read_typed(
+        inout self,
+        inout t: Types,
+        addr: u64,
+        ty: u32,
+        span: Span
+    ) -> Result(Value, Diag) {
         self.validate(&t, addr, ty, span)?
         self.read(addr, t.layout(ty).size, span)
     }
@@ -353,11 +424,21 @@ impl Interpreter {
                 self.memory[(addr >> 32) as i64 - 1].readonly = true
                 integer(addr as u128, t.ptr_size)
             }
-            Static(_, _) => return Err(error(span, "statics cannot be accessed during compile-time evaluation"))
+            Static(_, _) => return Err(error(
+                span,
+                "statics cannot be accessed during compile-time evaluation"
+            ))
         })
     }
 
-    fn place(inout self, inout t: Types, body: mir.Body, fr: Frame, p: mir.Place, span: Span) -> Result((u64, u32), Diag) {
+    fn place(
+        inout self,
+        inout t: Types,
+        body: mir.Body,
+        fr: Frame,
+        p: mir.Place,
+        span: Span
+    ) -> Result((u64, u32), Diag) {
         var addr = fr.locals[p.local as i64]
         var ty = body.locals[p.local as i64].ty
         var variant: Option(u32) = None
@@ -393,10 +474,16 @@ impl Interpreter {
                     let index = signed(t, bits(iv, span)?, it)
                     match t.kind(ty) {
                         Array(el, len) => {
-                            if index < 0 || index as u128 >= len as u128 { return Err(error(span, "array index out of bounds during compile-time evaluation")) }
+                            if index < 0 || index as u128 >= len as u128 { return Err(error(
+                                span,
+                                "array index out of bounds during compile-time evaluation"
+                            )) }
                             ty = el
                         }
-                        _ => return Err(error(span, "invalid array projection during compile-time evaluation"))
+                        _ => return Err(error(
+                            span,
+                            "invalid array projection during compile-time evaluation"
+                        ))
                     }
                     addr += index as u64 * t.layout(ty).size
                 }
@@ -449,7 +536,14 @@ impl Interpreter {
         }
     }
 
-    fn operand(inout self, inout t: Types, body: mir.Body, fr: Frame, o: mir.Operand, span: Span) -> Result(Value, Diag) {
+    fn operand(
+        inout self,
+        inout t: Types,
+        body: mir.Body,
+        fr: Frame,
+        o: mir.Operand,
+        span: Span
+    ) -> Result(Value, Diag) {
         match o {
             Copy(p) => {
                 let (addr, ty) = self.place(&t, body, fr, p, span)?
@@ -471,7 +565,17 @@ impl Interpreter {
         })
     }
 
-    fn binary(inout self, inout t: Types, op: lex.Op, a: Value, b: Value, ty: u32, out_ty: u32, checked: bool, span: Span) -> Result(Value, Diag) {
+    fn binary(
+        inout self,
+        inout t: Types,
+        op: lex.Op,
+        a: Value,
+        b: Value,
+        ty: u32,
+        out_ty: u32,
+        checked: bool,
+        span: Span
+    ) -> Result(Value, Diag) {
         if t.is_float(ty) {
             let x = float_value(a, ty, span)?
             let y = float_value(b, ty, span)?
@@ -486,7 +590,10 @@ impl Interpreter {
                 Le => integer(if x <= y { 1 } else { 0 }, 1)
                 Gt => integer(if x > y { 1 } else { 0 }, 1)
                 Ge => integer(if x >= y { 1 } else { 0 }, 1)
-                _ => return Err(error(span, "unsupported float operation during compile-time evaluation"))
+                _ => return Err(error(
+                    span,
+                    "unsupported float operation during compile-time evaluation"
+                ))
             })
         }
         let x = bits(a, span)?
@@ -500,7 +607,12 @@ impl Interpreter {
         let n = (y as u32) % width
         var operation = op
         if !checked {
-            operation = match op { Add => lex.Op.AddWrap, Sub => lex.Op.SubWrap, Mul => lex.Op.MulWrap, _ => op }
+            operation = match op {
+                Add => lex.Op.AddWrap
+                Sub => lex.Op.SubWrap
+                Mul => lex.Op.MulWrap
+                _ => op
+            }
         }
         // Use the constant folder's checked 128-bit arithmetic and signed
         // comparisons, then verify the narrower target width below.
@@ -511,29 +623,55 @@ impl Interpreter {
                 Or | LogOr => if x != 0 || y != 0 { 1 } else { 0 }
                 Eq => if x == y { 1 } else { 0 }
                 Ne | Xor => if x != y { 1 } else { 0 }
-                _ => return Err(error(span, "unsupported bool operation during compile-time evaluation"))
+                _ => return Err(error(
+                    span,
+                    "unsupported bool operation during compile-time evaluation"
+                ))
             }
         } else {
-            let folded = sema.fold_128(operation, if is_signed { sx } else { x as i128 }, if is_signed { sy } else { y as i128 }, is_signed, ty, span)?
-            result = match folded.c { Int(v, _) => v as u128, Bool(v) => if v { 1 } else { 0 }, _ => 0 }
-            if checked && width < 128 && (op == lex.Op.Add || op == lex.Op.Sub || op == lex.Op.Mul) {
+            let folded = sema.fold_128(operation, if is_signed {
+                sx
+            } else { x as i128 }, if is_signed { sy } else { y as i128 }, is_signed, ty, span)?
+            result = match folded.c {
+                Int(v, _) => v as u128
+                Bool(v) => if v { 1 } else { 0 }
+                _ => 0
+            }
+            if checked && width < 128 &&
+                (op == lex.Op.Add || op == lex.Op.Sub || op == lex.Op.Mul) {
                 if is_signed {
                     let limit: i128 = 1 << (width - 1)
-                    if (result as i128) < 0 - limit || result as i128 >= limit { return Err(error(span, "the result overflows its type")) }
-                } else if result >= (1 as u128 << width) { return Err(error(span, "the result overflows its type")) }
+                    if (result as i128) < 0 - limit ||
+                        result as i128 >= limit { return Err(error(
+                        span,
+                        "the result overflows its type"
+                    )) }
+                } else if result >= (1 as u128 << width) { return Err(error(
+                    span,
+                    "the result overflows its type"
+                )) }
             }
             // The shift count is reduced by the operand width, not 128.
             if op == lex.Op.Shl { result = x << n }
             if op == lex.Op.Shr { result = if is_signed { (sx >> n) as u128 } else { x >> n } }
             if is_signed && (op == lex.Op.Div || op == lex.Op.Rem) && width < 128 {
                 let min: i128 = 0 - (1 as i128 << (width - 1))
-                if sx == min && sy == -1 { return Err(error(span, "the result overflows its type")) }
+                if sx == min && sy == -1 {
+                    return Err(error(span, "the result overflows its type"))
+                }
             }
         }
         Ok(integer(result, t.layout(out_ty).size))
     }
 
-    fn cast(inout self, inout t: Types, v: Value, from: u32, to: u32, span: Span) -> Result(Value, Diag) {
+    fn cast(
+        inout self,
+        inout t: Types,
+        v: Value,
+        from: u32,
+        to: u32,
+        span: Span
+    ) -> Result(Value, Diag) {
         let n = t.layout(to).size
         let from_pointer = t.is_ptr(from) || t.is_ref(from)
         if from_pointer && t.is_int(to) && bits(v, span)? != 0 {
@@ -567,7 +705,16 @@ impl Interpreter {
         Ok(integer(signed(t, x, from) as u128, n))
     }
 
-    fn rvalue(inout self, inout t: Types, body: mir.Body, fr: Frame, rv: mir.Rvalue, ty: u32, checked: bool, span: Span) -> Result(Value, Diag) {
+    fn rvalue(
+        inout self,
+        inout t: Types,
+        body: mir.Body,
+        fr: Frame,
+        rv: mir.Rvalue,
+        ty: u32,
+        checked: bool,
+        span: Span
+    ) -> Result(Value, Diag) {
         match rv {
             Use(o) => self.operand(&t, body, fr, o, span)
             Ref(p) => {
@@ -596,7 +743,10 @@ impl Interpreter {
                 match op {
                     Neg => {
                         let width = t.int(ty).unwrap().bits
-                        if checked && x == (1 as u128 << (width - 1)) { return Err(error(span, "the result overflows its type")) }
+                        if checked && x == (1 as u128 << (width - 1)) { return Err(error(
+                            span,
+                            "the result overflows its type"
+                        )) }
                         v = 0 -% x
                     }
                     Not => { if ty == types.BOOL { v = if x == 0 { 1 } else { 0 } } }
@@ -610,7 +760,10 @@ impl Interpreter {
             }
             Aggregate(agg, os) => {
                 let size = t.layout(ty).size
-                if size > MAX_MEMORY { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                if size > MAX_MEMORY { return Err(error(
+                    span,
+                    "compile-time evaluation exceeded its memory limit"
+                )) }
                 var out = zero(size)
                 var offs = Vec(u64).new()
                 match agg {
@@ -643,7 +796,10 @@ impl Interpreter {
                 let index = signed(t, bits(bv, span)?, bt)
                 let stride = t.layout(t.pointee(at).unwrap()).size
                 let off = (addr & 0xffffffff) as i128 + index * stride as i128
-                if off < 0 || off > 0xffffffff { return Err(error(span, "invalid pointer offset during compile-time evaluation")) }
+                if off < 0 || off > 0xffffffff { return Err(error(
+                    span,
+                    "invalid pointer offset during compile-time evaluation"
+                )) }
                 let next = (addr & 0xffffffff00000000) | off as u64
                 self.check(next, 0, false, span)?
                 Ok(integer(next as u128, t.ptr_size))
@@ -660,14 +816,24 @@ impl Interpreter {
         }
     }
 
-    fn intrinsic(inout self, inout t: Types, i: mir.Intrinsic, args: Vec(Value), span: Span) -> Result(Value, Diag) {
+    fn intrinsic(
+        inout self,
+        inout t: Types,
+        i: mir.Intrinsic,
+        args: Vec(Value),
+        span: Span
+    ) -> Result(Value, Diag) {
         match i {
             Copy(ty) => {
                 let dst = bits(args[0], span)? as u64
                 let src = bits(args[1], span)? as u64
                 let count = bits(args[2], span)?
                 let stride = t.layout(ty).size
-                if count > MAX_MEMORY as u128 || count * stride as u128 > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                if count > MAX_MEMORY as u128 ||
+                    count * stride as u128 > MAX_MEMORY as u128 { return Err(error(
+                    span,
+                    "compile-time evaluation exceeded its memory limit"
+                )) }
                 let v = self.read(src, count as u64 * stride, span)?
                 var initialized = Vec(bool).new()
                 var pointers = Vec(bool).new()
@@ -690,7 +856,10 @@ impl Interpreter {
                 let dst = bits(args[0], span)? as u64
                 let byte = bits(args[1], span)? as u8
                 let count = bits(args[2], span)?
-                if count > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+                if count > MAX_MEMORY as u128 { return Err(error(
+                    span,
+                    "compile-time evaluation exceeded its memory limit"
+                )) }
                 var v = zero(count as u64)
                 for j in 0..v.len() { v[j] = byte }
                 self.write(dst, v, span)?
@@ -704,7 +873,13 @@ impl Interpreter {
     // The allocator's three functions work on interpreter memory, in both
     // profiles: `alloc_bytes` makes an allocation, `realloc_bytes` moves
     // one, and `free_bytes` ends its lifetime.
-    fn heap(inout self, inout t: Types, op: u8, args: Vec(Value), span: Span) -> Result(Value, Diag) {
+    fn heap(
+        inout self,
+        inout t: Types,
+        op: u8,
+        args: Vec(Value),
+        span: Span
+    ) -> Result(Value, Diag) {
         if op == 2 {
             let p = bits(args[0], span)? as u64
             if p == 0 { return Ok(Value.new()) }
@@ -712,7 +887,10 @@ impl Interpreter {
             return Ok(Value.new())
         }
         let n = signed(t, bits(args[args.len() - 1], span)?, types.I64)
-        if n < 0 || n as u128 > MAX_MEMORY as u128 { return Err(error(span, "compile-time evaluation exceeded its memory limit")) }
+        if n < 0 || n as u128 > MAX_MEMORY as u128 { return Err(error(
+            span,
+            "compile-time evaluation exceeded its memory limit"
+        )) }
         let addr = self.alloc(n as u64, false, span)?
         self.memory[(addr >> 32) as i64 - 1].heap = true
         if op == 1 {
@@ -735,14 +913,26 @@ impl Interpreter {
         if id < 0 || id >= self.memory.len() || addr & 0xffffffff != 0 || !self.memory[id].heap {
             return Err(error(span, "compile-time evaluation freed memory it did not allocate"))
         }
-        if !self.memory[id].live { return Err(error(span, "compile-time evaluation freed memory twice")) }
+        if !self.memory[id].live { return Err(error(
+            span,
+            "compile-time evaluation freed memory twice"
+        )) }
         self.memory[id].live = false
         Ok(())
     }
 
     // Runs a value's destructor, as the code generator's drop glue does:
     // the type's `drop`, then its parts.
-    fn drop_value(inout self, inout t: Types, fns: Vec(mir.Function), addr: u64, ty: u32, checked: bool, depth: u32, span: Span) -> Result((), Diag) {
+    fn drop_value(
+        inout self,
+        inout t: Types,
+        fns: Vec(mir.Function),
+        addr: u64,
+        ty: u32,
+        checked: bool,
+        depth: u32,
+        span: Span
+    ) -> Result((), Diag) {
         if !t.needs_drop(ty) { return Ok(()) }
         self.tick(span)?
         var hook: Option(u32) = None
@@ -759,32 +949,48 @@ impl Interpreter {
         match k {
             Dyn(_) | DynFn(_) => {
                 let data = bits(self.read_typed(&t, addr, types.BYTES, span)?, span)?
-                let vt = bits(self.read_typed(&t, addr + t.ptr_size, types.BYTES, span)?, span)? as u64
+                let vt = bits(self.read_typed(&t, addr +
+                    t.ptr_size, types.BYTES, span)?, span)? as u64
                 let f = bits(self.read(vt, t.ptr_size, span)?, span)?
-                if f == 0 || f > fns.len() as u128 { return Err(error(span, "invalid compile-time function pointer")) }
+                if f == 0 || f > fns.len() as u128 { return Err(error(
+                    span,
+                    "invalid compile-time function pointer"
+                )) }
                 var args = Vec(Value).new()
                 args.push(integer(data, t.ptr_size))
                 let _ = self.call(&t, fns, f as u32 - 1, args, checked, depth + 1, span)?
             }
             Array(el, n) => {
                 let stride = t.layout(el).size
-                for i in 0..n as i64 { self.drop_value(&t, fns, addr + i as u64 * stride, el, checked, depth, span)? }
+                for i in 0..n as i64 {
+                    self.drop_value(&t, fns, addr + i as u64 * stride, el, checked, depth, span)?
+                }
             }
             Tuple(ts) => {
                 let offs = t.field_offsets(ty)
-                for i, f in ts { self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)? }
+                for i, f in ts {
+                    self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)?
+                }
             }
             Adt(_) => match t.variants(ty) {
                 Some(vs) => {
                     let variants = vs.clone()
                     let layout = t.enum_layout(ty).1
                     let tag = bits(self.read(addr, (layout.tag_bits / 8) as u64, span)?, span)?
-                    if tag >= variants.len() as u128 { return Err(error(span, "invalid enum tag during compile-time evaluation")) }
-                    for i, f in variants[tag as i64].fields { self.drop_value(&t, fns, addr + layout.fields[tag as i64][i], f, checked, depth, span)? }
+                    if tag >= variants.len() as u128 { return Err(error(
+                        span,
+                        "invalid enum tag during compile-time evaluation"
+                    )) }
+                    for i, f in variants[tag as i64].fields {
+                        self.drop_value(&t, fns, addr +
+                            layout.fields[tag as i64][i], f, checked, depth, span)?
+                    }
                 }
                 None => {
                     let offs = t.field_offsets(ty)
-                    for i, f in t.field_tys(ty) { self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)? }
+                    for i, f in t.field_tys(ty) {
+                        self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)?
+                    }
                 }
             }
             _ => {}
@@ -792,8 +998,19 @@ impl Interpreter {
         Ok(())
     }
 
-    fn call(inout self, inout t: Types, fns: Vec(mir.Function), id: u32, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
-        if id as i64 >= fns.len() { return Err(error(span, "invalid compile-time function pointer")) }
+    fn call(
+        inout self,
+        inout t: Types,
+        fns: Vec(mir.Function),
+        id: u32,
+        args: Vec(Value),
+        checked: bool,
+        depth: u32,
+        span: Span
+    ) -> Result(Value, Diag) {
+        if id as i64 >= fns.len() {
+            return Err(error(span, "invalid compile-time function pointer"))
+        }
         let f = fns[id as i64]
         let op = heap_op(f.symbol.as_str())
         let previous = self.current
@@ -803,7 +1020,8 @@ impl Interpreter {
         }
         let result = if op < 3 { self.heap(&t, op, args, span) } else { match f.body {
             Some(body) => self.execute(&t, fns, body, args, checked, depth, span)
-            None => Err(error(span, ("external function `" + f.name.as_str() + "` cannot be called during compile-time evaluation").as_str()))
+            None => Err(error(span, ("external function `" + f.name.as_str() +
+                "` cannot be called during compile-time evaluation").as_str()))
         } }
         self.current = previous
         match result {
@@ -811,20 +1029,35 @@ impl Interpreter {
             Err(d) => {
                 if self.trace_notes < 8 {
                     self.trace_notes += 1
-                    return Err(d.note(Some(span), ("in compile-time call to `" + f.name.as_str() + "`").as_str()))
+                    return Err(d.note(Some(span), ("in compile-time call to `" +
+                        f.name.as_str() + "`").as_str()))
                 }
                 Err(d)
             }
         }
     }
 
-    fn execute(inout self, inout t: Types, fns: Vec(mir.Function), body: mir.Body, args: Vec(Value), checked: bool, depth: u32, span: Span) -> Result(Value, Diag) {
-        if depth >= MAX_DEPTH { return Err(error(span, "compile-time evaluation exceeded its call depth limit")) }
+    fn execute(
+        inout self,
+        inout t: Types,
+        fns: Vec(mir.Function),
+        body: mir.Body,
+        args: Vec(Value),
+        checked: bool,
+        depth: u32,
+        span: Span
+    ) -> Result(Value, Diag) {
+        if depth >= MAX_DEPTH { return Err(error(
+            span,
+            "compile-time evaluation exceeded its call depth limit"
+        )) }
         self.max_depth = max(self.max_depth, depth + 1)
         self.tick(span)?
         var fr = Frame { locals: Vec(u64).new() }
         for l in body.locals { fr.locals.push(self.alloc(t.layout(l.ty).size, false, l.span)?) }
-        for i, arg in args { self.write_typed(&t, fr.locals[i + 1], arg, body.locals[i + 1].ty, span)? }
+        for i, arg in args {
+            self.write_typed(&t, fr.locals[i + 1], arg, body.locals[i + 1].ty, span)?
+        }
         var block: u32 = 0
         loop {
             self.tick(span)?
@@ -845,7 +1078,9 @@ impl Interpreter {
                             self.memory[id].pointers[i] = false
                         }
                     }
-                    StorageDead(l) => self.memory[(fr.locals[l as i64] >> 32) as i64 - 1].live = false
+                    StorageDead(l) => {
+                        self.memory[(fr.locals[l as i64] >> 32) as i64 - 1].live = false
+                    }
                     Drop(p, sp) => {
                         let (addr, ty) = self.place(&t, body, fr, p, sp)?
                         self.drop_value(&t, fns, addr, ty, checked, depth, sp)?
@@ -876,13 +1111,19 @@ impl Interpreter {
                         Fn(f) => function = Some(f)
                         Ptr(o) => {
                             let v = bits(self.operand(&t, body, fr, o, sp)?, sp)?
-                            if v == 0 || v > fns.len() as u128 { return Err(error(sp, "invalid compile-time function pointer")) }
+                            if v == 0 || v > fns.len() as u128 { return Err(error(
+                                sp,
+                                "invalid compile-time function pointer"
+                            )) }
                             function = Some(v as u32 - 1)
                         }
                         Closure(o) => {
                             let v = self.operand(&t, body, fr, o, sp)?
                             let f = bits(part(v, 0, t.ptr_size), sp)?
-                            if f == 0 || f > fns.len() as u128 { return Err(error(sp, "invalid compile-time closure")) }
+                            if f == 0 || f > fns.len() as u128 { return Err(error(
+                                sp,
+                                "invalid compile-time closure"
+                            )) }
                             function = Some(f as u32 - 1)
                             values.push(part(v, t.ptr_size, t.ptr_size))
                         }
@@ -901,18 +1142,34 @@ impl Interpreter {
                     block = next
                 }
                 Assert(o, msg, next, sp) => {
-                    if bits(self.operand(&t, body, fr, o, sp)?, sp)? == 0 { return Err(error(sp, msg.as_str())) }
+                    if bits(self.operand(&t, body, fr, o, sp)?, sp)? == 0 {
+                        return Err(error(sp, msg.as_str()))
+                    }
                     block = next
                 }
-                Unreachable | Pending => return Err(error(span, "compile-time evaluation reached unreachable code"))
+                Unreachable | Pending => return Err(error(
+                    span,
+                    "compile-time evaluation reached unreachable code"
+                ))
             }
         }
     }
 
-    pub fn evaluate(inout self, inout t: Types, fns: Vec(mir.Function), sink drops: Map(u32, u32), buffer: Option(Buffer), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
+    pub fn evaluate(
+        inout self,
+        inout t: Types,
+        fns: Vec(mir.Function),
+        sink drops: Map(u32, u32),
+        buffer: Option(Buffer),
+        root: mir.Body,
+        checked: bool,
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
         self.drops = drops
         if self.profile {
-            for _ in 0..fns.len() + 1 { self.costs.push(Cost { calls: 0, steps: 0, bytes: 0, allocations: 0 }) }
+            for _ in 0..fns.len() + 1 {
+                self.costs.push(Cost { calls: 0, steps: 0, bytes: 0, allocations: 0 })
+            }
             self.current = fns.len()
             self.costs[self.current].calls = 1
         }
@@ -933,7 +1190,10 @@ impl Interpreter {
                 self.max_depth.show(&resources)
                 resources.push('/')
                 MAX_DEPTH.show(&resources)
-                Err(d.note(Some(span), "while evaluating this compile-time obligation").note(None, resources.as_str()))
+                Err(d.note(Some(span), "while evaluating this compile-time obligation").note(
+                    None,
+                    resources.as_str()
+                ))
             }
         }
     }
@@ -944,13 +1204,28 @@ impl Interpreter {
             if c.calls == 0 { continue }
             let name = if i < fns.len() { fns[i].symbol.clone() } else { String.from("comptime") }
             let at = if i < fns.len() { fns[i].span } else { span }
-            functions.push(FunctionCost { name, span: at, calls: c.calls, steps: c.steps, bytes: c.bytes, allocations: c.allocations })
+            functions.push(FunctionCost {
+                name,
+                span: at,
+                calls: c.calls,
+                steps: c.steps,
+                bytes: c.bytes,
+                allocations: c.allocations
+            })
         }
         Report { span, success, steps: self.steps, bytes: self.used,
             allocations: self.memory.len() as u64, max_depth: self.max_depth, functions }
     }
 
-    fn evaluate_inner(inout self, inout t: Types, fns: Vec(mir.Function), buffer: Option(Buffer), root: mir.Body, checked: bool, span: Span) -> Result(sema.TypedConst, Diag) {
+    fn evaluate_inner(
+        inout self,
+        inout t: Types,
+        fns: Vec(mir.Function),
+        buffer: Option(Buffer),
+        root: mir.Body,
+        checked: bool,
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
         let ty = root.locals[0].ty
         let v = self.execute(&t, fns, root, Vec(Value).new(), checked, 0, span)?
         match buffer {
@@ -958,14 +1233,27 @@ impl Interpreter {
             None => {}
         }
         match t.kind(ty) {
-            Slice(el) => return self.persist_buffer(&t, v, Buffer { ptr: 0, len: t.ptr_size, elem: el, view: ty }, span)
-            Str => return self.persist_buffer(&t, v, Buffer { ptr: 0, len: t.ptr_size, elem: types.U8, view: ty }, span)
+            Slice(el) => return self.persist_buffer(
+                &t,
+                v,
+                Buffer { ptr: 0, len: t.ptr_size, elem: el, view: ty },
+                span
+            )
+            Str => return self.persist_buffer(
+                &t,
+                v,
+                Buffer { ptr: 0, len: t.ptr_size, elem: types.U8, view: ty },
+                span
+            )
             _ => {}
         }
         let c = match t.kind(ty) {
             Int(_) | Float(_) | Bool => Interpreter.scalar_const(t, v, ty, span)?
             _ => {
-                if !persistable(t, ty) { return Err(error(span, "this compile-time result contains a pointer, borrow or owned value")) }
+                if !persistable(t, ty) { return Err(error(
+                    span,
+                    "this compile-time result contains a pointer, borrow or owned value"
+                )) }
                 if t.layout(ty).size == 0 { Const.Zst(ty) } else { Const.Bytes(v, ty) }
             }
         }
@@ -975,11 +1263,23 @@ impl Interpreter {
     // The elements a `str`, slice, `String` or `Vec` result refers to,
     // copied into a constant view. Whether the result still owns them
     // does not matter: the interpreter's memory is discarded.
-    fn persist_buffer(inout self, inout t: Types, v: Value, b: Buffer, span: Span) -> Result(sema.TypedConst, Diag) {
+    fn persist_buffer(
+        inout self,
+        inout t: Types,
+        v: Value,
+        b: Buffer,
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
         let addr = bits(part(v, b.ptr, t.ptr_size), span)? as u64
         let len = signed(t, bits(part(v, b.len, t.ptr_size), span)?, types.I64)
-        if len < 0 || len > MAX_MEMORY as i128 { return Err(error(span, "invalid compile-time length")) }
-        if !persistable(t, b.elem) { return Err(error(span, "the elements of this compile-time result contain a pointer, borrow or owned value")) }
+        if len < 0 || len > MAX_MEMORY as i128 { return Err(error(
+            span,
+            "invalid compile-time length"
+        )) }
+        if !persistable(t, b.elem) { return Err(error(
+            span,
+            "the elements of this compile-time result contain a pointer, borrow or owned value"
+        )) }
         let size = t.layout(b.elem).size
         for j in 0..len as i64 { self.validate(&t, addr + j as u64 * size, b.elem, span)? }
         let data = self.read(addr, len as u64 * size, span)?
@@ -994,7 +1294,12 @@ impl Interpreter {
 
 // Costs are exclusive to the currently executing function. Calls into the
 // allocator are included, and retained local/heap storage is cumulative.
-pub fn report_json(reports: Vec(Report), sources: diag.Sources, target: str, checked: bool) -> String {
+pub fn report_json(
+    reports: Vec(Report),
+    sources: diag.Sources,
+    target: str,
+    checked: bool
+) -> String {
     var out = String.from("{\"version\":1,\"target\":")
     diag.json_string(&out, target)
     out.push_str(",\"checked_arithmetic\":")
@@ -1065,7 +1370,14 @@ fn persistable(t: Types, ty: u32) -> bool {
             if t.adts[i as i64].has_drop { return false }
             match t.adts[i as i64].body {
                 Struct(fs) => { for f in fs { if !persistable(t, f.ty) { return false } }; true }
-                Enum(vs) => { for v in vs { for f in v.fields { if !persistable(t, f) { return false } } }; true }
+                Enum(vs) => {
+                    for v in vs {
+                        for f in v.fields {
+                            if !persistable(t, f) { return false }
+                        }
+                    }
+                    true
+                }
                 Pending => false
             }
         }

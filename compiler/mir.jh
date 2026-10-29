@@ -355,7 +355,6 @@ pub struct Program {
     pub target: target.Target
 }
 
-
 // ---- printing ----
 
 pub fn show_place(inout s: String, p: Place) {

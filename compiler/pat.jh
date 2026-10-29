@@ -157,7 +157,14 @@ fn is_struct_pat(p: ast.Pat) -> bool {
 }
 
 impl sema.Sema {
-    pub fn match_expr(inout self, inout fb: Fb, scrut: ast.Expr, arms: Vec(ast.Arm), exp: Option(u32), span: Span) -> Result(Val, Diag) {
+    pub fn match_expr(
+        inout self,
+        inout fb: Fb,
+        scrut: ast.Expr,
+        arms: Vec(ast.Arm),
+        exp: Option(u32),
+        span: Span
+    ) -> Result(Val, Diag) {
         var place = Place.local(0)
         var ty: u32 = 0
         var mode = BindMode.Borrow
@@ -172,7 +179,11 @@ impl sema.Sema {
                         Place(p) => p.clone()
                         Op(_) => return Err(err(inner.span, "`match &` needs a place"))
                     }
-                    mode = if self.place_mutable(fb, p) { BindMode.BorrowMut } else { BindMode.Borrow }
+                    mode = if self.place_mutable(fb, p) {
+                        BindMode.BorrowMut
+                    } else {
+                        BindMode.Borrow
+                    }
                     place = p
                     ty = v.ty
                 }
@@ -191,7 +202,8 @@ impl sema.Sema {
             var is_op = false
             match v.vk {
                 Place(p) => {
-                    if p.proj.len() == 0 && !self.types.is_ref(fb.ty_of(p.local)) && self.types.needs_drop(v.ty) {
+                    if p.proj.len() == 0 && !self.types.is_ref(fb.ty_of(p.local)) &&
+                        self.types.needs_drop(v.ty) {
                         for a in arms {
                             if pat_binds(a.pat) {
                                 whole_owned = true
@@ -322,7 +334,14 @@ impl sema.Sema {
     }
 
     // `let pattern = value`.
-    pub fn destructure(inout self, inout fb: Fb, pat: ast.Pat, sink v: Val, mode: BindMode, span: Span) -> Result((), Diag) {
+    pub fn destructure(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink v: Val,
+        mode: BindMode,
+        span: Span
+    ) -> Result((), Diag) {
         let ty = v.ty
         // The pattern must match every value.
         let p = self.reduce(&fb, pat, ty)?
@@ -333,7 +352,12 @@ impl sema.Sema {
         var tys = Vec(u32).new()
         tys.push(ty)
         match self.useful(rows, wilds(1), tys)? {
-            Some(w) => return Err(err(pat.span, ("this pattern does not match every value; `" + self.show_witness(w[0], ty).as_str() + "` is not covered (use `match`)").as_str()))
+            Some(w) => {
+                let m = "this pattern does not match every value; `" +
+                    self.show_witness(w[0], ty).as_str() +
+                    "` is not covered (use `match`)"
+                return Err(err(pat.span, m.as_str()))
+            }
             None => {}
         }
         var is_op = false
@@ -379,7 +403,13 @@ impl sema.Sema {
     }
 
     // The enum variant a pattern path names, checking any type prefix.
-    fn pat_variant(inout self, fb: Fb, path: Vec(String), ty: u32, span: Span) -> Result(Option(u32), Diag) {
+    fn pat_variant(
+        inout self,
+        fb: Fb,
+        path: Vec(String),
+        ty: u32,
+        span: Span
+    ) -> Result(Option(u32), Diag) {
         let vs = match self.types.variants(ty) {
             Some(vs) => vs.clone()
             None => return Ok(None)
@@ -398,7 +428,8 @@ impl sema.Sema {
                 if path.len() == 1 {
                     return Ok(None)
                 }
-                return Err(err(span, ("`" + self.types.show(ty).as_str() + "` has no variant `" + name.as_str() + "`").as_str()))
+                return Err(err(span, ("`" + self.types.show(ty).as_str() +
+                    "` has no variant `" + name.as_str() + "`").as_str()))
             }
         }
         if path.len() > 1 {
@@ -422,7 +453,8 @@ impl sema.Sema {
                 }
             }
             if !ok {
-                return Err(err(span, ("this pattern is for `" + sema.join_path(head).as_str() + "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
+                return Err(err(span, ("this pattern is for `" + sema.join_path(head).as_str() +
+                    "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
             }
         }
         Ok(Some(i as u32))
@@ -438,7 +470,8 @@ impl sema.Sema {
             })
             Variant(_, _) => Ok(self.types.variants(ty).is_some())
             Struct(_, _, _) => match self.types.kind(ty) {
-                Adt(_) => Ok(self.types.variants(ty).is_none() && self.find_method(ty, "deref")?.is_none())
+                Adt(_) => Ok(self.types.variants(ty).is_none() &&
+                    self.find_method(ty, "deref")?.is_none())
                 _ => Ok(false)
             }
             _ => Ok(false)
@@ -447,7 +480,14 @@ impl sema.Sema {
 
     // The place a `Box` (or anything with `deref`) points to, when a
     // pattern looks inside it.
-    fn deref_for_pat(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, span: Span) -> Result(Option((Place, u32)), Diag) {
+    fn deref_for_pat(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink place: Place,
+        ty: u32,
+        span: Span
+    ) -> Result(Option((Place, u32)), Diag) {
         // Through a borrow held as a value (`Option(ref T)`'s payload): what
         // it points to. A name binds the borrow itself, unless it names a
         // variant.
@@ -457,10 +497,18 @@ impl sema.Sema {
         }
         let structural = is_structural(pat)
         let fits = self.pat_fits(pat, ty)?
-        if !structural || fits || self.types.adt_index(ty).is_none() || self.find_method(ty, "deref")?.is_none() {
+        if !structural || fits || self.types.adt_index(ty).is_none() ||
+            self.find_method(ty, "deref")?.is_none() {
             return Ok(None)
         }
-        let v = self.method_call_val(&fb, body.val_place(place, ty), "deref", Vec(Val).new(), span, None)?
+        let v = self.method_call_val(
+            &fb,
+            body.val_place(place, ty),
+            "deref",
+            Vec(Val).new(),
+            span,
+            None
+        )?
         let t = v.ty
         match v.vk {
             Place(p) => Ok(Some((p.clone(), t)))
@@ -483,7 +531,14 @@ impl sema.Sema {
     }
 
     // Jumps to `fail` unless the place matches the pattern.
-    fn test_pat(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, fail: u32) -> Result((), Diag) {
+    fn test_pat(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink place: Place,
+        ty: u32,
+        fail: u32
+    ) -> Result((), Diag) {
         let span = pat.span
         match self.deref_for_pat(&fb, pat, place.clone(), ty, span)? {
             Some((p, t)) => return self.test_pat(&fb, pat, p, t, fail)
@@ -500,7 +555,8 @@ impl sema.Sema {
             }
             Int(v) => {
                 if !self.types.is_int(ty) {
-                    return Err(err(span, ("an integer pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    return Err(err(span, ("an integer pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 if !self.int_fits(v, ty) {
                     var m = String.new()
@@ -515,14 +571,16 @@ impl sema.Sema {
             }
             Char(c) => {
                 if !self.types.is_int(ty) {
-                    return Err(err(span, ("a character pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    return Err(err(span, ("a character pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 test_eq(&fb, place, c as i128, fail)
                 Ok(())
             }
             Bool(b) => {
                 if ty != types.BOOL {
-                    return Err(err(span, ("a bool pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    return Err(err(span, ("a bool pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 let ok = fb.new_block()
                 let t = if b { ok } else { fail }
@@ -535,15 +593,28 @@ impl sema.Sema {
             }
             Range(lo, hi) => {
                 if !self.types.is_int(ty) {
-                    return Err(err(span, ("a range pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    return Err(err(span, ("a range pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 let c1 = fb.temp(types.BOOL, span)
-                fb.assign(Place.local(c1), Rvalue.Bin(lex.Op.Ge, Operand.Copy(place.clone()), Operand.Const(Const.Int(lo, ty))), span)
+                fb.assign(
+                    Place.local(c1),
+                    Rvalue.Bin(
+                        lex.Op.Ge,
+                        Operand.Copy(place.clone()),
+                        Operand.Const(Const.Int(lo, ty))
+                    ),
+                    span
+                )
                 let ok1 = fb.new_block()
                 fb.term(Term.Switch(Operand.Copy(Place.local(c1)), fail_target(fail), ok1))
                 fb.switch_to(ok1)
                 let c2 = fb.temp(types.BOOL, span)
-                fb.assign(Place.local(c2), Rvalue.Bin(lex.Op.Le, Operand.Copy(place), Operand.Const(Const.Int(hi, ty))), span)
+                fb.assign(
+                    Place.local(c2),
+                    Rvalue.Bin(lex.Op.Le, Operand.Copy(place), Operand.Const(Const.Int(hi, ty))),
+                    span
+                )
                 let ok2 = fb.new_block()
                 fb.term(Term.Switch(Operand.Copy(Place.local(c2)), fail_target(fail), ok2))
                 fb.switch_to(ok2)
@@ -567,7 +638,8 @@ impl sema.Sema {
             Tuple(ps) => {
                 let ts = match self.types.kind(ty) {
                     Tuple(ts) => ts.clone()
-                    _ => return Err(err(span, ("a tuple pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    _ => return Err(err(span, ("a tuple pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 if ts.len() != ps.len() {
                     var m = String.from("this tuple has ")
@@ -586,7 +658,8 @@ impl sema.Sema {
                 for f in fields {
                     let i = match field_index(fs, f.name.as_str()) {
                         Some(i) => i
-                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() + "` has no field `" + f.name.as_str() + "`").as_str()))
+                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() +
+                            "` has no field `" + f.name.as_str() + "`").as_str()))
                     }
                     self.test_pat(&fb, f.pat, place.with(Proj.Field(i as u32)), fs[i].ty, fail)?
                 }
@@ -595,7 +668,11 @@ impl sema.Sema {
             Variant(path, ps) => {
                 let v = match self.pat_variant(fb, path, ty, span)? {
                     Some(v) => v
-                    None => return Err(err(span, ("`" + sema.join_path(path).as_str() + "` is not a variant of `" + self.types.show(ty).as_str() + "`").as_str()))
+                    None => {
+                        let m = "`" + sema.join_path(path).as_str() + "` is not a variant of `" +
+                            self.types.show(ty).as_str() + "`"
+                        return Err(err(span, m.as_str()))
+                    }
                 }
                 let fields = self.variant_fields(ty, v)
                 if fields.len() != ps.len() {
@@ -603,14 +680,23 @@ impl sema.Sema {
                 }
                 self.test_discr(&fb, place.clone(), v, fail, span)
                 for i, p in ps {
-                    self.test_pat(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], fail)?
+                    self.test_pat(
+                        &fb,
+                        p,
+                        place.with(Proj.Variant(v)).with(Proj.Field(i as u32)),
+                        fields[i],
+                        fail
+                    )?
                 }
                 Ok(())
             }
             Or(alts) => {
                 for a in alts {
                     if pat_binds(a) {
-                        return Err(err(span, "the alternatives of a `|` pattern cannot bind names yet"))
+                        return Err(err(
+                            span,
+                            "the alternatives of a `|` pattern cannot bind names yet"
+                        ))
                     }
                 }
                 let ok = fb.new_block()
@@ -640,15 +726,23 @@ impl sema.Sema {
         err(span, m.as_str())
     }
 
-    fn struct_fields_for_pat(inout self, fb: Fb, path: Vec(String), ty: u32, span: Span) -> Result(Vec(types.FieldDef), Diag) {
+    fn struct_fields_for_pat(
+        inout self,
+        fb: Fb,
+        path: Vec(String),
+        ty: u32,
+        span: Span
+    ) -> Result(Vec(types.FieldDef), Diag) {
         let a = match self.types.adt_index(ty) {
             Some(a) => a
-            None => return Err(err(span, ("a struct pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+            None => return Err(err(span, ("a struct pattern cannot match a `" +
+                self.types.show(ty).as_str() + "`").as_str()))
         }
         let decl = self.types.adts[a as i64].decl
         let fs = match self.types.adts[a as i64].body {
             Struct(fs) => fs.clone()
-            _ => return Err(err(span, ("`" + self.types.show(ty).as_str() + "` is not a struct").as_str()))
+            _ => return Err(err(span, ("`" + self.types.show(ty).as_str() +
+                "` is not a struct").as_str()))
         }
         let env = fb.env.clone()
         var ok = false
@@ -664,7 +758,8 @@ impl sema.Sema {
             }
         }
         if !ok {
-            return Err(err(span, ("this pattern is for `" + sema.join_path(path).as_str() + "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
+            return Err(err(span, ("this pattern is for `" + sema.join_path(path).as_str() +
+                "`, but the value is a `" + self.types.show(ty).as_str() + "`").as_str()))
         }
         Ok(fs)
     }
@@ -680,7 +775,14 @@ impl sema.Sema {
     }
 
     // Makes the pattern's variables, for a place known to match.
-    fn bind(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, mode: BindMode) -> Result((), Diag) {
+    fn bind(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink place: Place,
+        ty: u32,
+        mode: BindMode
+    ) -> Result((), Diag) {
         let span = pat.span
         match self.deref_for_pat(&fb, pat, place.clone(), ty, span)? {
             Some((p, t)) => {
@@ -712,7 +814,11 @@ impl sema.Sema {
                         RefMut(_) => true
                         _ => false
                     }
-                    let o = if is_mut && mode != BindMode.Borrow { Operand.Move(place) } else { Operand.Copy(place) }
+                    let o = if is_mut && mode != BindMode.Borrow {
+                        Operand.Move(place)
+                    } else {
+                        Operand.Copy(place)
+                    }
                     let l = fb.declare(n.as_str(), ty, false, VarKind.Borrow, span)
                     fb.assign(Place.local(l), Rvalue.Use(o), span)
                     return Ok(())
@@ -730,7 +836,10 @@ impl sema.Sema {
                             fb.assign(Place.local(l), Rvalue.Use(Operand.Copy(place)), span)
                         } else {
                             if var_ {
-                                return Err(err(span, "`var` would copy a value that is not plain; use `.clone()`"))
+                                return Err(err(
+                                    span,
+                                    "`var` would copy a value that is not plain; use `.clone()`"
+                                ))
                             }
                             let rt = self.types.refty(ty)
                             let l = fb.declare(n.as_str(), rt, false, VarKind.Borrow, span)
@@ -770,7 +879,13 @@ impl sema.Sema {
                 let fields = self.variant_fields(ty, v)
                 for i, p in ps {
                     if i < fields.len() {
-                        self.bind(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], mode)?
+                        self.bind(
+                            &fb,
+                            p,
+                            place.with(Proj.Variant(v)).with(Proj.Field(i as u32)),
+                            fields[i],
+                            mode
+                        )?
                     }
                 }
                 Ok(())
@@ -781,12 +896,20 @@ impl sema.Sema {
 
     // Drops the parts of an owned value that the pattern's bindings did
     // not move out.
-    fn drop_rest(inout self, inout fb: Fb, pat: ast.Pat, sink place: Place, ty: u32, span: Span) -> Result((), Diag) {
+    fn drop_rest(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink place: Place,
+        ty: u32,
+        span: Span
+    ) -> Result((), Diag) {
         if !self.types.needs_drop(ty) {
             return Ok(())
         }
         // Through a box, bindings borrowed: the box itself is dropped.
-        if is_structural(pat) && self.types.adt_index(ty).is_some() && self.types.variants(ty).is_none() && !is_struct_pat(pat) {
+        if is_structural(pat) && self.types.adt_index(ty).is_some() &&
+            self.types.variants(ty).is_none() && !is_struct_pat(pat) {
             fb.push(Stmt.Drop(place, span))
             return Ok(())
         }
@@ -819,7 +942,8 @@ impl sema.Sema {
             }
             Struct(path, fields, _) => {
                 if self.adt_has_drop(ty) {
-                    return Err(err(span, ("cannot take apart a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                    return Err(err(span, ("cannot take apart a `" +
+                        self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
                 }
                 let fs = self.struct_fields_for_pat(fb, path, ty, span)?
                 for i, fd in fs {
@@ -844,13 +968,20 @@ impl sema.Sema {
             }
             Variant(path, ps) => {
                 if self.adt_has_drop(ty) {
-                    return Err(err(span, ("cannot take apart a `" + self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
+                    return Err(err(span, ("cannot take apart a `" +
+                        self.types.show(ty).as_str() + "`: it has a `Drop` impl").as_str()))
                 }
                 let v = self.pat_variant(fb, path, ty, span)?.unwrap()
                 let fields = self.variant_fields(ty, v)
                 for i, p in ps {
                     if i < fields.len() {
-                        self.drop_rest(&fb, p, place.with(Proj.Variant(v)).with(Proj.Field(i as u32)), fields[i], span)?
+                        self.drop_rest(
+                            &fb,
+                            p,
+                            place.with(Proj.Variant(v)).with(Proj.Field(i as u32)),
+                            fields[i],
+                            span
+                        )?
                     }
                 }
                 Ok(())
@@ -867,7 +998,13 @@ impl sema.Sema {
 
     // ---- exhaustiveness ----
 
-    fn check_exhaustive(inout self, inout fb: Fb, arms: Vec(ast.Arm), ty: u32, span: Span) -> Result((), Diag) {
+    fn check_exhaustive(
+        inout self,
+        inout fb: Fb,
+        arms: Vec(ast.Arm),
+        ty: u32,
+        span: Span
+    ) -> Result((), Diag) {
         var rows = Vec(P).new()
         var tys = Vec(u32).new()
         tys.push(ty)
@@ -883,7 +1020,10 @@ impl sema.Sema {
             var v = Vec(P).new()
             v.push(p.clone())
             if self.useful(m, v, tys)?.is_none() {
-                return Err(err(a.pat.span, "this arm is never reached: the arms above match everything it matches"))
+                return Err(err(
+                    a.pat.span,
+                    "this arm is never reached: the arms above match everything it matches"
+                ))
             }
             if a.guard.is_none() {
                 rows.push(p)
@@ -896,7 +1036,8 @@ impl sema.Sema {
             m.push(row)
         }
         match self.useful(m, wilds(1), tys)? {
-            Some(w) => Err(err(span, ("this `match` does not cover `" + self.show_witness(w[0], ty).as_str() + "`").as_str()))
+            Some(w) => Err(err(span, ("this `match` does not cover `" +
+                self.show_witness(w[0], ty).as_str() + "`").as_str()))
             None => Ok(())
         }
     }
@@ -938,7 +1079,8 @@ impl sema.Sema {
             Tuple(ps) => {
                 let ts = match self.types.kind(ty) {
                     Tuple(ts) => ts.clone()
-                    _ => return Err(err(span, ("a tuple pattern cannot match a `" + self.types.show(ty).as_str() + "`").as_str()))
+                    _ => return Err(err(span, ("a tuple pattern cannot match a `" +
+                        self.types.show(ty).as_str() + "`").as_str()))
                 }
                 if ts.len() != ps.len() {
                     var m = String.from("this tuple has ")
@@ -959,7 +1101,8 @@ impl sema.Sema {
                 for f in fields {
                     let i = match field_index(fs, f.name.as_str()) {
                         Some(i) => i
-                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() + "` has no field `" + f.name.as_str() + "`").as_str()))
+                        None => return Err(err(f.pat.span, ("`" + self.types.show(ty).as_str() +
+                            "` has no field `" + f.name.as_str() + "`").as_str()))
                     }
                     v[i] = self.reduce(&fb, f.pat, fs[i].ty)?
                 }
@@ -979,14 +1122,19 @@ impl sema.Sema {
                             missing.push_str(fd.name.as_str())
                         }
                     }
-                    return Err(err(span, ("the pattern leaves out " + missing.as_str() + "; add them or `..`").as_str()))
+                    return Err(err(span, ("the pattern leaves out " + missing.as_str() +
+                        "; add them or `..`").as_str()))
                 }
                 Ok(P.Ctor(0, v))
             }
             Variant(path, ps) => {
                 let vi = match self.pat_variant(fb, path, ty, span)? {
                     Some(v) => v
-                    None => return Err(err(span, ("`" + sema.join_path(path).as_str() + "` is not a variant of `" + self.types.show(ty).as_str() + "`").as_str()))
+                    None => {
+                        let m = "`" + sema.join_path(path).as_str() + "` is not a variant of `" +
+                            self.types.show(ty).as_str() + "`"
+                        return Err(err(span, m.as_str()))
+                    }
                 }
                 let fields = self.variant_fields(ty, vi)
                 if fields.len() != ps.len() {
@@ -1062,7 +1210,12 @@ impl sema.Sema {
 
     // Maranget's usefulness: a value matched by `v` and by no row of `m`,
     // if there is one (the witness).
-    fn useful(inout self, m: Vec(Vec(P)), v: Vec(P), tys: Vec(u32)) -> Result(Option(Vec(P)), Diag) {
+    fn useful(
+        inout self,
+        m: Vec(Vec(P)),
+        v: Vec(P),
+        tys: Vec(u32)
+    ) -> Result(Option(Vec(P)), Diag) {
         // Expand or-patterns in the first column.
         if v.len() > 0 {
             match v[0] {
@@ -1128,7 +1281,11 @@ impl sema.Sema {
                 // A literal is useful if the rows without it (wildcards) do
                 // not cover the rest.
                 let dm = default_rows(m)
-                match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                match self.useful(
+                    dm,
+                    concat(Vec(P).new(), v, 1),
+                    concat_tys(Vec(u32).new(), tys, 1)
+                )? {
                     Some(w) => Ok(Some(prepend(P.Lit, w)))
                     None => Ok(None)
                 }
@@ -1163,7 +1320,11 @@ impl sema.Sema {
                             return Ok(None)
                         }
                         let dm = default_rows(m)
-                        match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                        match self.useful(
+                            dm,
+                            concat(Vec(P).new(), v, 1),
+                            concat_tys(Vec(u32).new(), tys, 1)
+                        )? {
                             Some(w) => {
                                 var missing = P.Wild
                                 for x in all {
@@ -1179,7 +1340,11 @@ impl sema.Sema {
                     }
                     None => {
                         let dm = default_rows(m)
-                        match self.useful(dm, concat(Vec(P).new(), v, 1), concat_tys(Vec(u32).new(), tys, 1))? {
+                        match self.useful(
+                            dm,
+                            concat(Vec(P).new(), v, 1),
+                            concat_tys(Vec(u32).new(), tys, 1)
+                        )? {
                             Some(w) => Ok(Some(prepend(P.Wild, w)))
                             None => Ok(None)
                         }

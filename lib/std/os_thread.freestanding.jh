@@ -5,7 +5,14 @@ import std.sysno
 
 // Defined in assembly by the compiler in every freestanding program:
 // `clone`, and in the new thread, `start(arg)` then `exit`.
-extern fn jihoo_clone(flags: i64, stack: *u8, ptid: *i32, ctid: *i32, start: fnptr(*u8), arg: *u8) -> i64
+extern fn jihoo_clone(
+    flags: i64,
+    stack: *u8,
+    ptid: *i32,
+    ctid: *i32,
+    start: fnptr(*u8),
+    arg: *u8
+) -> i64
 
 // Each thread's stack, mapped when it starts; pages are used as touched.
 // The lowest page is a guard, so running out of stack stops the program.

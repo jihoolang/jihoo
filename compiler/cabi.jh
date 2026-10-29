@@ -56,7 +56,12 @@ fn one(ty: str, size: u64) -> Mode {
 
 pub fn indirect(m: Mode) -> bool { match m { Indirect => true, _ => false } }
 
-pub fn plan(inout ts: types.Types, target: target.Target, sig: types.Sig, actual: Vec(u32)) -> Plan {
+pub fn plan(
+    inout ts: types.Types,
+    target: target.Target,
+    sig: types.Sig,
+    actual: Vec(u32)
+) -> Plan {
     var regs = Regs { gp: 0, fp: 0 }
     let ret = classify(&ts, target, sig.ret, true, &regs)
     if indirect(ret) { match target { X86_64 => regs.gp = 1, _ => {} } }
@@ -65,7 +70,13 @@ pub fn plan(inout ts: types.Types, target: target.Target, sig: types.Sig, actual
     Plan { ret: ret, args: args }
 }
 
-fn classify(inout ts: types.Types, target: target.Target, t: u32, result: bool, inout regs: Regs) -> Mode {
+fn classify(
+    inout ts: types.Types,
+    target: target.Target,
+    t: u32,
+    result: bool,
+    inout regs: Regs
+) -> Mode {
     let l = ts.layout(t)
     if l.size == 0 { return Mode.Ignore }
     let wide = match ts.kind(t) { Int(i) => i.bits == 128, _ => false }
@@ -84,7 +95,8 @@ fn classify(inout ts: types.Types, target: target.Target, t: u32, result: bool, 
             let (bits, n) = hfa(ts, t)
             if bits > 0 && n > 0 && n <= 4 {
                 let base = if bits == 32 { "float" } else { "double" }
-                return one(("[" + fmt.n(n as i128) + " x " + base + "]").as_str(), n as u64 * (bits / 8) as u64)
+                return one(("[" + fmt.n(n as i128) + " x " + base +
+                    "]").as_str(), n as u64 * (bits / 8) as u64)
             }
             if l.size > 16 { return Mode.Indirect }
             if result && l.size <= 8 {

@@ -166,7 +166,13 @@ fn run_body(inout body: Body) -> Result((), Diag) {
             let l = drop_local(body, e.block, e.stmt) as i64
             if flags[l].is_none() {
                 let sp = body.locals[l].span
-                body.locals.push(mir.LocalDecl { ty: types.BOOL, name: None, span: sp, mutable: true, kind: mir.LocalKind.Temp })
+                body.locals.push(mir.LocalDecl {
+                    ty: types.BOOL,
+                    name: None,
+                    span: sp,
+                    mutable: true,
+                    kind: mir.LocalKind.Temp
+                })
                 flags[l] = Some((body.locals.len() - 1) as u32)
             }
         }
@@ -182,7 +188,10 @@ fn run_body(inout body: Body) -> Result((), Diag) {
                     Drop(_, sp) => sp
                     _ => no_span()
                 }
-                return Err(Diag.new(span, "internal error: a value with parts moved out is dropped whole"))
+                return Err(Diag.new(
+                    span,
+                    "internal error: a value with parts moved out is dropped whole"
+                ))
             }
             Init => {}
         }
@@ -226,7 +235,11 @@ fn run_body(inout body: Body) -> Result((), Diag) {
             let drop_b = body.blocks.len() as u32
             var ds = Vec(Stmt).new()
             ds.push(Stmt.Drop(p.clone(), sp))
-            ds.push(Stmt.Assign(Place.local(flag), Rvalue.Use(Operand.Const(Const.Bool(false))), sp))
+            ds.push(Stmt.Assign(
+                Place.local(flag),
+                Rvalue.Use(Operand.Const(Const.Bool(false))),
+                sp
+            ))
             body.blocks.push(mir.Block { stmts: ds, term: Term.Goto(cont) })
             var ts = Vec(mir.SwitchTarget).new()
             ts.push(mir.SwitchTarget { value: 0, block: cont })
@@ -414,7 +427,8 @@ fn use_place(st: Vec(St), p: Place, body: Body, span: Span, check: bool) -> Resu
             }
             Err(moved_err(p, body, span))
         }
-        Maybe => Err(Diag.new(span, (local_name(body, p.local) + " is used here, but it may have been moved away before").as_str()))
+        Maybe => Err(Diag.new(span, (local_name(body, p.local) +
+            " is used here, but it may have been moved away before").as_str()))
         Uninit => Err(moved_err(p, body, span))
     }
 }
@@ -436,7 +450,11 @@ fn with_move_note(sink d: Diag, body: Body, entry: Vec(St), b: i64, si: i64) -> 
             Err(_) => return d
         }
     }
-    let used = if si < body.blocks[b].stmts.len() { stmt_reads(body.blocks[b].stmts[si]) } else { term_reads(body.blocks[b].term) }
+    let used = if si < body.blocks[b].stmts.len() {
+        stmt_reads(body.blocks[b].stmts[si])
+    } else {
+        term_reads(body.blocks[b].term)
+    }
     var local: Option(u32) = None
     for p in used {
         if st[p.local as i64] != St.Init && st[p.local as i64] != St.Bottom {
@@ -636,7 +654,13 @@ fn push_operand_place(inout out: Vec(Place), o: Operand) {
     }
 }
 
-fn op_transfer(inout st: Vec(St), o: Operand, body: Body, span: Span, check: bool) -> Result((), Diag) {
+fn op_transfer(
+    inout st: Vec(St),
+    o: Operand,
+    body: Body,
+    span: Span,
+    check: bool
+) -> Result((), Diag) {
     match o {
         Copy(p) => {
             use_place(st, p, body, span, check)?

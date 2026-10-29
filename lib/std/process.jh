@@ -63,7 +63,10 @@ pub fn output(program: str, args: [str]) -> Result(Output, String) {
     // while this one waits on the other.
     var stdout = String.new()
     var stderr = String.new()
-    var fds = [sys.PollFd { fd: out_r, events: 1, revents: 0 }, sys.PollFd { fd: err_r, events: 1, revents: 0 }]
+    var fds = [
+        sys.PollFd { fd: out_r, events: 1, revents: 0 },
+        sys.PollFd { fd: err_r, events: 1, revents: 0 }
+    ]
     var buf = [0 as u8; 4096]
     var open = 2
     while open > 0 {
