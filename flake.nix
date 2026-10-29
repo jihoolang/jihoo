@@ -28,10 +28,10 @@
       # what the seed knows; to use something new there, release the compiler
       # that has it and move the seed here.
       seed = {
-        version = "0.2.0";
+        version = "0.2.1";
         hash = {
-          x86_64-linux = "sha256-Hr7ayhmbfCk4ckcPo6OyV9QTcM3XI+Wey5in+DZfQfA=";
-          aarch64-linux = "sha256-fBfPkFkE/Od9iQrnu40tZA+wmFlRb3TWH5d4M1tMNMU=";
+          x86_64-linux = "sha256-z8I8pJqtdOmhhPcHgReDe1I+x70tb9sKZLZCgoFYdcU=";
+          aarch64-linux = "sha256-dWWkUmEuxtBSFwO3JiE8RFIAqCDccmS1E0dvYr/3LMs=";
         };
       };
 
