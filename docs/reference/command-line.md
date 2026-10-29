@@ -52,8 +52,11 @@ jihoo fmt src/main.jh --check               # verify layout without printing it
 jihoo fmt src/main.jh --width 80            # a different soft width
 ```
 
-`fmt` parses one file and prints its formatted source. It uses four spaces
-per delimiter level, normalizes spaces between tokens, removes leading and
+`fmt` parses one file and prints its formatted source. It indents four
+spaces per line that leaves a delimiter open: several delimiters opened on
+one line, as in `f(match x {` or `Ok(S {`, add one level together, and a
+line that starts with closing delimiters returns to the indentation of the
+line that opened them. It normalizes spaces between tokens, removes leading and
 trailing blank lines and retains at most one empty line between source
 elements. Nonempty and empty files end with one LF. Comments retain their
 exact bytes, including whitespace inside comment bodies; literals keep
@@ -65,7 +68,8 @@ of 100 byte columns expand with a break after the opening delimiter, after
 each separator and before the closing delimiter. This covers arguments,
 parameters, arrays, tuples, struct fields and variant lists identified by
 the parser. Outer lists expand first; nested lists are reconsidered at their
-new indentation. Commas and semicolons retain their original spelling.
+new indentation, and only the lines holding a list's own delimiters and
+separators make it overflow. Commas and semicolons retain their original spelling.
 
 `--width N` accepts decimal integers from 20 through 1000. It counts UTF-8
 bytes, like diagnostic columns. It is a soft target: long literals, comments

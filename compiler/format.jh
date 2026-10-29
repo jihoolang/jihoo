@@ -17,6 +17,18 @@ struct Layout {
 
 pub const DEFAULT_WIDTH: i64 = 100
 
+// An open delimiter. Only the first one still open on its line adds an
+// indentation level, so `f(match x {` indents its arms once; a line that
+// starts by closing it returns to the indentation of the line it opened on.
+struct Open {
+    counted: bool
+    line: i64
+    // The indentation of the line it opened on, and of the lines inside it.
+    outer: i64
+    inner: i64
+    after_impl: bool
+}
+
 struct Group {
     open: i64
     close: i64
@@ -60,6 +72,11 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
     var end = 0
     var previous = Tok.Eof
     var previous_prefix = false
+    var opens = Vec(Open).new()
+    var line = 0
+    var line_indent = 0
+    // The previous token closed `impl(...)`, as in `impl(T: type) [T]`.
+    var closed_impl = false
     for i, token in tokens {
         let kind = token.tok
         let prefix = is_prefix(kind, previous, token.nl_before || breaks[i])
@@ -68,17 +85,26 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
         if breaks[i] && !f.line_start { f.newline(1) }
         var indent = f.depth
         if f.line_start {
+            line += 1
             var j = i
+            var k = opens.len()
             while j < tokens.len() && is_close(tokens[j].tok) && (j == i || (!tokens[j].nl_before && !breaks[j])) {
-                indent -= 1
+                if k > 0 {
+                    k -= 1
+                    indent = opens[k].outer
+                }
                 j += 1
             }
+            // A continuation line is indented once more, but what opens on
+            // it nests from the statement's level.
+            line_indent = indent
             if !is_close(kind) && (kind == Tok.Dot || continues(previous)) {
                 indent += 1
             }
         }
         let range_end = i >= 2 && previous == Tok.Assign && tokens[i - 2].tok == Tok.DotDot
         var spaced = comment || (!range_end && needs_space(previous, kind, previous_prefix))
+        if closed_impl && kind == Tok.LBracket { spaced = true }
         if !spaced && !f.line_start && i > 0 {
             // Removing a gap must not turn two operators into one, make a
             // comment, or turn a tuple field followed by a dot into a float.
@@ -96,8 +122,25 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
         }
         f.start(indent, spaced)
         f.out.push_str(text[token.span.lo as i64..token.span.hi as i64])
-        if is_open(kind) { f.depth += 1 }
-        if is_close(kind) { f.depth -= 1 }
+        closed_impl = false
+        if is_open(kind) {
+            var counted = true
+            var k = opens.len()
+            while k > 0 && opens[k - 1].line == line {
+                if opens[k - 1].counted { counted = false }
+                k -= 1
+            }
+            let inner = if counted { line_indent + 1 } else { f.depth }
+            opens.push(Open { counted, line, outer: line_indent, inner, after_impl: previous == Tok.Impl })
+            f.depth = inner
+        }
+        if is_close(kind) {
+            match opens.pop() {
+                Some(o) => closed_impl = o.after_impl
+                None => {}
+            }
+            f.depth = if opens.is_empty() { 0 } else { opens[opens.len() - 1].inner }
+        }
         end = token.span.hi as i64
         previous = kind
         previous_prefix = prefix
@@ -179,23 +222,28 @@ fn overflowing(text: str, tokens: Vec(Token), groups: Vec(Group), breaks: Vec(bo
     widths.push(column)
     var selected = Vec(i64).new()
     var covered = -1
+    var covered_line = -1
     for i, g in groups {
-        if g.open < covered { continue }
+        // A later list on a line that an expansion splits is measured
+        // again at its new column, as a child is: `) -> Result((), E) {`
+        // fits once the parameters are on their own lines.
+        if g.open < covered || lines[g.open] <= covered_line { continue }
         var needed = !(tokens[g.open + 1].nl_before || breaks[g.open + 1]) ||
             !(tokens[g.close].nl_before || breaks[g.close])
         for sep in g.separators {
             if !(tokens[sep + 1].nl_before || breaks[sep + 1]) { needed = true }
         }
         if !needed { continue }
-        var wide = false
-        for row in lines[g.open]..lines[g.close] + 1 {
-            var end = widths[row]
-            if row == lines[g.close] {
-                end = columns[g.close] + (tokens[g.close].span.hi - tokens[g.close].span.lo) as i64
-            }
-            if end > width { wide = true; break }
+        // Only the rows that hold this list's own delimiters and separators
+        // get shorter when it expands; longer rows inside it belong to an
+        // element, and a nested list there is measured on its own.
+        let close_end = columns[g.close] + (tokens[g.close].span.hi - tokens[g.close].span.lo) as i64
+        var wide = close_end > width
+        if lines[g.open] != lines[g.close] && widths[lines[g.open]] > width { wide = true }
+        for sep in g.separators {
+            if lines[sep] != lines[g.close] && widths[lines[sep]] > width { wide = true }
         }
-        if wide { selected.push(i); covered = g.close }
+        if wide { selected.push(i); covered = g.close; covered_line = lines[g.close] }
     }
     selected
 }
@@ -275,6 +323,9 @@ fn continues(t: Tok) -> bool {
 
 fn needs_space(prev: Tok, next: Tok, prefix: bool) -> bool {
     if prev == Tok.Eof { return false }
+    // The rest of a pattern: `S { a, .. }`, `(a, ..)`.
+    if prev == Tok.Comma && next == Tok.DotDot { return true }
+    if prev == Tok.DotDot && next == Tok.RBrace { return true }
     match next {
         RParen | RBracket | Comma | Colon | Semi | Question | Dot | DotDot => return false
         _ => {}
@@ -283,6 +334,9 @@ fn needs_space(prev: Tok, next: Tok, prefix: bool) -> bool {
         LParen | LBracket | Hash | HashBang | Dot | DotDot => return false
         _ => {}
     }
+    // A prefix operator binds to its parenthesized or bracketed operand:
+    // `*(p as *u64)`, `&[1, 2]`.
+    if prefix && (next == Tok.LParen || next == Tok.LBracket) { return false }
     if next == Tok.LParen {
         return !(ends_value(prev) || prev == Tok.Fn || prev == Tok.Impl)
     }

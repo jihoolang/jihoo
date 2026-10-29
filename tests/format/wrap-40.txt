@@ -35,3 +35,11 @@ fn main() {
         results[0] + data.third_measurement
     )
 }
+
+fn checked(
+    first_value: i64,
+    second_value: i64
+) -> Result((), i64) {
+    if first_value < 2 { return Err(1) }
+    Ok(())
+}
