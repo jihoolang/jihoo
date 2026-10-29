@@ -121,9 +121,9 @@ specialized library work; they do not by themselves require new syntax.
   structural `--check-only` mode on both targets.
 - Maintain the [fusion benchmark](../../benchmarks/functional-fusion/README.md)
   and the compile-time costs jihoo-proofs records as compiler and library
-  implementations change. jihoo-proofs' examples currently fail to compile
-  with the checkout's library: its lexer still expects `read_line` to report
-  `String` errors rather than `os.Error`.
+  implementations change. jihoo-proofs' programs convert the library's
+  errors with `to_string`, so they compile with the checkout's library
+  (`os.Error`) as well as with the release they pin (`String`).
 
 Completion: changes can be compared with a recorded baseline using a
 reproducible command. Structural and correctness checks run in CI; timing
@@ -176,27 +176,47 @@ effect in the commit and here.
    optimization 11.7 s, emission 2.0 s (9.5 s of CPU) and linking 0.20 s,
    15.7 s in all. `check` takes 1.24 s, half of it borrow checks; peak
    memory grows from 258 MiB after the checks to 377 MiB during emission.
-2. Borrow checks and elaboration in parallel. After effect inference, each
-   function's check is independent. `Types` must not change while they run
-   (layout and drop caches filled beforehand), and errors are still
-   reported in source order, exactly as a sequential run reports them.
-   Effect inference may stay sequential if the timings show it is small.
-3. The library work that step 2 shows is needed, driven by the compiler
-   rather than speculation: `thread.map` over uneven work (chunks or a
-   pool), per-thread allocation if malloc contention shows up, deterministic
-   parallel reduction, and the `Send`-like rule if shared compiler data
-   needs one. Each addition gets tests in `tests/run` and `tests/fail` and
-   documentation in [threads](../language/threads.md).
-4. The LLVM optimization time (about 12.5 s of a 15.6 s build). Measure
-   first whether smaller IR from `llvm.jh` (fewer allocas and copies before
-   LLVM sees them) reduces it without slowing the programs it builds;
-   parallel optimization is acceptable only if it does not change what is
-   inlined where. The fusion and runtime benchmarks must not regress.
-5. The release: jihoo-proofs' examples compile again with the checkout's
-   library (its lexer must accept `os.Error` from `read_line`, or the
-   migration is documented), README's Status describes 0.3, and this
-   section records the final numbers. The seed need not move first:
-   `std.thread` is already in 0.2.1.
+2. Done: borrow checks and elaboration in parallel. Each function is
+   elaborated and checked independently, the costliest first (statements
+   times locals predicts the time well), and errors are reported in
+   function order, as before. Effect inference runs in rounds: every
+   function whose callees' summaries grew is inferred at once from the
+   previous round's summaries, which reaches the same least fixed point.
+   The per-block loan sets now have rows only for the locals that can hold
+   loans (views, arguments, borrowed locals and those assigned through a
+   pointer, under half in the largest functions); without that, checking
+   the four largest functions at once raised `check`'s peak memory from
+   258 MiB to 400 MiB. `Types` is only read by these passes. Medians of
+   five runs: elaboration 0.11 s to 0.025 s, effect inference 0.17 s to
+   0.03 s, borrow checks 0.58 s to 0.08 s, `check` 1.26 s to 0.53 s (1.3 s
+   of CPU) at 274 MiB; a full build takes 15.2 s, its peak unchanged at
+   365 MiB. The borrow checks cannot go below the largest function,
+   `Sema.call_decl_inner`, which alone takes 0.1 s.
+3. Done: the library work step 2 needed. `thread.each`, `map` and
+   `each_mut` halve their range by index, which left the compiler's largest
+   functions, adjacent in `sema.jh`, on one thread (borrow checks 0.37 s,
+   1.7 CPUs busy). `each_uneven`, `map_uneven` and `each_mut_uneven` start a
+   thread per processor that each take the next item when free, at an
+   atomic addition per item ([threads](../language/threads.md)). Malloc
+   contention did not show up, and the compiler shares no data that would
+   need a `Send`-like rule: the passes only read the program and types.
+4. Measured: the LLVM optimization time (11.7 s of a 15.2 s build) is
+   mostly the whole-module simplification pipeline around the inliner, and
+   neither lever the plan named helps much. With every function first
+   cleaned up by SROA, CSE, InstCombine and SimplifyCFG (a third of the
+   IR's lines left), `default<O2>` still takes 11.4 s instead of 13.0 s
+   (`opt`, one CPU); SROA alone saves 0.7 s, an upper bound for emitting
+   fewer allocas and copies from `llvm.jh`. Only the function pipeline
+   after inlining (about 1.4 s) could run per code generation unit without
+   changing what is inlined where, and it would still see module-wide
+   analyses (GlobalsAA) differently. Neither is done for 0.3.0; a full
+   build stays about 2.4 times faster than at 0.2.1.
+5. The release: jihoo-proofs' examples compile with the checkout's
+   library again (its programs turn `os.Error` into their `String`
+   errors with `to_string`, which also works with the 0.1.3 compiler it
+   pins), README's Status describes 0.3, and this section records the
+   final numbers. The seed need not move first: `std.thread` is already
+   in 0.2.1.
 
 Sema's instance queue stays sequential unless measurements show it
 dominates: it shares the type interner.
@@ -205,6 +225,8 @@ Completion: on the controlled host, a full `-O2` build of the compiler is
 several times faster than 36.8 s and `check` uses the available CPUs; the
 output of every compilation, diagnostics included, is identical to a
 sequential one, and the programs it builds are no slower.
+At 0.3.0: a full build takes 15.2 s (2.4 times faster), `check` 0.53 s
+(32 times faster, on 2.5 CPUs), with the same output.
 
 ## 0.1: the rewrite
 

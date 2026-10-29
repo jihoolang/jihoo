@@ -100,10 +100,18 @@ jihoo run tests/runner.jh                    # the tests
 
 ## Status
 
-Version 0.2: the 0.1 rewrite, which broke compatibility with everything
+Version 0.3: the 0.1 rewrite, which broke compatibility with everything
 before it ([why](docs/internals/redesign.md)), with a self-hosted compiler
 and checking, diagnostic and formatting tools. Native (libc) and
 freestanding (no libc, static) programs for x86_64 and aarch64 Linux.
+
+The compiler uses its own threads: it elaborates, infers borrow effects and
+checks borrows one function per thread, the costliest first, and emits
+large programs in parallel code generation units, with the same output as
+one thread. On 8 CPUs, `jihoo check` of the compiler takes 0.53 s and a
+full `-O2` build 15.2 s, against 17.0 s and 36.8 s at 0.2.1
+([phase timings](docs/reference/command-line.md#phase-timings),
+[roadmap](docs/internals/roadmap.md#4-parallel-compilation-03)).
 
 Done: ownership with moves, destructors and drop flags; borrowing with
 parameter conventions, projections and views, checked by a separate borrow
@@ -152,7 +160,8 @@ written with them, in `std/derive.jh`, and keeps privacy.
 
 [Threads](docs/language/threads.md): `std.thread.scope`, `join`, `each`, `map` and
 `each_mut` run work on several threads that borrows what the caller owns,
-in native and freestanding programs.
+in native and freestanding programs; the `_uneven` forms hand out one item
+at a time, for work of very different sizes.
 Scopes start any number of workers, collect results with `handle.join()`
 and join every remaining worker before the body's locals go away.
 The borrow rules and a compile-time check of the closures rule out data
