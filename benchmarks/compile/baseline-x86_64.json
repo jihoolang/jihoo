@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "date": "2026-10-29T05:18:55+00:00",
+  "date": "2026-10-29T06:19:41+00:00",
   "compiler": "/home/jihoo/jihoo/out/jihoo",
   "compiler_version": "jihoo 0.2.1",
-  "revision": "782e54752d8b291b05c37e0267a922c3eaae2982",
+  "revision": "258d3207641efe8168a52dee4914965e1544c7fb",
   "external": {},
   "host": {
     "platform": "Linux-7.3.0-x86_64-with-glibc2.44",
@@ -14,6 +14,7 @@
   "options": {
     "opt": "-O2"
   },
+  "time_passes": true,
   "repeats": 5,
   "cases": [
     {
@@ -25,42 +26,235 @@
         "check",
         "compiler/main.jh",
         "--target",
-        "x86_64"
+        "x86_64",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 1.2761132619998534,
-          "cpu": 1.26,
-          "peak_kib": 263348
+          "elapsed": 0.5293124239979079,
+          "cpu": 1.3599999999999999,
+          "peak_kib": 280540,
+          "phases": {
+            "load": {
+              "elapsed": 0.098,
+              "cpu": 0.097,
+              "peak_kib": 48845
+            },
+            "sema": {
+              "elapsed": 0.256,
+              "cpu": 0.255,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.023,
+              "cpu": 0.157,
+              "peak_kib": 190259
+            },
+            "effects": {
+              "elapsed": 0.028,
+              "cpu": 0.186,
+              "peak_kib": 204595
+            },
+            "borrows": {
+              "elapsed": 0.081,
+              "cpu": 0.63,
+              "peak_kib": 280474
+            },
+            "total": {
+              "elapsed": 0.489,
+              "cpu": 1.328,
+              "peak_kib": 280474
+            }
+          }
         },
         {
-          "elapsed": 1.2499659029999748,
-          "cpu": 1.23,
-          "peak_kib": 263348
+          "elapsed": 0.5153275619995838,
+          "cpu": 1.3,
+          "peak_kib": 279792,
+          "phases": {
+            "load": {
+              "elapsed": 0.063,
+              "cpu": 0.062,
+              "peak_kib": 48742
+            },
+            "sema": {
+              "elapsed": 0.279,
+              "cpu": 0.278,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.026,
+              "cpu": 0.144,
+              "peak_kib": 190771
+            },
+            "effects": {
+              "elapsed": 0.029,
+              "cpu": 0.194,
+              "peak_kib": 207462
+            },
+            "borrows": {
+              "elapsed": 0.077,
+              "cpu": 0.599,
+              "peak_kib": 279757
+            },
+            "total": {
+              "elapsed": 0.475,
+              "cpu": 1.278,
+              "peak_kib": 279757
+            }
+          }
         },
         {
-          "elapsed": 1.2579472580000584,
-          "cpu": 1.24,
-          "peak_kib": 263348
+          "elapsed": 0.5196919320005691,
+          "cpu": 1.31,
+          "peak_kib": 279736,
+          "phases": {
+            "load": {
+              "elapsed": 0.071,
+              "cpu": 0.07,
+              "peak_kib": 48845
+            },
+            "sema": {
+              "elapsed": 0.27,
+              "cpu": 0.269,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.024,
+              "cpu": 0.155,
+              "peak_kib": 190566
+            },
+            "effects": {
+              "elapsed": 0.028,
+              "cpu": 0.179,
+              "peak_kib": 204902
+            },
+            "borrows": {
+              "elapsed": 0.083,
+              "cpu": 0.608,
+              "peak_kib": 279654
+            },
+            "total": {
+              "elapsed": 0.478,
+              "cpu": 1.283,
+              "peak_kib": 279654
+            }
+          }
         },
         {
-          "elapsed": 1.2692283890028193,
-          "cpu": 1.26,
-          "peak_kib": 263348
+          "elapsed": 0.5166458140010945,
+          "cpu": 1.33,
+          "peak_kib": 280052,
+          "phases": {
+            "load": {
+              "elapsed": 0.066,
+              "cpu": 0.066,
+              "peak_kib": 48742
+            },
+            "sema": {
+              "elapsed": 0.276,
+              "cpu": 0.275,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.023,
+              "cpu": 0.154,
+              "peak_kib": 190054
+            },
+            "effects": {
+              "elapsed": 0.029,
+              "cpu": 0.189,
+              "peak_kib": 205926
+            },
+            "borrows": {
+              "elapsed": 0.08,
+              "cpu": 0.621,
+              "peak_kib": 279962
+            },
+            "total": {
+              "elapsed": 0.476,
+              "cpu": 1.308,
+              "peak_kib": 279962
+            }
+          }
         },
         {
-          "elapsed": 1.2616086740017636,
-          "cpu": 1.24,
-          "peak_kib": 263348
+          "elapsed": 0.5242224659996282,
+          "cpu": 1.34,
+          "peak_kib": 281912,
+          "phases": {
+            "load": {
+              "elapsed": 0.074,
+              "cpu": 0.073,
+              "peak_kib": 48845
+            },
+            "sema": {
+              "elapsed": 0.277,
+              "cpu": 0.274,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.024,
+              "cpu": 0.156,
+              "peak_kib": 191078
+            },
+            "effects": {
+              "elapsed": 0.029,
+              "cpu": 0.192,
+              "peak_kib": 206438
+            },
+            "borrows": {
+              "elapsed": 0.079,
+              "cpu": 0.614,
+              "peak_kib": 281907
+            },
+            "total": {
+              "elapsed": 0.484,
+              "cpu": 1.311,
+              "peak_kib": 281907
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 1.2616086740017636,
-        "cpu_seconds": 1.24,
-        "peak_kib": 263348,
-        "min_elapsed_seconds": 1.2499659029999748,
-        "max_peak_kib": 263348
+        "elapsed_seconds": 0.5196919320005691,
+        "cpu_seconds": 1.33,
+        "peak_kib": 280052,
+        "min_elapsed_seconds": 0.5153275619995838,
+        "max_peak_kib": 281912,
+        "phases": {
+          "load": {
+            "elapsed": 0.071,
+            "cpu": 0.07,
+            "peak_kib": 48845
+          },
+          "sema": {
+            "elapsed": 0.276,
+            "cpu": 0.274,
+            "peak_kib": 176742
+          },
+          "elaboration": {
+            "elapsed": 0.024,
+            "cpu": 0.155,
+            "peak_kib": 190566
+          },
+          "effects": {
+            "elapsed": 0.029,
+            "cpu": 0.189,
+            "peak_kib": 205926
+          },
+          "borrows": {
+            "elapsed": 0.08,
+            "cpu": 0.614,
+            "peak_kib": 279962
+          },
+          "total": {
+            "elapsed": 0.478,
+            "cpu": 1.308,
+            "peak_kib": 279962
+          }
+        }
       }
     },
     {
@@ -75,42 +269,385 @@
         "x86_64",
         "-O2",
         "-o",
-        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/compiler-x86_64"
+        "/tmp/nix-shell.VTfJMW/jihoo-compile-xurq34ws/compiler-x86_64",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 15.687002075999771,
-          "cpu": 22.979999999999997,
-          "peak_kib": 373500
+          "elapsed": 15.19204554800308,
+          "cpu": 23.35,
+          "peak_kib": 373016,
+          "phases": {
+            "load": {
+              "elapsed": 0.073,
+              "cpu": 0.072,
+              "peak_kib": 48742
+            },
+            "sema": {
+              "elapsed": 0.272,
+              "cpu": 0.271,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.023,
+              "cpu": 0.156,
+              "peak_kib": 190054
+            },
+            "effects": {
+              "elapsed": 0.028,
+              "cpu": 0.19,
+              "peak_kib": 205926
+            },
+            "borrows": {
+              "elapsed": 0.078,
+              "cpu": 0.597,
+              "peak_kib": 280371
+            },
+            "IR generation": {
+              "elapsed": 0.203,
+              "cpu": 0.202,
+              "peak_kib": 280371
+            },
+            "LLVM parse": {
+              "elapsed": 0.463,
+              "cpu": 0.462,
+              "peak_kib": 280371
+            },
+            "LLVM optimize": {
+              "elapsed": 11.719,
+              "cpu": 11.65,
+              "peak_kib": 303002
+            },
+            "LLVM emit": {
+              "elapsed": 2.079,
+              "cpu": 9.509,
+              "peak_kib": 372941
+            },
+            "link": {
+              "elapsed": 0.214,
+              "cpu": 0.213,
+              "peak_kib": 372941
+            },
+            "total": {
+              "elapsed": 15.156,
+              "cpu": 23.327,
+              "peak_kib": 372941
+            }
+          }
         },
         {
-          "elapsed": 15.749589314000332,
-          "cpu": 23.159999999999997,
-          "peak_kib": 373648
+          "elapsed": 15.269531372003257,
+          "cpu": 23.650000000000002,
+          "peak_kib": 362064,
+          "phases": {
+            "load": {
+              "elapsed": 0.069,
+              "cpu": 0.068,
+              "peak_kib": 48742
+            },
+            "sema": {
+              "elapsed": 0.275,
+              "cpu": 0.274,
+              "peak_kib": 176640
+            },
+            "elaboration": {
+              "elapsed": 0.024,
+              "cpu": 0.155,
+              "peak_kib": 190362
+            },
+            "effects": {
+              "elapsed": 0.029,
+              "cpu": 0.188,
+              "peak_kib": 204902
+            },
+            "borrows": {
+              "elapsed": 0.079,
+              "cpu": 0.611,
+              "peak_kib": 280166
+            },
+            "IR generation": {
+              "elapsed": 0.205,
+              "cpu": 0.205,
+              "peak_kib": 280166
+            },
+            "LLVM parse": {
+              "elapsed": 0.463,
+              "cpu": 0.461,
+              "peak_kib": 281088
+            },
+            "LLVM optimize": {
+              "elapsed": 11.769,
+              "cpu": 11.696,
+              "peak_kib": 311398
+            },
+            "LLVM emit": {
+              "elapsed": 2.151,
+              "cpu": 9.798,
+              "peak_kib": 361984
+            },
+            "link": {
+              "elapsed": 0.171,
+              "cpu": 0.17,
+              "peak_kib": 361984
+            },
+            "total": {
+              "elapsed": 15.239,
+              "cpu": 23.631,
+              "peak_kib": 361984
+            }
+          }
         },
         {
-          "elapsed": 15.772689303001243,
-          "cpu": 23.119999999999997,
-          "peak_kib": 373904
+          "elapsed": 15.393394257000182,
+          "cpu": 23.55,
+          "peak_kib": 370208,
+          "phases": {
+            "load": {
+              "elapsed": 0.072,
+              "cpu": 0.071,
+              "peak_kib": 48845
+            },
+            "sema": {
+              "elapsed": 0.275,
+              "cpu": 0.273,
+              "peak_kib": 176742
+            },
+            "elaboration": {
+              "elapsed": 0.024,
+              "cpu": 0.159,
+              "peak_kib": 190157
+            },
+            "effects": {
+              "elapsed": 0.032,
+              "cpu": 0.193,
+              "peak_kib": 206541
+            },
+            "borrows": {
+              "elapsed": 0.079,
+              "cpu": 0.613,
+              "peak_kib": 278630
+            },
+            "IR generation": {
+              "elapsed": 0.202,
+              "cpu": 0.201,
+              "peak_kib": 278630
+            },
+            "LLVM parse": {
+              "elapsed": 0.468,
+              "cpu": 0.467,
+              "peak_kib": 282624
+            },
+            "LLVM optimize": {
+              "elapsed": 11.741,
+              "cpu": 11.673,
+              "peak_kib": 302797
+            },
+            "LLVM emit": {
+              "elapsed": 2.252,
+              "cpu": 9.66,
+              "peak_kib": 370176
+            },
+            "link": {
+              "elapsed": 0.214,
+              "cpu": 0.215,
+              "peak_kib": 370176
+            },
+            "total": {
+              "elapsed": 15.364,
+              "cpu": 23.53,
+              "peak_kib": 370176
+            }
+          }
         },
         {
-          "elapsed": 15.745326824002404,
-          "cpu": 23.110000000000003,
-          "peak_kib": 373824
+          "elapsed": 15.140127902999666,
+          "cpu": 23.470000000000002,
+          "peak_kib": 387956,
+          "phases": {
+            "load": {
+              "elapsed": 0.088,
+              "cpu": 0.088,
+              "peak_kib": 48845
+            },
+            "sema": {
+              "elapsed": 0.249,
+              "cpu": 0.248,
+              "peak_kib": 176845
+            },
+            "elaboration": {
+              "elapsed": 0.027,
+              "cpu": 0.147,
+              "peak_kib": 190566
+            },
+            "effects": {
+              "elapsed": 0.029,
+              "cpu": 0.188,
+              "peak_kib": 207770
+            },
+            "borrows": {
+              "elapsed": 0.081,
+              "cpu": 0.624,
+              "peak_kib": 281702
+            },
+            "IR generation": {
+              "elapsed": 0.202,
+              "cpu": 0.202,
+              "peak_kib": 281702
+            },
+            "LLVM parse": {
+              "elapsed": 0.464,
+              "cpu": 0.463,
+              "peak_kib": 281702
+            },
+            "LLVM optimize": {
+              "elapsed": 11.726,
+              "cpu": 11.658,
+              "peak_kib": 297370
+            },
+            "LLVM emit": {
+              "elapsed": 2.046,
+              "cpu": 9.635,
+              "peak_kib": 387891
+            },
+            "link": {
+              "elapsed": 0.187,
+              "cpu": 0.186,
+              "peak_kib": 387891
+            },
+            "total": {
+              "elapsed": 15.105,
+              "cpu": 23.443,
+              "peak_kib": 387891
+            }
+          }
         },
         {
-          "elapsed": 15.759478913998464,
-          "cpu": 23.139999999999997,
-          "peak_kib": 373824
+          "elapsed": 15.539169433999632,
+          "cpu": 23.77,
+          "peak_kib": 375552,
+          "phases": {
+            "load": {
+              "elapsed": 0.066,
+              "cpu": 0.066,
+              "peak_kib": 48742
+            },
+            "sema": {
+              "elapsed": 0.249,
+              "cpu": 0.248,
+              "peak_kib": 176845
+            },
+            "elaboration": {
+              "elapsed": 0.027,
+              "cpu": 0.146,
+              "peak_kib": 190566
+            },
+            "effects": {
+              "elapsed": 0.027,
+              "cpu": 0.177,
+              "peak_kib": 204698
+            },
+            "borrows": {
+              "elapsed": 0.086,
+              "cpu": 0.607,
+              "peak_kib": 282112
+            },
+            "IR generation": {
+              "elapsed": 0.201,
+              "cpu": 0.2,
+              "peak_kib": 282112
+            },
+            "LLVM parse": {
+              "elapsed": 0.464,
+              "cpu": 0.463,
+              "peak_kib": 282829
+            },
+            "LLVM optimize": {
+              "elapsed": 11.743,
+              "cpu": 11.671,
+              "peak_kib": 311910
+            },
+            "LLVM emit": {
+              "elapsed": 2.401,
+              "cpu": 9.934,
+              "peak_kib": 375501
+            },
+            "link": {
+              "elapsed": 0.235,
+              "cpu": 0.234,
+              "peak_kib": 375501
+            },
+            "total": {
+              "elapsed": 15.505,
+              "cpu": 23.75,
+              "peak_kib": 375501
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 15.749589314000332,
-        "cpu_seconds": 23.119999999999997,
-        "peak_kib": 373824,
-        "min_elapsed_seconds": 15.687002075999771,
-        "max_peak_kib": 373904
+        "elapsed_seconds": 15.269531372003257,
+        "cpu_seconds": 23.55,
+        "peak_kib": 373016,
+        "min_elapsed_seconds": 15.140127902999666,
+        "max_peak_kib": 387956,
+        "phases": {
+          "load": {
+            "elapsed": 0.072,
+            "cpu": 0.071,
+            "peak_kib": 48742
+          },
+          "sema": {
+            "elapsed": 0.272,
+            "cpu": 0.271,
+            "peak_kib": 176742
+          },
+          "elaboration": {
+            "elapsed": 0.024,
+            "cpu": 0.155,
+            "peak_kib": 190362
+          },
+          "effects": {
+            "elapsed": 0.029,
+            "cpu": 0.188,
+            "peak_kib": 205926
+          },
+          "borrows": {
+            "elapsed": 0.079,
+            "cpu": 0.611,
+            "peak_kib": 280371
+          },
+          "IR generation": {
+            "elapsed": 0.202,
+            "cpu": 0.202,
+            "peak_kib": 280371
+          },
+          "LLVM parse": {
+            "elapsed": 0.464,
+            "cpu": 0.463,
+            "peak_kib": 281702
+          },
+          "LLVM optimize": {
+            "elapsed": 11.741,
+            "cpu": 11.671,
+            "peak_kib": 303002
+          },
+          "LLVM emit": {
+            "elapsed": 2.151,
+            "cpu": 9.66,
+            "peak_kib": 372941
+          },
+          "link": {
+            "elapsed": 0.214,
+            "cpu": 0.213,
+            "peak_kib": 372941
+          },
+          "total": {
+            "elapsed": 15.239,
+            "cpu": 23.53,
+            "peak_kib": 372941
+          }
+        }
       }
     },
     {
@@ -122,42 +659,235 @@
         "check",
         "benchmarks/compile/comptime.jh",
         "--target",
-        "x86_64"
+        "x86_64",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.13167501399948378,
-          "cpu": 0.12,
-          "peak_kib": 16036
+          "elapsed": 0.16359408700009226,
+          "cpu": 0.17,
+          "peak_kib": 16004,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.143,
+              "cpu": 0.149,
+              "peak_kib": 15872
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15872
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15872
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15974
+            },
+            "total": {
+              "elapsed": 0.155,
+              "cpu": 0.172,
+              "peak_kib": 15974
+            }
+          }
         },
         {
-          "elapsed": 0.1306095069994626,
-          "cpu": 0.12,
-          "peak_kib": 16036
+          "elapsed": 0.14077023199934047,
+          "cpu": 0.14,
+          "peak_kib": 15812,
+          "phases": {
+            "load": {
+              "elapsed": 0.005,
+              "cpu": 0.005,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.124,
+              "cpu": 0.129,
+              "peak_kib": 15770
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15770
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15770
+            },
+            "total": {
+              "elapsed": 0.133,
+              "cpu": 0.15,
+              "peak_kib": 15770
+            }
+          }
         },
         {
-          "elapsed": 0.12812603800193756,
-          "cpu": 0.11,
-          "peak_kib": 16036
+          "elapsed": 0.14161786999829928,
+          "cpu": 0.13999999999999999,
+          "peak_kib": 16108,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.123,
+              "cpu": 0.127,
+              "peak_kib": 15770
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 15974
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.004,
+              "peak_kib": 16077
+            },
+            "total": {
+              "elapsed": 0.134,
+              "cpu": 0.147,
+              "peak_kib": 16077
+            }
+          }
         },
         {
-          "elapsed": 0.1321887220001372,
-          "cpu": 0.12,
-          "peak_kib": 16036
+          "elapsed": 0.15317011300066952,
+          "cpu": 0.16,
+          "peak_kib": 15868,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.133,
+              "cpu": 0.139,
+              "peak_kib": 15770
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15770
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.006,
+              "peak_kib": 15770
+            },
+            "total": {
+              "elapsed": 0.144,
+              "cpu": 0.161,
+              "peak_kib": 15770
+            }
+          }
         },
         {
-          "elapsed": 0.12967451800068375,
-          "cpu": 0.12,
-          "peak_kib": 16036
+          "elapsed": 0.13438323800073704,
+          "cpu": 0.13999999999999999,
+          "peak_kib": 16032,
+          "phases": {
+            "load": {
+              "elapsed": 0.008,
+              "cpu": 0.008,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.117,
+              "cpu": 0.121,
+              "peak_kib": 15974
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.003,
+              "peak_kib": 15974
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15974
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.004,
+              "peak_kib": 15974
+            },
+            "total": {
+              "elapsed": 0.128,
+              "cpu": 0.142,
+              "peak_kib": 15974
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.1306095069994626,
-        "cpu_seconds": 0.12,
-        "peak_kib": 16036,
-        "min_elapsed_seconds": 0.12812603800193756,
-        "max_peak_kib": 16036
+        "elapsed_seconds": 0.14161786999829928,
+        "cpu_seconds": 0.14,
+        "peak_kib": 16004,
+        "min_elapsed_seconds": 0.13438323800073704,
+        "max_peak_kib": 16108,
+        "phases": {
+          "load": {
+            "elapsed": 0.007,
+            "cpu": 0.007,
+            "peak_kib": 5939
+          },
+          "sema": {
+            "elapsed": 0.124,
+            "cpu": 0.129,
+            "peak_kib": 15770
+          },
+          "elaboration": {
+            "elapsed": 0.001,
+            "cpu": 0.004,
+            "peak_kib": 15770
+          },
+          "effects": {
+            "elapsed": 0.001,
+            "cpu": 0.005,
+            "peak_kib": 15872
+          },
+          "borrows": {
+            "elapsed": 0.001,
+            "cpu": 0.005,
+            "peak_kib": 15974
+          },
+          "total": {
+            "elapsed": 0.134,
+            "cpu": 0.15,
+            "peak_kib": 15974
+          }
+        }
       }
     },
     {
@@ -172,42 +902,385 @@
         "x86_64",
         "-O2",
         "-o",
-        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/comptime-x86_64"
+        "/tmp/nix-shell.VTfJMW/jihoo-compile-xurq34ws/comptime-x86_64",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.6295113129999663,
-          "cpu": 0.61,
-          "peak_kib": 80160
+          "elapsed": 0.6564071760003571,
+          "cpu": 0.6599999999999999,
+          "peak_kib": 80036,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.13,
+              "cpu": 0.136,
+              "peak_kib": 15770
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15770
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15770
+            },
+            "IR generation": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 15974
+            },
+            "LLVM parse": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 49562
+            },
+            "LLVM optimize": {
+              "elapsed": 0.214,
+              "cpu": 0.213,
+              "peak_kib": 66458
+            },
+            "LLVM emit": {
+              "elapsed": 0.079,
+              "cpu": 0.078,
+              "peak_kib": 77824
+            },
+            "link": {
+              "elapsed": 0.185,
+              "cpu": 0.184,
+              "peak_kib": 77926
+            },
+            "total": {
+              "elapsed": 0.648,
+              "cpu": 0.662,
+              "peak_kib": 77926
+            }
+          }
         },
         {
-          "elapsed": 0.6119393720000517,
+          "elapsed": 0.6716558160005661,
+          "cpu": 0.67,
+          "peak_kib": 80192,
+          "phases": {
+            "load": {
+              "elapsed": 0.008,
+              "cpu": 0.008,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.136,
+              "cpu": 0.142,
+              "peak_kib": 15872
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15872
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15974
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15974
+            },
+            "IR generation": {
+              "elapsed": 0.007,
+              "cpu": 0.006,
+              "peak_kib": 16179
+            },
+            "LLVM parse": {
+              "elapsed": 0.03,
+              "cpu": 0.03,
+              "peak_kib": 49766
+            },
+            "LLVM optimize": {
+              "elapsed": 0.221,
+              "cpu": 0.22,
+              "peak_kib": 66560
+            },
+            "LLVM emit": {
+              "elapsed": 0.079,
+              "cpu": 0.078,
+              "peak_kib": 78029
+            },
+            "link": {
+              "elapsed": 0.174,
+              "cpu": 0.174,
+              "peak_kib": 78131
+            },
+            "total": {
+              "elapsed": 0.661,
+              "cpu": 0.676,
+              "peak_kib": 78131
+            }
+          }
+        },
+        {
+          "elapsed": 0.6278662050026469,
+          "cpu": 0.63,
+          "peak_kib": 80124,
+          "phases": {
+            "load": {
+              "elapsed": 0.005,
+              "cpu": 0.005,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.124,
+              "cpu": 0.129,
+              "peak_kib": 15667
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.003,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15872
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.004,
+              "peak_kib": 15872
+            },
+            "IR generation": {
+              "elapsed": 0.004,
+              "cpu": 0.004,
+              "peak_kib": 16077
+            },
+            "LLVM parse": {
+              "elapsed": 0.018,
+              "cpu": 0.017,
+              "peak_kib": 49664
+            },
+            "LLVM optimize": {
+              "elapsed": 0.213,
+              "cpu": 0.212,
+              "peak_kib": 66560
+            },
+            "LLVM emit": {
+              "elapsed": 0.079,
+              "cpu": 0.079,
+              "peak_kib": 78029
+            },
+            "link": {
+              "elapsed": 0.17,
+              "cpu": 0.17,
+              "peak_kib": 78131
+            },
+            "total": {
+              "elapsed": 0.619,
+              "cpu": 0.631,
+              "peak_kib": 78131
+            }
+          }
+        },
+        {
+          "elapsed": 0.6468949039990548,
+          "cpu": 0.65,
+          "peak_kib": 80184,
+          "phases": {
+            "load": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.136,
+              "cpu": 0.142,
+              "peak_kib": 15770
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15770
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15872
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15974
+            },
+            "IR generation": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 16179
+            },
+            "LLVM parse": {
+              "elapsed": 0.021,
+              "cpu": 0.021,
+              "peak_kib": 49664
+            },
+            "LLVM optimize": {
+              "elapsed": 0.213,
+              "cpu": 0.211,
+              "peak_kib": 66560
+            },
+            "LLVM emit": {
+              "elapsed": 0.079,
+              "cpu": 0.078,
+              "peak_kib": 78029
+            },
+            "link": {
+              "elapsed": 0.165,
+              "cpu": 0.164,
+              "peak_kib": 78131
+            },
+            "total": {
+              "elapsed": 0.633,
+              "cpu": 0.647,
+              "peak_kib": 78131
+            }
+          }
+        },
+        {
+          "elapsed": 0.595081900999503,
           "cpu": 0.6,
-          "peak_kib": 80160
-        },
-        {
-          "elapsed": 0.6247454840013233,
-          "cpu": 0.61,
-          "peak_kib": 80288
-        },
-        {
-          "elapsed": 0.6557550760007871,
-          "cpu": 0.64,
-          "peak_kib": 80160
-        },
-        {
-          "elapsed": 0.6121911660011392,
-          "cpu": 0.59,
-          "peak_kib": 80160
+          "peak_kib": 80248,
+          "phases": {
+            "load": {
+              "elapsed": 0.004,
+              "cpu": 0.004,
+              "peak_kib": 5837
+            },
+            "sema": {
+              "elapsed": 0.088,
+              "cpu": 0.092,
+              "peak_kib": 15872
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15872
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.004,
+              "peak_kib": 15974
+            },
+            "borrows": {
+              "elapsed": 0.001,
+              "cpu": 0.005,
+              "peak_kib": 15974
+            },
+            "IR generation": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 16179
+            },
+            "LLVM parse": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 49766
+            },
+            "LLVM optimize": {
+              "elapsed": 0.211,
+              "cpu": 0.209,
+              "peak_kib": 66662
+            },
+            "LLVM emit": {
+              "elapsed": 0.078,
+              "cpu": 0.078,
+              "peak_kib": 78029
+            },
+            "link": {
+              "elapsed": 0.167,
+              "cpu": 0.166,
+              "peak_kib": 78131
+            },
+            "total": {
+              "elapsed": 0.582,
+              "cpu": 0.594,
+              "peak_kib": 78131
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.6247454840013233,
-        "cpu_seconds": 0.61,
-        "peak_kib": 80160,
-        "min_elapsed_seconds": 0.6119393720000517,
-        "max_peak_kib": 80288
+        "elapsed_seconds": 0.6468949039990548,
+        "cpu_seconds": 0.65,
+        "peak_kib": 80184,
+        "min_elapsed_seconds": 0.595081900999503,
+        "max_peak_kib": 80248,
+        "phases": {
+          "load": {
+            "elapsed": 0.006,
+            "cpu": 0.006,
+            "peak_kib": 5939
+          },
+          "sema": {
+            "elapsed": 0.13,
+            "cpu": 0.136,
+            "peak_kib": 15770
+          },
+          "elaboration": {
+            "elapsed": 0.001,
+            "cpu": 0.004,
+            "peak_kib": 15770
+          },
+          "effects": {
+            "elapsed": 0.001,
+            "cpu": 0.004,
+            "peak_kib": 15872
+          },
+          "borrows": {
+            "elapsed": 0.001,
+            "cpu": 0.005,
+            "peak_kib": 15974
+          },
+          "IR generation": {
+            "elapsed": 0.006,
+            "cpu": 0.006,
+            "peak_kib": 16179
+          },
+          "LLVM parse": {
+            "elapsed": 0.02,
+            "cpu": 0.02,
+            "peak_kib": 49664
+          },
+          "LLVM optimize": {
+            "elapsed": 0.213,
+            "cpu": 0.212,
+            "peak_kib": 66560
+          },
+          "LLVM emit": {
+            "elapsed": 0.079,
+            "cpu": 0.078,
+            "peak_kib": 78029
+          },
+          "link": {
+            "elapsed": 0.17,
+            "cpu": 0.17,
+            "peak_kib": 78131
+          },
+          "total": {
+            "elapsed": 0.633,
+            "cpu": 0.647,
+            "peak_kib": 78131
+          }
+        }
       }
     },
     {
@@ -220,42 +1293,235 @@
         "benchmarks/functional-fusion/kernels.jh",
         "--target",
         "x86_64",
-        "--lib"
+        "--lib",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.020937691002473002,
+          "elapsed": 0.020092620001378236,
           "cpu": 0.01,
-          "peak_kib": 8080
+          "peak_kib": 8180,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 8090
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "total": {
+              "elapsed": 0.013,
+              "cpu": 0.019,
+              "peak_kib": 8090
+            }
+          }
         },
         {
-          "elapsed": 0.012343333000899293,
-          "cpu": 0.0,
-          "peak_kib": 8080
+          "elapsed": 0.01998864000051981,
+          "cpu": 0.02,
+          "peak_kib": 8180,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 8090
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "total": {
+              "elapsed": 0.013,
+              "cpu": 0.019,
+              "peak_kib": 8090
+            }
+          }
         },
         {
-          "elapsed": 0.01772614899891778,
+          "elapsed": 0.020077208999282448,
+          "cpu": 0.02,
+          "peak_kib": 8308,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 8294
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "total": {
+              "elapsed": 0.013,
+              "cpu": 0.019,
+              "peak_kib": 8294
+            }
+          }
+        },
+        {
+          "elapsed": 0.01936635399761144,
           "cpu": 0.01,
-          "peak_kib": 8080
+          "peak_kib": 8180,
+          "phases": {
+            "load": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 8090
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8090
+            },
+            "total": {
+              "elapsed": 0.013,
+              "cpu": 0.017,
+              "peak_kib": 8090
+            }
+          }
         },
         {
-          "elapsed": 0.015513026002736297,
-          "cpu": 0.0,
-          "peak_kib": 8080
-        },
-        {
-          "elapsed": 0.020208652000292204,
-          "cpu": 0.0,
-          "peak_kib": 8080
+          "elapsed": 0.018301599000551505,
+          "cpu": 0.02,
+          "peak_kib": 8240,
+          "phases": {
+            "load": {
+              "elapsed": 0.007,
+              "cpu": 0.007,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8192
+            },
+            "effects": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8192
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8192
+            },
+            "total": {
+              "elapsed": 0.013,
+              "cpu": 0.017,
+              "peak_kib": 8192
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.01772614899891778,
-        "cpu_seconds": 0.0,
-        "peak_kib": 8080,
-        "min_elapsed_seconds": 0.012343333000899293,
-        "max_peak_kib": 8080
+        "elapsed_seconds": 0.01998864000051981,
+        "cpu_seconds": 0.02,
+        "peak_kib": 8180,
+        "min_elapsed_seconds": 0.018301599000551505,
+        "max_peak_kib": 8308,
+        "phases": {
+          "load": {
+            "elapsed": 0.007,
+            "cpu": 0.007,
+            "peak_kib": 6042
+          },
+          "sema": {
+            "elapsed": 0.003,
+            "cpu": 0.003,
+            "peak_kib": 7885
+          },
+          "elaboration": {
+            "elapsed": 0.001,
+            "cpu": 0.002,
+            "peak_kib": 8090
+          },
+          "effects": {
+            "elapsed": 0.001,
+            "cpu": 0.003,
+            "peak_kib": 8090
+          },
+          "borrows": {
+            "elapsed": 0.0,
+            "cpu": 0.002,
+            "peak_kib": 8090
+          },
+          "total": {
+            "elapsed": 0.013,
+            "cpu": 0.019,
+            "peak_kib": 8090
+          }
+        }
       }
     },
     {
@@ -271,42 +1537,355 @@
         "-O2",
         "--lib",
         "-o",
-        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/fusion-x86_64.o"
+        "/tmp/nix-shell.VTfJMW/jihoo-compile-xurq34ws/fusion-x86_64.o",
+        "--time-passes"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.16021692900176276,
+          "elapsed": 0.1795687639969401,
+          "cpu": 0.17,
+          "peak_kib": 72240,
+          "phases": {
+            "load": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.002,
+              "cpu": 0.002,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.001,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "effects": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8090
+            },
+            "IR generation": {
+              "elapsed": 0.002,
+              "cpu": 0.002,
+              "peak_kib": 8499
+            },
+            "LLVM parse": {
+              "elapsed": 0.016,
+              "cpu": 0.016,
+              "peak_kib": 42496
+            },
+            "LLVM optimize": {
+              "elapsed": 0.118,
+              "cpu": 0.117,
+              "peak_kib": 59187
+            },
+            "LLVM emit": {
+              "elapsed": 0.023,
+              "cpu": 0.023,
+              "peak_kib": 70963
+            },
+            "total": {
+              "elapsed": 0.172,
+              "cpu": 0.175,
+              "peak_kib": 70963
+            }
+          }
+        },
+        {
+          "elapsed": 0.1545609160020831,
           "cpu": 0.14,
-          "peak_kib": 72568
+          "peak_kib": 72360,
+          "phases": {
+            "load": {
+              "elapsed": 0.004,
+              "cpu": 0.004,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.001,
+              "cpu": 0.001,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8294
+            },
+            "effects": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8294
+            },
+            "IR generation": {
+              "elapsed": 0.001,
+              "cpu": 0.001,
+              "peak_kib": 8499
+            },
+            "LLVM parse": {
+              "elapsed": 0.016,
+              "cpu": 0.016,
+              "peak_kib": 42598
+            },
+            "LLVM optimize": {
+              "elapsed": 0.098,
+              "cpu": 0.097,
+              "peak_kib": 59290
+            },
+            "LLVM emit": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 71168
+            },
+            "total": {
+              "elapsed": 0.146,
+              "cpu": 0.148,
+              "peak_kib": 71168
+            }
+          }
         },
         {
-          "elapsed": 0.12871766799798934,
-          "cpu": 0.12,
-          "peak_kib": 72568
+          "elapsed": 0.16418607000014163,
+          "cpu": 0.16,
+          "peak_kib": 72540,
+          "phases": {
+            "load": {
+              "elapsed": 0.008,
+              "cpu": 0.008,
+              "peak_kib": 5939
+            },
+            "sema": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 7782
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "effects": {
+              "elapsed": 0.001,
+              "cpu": 0.003,
+              "peak_kib": 8294
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "IR generation": {
+              "elapsed": 0.002,
+              "cpu": 0.002,
+              "peak_kib": 8704
+            },
+            "LLVM parse": {
+              "elapsed": 0.022,
+              "cpu": 0.022,
+              "peak_kib": 42701
+            },
+            "LLVM optimize": {
+              "elapsed": 0.096,
+              "cpu": 0.095,
+              "peak_kib": 59494
+            },
+            "LLVM emit": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 71373
+            },
+            "total": {
+              "elapsed": 0.156,
+              "cpu": 0.161,
+              "peak_kib": 71373
+            }
+          }
         },
         {
-          "elapsed": 0.14334814199901302,
-          "cpu": 0.13,
-          "peak_kib": 72440
-        },
-        {
-          "elapsed": 0.12816584500251338,
+          "elapsed": 0.12651056699905894,
           "cpu": 0.11,
-          "peak_kib": 72568
+          "peak_kib": 72452,
+          "phases": {
+            "load": {
+              "elapsed": 0.004,
+              "cpu": 0.004,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.001,
+              "cpu": 0.001,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8294
+            },
+            "effects": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8294
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8294
+            },
+            "IR generation": {
+              "elapsed": 0.001,
+              "cpu": 0.001,
+              "peak_kib": 8704
+            },
+            "LLVM parse": {
+              "elapsed": 0.011,
+              "cpu": 0.011,
+              "peak_kib": 42598
+            },
+            "LLVM optimize": {
+              "elapsed": 0.078,
+              "cpu": 0.078,
+              "peak_kib": 59392
+            },
+            "LLVM emit": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 71168
+            },
+            "total": {
+              "elapsed": 0.12,
+              "cpu": 0.123,
+              "peak_kib": 71168
+            }
+          }
         },
         {
-          "elapsed": 0.14948628100319183,
-          "cpu": 0.13,
-          "peak_kib": 72568
+          "elapsed": 0.1556375719992502,
+          "cpu": 0.15000000000000002,
+          "peak_kib": 72468,
+          "phases": {
+            "load": {
+              "elapsed": 0.006,
+              "cpu": 0.006,
+              "peak_kib": 6042
+            },
+            "sema": {
+              "elapsed": 0.004,
+              "cpu": 0.004,
+              "peak_kib": 7885
+            },
+            "elaboration": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8192
+            },
+            "effects": {
+              "elapsed": 0.0,
+              "cpu": 0.001,
+              "peak_kib": 8192
+            },
+            "borrows": {
+              "elapsed": 0.0,
+              "cpu": 0.002,
+              "peak_kib": 8192
+            },
+            "IR generation": {
+              "elapsed": 0.003,
+              "cpu": 0.003,
+              "peak_kib": 8704
+            },
+            "LLVM parse": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 42598
+            },
+            "LLVM optimize": {
+              "elapsed": 0.091,
+              "cpu": 0.091,
+              "peak_kib": 59392
+            },
+            "LLVM emit": {
+              "elapsed": 0.02,
+              "cpu": 0.02,
+              "peak_kib": 71168
+            },
+            "total": {
+              "elapsed": 0.148,
+              "cpu": 0.151,
+              "peak_kib": 71168
+            }
+          }
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.14334814199901302,
-        "cpu_seconds": 0.13,
-        "peak_kib": 72568,
-        "min_elapsed_seconds": 0.12816584500251338,
-        "max_peak_kib": 72568
+        "elapsed_seconds": 0.1556375719992502,
+        "cpu_seconds": 0.15000000000000002,
+        "peak_kib": 72452,
+        "min_elapsed_seconds": 0.12651056699905894,
+        "max_peak_kib": 72540,
+        "phases": {
+          "load": {
+            "elapsed": 0.006,
+            "cpu": 0.006,
+            "peak_kib": 6042
+          },
+          "sema": {
+            "elapsed": 0.002,
+            "cpu": 0.002,
+            "peak_kib": 7885
+          },
+          "elaboration": {
+            "elapsed": 0.0,
+            "cpu": 0.001,
+            "peak_kib": 8294
+          },
+          "effects": {
+            "elapsed": 0.0,
+            "cpu": 0.002,
+            "peak_kib": 8294
+          },
+          "borrows": {
+            "elapsed": 0.0,
+            "cpu": 0.002,
+            "peak_kib": 8294
+          },
+          "IR generation": {
+            "elapsed": 0.002,
+            "cpu": 0.002,
+            "peak_kib": 8704
+          },
+          "LLVM parse": {
+            "elapsed": 0.016,
+            "cpu": 0.016,
+            "peak_kib": 42598
+          },
+          "LLVM optimize": {
+            "elapsed": 0.096,
+            "cpu": 0.095,
+            "peak_kib": 59392
+          },
+          "LLVM emit": {
+            "elapsed": 0.02,
+            "cpu": 0.02,
+            "peak_kib": 71168
+          },
+          "total": {
+            "elapsed": 0.148,
+            "cpu": 0.151,
+            "peak_kib": 71168
+          }
+        }
       }
     }
   ]
