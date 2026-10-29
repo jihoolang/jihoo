@@ -1,0 +1,22 @@
+//> ab
+//> ab
+//> xy
+//> abc
+//> 7
+// `+` on strings as the `comptime` expression itself, not only inside a
+// called function.
+fn cat(a: str, b: str) -> String { a + b }
+
+const OK: str = comptime cat("a", "b")
+const PLAIN: str = comptime ("a" + "b")
+const OWNED: str = comptime (String.from("x") + "y")
+const N: i32 = comptime (1 + 2 * 3)
+
+fn main() {
+    println(OK)
+    println(PLAIN)
+    println(OWNED)
+    let s = comptime ("a" + "b" + "c")
+    println(s)
+    println(N)
+}

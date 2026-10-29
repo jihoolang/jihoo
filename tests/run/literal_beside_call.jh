@@ -1,0 +1,30 @@
+//> 0.5
+//> 7
+//> 5
+//> 0.75
+// A literal on the left of a binary operator takes the type of a function or
+// method call on the right, as it does for a variable.
+fn half(x: f64) -> f32 { (x / 2.0) as f32 }
+fn g() -> i32 { 3 }
+
+struct P { v: Vec(i32) }
+
+impl P {
+    fn n(self) -> u64 { self.v.len() as u64 + 2 }
+}
+
+fn main() {
+    let c = 1.0 - half(1.0)
+    let c32: f32 = c
+    println(c32)
+    let d = 10 - g()
+    let d32: i32 = d
+    println(d32)
+    let p = P { v: Vec(i32).new() }
+    let e = 3 + p.n()
+    let e64: u64 = e
+    println(e64)
+    let x: f32 = 0.25
+    let a = 1.0 - x
+    println(a)
+}

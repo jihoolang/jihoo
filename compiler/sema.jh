@@ -2568,6 +2568,11 @@ impl Sema {
                 if op == Op.LogAnd || op == Op.LogOr { return self.eval_const_expr(e, env, exp) }
                 let ea: Option(u32) = if op.is_compare() { None } else { exp }
                 let ra = self.const_expr(a.deref(), env, ea)?
+                // Strings and other values: the interpreter runs the operator.
+                match ra.c {
+                    Int(_, _) | Float(_, _) | Bool(_) => {}
+                    _ => return self.eval_const_expr(e, env, exp)
+                }
                 let rb = self.const_expr(b.deref(), env, Some(ra.ty))?
                 let shift = match op {
                     Shl | Shr => true

@@ -2129,6 +2129,33 @@ impl sema.Sema {
                     _ => None
                 }
             }
+            // A call to a function or method without compile-time
+            // parameters of its own: its return type.
+            Call(callee, _) => match callee.kind {
+                Name(n) => {
+                    if fb.lookup(n.as_str()).is_some() || fb.env.get(n.as_str()).is_some() {
+                        return None
+                    }
+                    match self.lookup(fb.env.module, n.as_str())? {
+                        Fn(f) => {
+                            let id = self.instance(f, Vec(CVal).new(), e.span).ok()?
+                            Some(self.out[id as i64].sig.ret)
+                        }
+                        _ => None
+                    }
+                }
+                Field(b, name) => {
+                    let bt = self.peek_type(fb, b.deref())?
+                    var t = bt
+                    if self.types.is_ref(bt) || self.types.is_ptr(bt) {
+                        t = self.types.pointee(bt).unwrap()
+                    }
+                    let h = self.find_method(t, name.as_str()).ok()??
+                    let id = self.instance(h.imp, h.args.clone(), e.span).ok()?
+                    Some(self.out[id as i64].sig.ret)
+                }
+                _ => None
+            }
             Binary(op, a, _) => {
                 if op.is_compare() {
                     return None
