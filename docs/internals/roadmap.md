@@ -148,8 +148,6 @@ emission about 6.7 s on the same IR). Every phase ran on one CPU.
   point and worklists, and effect inference revisits only callers of a
   function whose relation grew. `check` takes 1.3 s and a full build 20.7 s;
   peak memory fell by about a quarter.
-- Phase timings from the compiler (`--time-passes` or similar), so later
-  changes are measured per phase.
 - Done: object emission in parallel. The module is still optimized whole,
   so inlining is unchanged; a large one is then emitted as up to eight
   units of consecutive functions, each on its own thread and LLVM context,
@@ -161,21 +159,46 @@ emission about 6.7 s on the same IR). Every phase ran on one CPU.
   are formed by halving so that only two copies of the module are read at
   once, freed memory is returned before the threads start, and the syntax
   trees are dropped before the backend.
-- Optimization in parallel, the larger part of what remains (about 12.5 s):
-  only without changing what is inlined where, which rules out optimizing
-  units separately with `default<O2>`.
-- Borrow checks in parallel: after effect inference, each function's check
-  is independent. `Types` must not change while they run (layout and drop
-  caches filled beforehand), and errors are still reported in source order.
-- Library work that these need: `thread.map` over uneven work (chunks or a
-  pool), per-thread allocation, deterministic parallel reduction, and the
-  `Send`-like rule if shared compiler data needs one.
-- Sema's instance queue stays sequential unless measurements show it
-  dominates: it shares the type interner.
+
+Remaining for 0.3.0, in this order. Each step keeps the full test suite,
+the self-hosting comparison and the recorded baseline
+(`benchmarks/compile/baseline-x86_64.json`) green, and states its measured
+effect in the commit and here.
+
+1. Phase timings. `--time-passes` (or similar) reports load, sema,
+   elaboration, effect inference, borrow checks, IR generation, LLVM
+   optimization, emission and linking, measured inside the compiler, on
+   standard error, without changing any other output. The benchmark script
+   can record them.
+2. Borrow checks and elaboration in parallel. After effect inference, each
+   function's check is independent. `Types` must not change while they run
+   (layout and drop caches filled beforehand), and errors are still
+   reported in source order, exactly as a sequential run reports them.
+   Effect inference may stay sequential if the timings show it is small.
+3. The library work that step 2 shows is needed, driven by the compiler
+   rather than speculation: `thread.map` over uneven work (chunks or a
+   pool), per-thread allocation if malloc contention shows up, deterministic
+   parallel reduction, and the `Send`-like rule if shared compiler data
+   needs one. Each addition gets tests in `tests/run` and `tests/fail` and
+   documentation in [threads](../language/threads.md).
+4. The LLVM optimization time (about 12.5 s of a 15.6 s build). Measure
+   first whether smaller IR from `llvm.jh` (fewer allocas and copies before
+   LLVM sees them) reduces it without slowing the programs it builds;
+   parallel optimization is acceptable only if it does not change what is
+   inlined where. The fusion and runtime benchmarks must not regress.
+5. The release: jihoo-proofs' examples compile again with the checkout's
+   library (its lexer must accept `os.Error` from `read_line`, or the
+   migration is documented), README's Status describes 0.3, and this
+   section records the final numbers. The seed need not move first:
+   `std.thread` is already in 0.2.1.
+
+Sema's instance queue stays sequential unless measurements show it
+dominates: it shares the type interner.
 
 Completion: on the controlled host, a full `-O2` build of the compiler is
-several times faster than 36.8 s and uses the available CPUs; the output of
-every compilation is identical to a sequential one.
+several times faster than 36.8 s and `check` uses the available CPUs; the
+output of every compilation, diagnostics included, is identical to a
+sequential one, and the programs it builds are no slower.
 
 ## 0.1: the rewrite
 
