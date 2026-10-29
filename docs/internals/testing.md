@@ -177,6 +177,20 @@ case once and checks that it succeeds, that `check` prints nothing and
 creates no files, and that full compilation writes its output, without
 thresholds. CI runs it for both targets with the packaged compiler.
 
+`--time-passes` adds the compiler's own
+[phase timings](../reference/command-line.md#phase-timings) to every sample
+and their medians to each case, and prints them; against a baseline that
+recorded them too, each phase's elapsed ratio is printed, without
+thresholds. Use it to see which phase a change moved: the totals stay the
+measure that `--baseline` checks.
+
+```sh
+python3 tests/time_passes.py --compiler out/jihoo
+```
+
+The check suite validates the table, that its phases add up to the total,
+and that output, objects, statuses and diagnostics are the same without it.
+
 ## Compile-time resource measurements
 
 ```sh

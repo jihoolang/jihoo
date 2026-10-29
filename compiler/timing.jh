@@ -1,0 +1,124 @@
+// Phase timings (`--time-passes`): for each phase of a compilation, the
+// elapsed time, the CPU time of all the compiler's threads and of the
+// programs it ran (the linker), and the compiler's peak resident memory
+// once the phase ended, measured inside the compiler and written on
+// standard error.
+
+extern fn clock_gettime(clock: i32, ts: *i64) -> i32
+extern fn getrusage(who: i32, usage: *i64) -> i32
+
+const MONOTONIC: i32 = 1
+const SELF: i32 = 0
+const CHILDREN: i32 = -1
+
+// Nanoseconds since some fixed point.
+fn now() -> i64 {
+    var ts = [0 as i64; 2]
+    let _ = unsafe { clock_gettime(MONOTONIC, &ts[0]) }
+    ts[0] * 1000000000 + ts[1]
+}
+
+// `struct rusage`: user time, system time (each seconds and
+// microseconds), `ru_maxrss` in KiB, then fields not read here.
+fn usage(who: i32) -> [i64; 18] {
+    var u = [0 as i64; 18]
+    let _ = unsafe { getrusage(who, &u[0]) }
+    u
+}
+
+// User and system time of this process and its finished children, in
+// nanoseconds.
+fn cpu() -> i64 {
+    var ns = 0
+    for who in [SELF, CHILDREN] {
+        let u = usage(who)
+        ns += (u[0] + u[2]) * 1000000000 + (u[1] + u[3]) * 1000
+    }
+    ns
+}
+
+fn peak_kib() -> i64 {
+    usage(SELF)[4]
+}
+
+struct Phase {
+    name: String
+    wall: i64
+    cpu: i64
+    peak: i64
+}
+
+pub struct Timer {
+    phases: Vec(Phase)
+    wall: i64
+    cpu: i64
+    start_wall: i64
+    start_cpu: i64
+}
+
+impl Timer {
+    pub fn start() -> Timer {
+        let wall = now()
+        let spent = cpu()
+        Timer { phases: Vec(Phase).new(), wall, cpu: spent, start_wall: wall, start_cpu: spent }
+    }
+
+    // Ends the phase `name`, which began where the previous one ended.
+    pub fn lap(inout self, name: str) {
+        let wall = now()
+        let spent = cpu()
+        self.phases.push(Phase {
+            name: String.from(name),
+            wall: wall - self.wall,
+            cpu: spent - self.cpu,
+            peak: peak_kib()
+        })
+        self.wall = wall
+        self.cpu = spent
+    }
+
+    // A header, a line per phase and a total, in seconds and MiB, without
+    // a final newline.
+    pub fn report(self) -> String {
+        var s = String.from("phase")
+        pad(&s, 11, "elapsed")
+        pad(&s, 0, "cpu")
+        pad(&s, 1, "peak")
+        var peak = 0
+        for p in self.phases {
+            row(&s, p.name.as_str(), p.wall, p.cpu, p.peak)
+            peak = max(peak, p.peak)
+        }
+        row(&s, "total", self.wall - self.start_wall, self.cpu - self.start_cpu, peak)
+        s
+    }
+}
+
+fn row(inout s: String, name: str, wall: i64, cpu: i64, peak: i64) {
+    s.push('\n')
+    s.push_str(name)
+    pad(&s, 16 - name.len, seconds(wall).as_str())
+    pad(&s, 0, seconds(cpu).as_str())
+    var mib = (peak * 10 / 1024).to_string()
+    if mib.len() < 2 { mib = "0" + mib.as_str() }
+    let n = mib.len()
+    pad(&s, 1, (mib.as_str()[0..n - 1] + "." + mib.as_str()[n - 1..n] + " MiB").as_str())
+}
+
+// `text` right-aligned in a column of 10 bytes, after `extra` more spaces.
+fn pad(inout s: String, extra: i64, text: str) {
+    for _ in 0..max(extra, 0) + max(10 - text.len, 0) {
+        s.push(' ')
+    }
+    s.push_str(text)
+}
+
+// Nanoseconds as seconds with three decimals: "12.345s".
+fn seconds(ns: i64) -> String {
+    let ms = ns / 1000000
+    var frac = (ms % 1000).to_string()
+    while frac.len() < 3 {
+        frac = "0" + frac.as_str()
+    }
+    (ms / 1000).to_string() + "." + frac.as_str() + "s"
+}

@@ -21,6 +21,7 @@ import load
 import os
 import sema
 import target
+import timing
 
 type Json = json.Json
 type Diag = diag.Diag
@@ -592,7 +593,8 @@ pub fn analyze(
     let a = load.load_with(path, load.default_search(search), tgt.name(), &sources, false, overlay)?
     var reports = Vec(interp.Report).new()
     var prog = sema.compile(a, tgt, true, true, false, &reports)?
-    check.program(&prog)
+    var timer = timing.Timer.start()
+    check.program(&prog, &timer)
 }
 
 // Where an error is shown for a check of the document at `path`: at its

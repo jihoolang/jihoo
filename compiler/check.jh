@@ -17,6 +17,7 @@
 import diag
 import elab
 import mir
+import timing
 import types
 
 type Diag = diag.Diag
@@ -205,7 +206,8 @@ impl Worklist {
 
 // Elaborates moves and drops in every function of a program, then checks
 // the borrows of those that elaborated; their errors are reported together.
-pub fn program(inout prog: mir.Program) -> Result((), Diag) {
+// Each of the three steps ends a phase of `timer`.
+pub fn program(inout prog: mir.Program, inout timer: timing.Timer) -> Result((), Diag) {
     var errors = Vec(Diag).new()
     var initialized = Vec(bool).new()
     for i in 0..prog.fns.len() {
@@ -217,7 +219,9 @@ pub fn program(inout prog: mir.Program) -> Result((), Diag) {
             }
         }
     }
+    timer.lap("elaboration")
     let effects = infer_effects(prog.types, prog.fns)
+    timer.lap("effects")
     for i, f in prog.fns {
         if initialized[i] {
             match run_with_effects(prog.types, f, effects) {
@@ -226,6 +230,7 @@ pub fn program(inout prog: mir.Program) -> Result((), Diag) {
             }
         }
     }
+    timer.lap("borrows")
     if errors.len() > 0 { return Err(Diag.several(errors)) }
     Ok(())
 }

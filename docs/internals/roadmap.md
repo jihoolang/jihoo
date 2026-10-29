@@ -165,11 +165,17 @@ the self-hosting comparison and the recorded baseline
 (`benchmarks/compile/baseline-x86_64.json`) green, and states its measured
 effect in the commit and here.
 
-1. Phase timings. `--time-passes` (or similar) reports load, sema,
-   elaboration, effect inference, borrow checks, IR generation, LLVM
-   optimization, emission and linking, measured inside the compiler, on
-   standard error, without changing any other output. The benchmark script
-   can record them.
+1. Done: phase timings. `--time-passes` writes each phase's elapsed time,
+   CPU time and peak memory on standard error
+   ([phase timings](../reference/command-line.md#phase-timings)), and
+   `scripts/benchmark_compile.py --time-passes` records them. Every other
+   output is unchanged, and so is the compiler's speed (within noise of the
+   baseline). Medians of five full `-O2` builds of the compiler: load
+   0.08 s, sema 0.25 s, elaboration 0.11 s, effect inference 0.17 s,
+   borrow checks 0.62 s, IR generation 0.19 s, LLVM parsing 0.46 s, LLVM
+   optimization 11.7 s, emission 2.0 s (9.5 s of CPU) and linking 0.20 s,
+   15.7 s in all. `check` takes 1.24 s, half of it borrow checks; peak
+   memory grows from 258 MiB after the checks to 377 MiB during emission.
 2. Borrow checks and elaboration in parallel. After effect inference, each
    function's check is independent. `Types` must not change while they run
    (layout and drop caches filled beforehand), and errors are still

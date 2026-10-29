@@ -41,6 +41,7 @@ once the program has none.
 | `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
 | `--error-format=text\|json` | diagnostic format for every failure (default `text`) |
 | `--comptime-report <path>` | write interpreter resource measurements as a separate JSON file |
+| `--time-passes` | report the time and memory of each phase on standard error |
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
@@ -175,6 +176,51 @@ use a separate file, so successful checks remain silent and JSON source
 diagnostics remain one document on stderr. A source-loading or syntax error
 before semantic checking does not produce a report. Existing report files
 are replaced; a loaded source file cannot be used as the report destination.
+
+## Phase timings
+
+```sh
+jihoo build compiler/main.jh --time-passes -o out/jihoo
+```
+
+```text
+phase              elapsed       cpu       peak
+load                0.074s    0.073s   47.1 MiB
+sema                0.256s    0.254s  170.4 MiB
+elaboration         0.112s    0.112s  172.9 MiB
+effects             0.168s    0.168s  185.0 MiB
+borrows             0.618s    0.617s  258.0 MiB
+IR generation       0.193s    0.192s  258.0 MiB
+LLVM parse          0.462s    0.460s  258.0 MiB
+LLVM optimize      11.765s   11.693s  274.6 MiB
+LLVM emit           1.962s    9.492s  373.5 MiB
+link                0.216s    0.214s  373.5 MiB
+total              15.831s   23.280s  373.5 MiB
+```
+
+`--time-passes` measures each phase inside the compiler and writes a table
+on standard error when compilation ends: `load` (reading and parsing every
+module), `sema` (names, types, generic instances, compile-time evaluation
+and lowering to MIR), `elaboration` (moves and drops), `effects` (what each
+function's borrows may store or return), `borrows` (the borrow checks), `IR
+generation` (`llvm.jh`), then LLVM's `parse`, `optimize` and `emit` (object
+emission, in several threads for a large module), and `link`. `check` stops
+after `borrows`, `emit-llvm` after `IR generation` and `emit-mir` after
+`MIR text`; with `JIHOO_BACKEND=clang`, `clang` replaces the LLVM phases
+and the link. Writing a `--comptime-report` is a phase of its own.
+
+`elapsed` is wall-clock time; `cpu` is the user and system time of every
+thread of the compiler and of the programs it waited for (the linker), so it
+exceeds `elapsed` where a phase runs in parallel. `peak` is the compiler's
+peak resident memory once the phase ended. `total` covers the compiler from
+loading on. Times are truncated to milliseconds.
+
+Nothing else changes: standard output, the files written, exit statuses and
+diagnostics are the same with or without the option. When compilation fails,
+the phases that ran come first and the diagnostics, text or JSON, follow
+unchanged; `run` reports before the program starts, so the program's own
+output comes after the table. The option works with `check`, `build`, `run`,
+`emit-mir`, `emit-llvm` and `emit-obj`.
 
 ## Structured source diagnostics
 

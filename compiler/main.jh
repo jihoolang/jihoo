@@ -28,12 +28,13 @@ import lsp
 import backend
 import os
 import pat
+import timing
 
 // The release this compiler belongs to; flake.nix checks that it matches
 // the package version.
 const VERSION = "0.2.1"
 
-const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON"
+const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -74,6 +75,7 @@ fn drive() {
     var keep_ll = false
     var json_errors = false
     var comptime_report: Option(str) = None
+    var time_passes = false
     var format_check = false
     var format_write = false
     // `fmt` takes several files and directories.
@@ -128,6 +130,8 @@ fn drive() {
             i += 1
             if i >= args.len() { usage("--comptime-report requires a path") }
             comptime_report = Some(args[i])
+        } else if a == "--time-passes" {
+            time_passes = true
         } else if a == "--error-format=json" {
             json_errors = true
         } else if a == "--error-format=text" {
@@ -166,6 +170,10 @@ fn drive() {
         (cmd == "fmt" || cmd == "emit-tokens" || cmd == "emit-ast" || cmd == "emit-program") {
         usage("--comptime-report requires checking or code generation")
     }
+    if time_passes &&
+        (cmd == "fmt" || cmd == "emit-tokens" || cmd == "emit-ast" || cmd == "emit-program") {
+        usage("--time-passes requires checking or code generation")
+    }
     if cmd == "fmt" {
         if keep_ll || link.len() > 0 || prog_args.len() > 0 {
             usage("fmt does not accept output options, link inputs or program arguments")
@@ -196,10 +204,16 @@ fn drive() {
     }
     // Source to MIR, checked and with drops elaborated (before elaboration
     // with `JIHOO_NO_ELAB` set).
+    var timer = timing.Timer.start()
     let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
         Ok(a) => a
-        Err(d) => source_error(sources, d, json_errors)
+        Err(d) => {
+            timer.lap("load")
+            report_times(timer, time_passes)
+            source_error(sources, d, json_errors)
+        }
     }
+    timer.lap("load")
     if library && (cmd == "build" || cmd == "run") {
         usage("use `emit-obj --lib` to build a C-linkable library object")
     }
@@ -221,6 +235,7 @@ fn drive() {
     }
     var evaluations = Vec(interp.Report).new()
     let compiled = sema.compile(a, tgt, checked, library, comptime_report.is_some(), &evaluations)
+    timer.lap("sema")
     match comptime_report {
         Some(path) => {
             let report = interp.report_json(evaluations, sources, tgt.name(), checked)
@@ -231,31 +246,43 @@ fn drive() {
                     ("cannot write compile-time report: " + e.to_string().as_str()).as_str()
                 )
             }
+            timer.lap("comptime report")
         }
         None => {}
     }
     var prog = match compiled {
         Ok(p) => p
-        Err(d) => source_error(sources, d, json_errors)
+        Err(d) => {
+            report_times(timer, time_passes)
+            source_error(sources, d, json_errors)
+        }
     }
     // A check must always validate moves and borrows, even when the debug
     // switch for dumping unelaborated MIR is set in the environment.
     if cmd == "check" || env.get("JIHOO_NO_ELAB").is_none() {
-        match check.program(&prog) {
+        match check.program(&prog, &timer) {
             Ok(_) => {}
-            Err(d) => source_error(sources, d, json_errors)
+            Err(d) => {
+                report_times(timer, time_passes)
+                source_error(sources, d, json_errors)
+            }
         }
     }
     if cmd == "check" {
+        report_times(timer, time_passes)
         return
     } else if cmd == "emit-mir" {
         var text = String.new()
         for f in prog.fns {
             text.push_str(mir.show_function(prog, f).as_str())
         }
+        timer.lap("MIR text")
+        report_times(timer, time_passes)
         print(text)
     } else if cmd == "emit-llvm" {
         let ll = llvm.emit(prog)
+        timer.lap("IR generation")
+        report_times(timer, time_passes)
         match out {
             Some(o) => match fs.write_file(o, ll.as_str()) {
                 Ok(_) => {}
@@ -269,20 +296,26 @@ fn drive() {
     } else if cmd == "emit-obj" {
         let freestanding = prog.freestanding
         let ll = llvm.emit(prog)
+        timer.lap("IR generation")
         let output = match out {
             Some(o) => String.from(o)
             None => with_extension(file_stem(file), "o")
         }
-        match backend.object(ll.as_str(), output.as_str(), opt, tgt, freestanding) {
+        match backend.object(ll.as_str(), output.as_str(), opt, tgt, freestanding, &timer) {
             Ok(_) => {}
-            Err(e) => failure(diag.Kind.Backend, e.as_str())
+            Err(e) => {
+                report_times(timer, time_passes)
+                failure(diag.Kind.Backend, e.as_str())
+            }
         }
+        report_times(timer, time_passes)
     } else if cmd == "build" || cmd == "run" {
         let freestanding = prog.freestanding
         let ll = llvm.emit(prog)
         // Nothing refers to the syntax trees any more; LLVM can use their
         // memory.
         drop(a)
+        timer.lap("IR generation")
         var exe = String.new()
         match out {
             Some(o) => exe = String.from(o)
@@ -295,7 +328,19 @@ fn drive() {
                 }
             }
         }
-        match link_exe(ll.as_str(), exe.as_str(), opt, tgt, freestanding, link, keep_ll) {
+        let linked = link_exe(
+            ll.as_str(),
+            exe.as_str(),
+            opt,
+            tgt,
+            freestanding,
+            link,
+            keep_ll,
+            &timer
+        )
+        // The phases end before the program runs.
+        report_times(timer, time_passes)
+        match linked {
             Ok(_) => {}
             Err(e) => failure(diag.Kind.Backend, e.as_str())
         }
@@ -357,14 +402,15 @@ fn link_exe(
     tgt: target.Target,
     freestanding: bool,
     link: Vec(str),
-    keep: bool
+    keep: bool,
+    inout timer: timing.Timer
 ) -> Result((), String) {
     let selected = match env.get("JIHOO_BACKEND") {
         Some(s) => s
         None => "llvm"
     }
     if selected == "llvm" {
-        return link_object(ll, exe, opt, tgt, freestanding, link, keep)
+        return link_object(ll, exe, opt, tgt, freestanding, link, keep, &timer)
     }
     if selected != "clang" {
         return Err(String.from("unknown JIHOO_BACKEND; use llvm or clang"))
@@ -416,6 +462,7 @@ fn link_exe(
     if !keep {
         os.remove(ll_path.as_str())
     }
+    timer.lap("clang")
     let o = match r {
         Ok(o) => o
         Err(e) => return Err(
@@ -447,7 +494,8 @@ fn link_object(
     tgt: target.Target,
     freestanding: bool,
     link: Vec(str),
-    keep: bool
+    keep: bool,
+    inout timer: timing.Timer
 ) -> Result((), String) {
     if keep {
         let path = with_extension(exe, "ll")
@@ -459,11 +507,12 @@ fn link_object(
     let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" +
         exe[name_start(exe)..exe.len] + "."
     let stem = os.join(os.temp_dir().as_str(), name.as_str())
-    let objs = backend.objects(ll, stem.as_str(), opt, tgt, freestanding)?
+    let objs = backend.objects(ll, stem.as_str(), opt, tgt, freestanding, &timer)?
     let r = link_objects(objs, exe, opt, tgt, freestanding, link)
     for o in objs {
         os.remove(o.as_str())
     }
+    timer.lap("link")
     r
 }
 
@@ -535,6 +584,11 @@ fn link_objects(
         return Err(msg)
     }
     Ok(())
+}
+
+// The phase timings on standard error, if `--time-passes` asked for them.
+fn report_times(timer: timing.Timer, requested: bool) {
+    if requested { eprintln(timer.report()) }
 }
 
 fn fail(msg: str, code: i32) -> never {

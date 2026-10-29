@@ -13,11 +13,17 @@ memory grows beyond the thresholds. Compare only reports from the same
 controlled host. --check-only runs every case once, checks that it succeeds
 and that `check` is silent and writes nothing, and applies no thresholds: CI
 runs it, timing comparisons do not belong there.
+
+--time-passes also records the compiler's own phase timings (`jihoo
+--time-passes`) in every sample and their medians per case, and prints them;
+against a baseline that has them, each phase's ratio is printed, without
+thresholds.
 """
 import argparse
 import datetime
 import json
 import os
+import re
 import platform
 from pathlib import Path
 import shutil
@@ -91,18 +97,54 @@ def parse_external(text):
     return name, (entry.parent, entry.name, [x for i in includes for x in ("-I", str(Path(i).resolve()))])
 
 
+PHASE_ROW = re.compile(r"^(\S+(?: \S+)?) +(\d+\.\d+)s +(\d+\.\d+)s +(\d+\.\d+) MiB$")
+
+
+def parse_phases(stderr):
+    """The table `--time-passes` writes: ({phase: {elapsed, cpu, peak_kib}}, rest of stderr)."""
+    lines = stderr.decode(errors="replace").split("\n")
+    if lines[0].split() != ["phase", "elapsed", "cpu", "peak"]:
+        return None, stderr
+    phases = {}
+    for i, line in enumerate(lines[1:], 1):
+        m = PHASE_ROW.match(line)
+        if not m:
+            return None, stderr
+        phases[m[1]] = {"elapsed": float(m[2]), "cpu": float(m[3]), "peak_kib": round(float(m[4]) * 1024)}
+        if m[1] == "total":
+            return phases, "\n".join(lines[i + 1:]).encode()
+    return None, stderr
+
+
 def key(case):
     return f"{case['workload']}/{case['mode']}/{case['target']}"
 
 
 def summarize(samples):
-    return {
+    summary = {
         "elapsed_seconds": statistics.median(s["elapsed"] for s in samples),
         "cpu_seconds": statistics.median(s["cpu"] for s in samples),
         "peak_kib": statistics.median(s["peak_kib"] for s in samples),
         "min_elapsed_seconds": min(s["elapsed"] for s in samples),
         "max_peak_kib": max(s["peak_kib"] for s in samples),
     }
+    if all("phases" in s for s in samples):
+        summary["phases"] = {
+            name: {field: statistics.median(s["phases"][name][field] for s in samples)
+                   for field in ["elapsed", "cpu", "peak_kib"]}
+            for name in samples[0]["phases"]
+        }
+    return summary
+
+
+def print_phases(phases, before=None):
+    """One line per phase, with its elapsed ratio to `before` where that has it."""
+    for name, p in phases.items():
+        ratio = ""
+        if before and name in before and before[name]["elapsed"] > 0:
+            ratio = f" x{p['elapsed'] / before[name]['elapsed']:.3f}"
+        print(f"    {name:16} {p['elapsed']:8.3f}s elapsed {p['cpu']:8.3f}s cpu"
+              f" {p['peak_kib'] / 1024:8.1f} MiB peak{ratio}")
 
 
 def compare(report, baseline, max_time, max_memory, min_time):
@@ -128,6 +170,8 @@ def compare(report, baseline, max_time, max_memory, min_time):
         regressed |= bool(bad)
         print(f"{key(case):40} elapsed x{time_ratio:.3f} peak x{memory_ratio:.3f}"
               + (" REGRESSED: " + ", ".join(bad) if bad else ""))
+        if "phases" in case["summary"] and "phases" in before["summary"]:
+            print_phases(case["summary"]["phases"], before["summary"]["phases"])
     missing = set(old) - {key(c) for c in report["cases"]}
     for k in sorted(missing):
         print(f"{k:40} only in the baseline")
@@ -157,6 +201,8 @@ def main():
     parser.add_argument("--check-only", action="store_true",
                         help="one sample per case, structural checks only, no thresholds")
     parser.add_argument("--json", type=Path, help="write the report here")
+    parser.add_argument("--time-passes", action="store_true",
+                        help="also record the compiler's phase timings (jihoo --time-passes)")
     args = parser.parse_args()
     if args.repeats < 1:
         parser.error("--repeats must be positive")
@@ -195,6 +241,7 @@ def main():
         "host": {"platform": platform.platform(), "machine": platform.machine(),
                  "cpus": os.cpu_count(), "python": platform.python_version()},
         "options": {"opt": args.opt},
+        "time_passes": args.time_passes,
         "repeats": args.repeats,
         "cases": [],
     }
@@ -207,9 +254,10 @@ def main():
             for target in targets:
                 full = "build" if target == HOST and "--lib" not in flags else "emit-obj"
                 output = temp / f"{name}-{target}{'' if full == 'build' else '.o'}"
+                timing = ["--time-passes"] if args.time_passes else []
                 for mode, argv in [
-                    ("check", ["check", entry, "--target", target, *flags]),
-                    ("full", [full, entry, "--target", target, args.opt, *flags, "-o", str(output)]),
+                    ("check", ["check", entry, "--target", target, *flags, *timing]),
+                    ("full", [full, entry, "--target", target, args.opt, *flags, "-o", str(output), *timing]),
                 ]:
                     cases.append({"workload": name, "mode": mode, "target": target,
                                   "command": ["jihoo", *argv], "directory": str(directory),
@@ -221,8 +269,13 @@ def main():
                 case["_output"].unlink(missing_ok=True)
                 before = set(Path(case["directory"]).iterdir())
                 status, out, err, elapsed, cpu, peak = measure(time_cmd, case["_argv"], case["directory"], env)
+                phases = None
+                if args.time_passes:
+                    phases, err = parse_phases(err)
                 problem = None
-                if status != 0:
+                if args.time_passes and phases is None and status == 0:
+                    problem = "no phase timings on standard error:\n" + err.decode(errors="replace")
+                elif status != 0:
                     problem = f"exit status {status}:\n{err.decode(errors='replace')}"
                 elif case["mode"] == "check" and (out or err):
                     problem = "check was not silent:\n" + (out + err).decode(errors="replace")
@@ -235,7 +288,10 @@ def main():
                     failed = True
                     print(f"{key(case)}: {problem}", file=sys.stderr, flush=True)
                     continue
-                case["samples"].append({"elapsed": elapsed, "cpu": cpu, "peak_kib": peak})
+                sample = {"elapsed": elapsed, "cpu": cpu, "peak_kib": peak}
+                if phases is not None:
+                    sample["phases"] = phases
+                case["samples"].append(sample)
         for case in cases:
             del case["_argv"], case["_output"]
             if case["samples"]:
@@ -243,6 +299,8 @@ def main():
                 s = case["summary"]
                 print(f"{key(case):40} {s['elapsed_seconds']:8.3f}s elapsed {s['cpu_seconds']:8.3f}s cpu"
                       f" {s['peak_kib'] / 1024:8.1f} MiB peak", flush=True)
+                if "phases" in s and not args.baseline:
+                    print_phases(s["phases"])
             report["cases"].append(case)
 
     if args.json:

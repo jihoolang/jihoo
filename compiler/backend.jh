@@ -5,6 +5,7 @@ import std.ffi
 import std.fs
 import std.thread
 import target
+import timing
 
 struct Api {
     LLVMGetVersion: fnptr(*u32, *u32, *u32)
@@ -171,15 +172,17 @@ unsafe fn message(api: Api, p: *u8) -> String {
     text
 }
 
-// One object for the whole module, at `path` (`emit-obj`).
+// One object for the whole module, at `path` (`emit-obj`). Reading the IR,
+// optimizing and emitting each end a phase of `timer`.
 pub fn object(
     ir: str,
     path: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool
+    freestanding: bool,
+    inout timer: timing.Timer
 ) -> Result((), String) {
-    unsafe { emit_objects(ir, path, false, opt, tgt, freestanding)? }
+    unsafe { emit_objects(ir, path, false, opt, tgt, freestanding, &timer)? }
     Ok(())
 }
 
@@ -191,9 +194,10 @@ pub fn objects(
     stem: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool
+    freestanding: bool,
+    inout timer: timing.Timer
 ) -> Result(Vec(String), String) {
-    unsafe { emit_objects(ir, stem, true, opt, tgt, freestanding) }
+    unsafe { emit_objects(ir, stem, true, opt, tgt, freestanding, &timer) }
 }
 
 // Instructions per code generation unit, and at most this many units. The
@@ -214,7 +218,8 @@ unsafe fn emit_objects(
     split: bool,
     opt: str,
     tgt: target.Target,
-    freestanding: bool
+    freestanding: bool,
+    inout timer: timing.Timer
 ) -> Result(Vec(String), String) {
     let lib = open_llvm()?
     let api = load_api(lib)?
@@ -243,6 +248,7 @@ unsafe fn emit_objects(
     }
     if msg != null { api.LLVMDisposeMessage(msg) }
     msg = null
+    timer.lap("LLVM parse")
     let triple = ffi.c_string(tgt.triple())?
     var llvm_target: *u8 = null
     if api.LLVMGetTargetFromTriple(triple.as_str().ptr, &llvm_target, &msg) != 0 {
@@ -261,6 +267,7 @@ unsafe fn emit_objects(
     api.LLVMDisposeTargetData(data)
     let pipeline = "default<" + opt[1..opt.len] + ">"
     run_passes(api, r.module, pipeline.as_str(), r.machine, level >= 2)?
+    timer.lap("LLVM optimize")
     if freestanding {
         var f = api.LLVMGetFirstFunction(r.module)
         var i = 0
@@ -276,6 +283,7 @@ unsafe fn emit_objects(
     if starts.len() == 1 {
         let path = if split { out + "0.o" } else { String.from(out) }
         emit(api, r.machine, r.module, path.as_str())?
+        timer.lap("LLVM emit")
         paths.push(path)
         return Ok(paths)
     }
@@ -297,6 +305,7 @@ unsafe fn emit_objects(
         count
     )
     api.LLVMDisposeMemoryBuffer(bitcode)
+    timer.lap("LLVM emit")
     match result {
         Ok(_) => Ok(s.paths.clone())
         Err(e) => {

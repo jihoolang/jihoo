@@ -407,6 +407,12 @@ impl Tests {
         if !report.status.success() {
             return Err("compile-time resource report validation failed:\n" + report.stdout.as_str() + report.stderr.as_str())
         }
+        let times = exec("python3", ["tests/time_passes.py", "--compiler", self.compiler.as_str()])
+        if !times.status.success() {
+            return Err(
+                "phase timing validation failed:\n" + times.stdout.as_str() + times.stderr.as_str()
+            )
+        }
         Ok(())
     }
 
@@ -819,7 +825,10 @@ fn main() -> i32 {
             let r = t.version_and_help()
             t.check("check: --version and --help", r)
             let r = t.json_diagnostics()
-            t.check("check: JSON diagnostics, float digits and the language server", r)
+            t.check(
+                "check: JSON diagnostics, float digits, the language server and phase timings",
+                r
+            )
             t.suite_files("tests/run", "check")
             t.suite_files("examples", "check")
         } else if s == "run" {
