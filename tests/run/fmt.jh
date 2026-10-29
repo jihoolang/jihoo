@@ -1,0 +1,50 @@
+// std.fmt: several values, positions, alignment, signs, bases, precision
+// and values formatted with Show; also at compile time.
+import std.fmt
+
+struct P {
+    x: i64
+}
+
+impl Show for P {
+    fn show(self, inout out: String) {
+        out.push_str("P(")
+        self.x.show(&out)
+        out.push(')')
+    }
+}
+
+const LABEL = comptime fmt.format("{:>8.3}|{:#x}", (3.14159, 255))
+
+fn main() {
+    let name = String.from("total")
+    fmt.println("{} = {} ({:+}) {}", (name, 42, 7, true))
+    //> total = 42 (+7) true
+    fmt.println("[{:>8}] [{:<8}] [{:^8}] [{:*^9}] [{:가>5}]", ("ab", "ab", "ab", "ab", 1))
+    //> [      ab] [ab      ] [   ab   ] [***ab****] [가가가가1]
+    fmt.println("[{:08.3}] [{:+.2}] [{:e}] [{:.2e}] [{}]", (-3.14159, 2.5, 1234.5, 0.000123, 0.1 + 0.2))
+    //> [-003.142] [+2.50] [1.2345e3] [1.23e-4] [0.30000000000000004]
+    fmt.println("{:x} {:#X} {:#o} {:#b} {:#010x} {}", (255, 255, 8, 5, 255, -128 as i8))
+    //> ff 0xFF 0o10 0b101 0x000000ff -128
+    fmt.println("{:x} {:#b} {:X}", (-1 as i8, -2 as i16, -1 as i64))
+    //> ff 0b1111111111111110 FFFFFFFFFFFFFFFF
+    fmt.println("{1} {0} {1} {{literal}} {:.3}", ("a", "bcde"))
+    //> bcde a bcde {literal} a
+    fmt.println("{:>6}|{:<6}|{:06}|{:>5}", (P { x: 1 }, 0.0 / 0.0, -1.5, 1.0 / 0.0))
+    //>   P(1)|NaN   |-001.5|  inf
+    let big = (1 as i128 << 126) - 1 + (1 as i128 << 126)
+    fmt.println("{} {}", (big, 0 - big - 1))
+    //> 170141183460469231731687303715884105727 -170141183460469231731687303715884105728
+    fmt.println("{:x} {}", (0 -% 1 as u64, 0 - 9223372036854775807 - 1))
+    //> ffffffffffffffff -9223372036854775808
+    println(fmt.format("{:5}|{:.1}|{:<4}|", (1.5 as f32, "한글", "é")))
+    //>   1.5|한|é   |
+    fmt.println("one value: {:.2}", 2.675)
+    //> one value: 2.67
+    println(LABEL)
+    //>    3.142|0xff
+    var out = String.from("> ")
+    fmt.write(&out, "{}-{}", (1, 2))
+    println(out)
+    //> > 1-2
+}

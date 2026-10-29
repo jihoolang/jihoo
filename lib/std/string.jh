@@ -1,6 +1,7 @@
 // String: text, owned (UTF-8 bytes). A literal where a `String` is expected
 // borrows the literal's bytes; the first change copies them.
 
+import std.float
 import std.vec
 
 pub struct String {
@@ -123,6 +124,19 @@ impl Show for str {
 impl Show for bool {
     fn show(self, inout out: String) {
         out.push_str(if self { "true" } else { "false" })
+    }
+}
+
+// The shortest text that reads back as the same float (`std.float`).
+impl Show for f64 {
+    fn show(self, inout out: String) {
+        float.write_shortest(&out, float.parts_f64(self))
+    }
+}
+
+impl Show for f32 {
+    fn show(self, inout out: String) {
+        float.write_shortest(&out, float.parts_f32(self))
     }
 }
 

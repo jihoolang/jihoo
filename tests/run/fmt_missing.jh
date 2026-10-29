@@ -1,0 +1,7 @@
+// A placeholder without a value stops the program.
+// exit: 134
+import std.fmt
+
+fn main() {
+    fmt.println("{} {}", (1,))
+}

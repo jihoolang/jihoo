@@ -17,7 +17,7 @@ everywhere; the others are imported (`import std.fs`).
 | `assert(cond, msg)` | panics when `cond` is false |
 | `drop(x)` | destroys `x` now |
 | `min(a, b)`, `max(a, b)` | by `Ord` |
-| `print(x)`, `println(x)`, `eprintln(x)` | anything with `Show` (integers, `bool`, `str`, `String`; not floats or `Vec` yet), to standard output (error) |
+| `print(x)`, `println(x)`, `eprintln(x)` | anything with `Show` (integers, floats, `bool`, `str`, `String`; not `Vec` yet), to standard output (error) |
 | `sort(&v)`, `sort_by(&v, less)` | a stable merge sort of a `Vec` |
 | `is_space`, `is_digit`, `is_alpha` | on bytes |
 
@@ -147,6 +147,49 @@ fn read() -> Result(i64, os.Error) {
 }
 ```
 
+## Formatting
+
+`std.fmt` formats several values with a pattern. The values are a tuple,
+or a single value that is not a tuple:
+
+```jihoo
+import std.fmt
+
+fn report(name: str, total: f64, change: i64) {
+    fmt.println("{:<10} {:>8.2} ({:+})", (name, total, change))
+    let line = fmt.format("{1} before {0}", ("b", "a"))   // "a before b"
+    fmt.println("{:#010x}", 255)                           // 0x000000ff
+}
+```
+
+`format(pattern, values) -> String`, `write(&out, pattern, values)`,
+`print`, `println` and `eprintln`. `{}` takes the next value and `{N}` the
+value at index `N`; `{{` and `}}` are braces. After `:` comes
+`[[fill]align][+][#][0][width][.precision][kind]`:
+
+| part | |
+|------|---|
+| `fill`, `align` | `<` left, `>` right, `^` centered, padded with any one character (a space by default); numbers align right and other values left |
+| `+` | a sign on positive numbers too |
+| `#` | `0x`, `0o` or `0b` before an integer in that base |
+| `0` | pads a number with zeros between its sign or prefix and its digits |
+| `width` | the least number of characters (Unicode scalar values) |
+| `.precision` | digits after the point of a float, rounded half to even; the most characters of a string |
+| `kind` | `x`, `X`, `o`, `b`: an integer in base 16, 8 or 2, negative values as their two's complement bits; `e`: a float with an exponent (`1.2345e3`) |
+
+Values format through the `Format` trait (`fn format(self, inout out:
+String, spec: fmt.Spec)`). Integers, floats, `bool`, `str` and `String`
+implement it; any other type with `Show` uses its `show` text, padded. A
+type can implement `Format` itself, using `fmt.pad` for the width. The
+pattern is read when the program runs: a malformed pattern or a placeholder
+without a value panics. Formatting works in compile-time code, so
+`const S = comptime fmt.format(...)` is a string constant.
+
+`std.float` has the digits beneath: `shortest` (the fewest that read back as
+the float), `exact` (a chosen count, rounded half to even), and the text
+forms `write_shortest`, `write_fixed` and `write_exponent`, computed with
+big integers rather than float arithmetic.
+
 ## `Map(K, V)`
 
 A hash map with open addressing, for keys with `Hash` and `Eq`. `new`,
@@ -165,6 +208,8 @@ patterns see through it.
 |--------|---|
 | `std.iter` | lazy iterator adapters, consumers, slice iteration and `range` |
 | `std.io` | printing and `BufRead`, `StrReader`, `BufReader` for buffered UTF-8 lines |
+| `std.fmt` | `format`, `write`, `print`, `println`, `eprintln` with patterns, and the `Format` trait ([formatting](#formatting)) |
+| `std.float` | exact decimal digits of floats: shortest, fixed and exponent forms |
 | `std.utf8` | strict UTF-8 decoding, validation, scalar iteration and Unicode whitespace |
 | `std.thread` | `join(a, b)`, `each(lo, hi, f)`, `map(xs, f)`, `each_mut(&v, f)`, `cpu_count()`: work on several threads that borrows from the caller ([threads](../language/threads.md)) |
 | `std.arena` | `Arena(T)` and `Id(T)`, `Pool(T)` and `Handle(T)`, `Soa(T)`: data that refers to data by index ([data by index](../language/data-oriented.md)) |

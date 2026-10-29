@@ -45,6 +45,13 @@ type its context expects. A literal is at most 64 bits
 integer with `as` saturates: NaN becomes 0, and values out of range become
 the nearest end.
 
+`println(x)` and `to_string()` write a float as the shortest decimal that
+reads back as the same value (`0.1`, `1.0`, `-0.0`, `NaN`, `inf`), with an
+exponent below 1e-4 and from 1e16 on (`1e-5`, `1e16`). The digits are
+computed exactly, without float arithmetic. [`std.fmt`](../reference/standard-library.md#formatting)
+gives a fixed number of digits (`{:.2}`) or an exponent (`{:e}`), rounded
+half to even.
+
 ## Conversions
 
 `as` converts between integers (truncating or extending), integers and

@@ -1,0 +1,475 @@
+// Floats as decimal digits, exactly. A finite float is f * 2^e for
+// integers f and e; the digits come from big-integer arithmetic on that
+// value (Steele and White's algorithm, as Burger and Dybvig state it), so
+// they are correctly rounded and never depend on float arithmetic.
+//
+// `shortest` gives the fewest digits that read back as the same float;
+// `exact` gives a chosen number of digits, rounded half to even.
+
+// A float taken apart.
+pub struct Parts {
+    pub negative: bool
+    // NaN or an infinity: `f` is 0 for an infinity.
+    pub special: bool
+    pub f: u64
+    pub e: i64
+    // The precision in bits (53 or 24) and the smallest exponent.
+    pub bits: i64
+    pub e_min: i64
+}
+
+pub fn parts_f64(x: f64) -> Parts {
+    var v = x
+    let b = unsafe { *(&v as *u64) }
+    let exp = ((b >> 52) & 0x7ff) as i64
+    let mant = b & 0xfffffffffffff
+    if exp == 0x7ff {
+        return Parts {
+            negative: b >> 63 == 1,
+            special: true,
+            f: mant,
+            e: 0,
+            bits: 53,
+            e_min: -1074
+        }
+    }
+    let f = if exp == 0 { mant } else { mant | 1 << 52 }
+    let e = if exp == 0 { -1074 } else { exp - 1075 }
+    Parts { negative: b >> 63 == 1, special: false, f: f, e: e, bits: 53, e_min: -1074 }
+}
+
+pub fn parts_f32(x: f32) -> Parts {
+    var v = x
+    let b = unsafe { *(&v as *u32) } as u64
+    let exp = ((b >> 23) & 0xff) as i64
+    let mant = b & 0x7fffff
+    if exp == 0xff {
+        return Parts { negative: b >> 31 == 1, special: true, f: mant, e: 0, bits: 24, e_min: -149 }
+    }
+    let f = if exp == 0 { mant } else { mant | 1 << 23 }
+    let e = if exp == 0 { -149 } else { exp - 150 }
+    Parts { negative: b >> 31 == 1, special: false, f: f, e: e, bits: 24, e_min: -149 }
+}
+
+// Decimal digits (0 to 9) and the exponent `k`: the value is
+// 0.d1 d2 d3 ... * 10^k. Zero has no digits.
+pub struct Digits {
+    pub digits: Vec(u8)
+    pub k: i64
+}
+
+// ---- unsigned big integers: little-endian 32-bit limbs ----
+
+struct Big {
+    d: Vec(u32)
+}
+
+impl Big {
+    fn from(n: u64) -> Big {
+        var d = Vec(u32).new()
+        if n != 0 { d.push(n as u32) }
+        if n >> 32 != 0 { d.push((n >> 32) as u32) }
+        Big { d: d }
+    }
+
+    fn copy(self) -> Big {
+        Big { d: self.d.clone() }
+    }
+
+    fn is_zero(self) -> bool {
+        self.d.len() == 0
+    }
+
+    fn trim(inout self) {
+        while self.d.len() > 0 && self.d[self.d.len() - 1] == 0 {
+            self.d.pop()
+        }
+    }
+
+    fn mul_small(inout self, m: u32) {
+        var carry: u64 = 0
+        for i in 0..self.d.len() {
+            let t = self.d[i] as u64 * m as u64 + carry
+            self.d[i] = t as u32
+            carry = t >> 32
+        }
+        if carry != 0 { self.d.push(carry as u32) }
+        self.trim()
+    }
+
+    fn mul_pow10(inout self, n: i64) {
+        var left = n
+        while left >= 9 {
+            self.mul_small(1000000000)
+            left -= 9
+        }
+        var m: u32 = 1
+        for _ in 0..left { m *= 10 }
+        if m != 1 { self.mul_small(m) }
+    }
+
+    // Times 2^n.
+    fn shl(inout self, n: i64) {
+        if self.is_zero() { return }
+        let words = n / 32
+        let bits = n % 32
+        if bits != 0 {
+            var carry: u32 = 0
+            for i in 0..self.d.len() {
+                let x = self.d[i]
+                self.d[i] = (x << bits as u32) | carry
+                carry = x >> (32 - bits) as u32
+            }
+            if carry != 0 { self.d.push(carry) }
+        }
+        if words > 0 {
+            var d = Vec(u32).with_capacity(self.d.len() + words)
+            for _ in 0..words { d.push(0) }
+            for x in self.d { d.push(x) }
+            self.d = d
+        }
+    }
+
+    fn add(inout self, other: Big) {
+        var carry: u64 = 0
+        var i = 0
+        while i < other.d.len() || carry != 0 {
+            if i == self.d.len() { self.d.push(0) }
+            let o: u64 = if i < other.d.len() { other.d[i] as u64 } else { 0 }
+            let t = self.d[i] as u64 + o + carry
+            self.d[i] = t as u32
+            carry = t >> 32
+            i += 1
+        }
+    }
+
+    // `self - other`, which must not be negative.
+    fn sub(inout self, other: Big) {
+        var borrow: i64 = 0
+        for i in 0..self.d.len() {
+            let o: i64 = if i < other.d.len() { other.d[i] as i64 } else { 0 }
+            var t = self.d[i] as i64 - o - borrow
+            borrow = 0
+            if t < 0 {
+                t += 1 << 32
+                borrow = 1
+            }
+            self.d[i] = t as u32
+        }
+        self.trim()
+    }
+
+    fn cmp(self, other: Big) -> i64 {
+        if self.d.len() != other.d.len() { return if self.d.len() < other.d.len() { -1 } else { 1 } }
+        var i = self.d.len()
+        while i > 0 {
+            i -= 1
+            if self.d[i] != other.d[i] { return if self.d[i] < other.d[i] { -1 } else { 1 } }
+        }
+        0
+    }
+}
+
+// `a + b` compared with `c`.
+fn cmp_sum(a: Big, b: Big, c: Big) -> i64 {
+    var t = a.copy()
+    t.add(b)
+    t.cmp(c)
+}
+
+// The next digit of r / s (below 10, since r < s before it was multiplied),
+// leaving the remainder in r.
+fn digit(inout r: Big, s: Big) -> u8 {
+    var d: u8 = 0
+    while r.cmp(s) >= 0 {
+        r.sub(s)
+        d += 1
+    }
+    d
+}
+
+fn bit_length(n: u64) -> i64 {
+    var b = 0
+    var x = n
+    while x != 0 {
+        b += 1
+        x = x >> 1
+    }
+    b
+}
+
+// floor(log10(2^(n-1))), an estimate of k that the callers correct.
+fn estimate(f: u64, e: i64) -> i64 {
+    let n = e + bit_length(f) - 1
+    // log10(2) < 78913 / 2^18
+    if n >= 0 { n * 78913 >> 18 } else { 0 - ((0 - n) * 78913 >> 18) - 1 }
+}
+
+// The value as r / s.
+fn ratio(f: u64, e: i64, inout r: Big, inout s: Big) {
+    r = Big.from(f)
+    s = Big.from(1)
+    if e >= 0 { r.shl(e) } else { s.shl(0 - e) }
+}
+
+// The shortest digits that identify the float among its neighbors. A
+// float with an even significand also owns the halfway points (they read
+// back as it, under round half to even).
+pub fn shortest(p: Parts) -> Digits {
+    var out = Vec(u8).new()
+    if p.f == 0 { return Digits { digits: out, k: 0 } }
+    let even = p.f % 2 == 0
+    // The gaps to the neighbors are 2^e each, except below a power of two.
+    let lopsided = p.f == 1 << (p.bits - 1) as u64 && p.e > p.e_min
+    var r = Big.from(p.f)
+    var s = Big.from(1)
+    var mp = Big.from(1)
+    var mm = Big.from(1)
+    if p.e >= 0 {
+        r.shl(p.e)
+        mp.shl(p.e)
+        mm.shl(p.e)
+    } else {
+        s.shl(0 - p.e)
+    }
+    // Twice, so that the halfway points are integers.
+    r.shl(1)
+    s.shl(1)
+    if lopsided {
+        r.shl(1)
+        s.shl(1)
+        mp.shl(1)
+    }
+    var k = estimate(p.f, p.e)
+    if k >= 0 {
+        s.mul_pow10(k)
+    } else {
+        r.mul_pow10(0 - k)
+        mp.mul_pow10(0 - k)
+        mm.mul_pow10(0 - k)
+    }
+    // Correct k so that the upper bound is below 10^k, and at least 10^(k-1).
+    loop {
+        let c = cmp_sum(r, mp, s)
+        if c > 0 || (even && c == 0) {
+            s.mul_small(10)
+            k += 1
+        } else {
+            break
+        }
+    }
+    loop {
+        var t = r.copy()
+        t.add(mp)
+        t.mul_small(10)
+        let c = t.cmp(s)
+        if c < 0 || (!even && c == 0) {
+            r.mul_small(10)
+            mp.mul_small(10)
+            mm.mul_small(10)
+            k -= 1
+        } else {
+            break
+        }
+    }
+    loop {
+        r.mul_small(10)
+        mp.mul_small(10)
+        mm.mul_small(10)
+        let d = digit(&r, s)
+        let low = if even { r.cmp(mm) <= 0 } else { r.cmp(mm) < 0 }
+        let c = cmp_sum(r, mp, s)
+        let high = if even { c >= 0 } else { c > 0 }
+        if !low && !high {
+            out.push(d)
+            continue
+        }
+        if low && !high {
+            out.push(d)
+        } else if high && !low {
+            out.push(d + 1)
+        } else {
+            var twice = r.copy()
+            twice.shl(1)
+            // Both are as short: the nearer, or on a tie the even one.
+            let c = twice.cmp(s)
+            out.push(if c < 0 || (c == 0 && d % 2 == 0) { d } else { d + 1 })
+        }
+        break
+    }
+    Digits { digits: out, k: k }
+}
+
+// `count` digits rounded half to even, from the first nonzero one when
+// `fixed` is false; when it is true, as many as reach `count` digits after
+// the decimal point (none if the value is smaller than half of the last).
+pub fn exact(p: Parts, count: i64, fixed: bool) -> Digits {
+    var out = Vec(u8).new()
+    if p.f == 0 { return Digits { digits: out, k: 0 } }
+    var r = Big.new_zero()
+    var s = Big.new_zero()
+    ratio(p.f, p.e, &r, &s)
+    var k = estimate(p.f, p.e) + 1
+    if k >= 0 { s.mul_pow10(k) } else { r.mul_pow10(0 - k) }
+    // r / s in [0.1, 1)
+    while r.cmp(s) >= 0 {
+        s.mul_small(10)
+        k += 1
+    }
+    loop {
+        var t = r.copy()
+        t.mul_small(10)
+        if t.cmp(s) >= 0 { break }
+        r = t
+        k -= 1
+    }
+    let n = if fixed { k + count } else { count }
+    if n < 0 { return Digits { digits: out, k: k } }
+    for _ in 0..n {
+        r.mul_small(10)
+        out.push(digit(&r, s))
+    }
+    // Round by what is left, half to even.
+    var twice = r.copy()
+    twice.shl(1)
+    let c = twice.cmp(s)
+    let last_odd = out.len() > 0 && out[out.len() - 1] % 2 == 1
+    if c > 0 || (c == 0 && last_odd) {
+        var i = out.len()
+        loop {
+            if i == 0 {
+                // All nines: 0.99 becomes 0.10 * 10.
+                out.insert(0, 1)
+                if !fixed { out.pop() }
+                k += 1
+                break
+            }
+            i -= 1
+            if out[i] == 9 {
+                out[i] = 0
+            } else {
+                out[i] += 1
+                break
+            }
+        }
+    }
+    Digits { digits: out, k: k }
+}
+
+impl Big {
+    fn new_zero() -> Big {
+        Big { d: Vec(u32).new() }
+    }
+}
+
+// ---- text ----
+
+// The shortest text that reads back as the float: `1.5`, `100.0`, `-0.0`,
+// `1e21`, `2.5e-7`, `NaN`, `inf`. Values from 1e-5 up to 1e16 are written
+// out; others use an exponent.
+pub fn write_shortest(inout out: String, p: Parts) {
+    if special(&out, p) { return }
+    if p.negative { out.push('-') }
+    let d = shortest(p)
+    if d.digits.len() == 0 {
+        out.push_str("0.0")
+        return
+    }
+    if d.k > -4 && d.k <= 16 {
+        write_positional(&out, d, true)
+    } else {
+        write_scientific(&out, d)
+    }
+}
+
+// Writes `NaN` or an infinity; whether it was one.
+pub fn special(inout out: String, p: Parts) -> bool {
+    if !p.special { return false }
+    if p.f != 0 {
+        out.push_str("NaN")
+    } else {
+        out.push_str(if p.negative { "-inf" } else { "inf" })
+    }
+    true
+}
+
+// The digits with the decimal point placed by k: `.0` is added to a whole
+// number when `point` is set.
+pub fn write_positional(inout out: String, d: Digits, point: bool) {
+    let n = d.digits.len() as i64
+    if d.k <= 0 {
+        out.push_str("0.")
+        for _ in 0..0 - d.k { out.push('0') }
+        for x in d.digits { out.push('0' + x) }
+        return
+    }
+    for i in 0..d.k {
+        out.push(if i < n { '0' + d.digits[i] } else { '0' })
+    }
+    if n > d.k {
+        out.push('.')
+        for i in d.k..n { out.push('0' + d.digits[i]) }
+    } else if point {
+        out.push_str(".0")
+    }
+}
+
+// `d.ddde-N`.
+pub fn write_scientific(inout out: String, d: Digits) {
+    if d.digits.len() == 0 {
+        out.push_str("0e0")
+        return
+    }
+    out.push('0' + d.digits[0])
+    if d.digits.len() > 1 {
+        out.push('.')
+        for i in 1..d.digits.len() { out.push('0' + d.digits[i]) }
+    }
+    out.push('e')
+    (d.k - 1).show(&out)
+}
+
+// Exactly `precision` digits after the decimal point.
+pub fn write_fixed(inout out: String, p: Parts, precision: i64) {
+    if special(&out, p) { return }
+    if p.negative { out.push('-') }
+    var d = exact(p, precision, true)
+    if d.digits.len() == 0 { d.k = 0 }
+    // Whole digits, then the fraction.
+    if d.k <= 0 {
+        out.push('0')
+    } else {
+        for i in 0..d.k { out.push('0' + d.digits[i]) }
+    }
+    if precision > 0 {
+        out.push('.')
+        var written = 0
+        var i = if d.k > 0 { d.k } else { 0 }
+        // Zeros between the point and the first digit.
+        while written < precision && written < 0 - d.k {
+            out.push('0')
+            written += 1
+        }
+        while written < precision {
+            out.push(if i < d.digits.len() { '0' + d.digits[i] } else { '0' })
+            i += 1
+            written += 1
+        }
+    }
+}
+
+// `precision` digits after the first, then the exponent: `1.50e3`.
+pub fn write_exponent(inout out: String, p: Parts, precision: i64) {
+    if special(&out, p) { return }
+    if p.negative { out.push('-') }
+    if p.f == 0 {
+        out.push('0')
+        if precision > 0 {
+            out.push('.')
+            for _ in 0..precision { out.push('0') }
+        }
+        out.push_str("e0")
+        return
+    }
+    write_scientific(&out, exact(p, precision + 1, false))
+}

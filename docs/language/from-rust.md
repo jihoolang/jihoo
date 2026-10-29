@@ -33,8 +33,8 @@ if you know Rust, and check here when code that "should work" does not. The
 | `0..=n` in a `for` | `0..n + 1` (`..=` exists only in patterns) |
 | `if let Some(x) = o { ... }` | `match o { Some(x) => ..., None => {} }` |
 | `while let Some(x) = it.next()` | `loop { match it.next() { Some(x) => ..., None => break } }` |
-| `format!("{} {}", a, b)` | `a.to_string() + " " + b.to_string()`, or `show` into a `String` |
-| `println!("{}", x)` | `println(x)` (one argument, with `Show`) |
+| `format!("{} {:>5.2}", a, b)` | `fmt.format("{} {:>5.2}", (a, b))` (`import std.fmt`): the values are a tuple |
+| `println!("{}", x)` | `println(x)` (one argument, with `Show`), or `fmt.println("{} {}", (a, b))` |
 | `#[derive(Clone, PartialEq, Debug)]` | `#[derive(Clone, Eq, Show)]`; `Show` prints like `{:?}` without quotes around strings |
 | `Self::new()` | `Self.new()` or `Type.new()` |
 | `x.len()` on `&str`, `&[T]` | `x.len`: a field on `str` and slices; `v.len()` on `Vec`, `String`, `Map` |
@@ -50,9 +50,11 @@ if you know Rust, and check here when code that "should work" does not. The
 
 - No `if let`, `while let`, `let else`, labeled loops or `break value`. Use
   `match` and flags.
-- No macros. `println`, `print`, `panic` and `assert` are functions.
-- No string formatting. Build text with `+` and `to_string()`, or call
-  `show(&out)` on each part.
+- No macros. `println`, `print`, `panic` and `assert` are functions, and
+  [`std.fmt`](../reference/standard-library.md#formatting) formats several
+  values from a tuple. Its patterns are read when the program runs: a
+  malformed one, or a placeholder without a value, panics instead of
+  failing to compile.
 - No items inside function bodies: helper functions go at the top level.
 - No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes.
   [`dyn Trait`](dyn.md) is always owned: there is no `&dyn Trait`, and a
@@ -153,9 +155,10 @@ Rust struct with a lifetime parameter, without the annotation
 - `==` needs an `Eq` impl, even for an enum without payloads or a tuple.
   Compare such values with `match`, or write `impl Eq for T`.
 - `String == str` and `str == String` both work.
-- `print`/`println` need `Show`: integers, `bool`, `str` and `String` have
-  it. Floats, `Vec`, `Option` and tuples do not; convert first
-  (`(x as i64).to_string()`) or write a `Show` impl.
+- `print`/`println` need `Show`: integers, floats, `bool`, `str` and
+  `String` have it. `Vec`, `Option` and tuples do not; derive or write a
+  `Show` impl. A float prints the shortest text that reads back as it,
+  like Rust's `{:?}`: `1.0`, `0.30000000000000004`, `1e21`.
 
 ## Line breaks matter
 

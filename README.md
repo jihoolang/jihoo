@@ -137,6 +137,9 @@ Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
 failures as an errno-based `os.Error` and reads and writes bytes with one
 system call each, so partial operations, the end of input, interrupted
 calls and nonblocking readiness are explicit, in both profiles.
+[`std.fmt`](docs/reference/standard-library.md#formatting) formats several
+values with patterns such as `"{:>8.2} {:#x}"`, and floats print the
+shortest text that reads back as the same value.
 The borrow kernel infers argument escape effects for direct calls, including
 recursive functions, so methods on views keep only the borrows they can
 actually retain; unknown calls and raw memory effects remain conservative.

@@ -1,0 +1,36 @@
+// Floats print the shortest text that reads back as the same value.
+fn main() {
+    println(0.1 + 0.2)
+    //> 0.30000000000000004
+    println(1.0)
+    //> 1.0
+    println(-0.0)
+    //> -0.0
+    println(123456.789)
+    //> 123456.789
+    println(1e15)
+    //> 1000000000000000.0
+    println(1e16)
+    //> 1e16
+    println(0.0001)
+    //> 0.0001
+    println(0.00001)
+    //> 1e-5
+    println(5e-324)
+    //> 5e-324
+    println(1.7976931348623157e308)
+    //> 1.7976931348623157e308
+    println(3.0 / 0.0)
+    //> inf
+    println(-1.0 / 0.0)
+    //> -inf
+    println(0.0 / 0.0)
+    //> NaN
+    println(0.1 as f32)
+    //> 0.1
+    println(16777217.0 as f32)
+    //> 16777216.0
+    let half = comptime (2.5).to_string()
+    println(half)
+    //> 2.5
+}

@@ -90,7 +90,10 @@ produces the same source, and formatted programs retain their behavior.
   (`set_nonblocking`, `wait_readable`, `wait_writable`) are explicit;
   `std.fs` and `io.BufReader` report `os.Error`. Left: `std.process`
   errors, which are still text.
-- Add library formatting for several values and formatting options.
+- Done: library formatting for several values and options. `std.fmt`
+  formats a tuple of values with `{}` patterns (positions, fill, alignment,
+  sign, bases, width, precision, exponents), and floats print the shortest
+  text that reads back as them, from exact big-integer digits.
 
 Completion: the external regression command works with an explicitly selected
 compiler; core application behavior is tested without a display. Extracted
