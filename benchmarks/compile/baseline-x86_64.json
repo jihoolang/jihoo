@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "date": "2026-10-29T04:24:05+00:00",
+  "date": "2026-10-29T05:18:55+00:00",
   "compiler": "/home/jihoo/jihoo/out/jihoo",
   "compiler_version": "jihoo 0.2.1",
-  "revision": "6a92a215fe5f00fd14b5b3a46ec201b576884436",
+  "revision": "782e54752d8b291b05c37e0267a922c3eaae2982",
   "external": {},
   "host": {
     "platform": "Linux-7.3.0-x86_64-with-glibc2.44",
@@ -30,37 +30,37 @@
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 1.274195193000196,
+          "elapsed": 1.2761132619998534,
           "cpu": 1.26,
-          "peak_kib": 260692
+          "peak_kib": 263348
         },
         {
-          "elapsed": 1.2959106630005408,
-          "cpu": 1.28,
-          "peak_kib": 260668
+          "elapsed": 1.2499659029999748,
+          "cpu": 1.23,
+          "peak_kib": 263348
         },
         {
-          "elapsed": 1.2779870360027417,
-          "cpu": 1.26,
-          "peak_kib": 260636
-        },
-        {
-          "elapsed": 1.2919275300009758,
-          "cpu": 1.27,
-          "peak_kib": 260648
-        },
-        {
-          "elapsed": 1.2646264000031806,
+          "elapsed": 1.2579472580000584,
           "cpu": 1.24,
-          "peak_kib": 260644
+          "peak_kib": 263348
+        },
+        {
+          "elapsed": 1.2692283890028193,
+          "cpu": 1.26,
+          "peak_kib": 263348
+        },
+        {
+          "elapsed": 1.2616086740017636,
+          "cpu": 1.24,
+          "peak_kib": 263348
         }
       ],
       "summary": {
-        "elapsed_seconds": 1.2779870360027417,
-        "cpu_seconds": 1.26,
-        "peak_kib": 260648,
-        "min_elapsed_seconds": 1.2646264000031806,
-        "max_peak_kib": 260692
+        "elapsed_seconds": 1.2616086740017636,
+        "cpu_seconds": 1.24,
+        "peak_kib": 263348,
+        "min_elapsed_seconds": 1.2499659029999748,
+        "max_peak_kib": 263348
       }
     },
     {
@@ -75,42 +75,42 @@
         "x86_64",
         "-O2",
         "-o",
-        "/tmp/nix-shell.KTsmBA/jihoo-compile-gfttlfb6/compiler-x86_64"
+        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/compiler-x86_64"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 20.79194327699952,
-          "cpu": 20.669999999999998,
-          "peak_kib": 283972
+          "elapsed": 15.687002075999771,
+          "cpu": 22.979999999999997,
+          "peak_kib": 373500
         },
         {
-          "elapsed": 20.745562178999535,
-          "cpu": 20.619999999999997,
-          "peak_kib": 283904
+          "elapsed": 15.749589314000332,
+          "cpu": 23.159999999999997,
+          "peak_kib": 373648
         },
         {
-          "elapsed": 20.78343000699897,
-          "cpu": 20.66,
-          "peak_kib": 283924
+          "elapsed": 15.772689303001243,
+          "cpu": 23.119999999999997,
+          "peak_kib": 373904
         },
         {
-          "elapsed": 20.773091568000382,
-          "cpu": 20.65,
-          "peak_kib": 283932
+          "elapsed": 15.745326824002404,
+          "cpu": 23.110000000000003,
+          "peak_kib": 373824
         },
         {
-          "elapsed": 20.7157267970033,
-          "cpu": 20.59,
-          "peak_kib": 283904
+          "elapsed": 15.759478913998464,
+          "cpu": 23.139999999999997,
+          "peak_kib": 373824
         }
       ],
       "summary": {
-        "elapsed_seconds": 20.773091568000382,
-        "cpu_seconds": 20.65,
-        "peak_kib": 283924,
-        "min_elapsed_seconds": 20.7157267970033,
-        "max_peak_kib": 283972
+        "elapsed_seconds": 15.749589314000332,
+        "cpu_seconds": 23.119999999999997,
+        "peak_kib": 373824,
+        "min_elapsed_seconds": 15.687002075999771,
+        "max_peak_kib": 373904
       }
     },
     {
@@ -127,37 +127,37 @@
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.14588505099891336,
-          "cpu": 0.13,
-          "peak_kib": 16024
-        },
-        {
-          "elapsed": 0.1433030369989865,
-          "cpu": 0.13,
-          "peak_kib": 16024
-        },
-        {
-          "elapsed": 0.14516497399745276,
-          "cpu": 0.13,
-          "peak_kib": 16024
-        },
-        {
-          "elapsed": 0.14389081799890846,
-          "cpu": 0.13,
-          "peak_kib": 16024
-        },
-        {
-          "elapsed": 0.12796139599959133,
+          "elapsed": 0.13167501399948378,
           "cpu": 0.12,
-          "peak_kib": 16152
+          "peak_kib": 16036
+        },
+        {
+          "elapsed": 0.1306095069994626,
+          "cpu": 0.12,
+          "peak_kib": 16036
+        },
+        {
+          "elapsed": 0.12812603800193756,
+          "cpu": 0.11,
+          "peak_kib": 16036
+        },
+        {
+          "elapsed": 0.1321887220001372,
+          "cpu": 0.12,
+          "peak_kib": 16036
+        },
+        {
+          "elapsed": 0.12967451800068375,
+          "cpu": 0.12,
+          "peak_kib": 16036
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.14389081799890846,
-        "cpu_seconds": 0.13,
-        "peak_kib": 16024,
-        "min_elapsed_seconds": 0.12796139599959133,
-        "max_peak_kib": 16152
+        "elapsed_seconds": 0.1306095069994626,
+        "cpu_seconds": 0.12,
+        "peak_kib": 16036,
+        "min_elapsed_seconds": 0.12812603800193756,
+        "max_peak_kib": 16036
       }
     },
     {
@@ -172,42 +172,42 @@
         "x86_64",
         "-O2",
         "-o",
-        "/tmp/nix-shell.KTsmBA/jihoo-compile-gfttlfb6/comptime-x86_64"
+        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/comptime-x86_64"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.6420987199999217,
-          "cpu": 0.63,
-          "peak_kib": 80068
-        },
-        {
-          "elapsed": 0.6225014370029385,
+          "elapsed": 0.6295113129999663,
           "cpu": 0.61,
-          "peak_kib": 79872
+          "peak_kib": 80160
         },
         {
-          "elapsed": 0.6723544970009243,
-          "cpu": 0.66,
-          "peak_kib": 80004
+          "elapsed": 0.6119393720000517,
+          "cpu": 0.6,
+          "peak_kib": 80160
         },
         {
-          "elapsed": 0.6433658149981056,
-          "cpu": 0.62,
-          "peak_kib": 80024
+          "elapsed": 0.6247454840013233,
+          "cpu": 0.61,
+          "peak_kib": 80288
         },
         {
-          "elapsed": 0.6494379879986809,
+          "elapsed": 0.6557550760007871,
           "cpu": 0.64,
-          "peak_kib": 80024
+          "peak_kib": 80160
+        },
+        {
+          "elapsed": 0.6121911660011392,
+          "cpu": 0.59,
+          "peak_kib": 80160
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.6433658149981056,
-        "cpu_seconds": 0.63,
-        "peak_kib": 80024,
-        "min_elapsed_seconds": 0.6225014370029385,
-        "max_peak_kib": 80068
+        "elapsed_seconds": 0.6247454840013233,
+        "cpu_seconds": 0.61,
+        "peak_kib": 80160,
+        "min_elapsed_seconds": 0.6119393720000517,
+        "max_peak_kib": 80288
       }
     },
     {
@@ -225,37 +225,37 @@
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.0193589400005294,
+          "elapsed": 0.020937691002473002,
           "cpu": 0.01,
-          "peak_kib": 8196
+          "peak_kib": 8080
         },
         {
-          "elapsed": 0.015371307999885175,
+          "elapsed": 0.012343333000899293,
           "cpu": 0.0,
-          "peak_kib": 8196
+          "peak_kib": 8080
         },
         {
-          "elapsed": 0.020803695002541644,
-          "cpu": 0.0,
-          "peak_kib": 8196
+          "elapsed": 0.01772614899891778,
+          "cpu": 0.01,
+          "peak_kib": 8080
         },
         {
-          "elapsed": 0.011738414999854285,
+          "elapsed": 0.015513026002736297,
           "cpu": 0.0,
-          "peak_kib": 8196
+          "peak_kib": 8080
         },
         {
-          "elapsed": 0.019352916002389975,
+          "elapsed": 0.020208652000292204,
           "cpu": 0.0,
-          "peak_kib": 8196
+          "peak_kib": 8080
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.019352916002389975,
+        "elapsed_seconds": 0.01772614899891778,
         "cpu_seconds": 0.0,
-        "peak_kib": 8196,
-        "min_elapsed_seconds": 0.011738414999854285,
-        "max_peak_kib": 8196
+        "peak_kib": 8080,
+        "min_elapsed_seconds": 0.012343333000899293,
+        "max_peak_kib": 8080
       }
     },
     {
@@ -271,42 +271,42 @@
         "-O2",
         "--lib",
         "-o",
-        "/tmp/nix-shell.KTsmBA/jihoo-compile-gfttlfb6/fusion-x86_64.o"
+        "/tmp/nix-shell.gkXrJl/jihoo-compile-07qndo08/fusion-x86_64.o"
       ],
       "directory": "/home/jihoo/jihoo",
       "samples": [
         {
-          "elapsed": 0.1771190210019995,
-          "cpu": 0.16,
-          "peak_kib": 72376
-        },
-        {
-          "elapsed": 0.1715403240013984,
-          "cpu": 0.15000000000000002,
-          "peak_kib": 72376
-        },
-        {
-          "elapsed": 0.18813628899806645,
-          "cpu": 0.17,
-          "peak_kib": 72368
-        },
-        {
-          "elapsed": 0.15399629800231196,
+          "elapsed": 0.16021692900176276,
           "cpu": 0.14,
-          "peak_kib": 72484
+          "peak_kib": 72568
         },
         {
-          "elapsed": 0.18360363800093182,
-          "cpu": 0.17,
-          "peak_kib": 72376
+          "elapsed": 0.12871766799798934,
+          "cpu": 0.12,
+          "peak_kib": 72568
+        },
+        {
+          "elapsed": 0.14334814199901302,
+          "cpu": 0.13,
+          "peak_kib": 72440
+        },
+        {
+          "elapsed": 0.12816584500251338,
+          "cpu": 0.11,
+          "peak_kib": 72568
+        },
+        {
+          "elapsed": 0.14948628100319183,
+          "cpu": 0.13,
+          "peak_kib": 72568
         }
       ],
       "summary": {
-        "elapsed_seconds": 0.1771190210019995,
-        "cpu_seconds": 0.16,
-        "peak_kib": 72376,
-        "min_elapsed_seconds": 0.15399629800231196,
-        "max_peak_kib": 72484
+        "elapsed_seconds": 0.14334814199901302,
+        "cpu_seconds": 0.13,
+        "peak_kib": 72568,
+        "min_elapsed_seconds": 0.12816584500251338,
+        "max_peak_kib": 72568
       }
     }
   ]
