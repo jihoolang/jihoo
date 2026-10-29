@@ -14,6 +14,9 @@
 // This pass trusts nothing sema decided about borrows; sema's own checks
 // give better messages, this one makes sure.
 
+import std.mem
+import std.sort
+import std.thread
 import diag
 import elab
 import mir
@@ -45,38 +48,114 @@ fn bits(n: i64) -> Bits {
     Vec(u64).filled(n, 0)
 }
 
-// A set of loans for each local: `lw` words per local, in one vector, so
+// A set of loans for each local that can hold some (`Rows`), in one vector, so
 // that a block's state is copied and joined without an allocation per
 // local.
 type Held = Vec(u64)
 
-fn row_get(h: Held, lw: i64, l: i64, i: i64) -> bool {
-    (h[l * lw + i / 64] >> ((i % 64) as u64)) & 1 == 1
+// Where each local's loans are in a `Held`: a row of `lw` words for each
+// local that can hold loans (`of[l]`, or -1). Only views, arguments,
+// borrowed locals and locals assigned through a pointer ever gain a loan
+// (`holders`); leaving the others out keeps the set at every block small.
+#[derive(Clone)]
+struct Rows {
+    of: Vec(i64)
+    count: i64
+    lw: i64
 }
 
-fn row_clear(inout h: Held, lw: i64, l: i64) {
-    for k in l * lw..(l + 1) * lw {
-        h[k] = 0
+impl Rows {
+    fn held(self) -> Held {
+        bits(self.count * self.lw)
+    }
+
+    // The first word of `l`'s row, or -1 if it has none.
+    fn at(self, l: i64) -> i64 {
+        let k = self.of[l]
+        if k < 0 { -1 } else { k * self.lw }
+    }
+
+    // The row of a local that gains loans.
+    fn gaining(self, l: i64) -> i64 {
+        let k = self.at(l)
+        if k < 0 {
+            panic("borrow check: a local without a row gains loans")
+        }
+        k
     }
 }
 
-fn row_assign(inout h: Held, lw: i64, l: i64, b: Bits) {
-    for k in 0..lw {
-        h[l * lw + k] = b[k]
+// The locals that can hold loans, with a row each.
+fn holders(body: Body, is_view: Vec(bool), lw: i64) -> Rows {
+    var holds = Vec(bool).new()
+    for i, l in body.locals {
+        holds.push(is_view[i] || l.kind == LocalKind.Arg)
+    }
+    for blk in body.blocks {
+        for s in blk.stmts {
+            match s {
+                Assign(d, r, _) => {
+                    if starts_deref(d) { holds[d.local as i64] = true }
+                    match r {
+                        Ref(q) => holds[q.local as i64] = true
+                        RefMut(q) => holds[q.local as i64] = true
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    var of = Vec(i64).new()
+    var count = 0
+    for h in holds {
+        if h {
+            of.push(count)
+            count += 1
+        } else {
+            of.push(-1)
+        }
+    }
+    Rows { of: of, count: count, lw: lw }
+}
+
+fn row_get(h: Held, r: Rows, l: i64, i: i64) -> bool {
+    let at = r.at(l)
+    at >= 0 && (h[at + i / 64] >> ((i % 64) as u64)) & 1 == 1
+}
+
+fn row_clear(inout h: Held, r: Rows, l: i64) {
+    let at = r.at(l)
+    if at >= 0 {
+        for k in at..at + r.lw {
+            h[k] = 0
+        }
     }
 }
 
-fn row_union(inout h: Held, lw: i64, l: i64, b: Bits) {
-    for k in 0..lw {
-        h[l * lw + k] = h[l * lw + k] | b[k]
+fn row_assign(inout h: Held, r: Rows, l: i64, b: Bits) {
+    let at = r.gaining(l)
+    for k in 0..r.lw {
+        h[at + k] = b[k]
+    }
+}
+
+fn row_union(inout h: Held, r: Rows, l: i64, b: Bits) {
+    let at = r.gaining(l)
+    for k in 0..r.lw {
+        h[at + k] = h[at + k] | b[k]
     }
 }
 
 // b |= the loans of local `l`.
-fn union_row(inout b: Bits, h: Held, lw: i64, l: i64) -> bool {
+fn union_row(inout b: Bits, h: Held, r: Rows, l: i64) -> bool {
+    let at = r.at(l)
+    if at < 0 {
+        return false
+    }
     var changed = false
-    for k in 0..lw {
-        let n = b[k] | h[l * lw + k]
+    for k in 0..r.lw {
+        let n = b[k] | h[at + k]
         if n != b[k] {
             b[k] = n
             changed = true
@@ -85,9 +164,14 @@ fn union_row(inout b: Bits, h: Held, lw: i64, l: i64) -> bool {
     changed
 }
 
-fn rows_intersect(h: Held, lw: i64, a: i64, b: i64) -> bool {
-    for k in 0..lw {
-        if h[a * lw + k] & h[b * lw + k] != 0 {
+fn rows_intersect(h: Held, r: Rows, a: i64, b: i64) -> bool {
+    let x = r.at(a)
+    let y = r.at(b)
+    if x < 0 || y < 0 {
+        return false
+    }
+    for k in 0..r.lw {
+        if h[x + k] & h[y + k] != 0 {
             return true
         }
     }
@@ -160,7 +244,7 @@ struct Ctx {
     loans: Vec(Loan)
     // The loans of each local at the point being checked.
     held: Held
-    lw: i64
+    rows: Rows
     // The loans held by locals still used later.
     active: Bits
 }
@@ -204,35 +288,80 @@ impl Worklist {
     }
 }
 
+// A function with the outcome of its elaboration.
+struct Elaborated {
+    index: i64
+    cost: i64
+    f: mir.Function
+    result: Result((), Diag)
+}
+
 // Elaborates moves and drops in every function of a program, then checks
-// the borrows of those that elaborated; their errors are reported together.
-// Each of the three steps ends a phase of `timer`.
+// the borrows of those that elaborated; their errors are reported together,
+// in the order of the functions, elaboration errors first. Functions are
+// independent of each other in both steps (after effect inference), so
+// each step runs on several threads, the costliest functions first: a few
+// large ones take most of the time. Each of the three steps ends a phase
+// of `timer`.
 pub fn program(inout prog: mir.Program, inout timer: timing.Timer) -> Result((), Diag) {
-    var errors = Vec(Diag).new()
-    var initialized = Vec(bool).new()
-    for i in 0..prog.fns.len() {
-        match elab.run(&prog.fns[i]) {
-            Ok(_) => initialized.push(true)
-            Err(d) => {
-                initialized.push(false)
-                errors.push(d)
-            }
+    var jobs = Vec(Elaborated).new()
+    for f in mem.replace(&prog.fns, Vec(mir.Function).new()).into_iter() {
+        let index = jobs.len()
+        let c = cost(f)
+        jobs.push(Elaborated { index: index, cost: c, f: f, result: Ok(()) })
+    }
+    sort.sort_by(&jobs, fn(a, b) { a.cost > b.cost })
+    thread.each_mut_uneven(&jobs, fn(j) { j.result = elab.run(&j.f) })
+    // The functions that elaborated, costliest first.
+    var order = Vec(i64).new()
+    for j in jobs {
+        if j.result.is_ok() {
+            order.push(j.index)
         }
+    }
+    sort.sort_by(&jobs, fn(a, b) { a.index < b.index })
+    var errors = Vec(Diag).new()
+    for Elaborated { index: _, cost: _, f, result } in jobs.into_iter() {
+        match result {
+            Ok(_) => {}
+            Err(d) => errors.push(d)
+        }
+        prog.fns.push(f)
     }
     timer.lap("elaboration")
     let effects = infer_effects(prog.types, prog.fns)
     timer.lap("effects")
-    for i, f in prog.fns {
-        if initialized[i] {
-            match run_with_effects(prog.types, f, effects) {
-                Ok(_) => {}
-                Err(d) => errors.push(d)
-            }
+    let t = prog.types
+    let fns = prog.fns
+    var checked = thread.map_uneven(
+        order.as_slice(),
+        fn(i) { (i, run_with_effects(t, fns[i], effects)) }
+    )
+    sort.sort_by(&checked, fn(a, b) { a.0 < b.0 })
+    for (_, r) in checked.into_iter() {
+        match r {
+            Ok(_) => {}
+            Err(d) => errors.push(d)
         }
     }
     timer.lap("borrows")
     if errors.len() > 0 { return Err(Diag.several(errors)) }
     Ok(())
+}
+
+// About how long a function takes to elaborate and check: the dataflow
+// visits each statement with a set of locals.
+fn cost(f: mir.Function) -> i64 {
+    match f.body {
+        Some(body) => {
+            var stmts = 0
+            for b in body.blocks {
+                stmts += b.stmts.len() + 1
+            }
+            stmts * body.locals.len()
+        }
+        None => 0
+    }
 }
 
 pub fn run(t: Types, f: mir.Function) -> Result((), Diag) {
@@ -322,19 +451,20 @@ fn run_body(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Resu
     for l in body.locals {
         is_view.push(t.is_view(l.ty))
     }
+    let rows = holders(body, is_view, lw)
     // rooted[l] = the loans of `l` itself: a value moved or copied out of
     // `l` does not borrow `l`.
-    var rooted = bits(n * lw)
+    var rooted = rows.held()
     for i, l in loans {
-        set(&rooted, l.place.local as i64 * lw * 64 + i)
+        set(&rooted, rows.gaining(l.place.local as i64) * 64 + i)
     }
     // held_in[block] = loans each local holds at the block's start.
     var held_in = Vec(Held).new()
     for _ in 0..nb {
-        held_in.push(bits(n * lw))
+        held_in.push(rows.held())
     }
-    let lc = LoanCtx { is_view: is_view, rooted: rooted, lw: lw }
-    var held = bits(n * lw)
+    let lc = LoanCtx { is_view: is_view, rooted: rooted, rows: rows }
+    var held = lc.rows.held()
     var work = Worklist.new(nb)
     work.add(0)
     loop {
@@ -356,7 +486,7 @@ fn run_body(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Resu
     }
 
     // ---- checking ----
-    var cx = Ctx { loans: loans, held: bits(n * lw), lw: lw, active: bits(lw) }
+    var cx = Ctx { loans: loans, held: lc.rows.held(), rows: lc.rows.clone(), active: bits(lw) }
     for b in 0..nb {
         if !reach[b] {
             continue
@@ -382,11 +512,11 @@ fn run_body(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Resu
         }
         copy_into(&cx.held, held_in[b])
         for i, s in blk.stmts {
-            cx.active = active_loans(cx.held, after[i], n, lw)
+            cx.active = active_loans(cx.held, after[i], n, cx.rows)
             check_stmt(t, body, s, cx)?
             stmt_loans(s, &cx.held, lc, t, body, loan_at[b][i])
         }
-        cx.active = active_loans(cx.held, after[ns], n, lw)
+        cx.active = active_loans(cx.held, after[ns], n, cx.rows)
         check_term(t, body, blk.term, cx, f)?
     }
     Ok(())
@@ -396,7 +526,7 @@ fn run_body(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Resu
 struct LoanCtx {
     is_view: Vec(bool)
     rooted: Held
-    lw: i64
+    rows: Rows
 }
 
 fn root_is_raw(t: Types, body: Body, p: Place) -> bool {
@@ -589,15 +719,19 @@ fn op_loans(o: Operand, held: Held, lc: LoanCtx, t: Types, body: Body) -> Bits {
         Some(p) => {
             let l = p.local as i64
             if (lc.is_view[l] || has_deref(p)) && place_is_view(t, body, p) {
+                let at = lc.rows.at(l)
+                if at < 0 {
+                    return bits(lc.rows.lw)
+                }
                 var out = Vec(u64).new()
-                for i in 0..lc.lw {
-                    out.push(held[l * lc.lw + i] & !lc.rooted[l * lc.lw + i])
+                for i in 0..lc.rows.lw {
+                    out.push(held[at + i] & !lc.rooted[at + i])
                 }
                 return out
             }
-            bits(lc.lw)
+            bits(lc.rows.lw)
         }
-        None => bits(lc.lw)
+        None => bits(lc.rows.lw)
     }
 }
 
@@ -618,7 +752,7 @@ fn external_holder(t: Types, body: Body, l: u32) -> bool {
 fn stmt_loans(s: Stmt, inout held: Held, lc: LoanCtx, t: Types, body: Body, new: i64) {
     match s {
         Assign(p, r, _) => {
-            var gained = bits(lc.lw)
+            var gained = bits(lc.rows.lw)
             let ops = elab.rvalue_operands(r)
             for o in ops {
                 union(&gained, op_loans(o, held, lc, t, body))
@@ -634,7 +768,7 @@ fn stmt_loans(s: Stmt, inout held: Held, lc: LoanCtx, t: Types, body: Body, new:
                     // A reborrow through a borrow, or a borrow of a view (a
                     // closure's environment), keeps the loans it holds too.
                     if starts_deref(q) || lc.is_view[q.local as i64] {
-                        union_row(&gained, held, lc.lw, q.local as i64)
+                        union_row(&gained, held, lc.rows, q.local as i64)
                     }
                 }
                 None => {}
@@ -646,7 +780,7 @@ fn stmt_loans(s: Stmt, inout held: Held, lc: LoanCtx, t: Types, body: Body, new:
                 match o {
                     Move(m) => {
                         if m.proj.len() == 0 && !external_holder(t, body, m.local) {
-                            row_clear(&held, lc.lw, m.local as i64)
+                            row_clear(&held, lc.rows, m.local as i64)
                         }
                     }
                     _ => {}
@@ -657,13 +791,13 @@ fn stmt_loans(s: Stmt, inout held: Held, lc: LoanCtx, t: Types, body: Body, new:
                 return
             }
             if p.proj.len() == 0 && !external_holder(t, body, p.local) {
-                row_assign(&held, lc.lw, d, gained)
+                row_assign(&held, lc.rows, d, gained)
             } else {
-                row_union(&held, lc.lw, d, gained)
+                row_union(&held, lc.rows, d, gained)
             }
         }
-        StorageDead(l) => if !external_holder(t, body, l) { row_clear(&held, lc.lw, l as i64) }
-        Forget(l) => row_clear(&held, lc.lw, l as i64)
+        StorageDead(l) => if !external_holder(t, body, l) { row_clear(&held, lc.rows, l as i64) }
+        Forget(l) => row_clear(&held, lc.rows, l as i64)
         _ => {}
     }
 }
@@ -674,7 +808,7 @@ fn stmt_loans(s: Stmt, inout held: Held, lc: LoanCtx, t: Types, body: Body, new:
 // shares some loan with `p` (the iterator of an outer loop, whose element
 // the borrowed one came from) cannot. A borrow not made by a Ref/RefMut in
 // this body falls back to every local that shares a loan with it.
-fn pointees(p: i64, held: Held, lw: i64, body: Body, inout out: Vec(i64)) {
+fn pointees(p: i64, held: Held, rows: Rows, body: Body, inout out: Vec(i64)) {
     // An incoming reference has no Ref instruction in this body. Its
     // argument local represents the caller's pointee for stored loans.
     if body.locals[p].kind == LocalKind.Arg {
@@ -697,7 +831,7 @@ fn pointees(p: i64, held: Held, lw: i64, body: Body, inout out: Vec(i64)) {
                             let r = q.local as i64
                             if r != p && !contains(out, r) {
                                 out.push(r)
-                                if has_deref(q) { pointees(r, held, lw, body, &out) }
+                                if has_deref(q) { pointees(r, held, rows, body, &out) }
                             }
                         }
                         None => {}
@@ -708,8 +842,8 @@ fn pointees(p: i64, held: Held, lw: i64, body: Body, inout out: Vec(i64)) {
         }
     }
     if !found {
-        for l in 0..held.len() / lw {
-            if l != p && !contains(out, l) && rows_intersect(held, lw, p, l) {
+        for l in 0..rows.of.len() {
+            if l != p && !contains(out, l) && rows_intersect(held, rows, p, l) {
                 out.push(l)
             }
         }
@@ -746,7 +880,7 @@ fn term_loans(
 ) {
     match t {
         Call(callee, args, dest, _, _) => {
-            var all = bits(lc.lw)
+            var all = bits(lc.rows.lw)
             let effect = call_effect(callee, args.len(), effects)
             for a in args {
                 union(&all, op_loans(a, held, lc, ts, body))
@@ -759,7 +893,7 @@ fn term_loans(
                             if stores_views(ts, body.locals[p.local as i64].ty) {
                                 // The loans go to whatever the borrow points to.
                                 var targets = Vec(i64).new()
-                                pointees(p.local as i64, held, lc.lw, body, &targets)
+                                pointees(p.local as i64, held, lc.rows, body, &targets)
                                 var stored = all.clone()
                                 if effect >= 0 {
                                     stored = selected_loans(
@@ -772,7 +906,7 @@ fn term_loans(
                                     )
                                 }
                                 for l in targets {
-                                    row_union(&held, lc.lw, l, stored)
+                                    row_union(&held, lc.rows, l, stored)
                                 }
                             }
                         }
@@ -788,7 +922,7 @@ fn term_loans(
                 match a {
                     Move(m) => {
                         if m.proj.len() == 0 && !external_holder(ts, body, m.local) {
-                            row_clear(&held, lc.lw, m.local as i64)
+                            row_clear(&held, lc.rows, m.local as i64)
                         }
                     }
                     _ => {}
@@ -797,9 +931,9 @@ fn term_loans(
             let d = dest.local as i64
             if lc.is_view[d] {
                 if dest.proj.len() == 0 {
-                    row_assign(&held, lc.lw, d, returned)
+                    row_assign(&held, lc.rows, d, returned)
                 } else {
-                    row_union(&held, lc.lw, d, returned)
+                    row_union(&held, lc.rows, d, returned)
                 }
             }
         }
@@ -837,7 +971,7 @@ fn selected_loans(
     t: Types,
     body: Body
 ) -> Bits {
-    var out = bits(lc.lw)
+    var out = bits(lc.rows.lw)
     for i, a in args {
         if get(origins, i) { union(&out, op_loans(a, held, lc, t, body)) }
     }
@@ -916,15 +1050,15 @@ fn raw_effects(t: Types, body: Body) -> (bool, bool) {
 
 fn infer_effect(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> Effect {
     let count = body.arg_count
-    let n = body.locals.len()
     let w = max(1, (count + 63) / 64)
     var views = Vec(bool).new()
     for l in body.locals {
         views.push(t.is_view(l.ty))
     }
-    var initial = bits(n * w)
-    for a in 0..count { if views[a + 1] { set(&initial, (a + 1) * w * 64 + a) } }
-    let lc = LoanCtx { is_view: views, rooted: bits(n * w), lw: w }
+    let rows = holders(body, views, w)
+    var initial = rows.held()
+    for a in 0..count { if views[a + 1] { set(&initial, rows.gaining(a + 1) * 64 + a) } }
+    let lc = LoanCtx { is_view: views, rooted: rows.held(), rows: rows }
     let nb = body.blocks.len()
     var incoming = Vec(Held).new()
     for _ in 0..nb { incoming.push(initial.clone()) }
@@ -939,7 +1073,7 @@ fn infer_effect(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> 
             }
         }
     }
-    var held = bits(n * w)
+    var held = lc.rows.held()
     var work = Worklist.new(nb)
     work.add(0)
     loop {
@@ -950,10 +1084,10 @@ fn infer_effect(t: Types, f: mir.Function, body: Body, effects: Vec(Effect)) -> 
         term_loans(body.blocks[b].term, &held, lc, t, body, effects)
         match body.blocks[b].term {
             Return => {
-                union_row(&result.returned, held, w, mir.RET as i64)
+                union_row(&result.returned, held, lc.rows, mir.RET as i64)
                 for a in 0..count {
                     if stores_views(t, body.locals[a + 1].ty) {
-                        union_row(&result.stored[a], held, w, a + 1)
+                        union_row(&result.stored[a], held, lc.rows, a + 1)
                     }
                 }
             }
@@ -980,38 +1114,53 @@ pub fn infer_effects(t: Types, functions: Vec(mir.Function)) -> Vec(Effect) {
     // recursive functions gain every escaping origin, without trusting a
     // provisional empty summary when the actual borrow checks run. A
     // function's summary depends only on its callees' summaries, so when
-    // one grows only its callers are inferred again.
+    // one grows only its callers are inferred again. Summaries only grow,
+    // so the functions of each round can be inferred at once, on several
+    // threads, from the previous round's summaries: the fixed point is the
+    // same as one function at a time would reach.
     let callers = callers_of(functions)
-    var queue = Vec(i64).new()
-    var queued = Vec(bool).new()
+    var round = Vec(i64).new()
     for i in 0..functions.len() {
-        queue.push(i)
-        queued.push(true)
+        if functions[i].body.is_some() {
+            round.push(i)
+        }
     }
-    var next = 0
-    while next < queue.len() {
-        let i = queue[next]
-        next += 1
-        queued[i] = false
-        let f = functions[i]
-        match f.body {
-            Some(body) => {
-                let e = infer_effect(t, f, body, effects)
-                var changed = union(&effects[i].returned, e.returned)
-                for a in 0..e.stored.len() {
-                    if union(&effects[i].stored[a], e.stored[a]) { changed = true }
-                }
-                if changed {
-                    for c in callers[i] {
-                        if !queued[c] {
-                            queued[c] = true
-                            queue.push(c)
-                        }
+    var costs = Vec(i64).new()
+    for f in functions {
+        costs.push(cost(f))
+    }
+    let size = costs
+    let fns = functions
+    var queued = Vec(bool).filled(functions.len(), false)
+    while round.len() > 0 {
+        sort.sort_by(&round, fn(a, b) { size[a] > size[b] })
+        let known = effects
+        let inferred = thread.map_uneven(round.as_slice(), fn(i) {
+            match fns[i].body {
+                Some(body) => infer_effect(t, fns[i], body, known)
+                None => Effect { known: false, returned: Vec(u64).new(), stored: Vec(Bits).new() }
+            }
+        })
+        var next = Vec(i64).new()
+        for k, e in inferred {
+            let i = round[k]
+            var changed = union(&effects[i].returned, e.returned)
+            for a in 0..e.stored.len() {
+                if union(&effects[i].stored[a], e.stored[a]) { changed = true }
+            }
+            if changed {
+                for c in callers[i] {
+                    if !queued[c] {
+                        queued[c] = true
+                        next.push(c)
                     }
                 }
             }
-            None => {}
         }
+        for c in next {
+            queued[c] = false
+        }
+        round = next
     }
     effects
 }
@@ -1048,11 +1197,11 @@ fn callers_of(functions: Vec(mir.Function)) -> Vec(Vec(i64)) {
 }
 
 // Loans held by some local that is still used later.
-fn active_loans(held: Held, live_after: Bits, n: i64, lw: i64) -> Bits {
-    var a = bits(lw)
+fn active_loans(held: Held, live_after: Bits, n: i64, rows: Rows) -> Bits {
+    var a = bits(rows.lw)
     for l in 0..n {
         if get(live_after, l) {
-            union_row(&a, held, lw, l)
+            union_row(&a, held, rows, l)
         }
     }
     a
@@ -1100,7 +1249,7 @@ fn name(body: Body, p: Place) -> String {
 
 fn conflict(body: Body, q: Place, access: Access, span: Span, cx: Ctx) -> Result((), Diag) {
     for i, l in cx.loans {
-        if !get(cx.active, i) || row_get(cx.held, cx.lw, q.local as i64, i) {
+        if !get(cx.active, i) || row_get(cx.held, cx.rows, q.local as i64, i) {
             continue
         }
         if !overlap(l.place, q) {
@@ -1190,10 +1339,10 @@ fn check_term(t: Types, body: Body, term: Term, cx: Ctx, f: mir.Function) -> Res
             // What the result borrows must outlive the call: it is reached
             // through a parameter.
             for i, l in cx.loans {
-                let result = row_get(cx.held, cx.lw, mir.RET as i64, i)
+                let result = row_get(cx.held, cx.rows, mir.RET as i64, i)
                 var stored = false
                 for a in 1..body.arg_count + 1 {
-                    if external_holder(t, body, a as u32) && row_get(cx.held, cx.lw, a, i) {
+                    if external_holder(t, body, a as u32) && row_get(cx.held, cx.rows, a, i) {
                         stored = true
                     }
                 }
