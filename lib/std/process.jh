@@ -1,5 +1,8 @@
-// Running other programs.
+// Running other programs. Failures are `os.Error`s: `NotFound` for a
+// program that is not in `PATH`, and the error number of `execve` for one
+// that cannot start.
 
+import std.os
 import std.sys
 import std.env
 
@@ -23,9 +26,9 @@ impl Exit {
 // Runs a program with arguments and waits for it to end. A name without a
 // `/` is looked for in the directories of `PATH`. The program inherits the
 // environment and the standard streams.
-pub fn run(program: str, args: [str]) -> Result(Exit, String) {
+pub fn run(program: str, args: [str]) -> Result(Exit, os.Error) {
     let pid = start(program, args, [-1, -1, -1])?
-    finish(program, pid)
+    finish(pid)
 }
 
 // What a program wrote, and how it ended.
@@ -37,107 +40,143 @@ pub struct Output {
 
 // Runs a program as `run` does, but keeps what it writes to standard
 // output and standard error; its standard input is empty (`/dev/null`).
-pub fn output(program: str, args: [str]) -> Result(Output, String) {
-    let pipes = match (sys.pipe(), sys.pipe()) {
-        (Some(o), Some(e)) => (o, e)
-        _ => return Err("cannot make pipes for " + program)
-    }
-    let ((out_r, out_w), (err_r, err_w)) = pipes
-    let null_fd = sys.open_read("/dev/null")
-    let started = start(program, args, [null_fd, out_w, err_w])
-    // The child has the write ends now: reading ends when it closes them.
-    sys.close(out_w)
-    sys.close(err_w)
-    if null_fd >= 0 {
-        sys.close(null_fd)
-    }
-    let pid = match started {
-        Ok(p) => p
-        Err(e) => {
-            sys.close(out_r)
-            sys.close(err_r)
-            return Err(e)
-        }
-    }
-    // Both streams at once, so that a full pipe cannot stop the program
-    // while this one waits on the other.
+pub fn output(program: str, args: [str]) -> Result(Output, os.Error) {
+    let (out_r, out_w) = os.pipe()?
+    let (err_r, err_w) = os.pipe()?
+    let pid = start_piped(program, args, out_w, err_w)?
+    let read = read_both(out_r, err_r)
+    // Waited for even when reading failed, so that it does not stay a
+    // zombie; its read ends are closed, so it does not block on them.
+    let status = finish(pid)?
+    let (stdout, stderr) = read?
+    Ok(Output { status: status, stdout: stdout, stderr: stderr })
+}
+
+// Starts a program writing to `out` and `err`, which close in this process
+// when it returns, so that reading their other ends ends with the program.
+fn start_piped(
+    program: str,
+    args: [str],
+    sink out: os.File,
+    sink err: os.File
+) -> Result(i32, os.Error) {
+    let null = os.File.open("/dev/null")?
+    start(program, args, [null.fd, out.fd, err.fd])
+}
+
+// Reads both pipes until both end, at once, so that a full pipe cannot
+// stop the program while this one waits on the other.
+fn read_both(sink out: os.File, sink err: os.File) -> Result((String, String), os.Error) {
     var stdout = String.new()
     var stderr = String.new()
     var fds = [
-        sys.PollFd { fd: out_r, events: 1, revents: 0 },
-        sys.PollFd { fd: err_r, events: 1, revents: 0 }
+        sys.PollFd { fd: out.fd, events: 1, revents: 0 },
+        sys.PollFd { fd: err.fd, events: 1, revents: 0 }
     ]
     var buf = [0 as u8; 4096]
-    var open = 2
-    while open > 0 {
-        if unsafe { sys.poll(&fds[0], 2) } < 0 {
-            break
+    // A descriptor of -1 is one `poll` skips: that stream has ended.
+    while fds[0].fd >= 0 || fds[1].fd >= 0 {
+        match check(unsafe { sys.poll_raw(&fds[0], 2, -1) }) {
+            Ok(_) => {}
+            Err(e) => if e == os.Error.Interrupted { continue } else { return Err(e) }
         }
         for i in 0..2 {
             if fds[i].fd < 0 || fds[i].revents == 0 {
                 continue
             }
-            let n = unsafe { sys.read_fd(fds[i].fd, &buf[0], 4096) }
-            if n <= 0 {
-                sys.close(fds[i].fd)
+            let n = unsafe { sys.read_raw(fds[i].fd, &buf[0], 4096) }
+            if n > 0 {
+                let s = unsafe { make_str(&buf[0], n) }
+                if i == 0 { stdout.push_str(s) } else { stderr.push_str(s) }
+            } else if n == 0 {
                 fds[i].fd = -1
-                open -= 1
-            } else if i == 0 {
-                stdout.push_str(unsafe { make_str(&buf[0], n) })
-            } else {
-                stderr.push_str(unsafe { make_str(&buf[0], n) })
+            } else if n != -4 {
+                return Err(os.Error.from_code((0 - n) as i32))
             }
         }
     }
-    for i in 0..2 {
-        if fds[i].fd >= 0 {
-            sys.close(fds[i].fd)
-        }
-    }
-    let status = finish(program, pid)?
-    if open > 0 {
-        return Err("cannot read the output of " + program)
-    }
-    Ok(Output { status: status, stdout: stdout, stderr: stderr })
+    Ok((stdout, stderr))
 }
 
 // Starts a program with `stdio` as its standard streams (see
-// `sys.spawn_io`); its pid.
-fn start(program: str, args: [str], stdio: [i32; 3]) -> Result(i32, String) {
+// `sys.spawn_raw`); its pid. A failing `execve` is reported here, with its
+// error number, rather than as the child's exit status.
+fn start(program: str, args: [str], stdio: [i32; 3]) -> Result(i32, os.Error) {
+    // C strings for the program, its arguments and argv.
+    let name = c_string(program)?
     let path = match find(program) {
         Some(p) => p
-        None => return Err("cannot find " + program)
+        None => return Err(os.Error.NotFound)
     }
-    // C strings for the program, its arguments and argv.
     var strings = Vec(Vec(u8)).new()
-    strings.push(c_string(path.as_str()))
-    strings.push(c_string(program))
+    strings.push(c_string(path.as_str())?)
+    strings.push(name)
     for a in args {
-        strings.push(c_string(a))
+        strings.push(c_string(a)?)
     }
     var argv = Vec(*u8).with_capacity(strings.len())
     for i in 1..strings.len() {
         argv.push(strings[i].ptr)
     }
     argv.push(null)
-    let pid = unsafe { sys.spawn_io(strings[0].ptr, argv.ptr, env.environ(), stdio) }
-    if pid < 0 {
-        return Err("cannot start " + program)
+    let (report, pid) = {
+        let (r, w) = os.pipe()?
+        // The child replaces its descriptors 0 to 2, so the report must be
+        // above them.
+        let w = if w.fd > 2 {
+            w
+        } else {
+            // F_DUPFD_CLOEXEC
+            let fd = check(sys.fcntl_raw(w.fd, 1030, 3))?
+            os.File { fd: fd as i32, owned: true }
+        }
+        let pid = check(unsafe {
+            sys.spawn_raw(strings[0].ptr, argv.ptr, env.environ(), stdio, w.fd)
+        })?
+        (r, pid as i32)
     }
-    Ok(pid)
+    // The write end is closed here and, by `execve`, in the child: reading
+    // ends with no bytes when the program started.
+    var code = [0 as u8; 4]
+    var got = 0
+    while got < 4 {
+        let n = unsafe { sys.read_raw(report.fd, &code[got], 4 - got) }
+        if n == -4 {
+            continue
+        }
+        if n <= 0 {
+            break
+        }
+        got += n
+    }
+    if got == 0 {
+        return Ok(pid)
+    }
+    finish(pid)?
+    let c = code[0] as i32 | (code[1] as i32) << 8 | (code[2] as i32) << 16 | (code[3] as i32) << 24
+    Err(os.Error.from_code(c))
 }
 
 // Waits for a program started by `start` to end.
-fn finish(program: str, pid: i32) -> Result(Exit, String) {
-    let status = sys.wait(pid)
-    if status < 0 {
-        return Err("cannot wait for " + program)
+fn finish(pid: i32) -> Result(Exit, os.Error) {
+    var status: i32 = 0
+    loop {
+        let r = sys.wait_raw(pid, &status)
+        if r != -4 {
+            check(r)?
+            break
+        }
     }
     if status & 0x7f == 0 {
         Ok(Exit.Code((status >> 8) & 0xff))
     } else {
         Ok(Exit.Signal(status & 0x7f))
     }
+}
+
+// The result of a raw call, as `sys` returns it.
+fn check(r: i64) -> Result(i64, os.Error) {
+    if r < 0 { Err(os.Error.from_code((0 - r) as i32)) } else { Ok(r) }
 }
 
 // The file a program name stands for.
@@ -163,11 +202,15 @@ pub fn find(program: str) -> Option(String) {
     None
 }
 
-fn c_string(s: str) -> Vec(u8) {
+// `s` with a zero byte after it; a zero byte inside it is `InvalidInput`.
+fn c_string(s: str) -> Result(Vec(u8), os.Error) {
     var v = Vec(u8).with_capacity(s.len + 1)
     for b in s {
+        if b == 0 {
+            return Err(os.Error.InvalidInput)
+        }
         v.push(b)
     }
     v.push(0)
-    v
+    Ok(v)
 }

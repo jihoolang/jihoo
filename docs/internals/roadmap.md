@@ -88,8 +88,8 @@ produces the same source, and formatted programs retain their behavior.
   `Error` and `File` reads and writes of one system call each, so partial
   reads/writes, EOF, interrupted operations and nonblocking readiness
   (`set_nonblocking`, `wait_readable`, `wait_writable`) are explicit;
-  `std.fs` and `io.BufReader` report `os.Error`. Left: `std.process`
-  errors, which are still text.
+  `std.fs`, `io.BufReader` and `std.process` report `os.Error`; a program
+  that cannot start fails with the error number of its `execve`.
 - Done: library formatting for several values and options. `std.fmt`
   formats a tuple of values with `{}` patterns (positions, fill, alignment,
   sign, bases, width, precision, exponents), and floats print the shortest

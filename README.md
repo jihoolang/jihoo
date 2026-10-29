@@ -134,9 +134,10 @@ repository. General source-level contracts remain open.
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
 [`std.os`](docs/reference/standard-library.md#files-and-errors) reports
-failures as an errno-based `os.Error` and reads and writes bytes with one
-system call each, so partial operations, the end of input, interrupted
-calls and nonblocking readiness are explicit, in both profiles.
+failures as an errno-based `os.Error`, which `std.fs` and `std.process`
+also return, and reads and writes bytes with one system call each, so
+partial operations, the end of input, interrupted calls and nonblocking
+readiness are explicit, in both profiles.
 [`std.fmt`](docs/reference/standard-library.md#formatting) formats several
 values with patterns such as `"{:>8.2} {:#x}"`, and floats print the
 shortest text that reads back as the same value.

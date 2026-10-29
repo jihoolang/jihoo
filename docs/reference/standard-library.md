@@ -220,8 +220,8 @@ patterns see through it.
 | `std.os` | `Error` (errno-based), `File` with partial and nonblocking reads and writes, `pipe`, the standard streams ([files and errors](#files-and-errors)) |
 | `std.fs` | `read_file`, `read_bytes`, `write_file`, `write_bytes`, `append_bytes`, `remove_file`, `read_dir`, failing with `os.Error` |
 | `std.env` | `args() -> Vec(str)`, `get(name) -> Option(str)`, `environ()` |
-| `std.process` | `run(program, args) -> Result(Exit, String)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, String)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH` |
-| `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `spawn`, `spawn_io` (with the child's standard streams), `pipe`, `poll`, `wait`, `exit`, `abort`, the allocator under `mem`, and `*_raw` calls returning `-errno` that `std.os` uses |
+| `std.process` | `run(program, args) -> Result(Exit, os.Error)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, os.Error)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH`. A program not in `PATH` is `NotFound`, one that cannot start fails with the error number of `execve` (such as `PermissionDenied`), and a zero byte in the program or an argument is `InvalidInput` |
+| `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `exit`, `abort`, the allocator under `mem`, and `*_raw` calls returning `-errno` that `std.os` and `std.process` use (`spawn_raw` reports a failing `execve` through a pipe) |
 | `std.libc` | C library declarations (native programs) |
 | `std.ffi` | native Linux `Library.open`/`symbol` (unsafe), `c_string`, `copy_c_string` (unsafe), and C integer aliases; see [C interoperation](../language/unsafe.md#shared-libraries-and-c-strings) |
 | `std.sysno` | Linux system call numbers for the target |

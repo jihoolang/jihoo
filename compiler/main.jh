@@ -308,7 +308,7 @@ fn drive() {
                 }
                 Err(e) => failure(
                     diag.Kind.Io,
-                    ("cannot run " + exe.as_str() + ": " + e.as_str()).as_str()
+                    ("cannot run " + exe.as_str() + ": " + e.to_string().as_str()).as_str()
                 )
             }
         }
@@ -415,7 +415,9 @@ fn link_exe(
     }
     let o = match r {
         Ok(o) => o
-        Err(e) => return Err("cannot run " + cc + ": " + e.as_str() + " (set JIHOO_CC to clang)")
+        Err(e) => return Err(
+            "cannot run " + cc + ": " + e.to_string().as_str() + " (set JIHOO_CC to clang)"
+        )
     }
     if !o.status.success() {
         var msg = cc + " failed:\n"
@@ -512,7 +514,9 @@ fn object_and_link(
             } else {
                 "JIHOO_CC to a C linker driver"
             }
-            return Err("cannot run " + driver + ": " + e.as_str() + " (set " + set + ")")
+            return Err(
+                "cannot run " + driver + ": " + e.to_string().as_str() + " (set " + set + ")"
+            )
         }
     }
     if !o.status.success() {

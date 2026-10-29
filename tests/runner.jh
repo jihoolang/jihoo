@@ -53,7 +53,11 @@ struct Tests {
 fn exec(program: str, args: [str]) -> process.Output {
     match process.output(program, args) {
         Ok(o) => o
-        Err(e) => process.Output { status: process.Exit.Code(127), stdout: String.new(), stderr: e }
+        Err(e) => process.Output {
+            status: process.Exit.Code(127),
+            stdout: String.new(),
+            stderr: e.to_string()
+        }
     }
 }
 
@@ -223,7 +227,9 @@ impl Tests {
         let out = self.temp(name)
         let o = exec(compiler, ["build", "-O1", "compiler/main.jh", "-o", out.as_str()])
         if !o.status.success() {
-            return Err("compiler/main.jh does not compile with " + compiler + ":\n" + o.stderr.as_str())
+            return Err(
+                "compiler/main.jh does not compile with " + compiler + ":\n" + o.stderr.as_str()
+            )
         }
         Ok(out)
     }
@@ -263,9 +269,11 @@ impl Tests {
         let got = r.stdout.as_str().lines()
         let st = status(r)
         if !same(got, want) || st != code {
-            return Err("expected (exit " + code.to_string().as_str() + "):\n" + join(want).as_str() +
-                "\ngot (exit " + st.to_string().as_str() + "):\n" + join(got).as_str() +
-                "\nstderr:\n" + r.stderr.as_str())
+            return Err(
+                "expected (exit " + code.to_string().as_str() + "):\n" + join(want).as_str() +
+                    "\ngot (exit " + st.to_string().as_str() + "):\n" + join(got).as_str() +
+                    "\nstderr:\n" + r.stderr.as_str()
+            )
         }
         Ok(())
     }
@@ -300,8 +308,8 @@ impl Tests {
         var a = Vec(str).new()
         for setting in ["JIHOO_LLVM=/no-library.so", "JIHOO_CC=/no-c-compiler",
             "JIHOO_LD=/no-linker", "JIHOO_BACKEND=no-backend"] {
-            a.push(setting)
-        }
+                a.push(setting)
+            }
         a.push(self.compiler.as_str())
         a.push("check")
         a.push(path)
@@ -316,7 +324,10 @@ impl Tests {
     fn check_command(self) -> Result((), String) {
         let source = self.temp("check-only.jh")
         // This program would fail to link, and its main must not execute.
-        write_file(source.as_str(), "extern fn missing_symbol()\nfn main() { unsafe { missing_symbol() }; trap() }\n")?
+        write_file(
+            source.as_str(),
+            "extern fn missing_symbol()\nfn main() { unsafe { missing_symbol() }; trap() }\n"
+        )?
         let before = read_dir(self.tmp.as_str())?
         for target in ["x86_64", "aarch64"] {
             self.check_one(source.as_str(), ["--target", target])?
@@ -339,13 +350,17 @@ impl Tests {
             }
         }
         let missing_output = exec(self.compiler.as_str(), ["check", source.as_str(), "-o"])
-        if status(missing_output) != 2 || !missing_output.stderr.as_str().contains("check does not accept") {
+        if status(missing_output) != 2 || !missing_output.stderr.as_str().contains(
+            "check does not accept"
+        ) {
             return Err(String.from("check accepted -o without a path"))
         }
         let after = read_dir(self.tmp.as_str())?
         if before.len() != after.len() { return Err(String.from("check created output files")) }
         for i in 0..before.len() {
-            if before[i] != after[i].as_str() { return Err(String.from("check changed output files")) }
+            if before[i] != after[i].as_str() { return Err(String.from(
+                "check changed output files"
+            )) }
         }
         remove_file(source.as_str())?
         Ok(())
@@ -356,7 +371,9 @@ impl Tests {
         for flag in ["--version", "-V"] {
             let o = exec(self.compiler.as_str(), [flag])
             if status(o) != 0 || !o.stdout.as_str().starts_with("jihoo ") || o.stdout.as_str().trim().len <= 6 {
-                return Err(flag + " does not print the version:\n" + o.stdout.as_str() + o.stderr.as_str())
+                return Err(
+                    flag + " does not print the version:\n" + o.stdout.as_str() + o.stderr.as_str()
+                )
             }
         }
         for flag in ["--help", "-h"] {
@@ -371,7 +388,9 @@ impl Tests {
     fn json_diagnostics(self) -> Result((), String) {
         let o = exec("python3", ["tests/diagnostics.py", "--compiler", self.compiler.as_str()])
         if !o.status.success() {
-            return Err("JSON diagnostic validation failed:\n" + o.stdout.as_str() + o.stderr.as_str())
+            return Err(
+                "JSON diagnostic validation failed:\n" + o.stdout.as_str() + o.stderr.as_str()
+            )
         }
         let floats = exec("python3", ["tests/floats.py", "--compiler", self.compiler.as_str()])
         if !floats.status.success() {
@@ -381,7 +400,10 @@ impl Tests {
         if !server.status.success() {
             return Err("language server validation failed:\n" + server.stdout.as_str() + server.stderr.as_str())
         }
-        let report = exec("python3", ["tests/comptime_report.py", "--compiler", self.compiler.as_str()])
+        let report = exec(
+            "python3",
+            ["tests/comptime_report.py", "--compiler", self.compiler.as_str()]
+        )
         if !report.status.success() {
             return Err("compile-time resource report validation failed:\n" + report.stdout.as_str() + report.stderr.as_str())
         }
@@ -422,7 +444,9 @@ impl Tests {
         let r = exec(exe.as_str(), args.as_slice())
         fs.remove_file(exe.as_str())
         match r.status {
-            Signal(s) => return Err("stopped by signal " + s.to_string().as_str() + ":\n" + r.stderr.as_str())
+            Signal(s) => return Err(
+                "stopped by signal " + s.to_string().as_str() + ":\n" + r.stderr.as_str()
+            )
             Code(_) => {}
         }
         Ok(())
@@ -572,7 +596,9 @@ impl Tests {
                 let b = bytes.as_str()
                 // ELF, and e_machine: 62 for x86_64, 183 for aarch64
                 let want: i64 = if t == "x86_64" { 62 } else { 183 }
-                if b.len < 20 || b[0] != 0x7f || b[1..4] != "ELF" || (b[18] as i64 | (b[19] as i64) << 8) != want {
+                if b.len < 20 || b[0] != 0x7f || b[1..4] != "ELF" || (
+                    b[18] as i64 | (b[19] as i64) << 8
+                ) != want {
                     return Err(t + ": not an ELF object for that machine")
                 }
             }
@@ -592,7 +618,9 @@ impl Tests {
         a.push(exe.as_str())
         let o = exec(self.compiler.as_str(), a.as_slice())
         let err = o.stderr.as_str()
-        if o.status.success() || !err.contains("failed:\n") || !err.contains("no-such-input.o") || err.contains("warning:") {
+        if o.status.success() || !err.contains("failed:\n") || !err.contains("no-such-input.o") || err.contains(
+            "warning:"
+        ) {
             return Err("the link error is\n" + err)
         }
         Ok(())
@@ -612,7 +640,9 @@ impl Tests {
         a.push("-o")
         a.push(exe.as_str())
         let o = exec("env", a.as_slice())
-        if o.status.success() || !o.stderr.as_str().contains("no-library.so") || fs.read_file(exe.as_str()).is_ok() {
+        if o.status.success() || !o.stderr.as_str().contains("no-library.so") || fs.read_file(
+            exe.as_str()
+        ).is_ok() {
             return Err("building without LLVM says\n" + o.stderr.as_str())
         }
         var b = Vec(str).new()
@@ -673,9 +703,13 @@ impl Tests {
                 let want = exec(self.compiler.as_str(), a.as_slice())
                 let got = exec(next.as_str(), a.as_slice())
                 var r: Result((), String) = Ok(())
-                if want.stdout != got.stdout.as_str() || want.stderr != got.stderr.as_str() || status(want) != status(got) {
-                    r = Err("the compiler it builds writes something else:\n--- tested\n" + want.stderr.as_str() +
-                        "--- built by it\n" + got.stderr.as_str())
+                if want.stdout != got.stdout.as_str() || want.stderr != got.stderr.as_str() || status(
+                    want
+                ) != status(got) {
+                    r = Err(
+                        "the compiler it builds writes something else:\n--- tested\n" + want.stderr.as_str() +
+                            "--- built by it\n" + got.stderr.as_str()
+                    )
                 }
                 let what = "selfhost: emit-llvm --target " + t + " " + f.as_str()
                 self.check(what.as_str(), r)
@@ -709,7 +743,13 @@ fn main() -> i32 {
         Some(f) => f
         None => ""
     }
-    var t = Tests { compiler: String.new(), tmp: made.stdout.as_str().trim().to_string(), filter: filter.to_string(), failures: Vec(String).new(), count: 0 }
+    var t = Tests {
+        compiler: String.new(),
+        tmp: made.stdout.as_str().trim().to_string(),
+        filter: filter.to_string(),
+        failures: Vec(String).new(),
+        count: 0
+    }
     match env.get("JIHOO_COMPILER") {
         Some(c) => t.compiler = c.to_string()
         None => {
@@ -754,7 +794,9 @@ fn main() -> i32 {
     }
     exec("rm", ["-rf", t.tmp.as_str()])
     if t.failures.len() > 0 {
-        eprintln(t.failures.len().to_string() + " of " + t.count.to_string().as_str() + " tests failed:")
+        eprintln(
+            t.failures.len().to_string() + " of " + t.count.to_string().as_str() + " tests failed:"
+        )
         for f in t.failures {
             eprintln("  " + f.as_str())
         }

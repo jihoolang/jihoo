@@ -1,5 +1,6 @@
 #![freestanding]
 import std.process
+import std.os
 import std.env
 
 fn main() {
@@ -32,6 +33,14 @@ fn main() {
     let cat = process.output("cat", []).unwrap()
     println(cat.stdout.len())
     println(process.output("no-such-program-xyz", []).is_err())
+
+    // Errors are error numbers: one for a name not in `PATH`, and the
+    // child's `execve` failure, reported to this process.
+    println(process.run("no-such-program-xyz", []).err().unwrap())
+    println(process.run("/no/such/dir/program", []).err().unwrap() == os.Error.NotFound)
+    println(process.output("/", []).err().unwrap())
+    println(process.run("a\0b", []).err().unwrap() == os.Error.InvalidInput)
+    println(process.run("true", ["a\0b"]).err().unwrap() == os.Error.InvalidInput)
 }
 //> 3
 //> true
@@ -46,4 +55,9 @@ fn main() {
 //> 200000
 //> true
 //> 0
+//> true
+//> No such file or directory (os error 2)
+//> true
+//> Permission denied (os error 13)
+//> true
 //> true

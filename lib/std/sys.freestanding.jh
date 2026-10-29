@@ -180,68 +180,11 @@ pub unsafe fn realloc_bytes(p: *u8, n: i64) -> *u8 {
     q
 }
 
-// Starts a program in a new process; the child's pid, or -1.
-pub unsafe fn spawn(path: *u8, argv: **u8, envp: **u8) -> i32 {
-    spawn_io(path, argv, envp, [-1, -1, -1])
-}
-
-// Starts a program with `stdio[i]` as its file descriptor `i` (-1 keeps
-// this process's own); the child's pid, or -1.
-pub unsafe fn spawn_io(path: *u8, argv: **u8, envp: **u8, stdio: [i32; 3]) -> i32 {
-    // clone(SIGCHLD): a fork.
-    let pid = syscall(sysno.CLONE, 17, 0, 0, 0, 0)
-    if pid == 0 {
-        for i in 0..3 {
-            if stdio[i] >= 0 && stdio[i] != i as i32 {
-                syscall(sysno.DUP3, stdio[i] as i64, i, 0)
-            }
-        }
-        for i in 0..3 {
-            if stdio[i] > 2 {
-                syscall(sysno.CLOSE, stdio[i] as i64)
-            }
-        }
-        syscall(sysno.EXECVE, path, argv, envp)
-        syscall(sysno.EXIT_GROUP, 127)
-    }
-    if pid < 0 { -1 } else { pid as i32 }
-}
-
-// A pipe, as (read end, write end); both ends close when a program is
-// started.
-pub fn pipe() -> Option((i32, i32)) {
-    var fds = [0 as i32; 2]
-    // O_CLOEXEC
-    if unsafe { syscall(sysno.PIPE2, &fds[0], 0x80000) } < 0 {
-        return None
-    }
-    Some((fds[0], fds[1]))
-}
-
 // A file descriptor to wait on, and what happened to it.
 pub struct PollFd {
     pub fd: i32
     pub events: i16
     pub revents: i16
-}
-
-// Waits until something happens to one of `n` descriptors (C's `poll`, no
-// timeout); how many, or -1.
-pub unsafe fn poll(fds: *PollFd, n: i64) -> i32 {
-    loop {
-        let r = syscall(sysno.PPOLL, fds, n, 0, 0, 8)
-        // -EINTR: a signal came first
-        if r != -4 {
-            return if r < 0 { -1 } else { r as i32 }
-        }
-    }
-}
-
-// Waits for a child; its raw wait status, or -1.
-pub fn wait(pid: i32) -> i32 {
-    var status: i32 = 0
-    let r = unsafe { syscall(sysno.WAIT4, pid as i64, &status, 0, 0) }
-    if r < 0 { -1 } else { status }
 }
 
 pub fn is_executable(path: str) -> bool {
@@ -317,4 +260,37 @@ pub fn unlink_raw(path: str) -> i64 {
     let p = c_path(path)
     // unlinkat(AT_FDCWD, path, 0)
     unsafe { syscall(sysno.UNLINKAT, CWD, p.ptr, 0) }
+}
+
+// Starts a program in a new process with `stdio[i]` as its file descriptor
+// `i` (-1 keeps this process's own); the child's pid, or `-errno` when it
+// cannot fork. When `execve` fails, the child writes its error number to
+// `report` (4 bytes, little-endian) and exits with 127; `report` should be
+// above 2 and close on exec, so that a started program closes it.
+pub unsafe fn spawn_raw(path: *u8, argv: **u8, envp: **u8, stdio: [i32; 3], report: i32) -> i64 {
+    // clone(SIGCHLD): a fork.
+    let pid = syscall(sysno.CLONE, 17, 0, 0, 0, 0)
+    if pid == 0 {
+        for i in 0..3 {
+            if stdio[i] >= 0 && stdio[i] != i as i32 {
+                syscall(sysno.DUP3, stdio[i] as i64, i, 0)
+            }
+        }
+        for i in 0..3 {
+            if stdio[i] > 2 {
+                syscall(sysno.CLOSE, stdio[i] as i64)
+            }
+        }
+        let code = 0 - syscall(sysno.EXECVE, path, argv, envp)
+        var b = [code as u8, (code >> 8) as u8, (code >> 16) as u8, (code >> 24) as u8]
+        syscall(sysno.WRITE, report as i64, &b[0], 4)
+        syscall(sysno.EXIT_GROUP, 127)
+    }
+    pid
+}
+
+// Waits for a child once (a signal makes it return `-EINTR`); its pid, the
+// raw wait status in `status`.
+pub fn wait_raw(pid: i32, inout status: i32) -> i64 {
+    unsafe { syscall(sysno.WAIT4, pid as i64, &status, 0, 0) }
 }
