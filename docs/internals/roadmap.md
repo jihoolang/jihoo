@@ -130,6 +130,44 @@ reproducible command. Structural and correctness checks run in CI; timing
 comparisons run on a controlled host with repeated samples. Self-hosting
 agreement is a regression check, not a proof of memory safety.
 
+### 4. Parallel compilation (0.3)
+
+Programs use [threads](../language/threads.md)
+at scale, starting with the compiler itself: its passes become parallel
+where the work is independent, and what that needs from `std.thread` and
+`std.sync` guides the library. Single-threaded costs come first, because
+allocation-bound code does not scale across threads.
+
+Measured on `compiler/main.jh` (x86_64, 8 CPUs, `-O2`, 0.2.1): `check`
+took 17.0 s, of which 11.3 s was borrow-effect inference and 5.2 s the
+borrow checks; sema and elaboration took under 0.5 s. A full build took
+36.8 s, nearly all of the rest in LLVM (`opt -O2` about 12.5 s, object
+emission about 6.7 s on the same IR). Every phase ran on one CPU.
+
+- Done: the borrow kernel's dataflow uses one flat bit vector per program
+  point and worklists, and effect inference revisits only callers of a
+  function whose relation grew. `check` takes 1.3 s and a full build 20.7 s;
+  peak memory fell by about a quarter.
+- Phase timings from the compiler (`--time-passes` or similar), so later
+  changes are measured per phase.
+- Code generation in parallel: the module split into a deterministic
+  number of units, each optimized and emitted by its own thread and LLVM
+  context, with a single-unit mode where cross-unit inlining matters.
+  `emit-llvm`, the stage 1/stage 2 comparison and diagnostics stay
+  deterministic.
+- Borrow checks in parallel: after effect inference, each function's check
+  is independent. `Types` must not change while they run (layout and drop
+  caches filled beforehand), and errors are still reported in source order.
+- Library work that these need: `thread.map` over uneven work (chunks or a
+  pool), per-thread allocation, deterministic parallel reduction, and the
+  `Send`-like rule if shared compiler data needs one.
+- Sema's instance queue stays sequential unless measurements show it
+  dominates: it shares the type interner.
+
+Completion: on the controlled host, a full `-O2` build of the compiler is
+several times faster than 36.8 s and uses the available CPUs; the output of
+every compilation is identical to a sequential one.
+
 ## 0.1: the rewrite
 
 Done ([design](redesign.md)):

@@ -106,7 +106,11 @@ used later. Then it checks every access against the loans that last there:
 Before checking calls, the kernel derives a relation between argument
 origins, returned views and stores into mutable/interior view arguments.
 It propagates origins through MIR with a fixed point over function bodies,
-including recursive call cycles. Call sites use the resulting relations
+including recursive call cycles: when a function's relation grows, only its
+direct callers are inferred again, and inside a body only blocks whose
+incoming loans changed are revisited. The loans of all locals at a point are
+one flat bit vector, so joining and copying block states does not allocate
+per local. Call sites use the resulting relations
 instead of assuming every call stores every input borrow. These relations
 are computed by the borrow kernel, not supplied by sema. Calls without a
 known body keep the conservative rule. Raw reads that can manufacture views
