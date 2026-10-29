@@ -1,0 +1,338 @@
+// Errors of the operating system, and files as streams of bytes.
+//
+// A failure is an `Error`, one variant per error number (errno) that
+// programs commonly handle, the others as `Other(code)`. Reads and writes
+// make one system call each, so what can happen there is in the result: a
+// read or write of fewer bytes than asked, the end of input (a read of
+// zero bytes), a call a signal interrupted (`Interrupted`) and a
+// nonblocking descriptor that is not ready (`WouldBlock`). `read_exact`,
+// `read_to_end` and `write_all` repeat calls until done, retrying
+// interrupted ones.
+
+import std.sys
+
+pub enum Error {
+    // EPERM
+    NotPermitted
+    // ENOENT
+    NotFound
+    // EINTR: a signal came before the call did anything.
+    Interrupted
+    // EIO
+    Io
+    // EBADF
+    BadDescriptor
+    // EAGAIN: a nonblocking descriptor is not ready.
+    WouldBlock
+    // ENOMEM
+    OutOfMemory
+    // EACCES
+    PermissionDenied
+    // EBUSY
+    Busy
+    // EEXIST
+    AlreadyExists
+    // ENOTDIR
+    NotADirectory
+    // EISDIR
+    IsADirectory
+    // EINVAL
+    InvalidInput
+    // EMFILE
+    TooManyOpenFiles
+    // ENOSPC
+    NoSpace
+    // EROFS
+    ReadOnly
+    // EPIPE: the reading end is closed.
+    BrokenPipe
+    // ENAMETOOLONG
+    NameTooLong
+    // ENOTEMPTY
+    NotEmpty
+    // Another error number.
+    Other(i32)
+    // Not an error number: the input ended before what was asked for.
+    UnexpectedEof
+    // Not an error number: the bytes are not what was expected, such as
+    // invalid UTF-8.
+    InvalidData
+}
+
+// The error numbers, the same on x86_64 and aarch64 Linux, with their
+// variants' messages as the C library words them.
+const CODES: [i32; 19] = [1, 2, 4, 5, 9, 11, 12, 13, 16, 17, 20, 21, 22, 24, 28, 30, 32, 36, 39]
+
+impl Error {
+    // The error for an error number.
+    pub fn from_code(code: i32) -> Error {
+        match code {
+            1 => NotPermitted
+            2 => NotFound
+            4 => Interrupted
+            5 => Io
+            9 => BadDescriptor
+            11 => WouldBlock
+            12 => OutOfMemory
+            13 => PermissionDenied
+            16 => Busy
+            17 => AlreadyExists
+            20 => NotADirectory
+            21 => IsADirectory
+            22 => InvalidInput
+            24 => TooManyOpenFiles
+            28 => NoSpace
+            30 => ReadOnly
+            32 => BrokenPipe
+            36 => NameTooLong
+            39 => NotEmpty
+            c => Other(c)
+        }
+    }
+
+    // The error number, or 0 for `UnexpectedEof` and `InvalidData`.
+    pub fn code(self) -> i32 {
+        match self {
+            Other(c) => c
+            UnexpectedEof => 0
+            InvalidData => 0
+            e => CODES[variant_of(e)]
+        }
+    }
+
+    pub fn message(self) -> str {
+        match self {
+            NotPermitted => "Operation not permitted"
+            NotFound => "No such file or directory"
+            Interrupted => "Interrupted system call"
+            Io => "Input/output error"
+            BadDescriptor => "Bad file descriptor"
+            WouldBlock => "Resource temporarily unavailable"
+            OutOfMemory => "Cannot allocate memory"
+            PermissionDenied => "Permission denied"
+            Busy => "Device or resource busy"
+            AlreadyExists => "File exists"
+            NotADirectory => "Not a directory"
+            IsADirectory => "Is a directory"
+            InvalidInput => "Invalid argument"
+            TooManyOpenFiles => "Too many open files"
+            NoSpace => "No space left on device"
+            ReadOnly => "Read-only file system"
+            BrokenPipe => "Broken pipe"
+            NameTooLong => "File name too long"
+            NotEmpty => "Directory not empty"
+            Other(_) => "Unknown error"
+            UnexpectedEof => "unexpected end of input"
+            InvalidData => "invalid data"
+        }
+    }
+
+    pub fn to_string(self) -> String {
+        var s = String.new()
+        self.show(&s)
+        s
+    }
+}
+
+// The result of a raw call, as `sys` returns it.
+fn check(r: i64) -> Result(i64, Error) {
+    if r < 0 { Err(Error.from_code((0 - r) as i32)) } else { Ok(r) }
+}
+
+impl Show for Error {
+    // "No such file or directory (os error 2)"
+    fn show(self, inout out: String) {
+        match self {
+            Other(c) => {
+                out.push_str("os error ")
+                c.show(&out)
+            }
+            UnexpectedEof => out.push_str(self.message())
+            InvalidData => out.push_str(self.message())
+            _ => {
+                out.push_str(self.message())
+                out.push_str(" (os error ")
+                self.code().show(&out)
+                out.push(')')
+            }
+        }
+    }
+}
+
+impl Eq for Error {
+    fn eq(self, other: Error) -> bool {
+        variant_of(self) == variant_of(other) && self.code() == other.code()
+    }
+}
+
+// Flags of `File.open_with`, as Linux defines them on both targets.
+pub const READ: i32 = 0
+pub const WRITE: i32 = 1
+pub const READ_WRITE: i32 = 2
+pub const CREATE: i32 = 0x40
+pub const EXCLUSIVE: i32 = 0x80
+pub const TRUNCATE: i32 = 0x200
+pub const APPEND: i32 = 0x400
+pub const NONBLOCK: i32 = 0x800
+const CLOEXEC: i32 = 0x80000
+
+// What `File.wait` waits for.
+const POLLIN: i16 = 1
+const POLLOUT: i16 = 4
+
+// An open file descriptor. It is closed when the `File` is dropped, unless
+// it is one of the standard streams.
+pub struct File {
+    fd: i32
+    owned: bool
+}
+
+pub fn stdin() -> File {
+    File { fd: 0, owned: false }
+}
+
+pub fn stdout() -> File {
+    File { fd: 1, owned: false }
+}
+
+pub fn stderr() -> File {
+    File { fd: 2, owned: false }
+}
+
+// A pipe, as `(read end, write end)`.
+pub fn pipe() -> Result((File, File), Error) {
+    var fds = [0 as i32; 2]
+    check(sys.pipe_raw(&fds))?
+    Ok((File { fd: fds[0], owned: true }, File { fd: fds[1], owned: true }))
+}
+
+impl File {
+    // For reading.
+    pub fn open(path: str) -> Result(File, Error) {
+        Self.open_with(path, READ, 0)
+    }
+
+    // For writing, created or emptied.
+    pub fn create(path: str) -> Result(File, Error) {
+        Self.open_with(path, WRITE | CREATE | TRUNCATE, 0o644)
+    }
+
+    // For writing at its end, created if missing.
+    pub fn append(path: str) -> Result(File, Error) {
+        Self.open_with(path, WRITE | CREATE | APPEND, 0o644)
+    }
+
+    // Opens with the flags above, and `mode` for a file it creates. The
+    // descriptor is closed in programs this one starts.
+    pub fn open_with(path: str, flags: i32, mode: i32) -> Result(File, Error) {
+        for b in path {
+            if b == 0 { return Err(InvalidInput) }
+        }
+        let fd = check(sys.open_raw(path, flags | CLOEXEC, mode))?
+        Ok(File { fd: fd as i32, owned: true })
+    }
+
+    // Takes ownership of a descriptor, which the `File` closes.
+    pub unsafe fn from_fd(fd: i32) -> File {
+        File { fd: fd, owned: true }
+    }
+
+    pub fn fd(self) -> i32 {
+        self.fd
+    }
+
+    // Reads at most `max` bytes, appended to `buf`, with one system call:
+    // how many, and 0 only at the end of input (or when `max` is 0).
+    pub fn read(inout self, inout buf: Vec(u8), max: i64) -> Result(i64, Error) {
+        if max <= 0 { return Ok(0) }
+        buf.reserve(max)
+        let n = check(unsafe { sys.read_raw(self.fd, buf.ptr + buf.len, max) })?
+        buf.len += n
+        Ok(n)
+    }
+
+    // Reads exactly `n` bytes into `buf`, or fails with `UnexpectedEof`
+    // if the input ends first; the bytes read before an error stay in
+    // `buf`.
+    pub fn read_exact(inout self, inout buf: Vec(u8), n: i64) -> Result((), Error) {
+        var left = n
+        while left > 0 {
+            match self.read(&buf, left) {
+                Ok(0) => return Err(UnexpectedEof)
+                Ok(k) => left -= k
+                Err(Interrupted) => {}
+                Err(e) => return Err(e)
+            }
+        }
+        Ok(())
+    }
+
+    // Reads until the end of input, appended to `buf`: how many bytes.
+    pub fn read_to_end(inout self, inout buf: Vec(u8)) -> Result(i64, Error) {
+        var total = 0
+        loop {
+            match self.read(&buf, 65536) {
+                Ok(0) => return Ok(total)
+                Ok(k) => total += k
+                Err(Interrupted) => {}
+                Err(e) => return Err(e)
+            }
+        }
+    }
+
+    // Writes some of `data` with one system call: how many bytes, which
+    // may be fewer than `data.len`.
+    pub fn write(inout self, data: [u8]) -> Result(i64, Error) {
+        if data.len == 0 { return Ok(0) }
+        check(unsafe { sys.write_raw(self.fd, data.ptr, data.len) })
+    }
+
+    // Writes all of `data`, retrying interrupted calls. An error leaves
+    // how much was written unknown; use `write` where that matters, as
+    // with nonblocking descriptors.
+    pub fn write_all(inout self, data: [u8]) -> Result((), Error) {
+        var done = 0
+        while done < data.len {
+            match self.write(data[done..data.len]) {
+                Ok(0) => return Err(Io)
+                Ok(k) => done += k
+                Err(Interrupted) => {}
+                Err(e) => return Err(e)
+            }
+        }
+        Ok(())
+    }
+
+    // Makes reads and writes fail with `WouldBlock` instead of waiting.
+    pub fn set_nonblocking(inout self, on: bool) -> Result((), Error) {
+        // F_GETFL, F_SETFL
+        let flags = check(sys.fcntl_raw(self.fd, 3, 0))?
+        let wanted = if on { flags | NONBLOCK as i64 } else { flags ^ (flags & NONBLOCK as i64) }
+        if wanted != flags { check(sys.fcntl_raw(self.fd, 4, wanted))? }
+        Ok(())
+    }
+
+    // Waits at most `timeout_ms` milliseconds (forever when negative) until
+    // a read would not block: whether it would. The end of input and a
+    // closed writing end count as readable.
+    pub fn wait_readable(self, timeout_ms: i64) -> Result(bool, Error) {
+        self.wait(POLLIN, timeout_ms)
+    }
+
+    // The same until a write would not block; a closed reading end counts.
+    pub fn wait_writable(self, timeout_ms: i64) -> Result(bool, Error) {
+        self.wait(POLLOUT, timeout_ms)
+    }
+
+    fn wait(self, events: i16, timeout_ms: i64) -> Result(bool, Error) {
+        var p = sys.PollFd { fd: self.fd, events: events, revents: 0 }
+        let n = check(unsafe { sys.poll_raw(&p, 1, timeout_ms) })?
+        Ok(n > 0)
+    }
+}
+
+impl Drop for File {
+    fn drop(inout self) {
+        if self.owned { let _ = sys.close_raw(self.fd) }
+    }
+}

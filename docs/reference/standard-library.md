@@ -9,7 +9,7 @@ everywhere; the others are imported (`import std.fs`).
 | name | what |
 |------|------|
 | `Option(T)` | `Some(T)` or `None`: `is_some`, `is_none`, `unwrap`, `expect`, `unwrap_or` |
-| `Result(T, E)` | `Ok(T)` or `Err(E)`: `is_ok`, `is_err`, `unwrap`, `expect`, `ok` |
+| `Result(T, E)` | `Ok(T)` or `Err(E)`: `is_ok`, `is_err`, `unwrap`, `expect`, `ok`, `err` |
 | `Ordering` | `Less`, `Equal`, `Greater` |
 | `Clone`, `Eq`, `Ord`, `Hash`, `Show`, `Default`, `Drop`, `Iterator` | the [standard traits](../language/generics.md#standard-traits) |
 | `Plain`, `Int`, `Signed`, `Unsigned`, `Float`, `Number` | marker traits the compiler implements |
@@ -62,24 +62,85 @@ Unicode scalar values. Invalid UTF-8 yields one error, then ends iteration.
 `utf8.validate(s)` checks the whole string. `utf8.is_whitespace(scalar)`
 recognizes Unicode White_Space; byte-oriented `is_space` keeps its meaning.
 
+## Files and errors
+
+`std.os` reports what the operating system says. `os.Error` has one variant
+per error number (errno) that programs commonly handle: `NotPermitted`,
+`NotFound`, `Interrupted`, `Io`, `BadDescriptor`, `WouldBlock`,
+`OutOfMemory`, `PermissionDenied`, `Busy`, `AlreadyExists`,
+`NotADirectory`, `IsADirectory`, `InvalidInput`, `TooManyOpenFiles`,
+`NoSpace`, `ReadOnly`, `BrokenPipe`, `NameTooLong` and `NotEmpty`;
+`Other(code)` holds any other number. Two variants are not error numbers:
+`UnexpectedEof` (the input ended before what was asked for) and
+`InvalidData` (such as invalid UTF-8). `Error.from_code(n)` and `code()`
+convert (`code()` is 0 for the last two), `message()` is the C library's
+wording, and `Show` prints `No such file or directory (os error 2)`. `==`
+compares variants and numbers.
+
+`os.File` owns a descriptor and closes it when dropped; `os.stdin()`,
+`stdout()` and `stderr()` borrow the standard streams without closing them.
+`File.open(path)` reads, `create(path)` writes a new or emptied file,
+`append(path)` writes at the end, and `open_with(path, flags, mode)` takes
+`os.READ`, `WRITE`, `READ_WRITE`, `CREATE`, `EXCLUSIVE`, `TRUNCATE`,
+`APPEND` and `NONBLOCK`. `os.pipe()` returns `(read end, write end)`.
+Descriptors are closed in programs `std.process` starts.
+
+Each read and write is one system call, so partial operations, the end of
+input, signals and nonblocking descriptors show in the result:
+
+| method | |
+|--------|---|
+| `read(&buf, max)` | appends at most `max` bytes to a `Vec(u8)`; `Ok(0)` is the end of input |
+| `write(data)` | writes some of a `[u8]`; the count may be smaller than `data.len` |
+| `read_exact(&buf, n)` | exactly `n` bytes, or `UnexpectedEof` with the bytes read so far left in `buf` |
+| `read_to_end(&buf)` | everything up to the end of input |
+| `write_all(data)` | every byte, or an error after an unknown amount; use `write` where the amount matters |
+| `set_nonblocking(on)` | reads and writes return `WouldBlock` instead of waiting |
+| `wait_readable(ms)`, `wait_writable(ms)` | whether the descriptor became ready within `ms` milliseconds (forever if negative) |
+
+`read` and `write` return `Interrupted` when a signal arrives first;
+`read_exact`, `read_to_end` and `write_all` retry such calls. `s.as_bytes()`
+views a `str` or `String` as `[u8]`. Both profiles behave the same: native
+programs go through libc and `errno`, freestanding ones through system calls.
+
+```jihoo
+import std.os
+
+fn copy(path: str) -> Result(i64, os.Error) {
+    var input = os.File.open(path)?
+    var out = os.stdout()
+    var buf = Vec(u8).new()
+    let n = input.read_to_end(&buf)?
+    out.write_all(buf.as_slice())?
+    Ok(n)
+}
+```
+
+`std.fs` reads and writes whole files with the same errors:
+`read_file(path) -> Result(String, os.Error)` (bytes not checked to be
+UTF-8), `read_bytes`, `write_file(path, text)`, `write_bytes(path, data)`,
+`append_bytes`, `remove_file` and `read_dir` (sorted names).
+
 ## Buffered input
 
-`std.io.BufRead` supplies `read_line(&out) -> Result(i64, String)`, appending
+`std.io.BufRead` supplies `read_line(&out) -> Result(i64, os.Error)`, appending
 one UTF-8 line to a `String`, including its newline. The count is in bytes;
-zero means end of input. An error restores the output's previous length;
-input already consumed is not restored.
+zero means end of input. Invalid UTF-8 is `InvalidData`. An error restores
+the output's previous length; input already consumed is not restored.
 
 `io.StrReader.new(text)` borrows a string without copying it.
-`io.BufReader.open(path)` owns a file descriptor and a 64 KiB buffer;
-`with_capacity(path, bytes)` chooses a positive buffer size. The descriptor
-closes on drop. Lines may span buffers, and the final line needs no newline.
-Both readers reject invalid UTF-8 and work in native and freestanding code.
-Only the memory reader can be used during compile-time evaluation.
+`io.BufReader.open(path)` owns a file and a 64 KiB buffer;
+`with_capacity(path, bytes)` chooses a positive buffer size, and
+`BufReader.new(file)` reads an open `os.File`, such as `os.stdin()`.
+Interrupted reads are retried. Lines may span buffers, and the final line
+needs no newline. Both readers work in native and freestanding code. Only
+the memory reader can be used during compile-time evaluation.
 
 ```jihoo
 import std.io
+import std.os
 
-fn read() -> Result(i64, String) {
+fn read() -> Result(i64, os.Error) {
     var input = io.StrReader.new("first\nsecond")
     var line = String.new()
     input.read_line(&line)
@@ -111,10 +172,11 @@ patterns see through it.
 | `std.os_thread` | `start`, `wait` (unsafe) and `cpu_count`: the threads `std.thread` uses, POSIX threads or `clone` |
 | `std.derive` | the bodies of `#[derive(...)]`d methods, loaded by the compiler when an item derives a trait ([derive](../language/reflection.md#derive)) |
 | `std.mem` | `alloc`, `realloc`, `dealloc` (unsafe); `replace`, `swap`, `take`; `drop_at`; `dyn_box`, `dyn_drop`, which [`dyn` values](../language/dyn.md) use |
-| `std.fs` | `read_file(path) -> Result(String, String)`, `write_file(path, text)`, `remove_file(path)`, `read_dir(path) -> Result(Vec(String), String)` (sorted names) |
+| `std.os` | `Error` (errno-based), `File` with partial and nonblocking reads and writes, `pipe`, the standard streams ([files and errors](#files-and-errors)) |
+| `std.fs` | `read_file`, `read_bytes`, `write_file`, `write_bytes`, `append_bytes`, `remove_file`, `read_dir`, failing with `os.Error` |
 | `std.env` | `args() -> Vec(str)`, `get(name) -> Option(str)`, `environ()` |
 | `std.process` | `run(program, args) -> Result(Exit, String)`, which waits; `Exit` is `Code(i32)` or `Signal(i32)`, with `success()`; `output(program, args) -> Result(Output, String)` also keeps what the program writes (`Output { status, stdout, stderr }`, its standard input empty); `find(program)` looks in `PATH` |
-| `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `spawn`, `spawn_io` (with the child's standard streams), `pipe`, `poll`, `wait`, `exit`, `abort`, and the allocator under `mem` |
+| `std.sys` | the operating system: `write_fd`, `read_fd`, `open_read`, `open_write`, `close`, `spawn`, `spawn_io` (with the child's standard streams), `pipe`, `poll`, `wait`, `exit`, `abort`, the allocator under `mem`, and `*_raw` calls returning `-errno` that `std.os` uses |
 | `std.libc` | C library declarations (native programs) |
 | `std.ffi` | native Linux `Library.open`/`symbol` (unsafe), `c_string`, `copy_c_string` (unsafe), and C integer aliases; see [C interoperation](../language/unsafe.md#shared-libraries-and-c-strings) |
 | `std.sysno` | Linux system call numbers for the target |

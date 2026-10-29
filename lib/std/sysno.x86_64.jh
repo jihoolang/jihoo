@@ -20,3 +20,4 @@ pub const FUTEX: i64 = 202
 pub const MPROTECT: i64 = 10
 pub const EXIT: i64 = 60
 pub const SCHED_GETAFFINITY: i64 = 204
+pub const FCNTL: i64 = 72

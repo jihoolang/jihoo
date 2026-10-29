@@ -1,12 +1,14 @@
 // Printing and reading.
 
+import std.os
 import std.sys
 import std.utf8
 
 pub trait BufRead {
     // Append one UTF-8 line, including '\n'. Zero means end of input.
-    // On error, out is restored to its original length.
-    fn read_line(inout self, inout out: String) -> Result(i64, String)
+    // On error, out is restored to its original length; invalid UTF-8 is
+    // `InvalidData`.
+    fn read_line(inout self, inout out: String) -> Result(i64, os.Error)
 }
 
 pub struct StrReader {
@@ -21,7 +23,7 @@ impl StrReader {
 }
 
 impl BufRead for StrReader {
-    fn read_line(inout self, inout out: String) -> Result(i64, String) {
+    fn read_line(inout self, inout out: String) -> Result(i64, os.Error) {
         let start = self.pos
         while self.pos < self.text.len {
             let b = self.text[self.pos]
@@ -29,40 +31,57 @@ impl BufRead for StrReader {
             if b == '\n' { break }
         }
         let line = self.text[start..self.pos]
-        utf8.validate(line)?
+        if utf8.validate(line).is_err() { return Err(os.Error.InvalidData) }
         out.push_str(line)
         Ok(self.pos - start)
     }
 }
 
-// Owns a read-only file descriptor. The buffer is reused between lines.
+// Owns a file (or borrows a standard stream) and a buffer reused between
+// lines.
 pub struct BufReader {
-    fd: i32
+    file: os.File
     buffer: Vec(u8)
+    size: i64
     pos: i64
     end: i64
 }
 
 impl BufReader {
-    pub fn open(path: str) -> Result(BufReader, String) {
+    pub fn open(path: str) -> Result(BufReader, os.Error) {
         Self.with_capacity(path, 65536)
     }
 
-    pub fn with_capacity(path: str, capacity: i64) -> Result(BufReader, String) {
-        if capacity <= 0 { return Err("buffer capacity must be positive") }
-        let fd = sys.open_read(path)
-        if fd < 0 { return Err("cannot open " + path) }
-        Ok(BufReader { fd, buffer: Vec(u8).filled(capacity, 0), pos: 0, end: 0 })
+    pub fn with_capacity(path: str, capacity: i64) -> Result(BufReader, os.Error) {
+        if capacity <= 0 { return Err(os.Error.InvalidInput) }
+        let file = os.File.open(path)?
+        Ok(BufReader {
+            file,
+            buffer: Vec(u8).with_capacity(capacity),
+            size: capacity,
+            pos: 0,
+            end: 0
+        })
     }
 
-    fn append_line(inout self, inout out: String) -> Result((), String) {
+    // Reads lines from an open file, such as `os.stdin()`.
+    pub fn new(sink file: os.File) -> BufReader {
+        BufReader { file, buffer: Vec(u8).with_capacity(65536), size: 65536, pos: 0, end: 0 }
+    }
+
+    fn append_line(inout self, inout out: String) -> Result((), os.Error) {
         loop {
             if self.pos == self.end {
-                let n = unsafe { sys.read_fd(self.fd, &self.buffer[0], self.buffer.len()) }
-                if n < 0 { return Err("cannot read file") }
-                self.pos = 0
-                self.end = n
-                if n == 0 { return Ok(()) }
+                self.buffer.clear()
+                match self.file.read(&self.buffer, self.size) {
+                    Ok(n) => {
+                        self.pos = 0
+                        self.end = n
+                        if n == 0 { return Ok(()) }
+                    }
+                    Err(Interrupted) => continue
+                    Err(e) => return Err(e)
+                }
             }
             let start = self.pos
             while self.pos < self.end {
@@ -79,14 +98,13 @@ impl BufReader {
 }
 
 impl BufRead for BufReader {
-    fn read_line(inout self, inout out: String) -> Result(i64, String) {
+    fn read_line(inout self, inout out: String) -> Result(i64, os.Error) {
         let start = out.len()
-        let result = self.append_line(&out)
-        let valid = match result {
-            Ok(_) => utf8.validate(out.as_str()[start..])
-            Err(e) => Err(e)
+        var result = self.append_line(&out)
+        if result.is_ok() && utf8.validate(out.as_str()[start..]).is_err() {
+            result = Err(os.Error.InvalidData)
         }
-        match valid {
+        match result {
             Ok(_) => Ok(out.len() - start)
             Err(e) => {
                 out.bytes.truncate(start)
@@ -94,10 +112,6 @@ impl BufRead for BufReader {
             }
         }
     }
-}
-
-impl Drop for BufReader {
-    fn drop(inout self) { sys.close(self.fd) }
 }
 
 pub fn print(comptime T: Show, x: T) {

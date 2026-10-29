@@ -84,8 +84,12 @@ produces the same source, and formatted programs retain their behavior.
 - Develop resource and callback wrappers in the application first. State
   registration lifetime, thread and reentrancy requirements before exposing
   a safe interface. Extract reusable pieces after their behavior is tested.
-- Extend binary I/O and structured OS errors so partial reads/writes, EOF,
-  interrupted operations and nonblocking readiness are explicit.
+- Done: binary I/O and structured OS errors. `std.os` has an errno-based
+  `Error` and `File` reads and writes of one system call each, so partial
+  reads/writes, EOF, interrupted operations and nonblocking readiness
+  (`set_nonblocking`, `wait_readable`, `wait_writable`) are explicit;
+  `std.fs` and `io.BufReader` report `os.Error`. Left: `std.process`
+  errors, which are still text.
 - Add library formatting for several values and formatting options.
 
 Completion: the external regression command works with an explicitly selected

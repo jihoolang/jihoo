@@ -1,0 +1,155 @@
+// std.os: errors by number, partial reads and writes, the end of input,
+// nonblocking readiness, broken pipes and interrupted calls.
+import std.fs
+import std.os
+
+extern fn signal(sig: i32, handler: *u8) -> *u8
+extern fn siginterrupt(sig: i32, flag: i32) -> i32
+extern fn alarm(seconds: u32) -> u32
+
+fn on_alarm(_sig: i32) {}
+
+fn show(r: Result((), os.Error)) {
+    match r {
+        Ok(_) => println("ok")
+        Err(e) => println(e)
+    }
+}
+
+fn main() {
+    // Every named variant round-trips through its number.
+    let codes: [i32; 19] = [1, 2, 4, 5, 9, 11, 12, 13, 16, 17, 20, 21, 22, 24, 28, 30, 32, 36, 39]
+    var named = 0
+    for c in codes {
+        let e = os.Error.from_code(c)
+        if e.code() == c && e != os.Error.Other(c) { named += 1 }
+    }
+    println(named)
+    //> 19
+    println(os.Error.from_code(2))
+    //> No such file or directory (os error 2)
+    println(os.Error.from_code(110))
+    //> os error 110
+    println(os.Error.from_code(110) == os.Error.Other(110))
+    //> true
+    println(os.Error.UnexpectedEof.code())
+    //> 0
+
+    // Opening.
+    let dir = "/tmp/jihoo-os-io-test"
+    fs.remove_file(dir + "/f").ok()
+    println(os.File.open(dir + "/missing").err().unwrap() == os.Error.NotFound)
+    //> true
+    println(os.File.create("/tmp").err().unwrap())
+    //> Is a directory (os error 21)
+    println(os.File.open("a\0b").err().unwrap())
+    //> Invalid argument (os error 22)
+    let path = "/tmp/jihoo-os-io-test.bin"
+    fs.write_bytes(path, [0 as u8, 1, 2, 255, 10, 0]).unwrap()
+    let flags = os.WRITE | os.CREATE | os.EXCLUSIVE
+    println(os.File.open_with(path, flags, 0o600).err().unwrap() == os.Error.AlreadyExists)
+    //> true
+    fs.append_bytes(path, "xyz".as_bytes()).unwrap()
+    let bytes = fs.read_bytes(path).unwrap()
+    println(bytes.len().to_string() + " " + bytes[3].to_string() + " " + bytes[8].to_string())
+    //> 9 255 122
+
+    // Partial reads, the end of input, and what read_exact keeps.
+    var f = os.File.open(path).unwrap()
+    var buf = Vec(u8).new()
+    println(f.read(&buf, 4).unwrap())
+    //> 4
+    println(f.read(&buf, 0).unwrap())
+    //> 0
+    println(f.read_to_end(&buf).unwrap())
+    //> 5
+    println(f.read(&buf, 10).unwrap())
+    //> 0
+    var g = os.File.open(path).unwrap()
+    var exact = Vec(u8).new()
+    show(g.read_exact(&exact, 4))
+    //> ok
+    show(g.read_exact(&exact, 10))
+    //> unexpected end of input
+    println(exact.len())
+    //> 9
+    fs.remove_file(path).unwrap()
+    println(fs.remove_file(path).err().unwrap() == os.Error.NotFound)
+    //> true
+
+    // A nonblocking pipe: not ready, then partial writes until it is full.
+    let (r, w) = os.pipe().unwrap()
+    var r = r
+    var w = w
+    r.set_nonblocking(true).unwrap()
+    w.set_nonblocking(true).unwrap()
+    var got = Vec(u8).new()
+    println(r.read(&got, 16).err().unwrap() == os.Error.WouldBlock)
+    //> true
+    println(r.wait_readable(0).unwrap())
+    //> false
+    println(w.wait_writable(0).unwrap())
+    //> true
+    var big = Vec(u8).new()
+    for i in 0..100000 { big.push((i % 251) as u8) }
+    var written = 0
+    var partial = false
+    loop {
+        match w.write(big.as_slice()[written % 1000..big.len()]) {
+            Ok(n) => {
+                if n < big.len() - written % 1000 { partial = true }
+                written += n
+            }
+            Err(WouldBlock) => break
+            Err(e) => panic(e.to_string().as_str())
+        }
+    }
+    println(partial && written > 0)
+    //> true
+    println(w.wait_writable(0).unwrap())
+    //> false
+    println(r.wait_readable(0).unwrap())
+    //> true
+    // Recover by draining, then the end of input once the writer closes.
+    var total = 0
+    loop {
+        got.clear()
+        match r.read(&got, 4096) {
+            Ok(n) => total += n
+            Err(WouldBlock) => break
+            Err(e) => panic(e.to_string().as_str())
+        }
+    }
+    println(total == written)
+    //> true
+    println(w.wait_writable(1000).unwrap())
+    //> true
+    w.write_all("end".as_bytes()).unwrap()
+    drop(w)
+    got.clear()
+    println(r.read_to_end(&got).unwrap())
+    //> 3
+
+    // A write with no reader is a broken pipe once SIGPIPE is ignored.
+    let (r2, w2) = os.pipe().unwrap()
+    var w2 = w2
+    drop(r2)
+    // SIG_IGN
+    unsafe { signal(13, 1 as *u8) }
+    println(w2.write("x".as_bytes()).err().unwrap())
+    //> Broken pipe (os error 32)
+
+    // A signal interrupts a blocking read once; read_exact would retry.
+    let (r3, w3) = os.pipe().unwrap()
+    var r3 = r3
+    unsafe {
+        let handler: fnptr(i32) = on_alarm
+        signal(14, handler as *u8)
+        siginterrupt(14, 1)
+        alarm(1)
+    }
+    var one = Vec(u8).new()
+    println(r3.read(&one, 1).err().unwrap() == os.Error.Interrupted)
+    //> true
+    drop(w3)
+}

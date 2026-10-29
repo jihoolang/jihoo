@@ -228,7 +228,7 @@ fn drive() {
                 Ok(_) => {}
                 Err(e) => failure(
                     diag.Kind.Io,
-                    ("cannot write compile-time report: " + e.as_str()).as_str()
+                    ("cannot write compile-time report: " + e.to_string().as_str()).as_str()
                 )
             }
         }
@@ -259,7 +259,10 @@ fn drive() {
         match out {
             Some(o) => match fs.write_file(o, ll.as_str()) {
                 Ok(_) => {}
-                Err(e) => failure(diag.Kind.Io, ("cannot write " + o + ": " + e.as_str()).as_str())
+                Err(e) => failure(
+                    diag.Kind.Io,
+                    ("cannot write " + o + ": " + e.to_string().as_str()).as_str()
+                )
             }
             None => print(ll)
         }
@@ -373,7 +376,7 @@ fn link_exe(
     }
     match fs.write_file(ll_path.as_str(), ll) {
         Ok(_) => {}
-        Err(e) => return Err("cannot write " + ll_path.as_str() + ": " + e.as_str())
+        Err(e) => return Err("cannot write " + ll_path.as_str() + ": " + e.to_string().as_str())
     }
     let cc = match env.get("JIHOO_CC") {
         Some(c) => c
@@ -445,7 +448,7 @@ fn link_object(
         let path = with_extension(exe, "ll")
         match fs.write_file(path.as_str(), ll) {
             Ok(_) => {}
-            Err(e) => return Err("cannot write " + path.as_str() + ": " + e.as_str())
+            Err(e) => return Err("cannot write " + path.as_str() + ": " + e.to_string().as_str())
         }
     }
     let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" +

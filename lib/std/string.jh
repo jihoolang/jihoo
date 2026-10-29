@@ -40,6 +40,10 @@ impl String {
         unsafe { make_str(self.bytes.ptr, self.bytes.len) }
     }
 
+    pub fn as_bytes(self) -> [u8] {
+        self.bytes.as_slice()
+    }
+
     pub fn push(inout self, b: u8) {
         self.bytes.push(b)
     }
@@ -177,6 +181,11 @@ fn show_128(neg: bool, bits: u128, inout out: String) {
 }
 
 impl str {
+    // The bytes, as a slice.
+    pub fn as_bytes(self) -> [u8] {
+        unsafe { make_slice(self.ptr, self.len) }
+    }
+
     pub fn to_string(self) -> String {
         String.from(self)
     }

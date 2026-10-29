@@ -253,6 +253,13 @@ impl(T: type, E: type) Result(T, E) {
             Err(_) => None
         }
     }
+
+    pub fn err(sink self) -> Option(E) {
+        match self {
+            Ok(_) => None
+            Err(e) => Some(e)
+        }
+    }
 }
 
 impl(T: Clone) Clone for Option(T) {

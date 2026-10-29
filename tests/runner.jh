@@ -146,6 +146,35 @@ fn stem(path: str) -> str {
     path[start..end]
 }
 
+// The file operations of `std.fs`, with errors as text for `?`.
+fn read_file(path: str) -> Result(String, String) {
+    match fs.read_file(path) {
+        Ok(t) => Ok(t)
+        Err(e) => Err("cannot read " + path + ": " + e.to_string().as_str())
+    }
+}
+
+fn write_file(path: str, text: str) -> Result((), String) {
+    match fs.write_file(path, text) {
+        Ok(_) => Ok(())
+        Err(e) => Err("cannot write " + path + ": " + e.to_string().as_str())
+    }
+}
+
+fn read_dir(path: str) -> Result(Vec(String), String) {
+    match fs.read_dir(path) {
+        Ok(names) => Ok(names)
+        Err(e) => Err("cannot read " + path + ": " + e.to_string().as_str())
+    }
+}
+
+fn remove_file(path: str) -> Result((), String) {
+    match fs.remove_file(path) {
+        Ok(_) => Ok(())
+        Err(e) => Err("cannot remove " + path + ": " + e.to_string().as_str())
+    }
+}
+
 // The .jh files of a directory, sorted, and with `deep` those of the
 // directories in it.
 fn jh_files(dir: str, deep: bool, inout out: Vec(String)) {
@@ -199,7 +228,7 @@ impl Tests {
     }
 
     fn run_one(self, path: str) -> Result((), String) {
-        let src = fs.read_file(path)?
+        let src = read_file(path)?
         let lines = directives(src.as_str(), "//>")
         var want = Vec(str).new()
         for d in lines {
@@ -241,7 +270,7 @@ impl Tests {
     }
 
     fn fail_one(self, path: str) -> Result((), String) {
-        let src = fs.read_file(path)?
+        let src = read_file(path)?
         let want = directives(src.as_str(), "// error:")
         if want.len() == 0 {
             return Err(String.from("no `// error:` line"))
@@ -286,8 +315,8 @@ impl Tests {
     fn check_command(self) -> Result((), String) {
         let source = self.temp("check-only.jh")
         // This program would fail to link, and its main must not execute.
-        fs.write_file(source.as_str(), "extern fn missing_symbol()\nfn main() { unsafe { missing_symbol() }; trap() }\n")?
-        let before = fs.read_dir(self.tmp.as_str())?
+        write_file(source.as_str(), "extern fn missing_symbol()\nfn main() { unsafe { missing_symbol() }; trap() }\n")?
+        let before = read_dir(self.tmp.as_str())?
         for target in ["x86_64", "aarch64"] {
             self.check_one(source.as_str(), ["--target", target])?
             self.check_one("tests/ffi/export.jh", ["--lib", "--target", target])?
@@ -312,12 +341,12 @@ impl Tests {
         if status(missing_output) != 2 || !missing_output.stderr.as_str().contains("check does not accept") {
             return Err(String.from("check accepted -o without a path"))
         }
-        let after = fs.read_dir(self.tmp.as_str())?
+        let after = read_dir(self.tmp.as_str())?
         if before.len() != after.len() { return Err(String.from("check created output files")) }
         for i in 0..before.len() {
             if before[i] != after[i].as_str() { return Err(String.from("check changed output files")) }
         }
-        fs.remove_file(source.as_str())?
+        remove_file(source.as_str())?
         Ok(())
     }
 
@@ -372,7 +401,7 @@ impl Tests {
     }
 
     fn example_one(self, path: str) -> Result((), String) {
-        let src = fs.read_file(path)?
+        let src = read_file(path)?
         let exe = self.temp(stem(path))
         var a = Vec(str).new()
         a.push("build")
@@ -422,7 +451,7 @@ impl Tests {
     }
 
     fn c_abi_file(self, file: str) -> Result((), String) {
-        let src = fs.read_file(file)?
+        let src = read_file(file)?
         let lines = directives(src.as_str(), "//> ")
         var want = String.new()
         for d in lines {
@@ -534,7 +563,7 @@ impl Tests {
                 if !o.status.success() {
                     return Err(t + ": " + o.stderr.as_str())
                 }
-                let bytes = fs.read_file(obj.as_str())?
+                let bytes = read_file(obj.as_str())?
                 let b = bytes.as_str()
                 // ELF, and e_machine: 62 for x86_64, 183 for aarch64
                 let want: i64 = if t == "x86_64" { 62 } else { 183 }

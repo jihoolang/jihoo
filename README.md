@@ -133,6 +133,10 @@ repository. General source-level contracts remain open.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
+[`std.os`](docs/reference/standard-library.md#files-and-errors) reports
+failures as an errno-based `os.Error` and reads and writes bytes with one
+system call each, so partial operations, the end of input, interrupted
+calls and nonblocking readiness are explicit, in both profiles.
 The borrow kernel infers argument escape effects for direct calls, including
 recursive functions, so methods on views keep only the borrows they can
 actually retain; unknown calls and raw memory effects remain conservative.

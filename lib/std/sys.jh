@@ -157,3 +157,56 @@ pub fn remove_file(path: str) -> bool {
     let p = c_path(path)
     unsafe { libc.unlink(p.ptr) == 0 }
 }
+
+// ---- calls that report failure as minus the error number ----
+//
+// `std.os` builds on these: each makes one system call and returns its
+// result, or `-errno` when it fails, the same in both profiles.
+
+fn result(r: i64) -> i64 {
+    if r < 0 { 0 - unsafe { *libc.__errno_location() } as i64 } else { r }
+}
+
+pub unsafe fn read_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    result(libc.read(fd, buf, n))
+}
+
+pub unsafe fn write_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    result(libc.write(fd, buf, n))
+}
+
+// `path` must not contain a zero byte.
+pub fn open_raw(path: str, flags: i32, mode: i32) -> i64 {
+    let p = c_path(path)
+    result(unsafe { libc.open(p.ptr, flags, mode) } as i64)
+}
+
+pub fn close_raw(fd: i32) -> i64 {
+    result(unsafe { libc.close(fd) } as i64)
+}
+
+pub fn fcntl_raw(fd: i32, cmd: i32, arg: i64) -> i64 {
+    result(unsafe { libc.fcntl(fd, cmd, arg) } as i64)
+}
+
+// Waits at most `timeout_ms` milliseconds (forever when negative) for
+// something to happen to one of `n` descriptors, once: a signal makes it
+// return `-EINTR`.
+pub unsafe fn poll_raw(fds: *PollFd, n: i64, timeout_ms: i64) -> i64 {
+    result(libc.poll(fds as *u8, n as u64, timeout_ms as i32) as i64)
+}
+
+// `(read end, write end)`, both closed when a program is started.
+pub fn pipe_raw(inout fds: [i32; 2]) -> i64 {
+    // O_CLOEXEC
+    result(unsafe { libc.pipe2(&fds[0], 0x80000) } as i64)
+}
+
+pub unsafe fn read_dir_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    result(libc.getdents64(fd, buf, n))
+}
+
+pub fn unlink_raw(path: str) -> i64 {
+    let p = c_path(path)
+    result(unsafe { libc.unlink(p.ptr) } as i64)
+}

@@ -263,3 +263,58 @@ pub fn remove_file(path: str) -> bool {
     // unlinkat(AT_FDCWD, path, 0)
     unsafe { syscall(sysno.UNLINKAT, CWD, p.ptr, 0) == 0 }
 }
+
+// ---- calls that report failure as minus the error number ----
+//
+// `std.os` builds on these: each makes one system call and returns its
+// result, or `-errno` when it fails, the same in both profiles.
+
+pub unsafe fn read_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    syscall(sysno.READ, fd as i64, buf, n)
+}
+
+pub unsafe fn write_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    syscall(sysno.WRITE, fd as i64, buf, n)
+}
+
+// `path` must not contain a zero byte.
+pub fn open_raw(path: str, flags: i32, mode: i32) -> i64 {
+    let p = c_path(path)
+    unsafe { syscall(sysno.OPENAT, CWD, p.ptr, flags as i64, mode as i64) }
+}
+
+pub fn close_raw(fd: i32) -> i64 {
+    unsafe { syscall(sysno.CLOSE, fd as i64) }
+}
+
+pub fn fcntl_raw(fd: i32, cmd: i32, arg: i64) -> i64 {
+    unsafe { syscall(sysno.FCNTL, fd as i64, cmd as i64, arg) }
+}
+
+// Waits at most `timeout_ms` milliseconds (forever when negative) for
+// something to happen to one of `n` descriptors, once: a signal makes it
+// return `-EINTR`.
+pub unsafe fn poll_raw(fds: *PollFd, n: i64, timeout_ms: i64) -> i64 {
+    if timeout_ms < 0 {
+        return syscall(sysno.PPOLL, fds, n, 0, 0, 8)
+    }
+    // struct timespec
+    var t = [timeout_ms / 1000, timeout_ms % 1000 * 1000000]
+    syscall(sysno.PPOLL, fds, n, &t[0], 0, 8)
+}
+
+// `(read end, write end)`, both closed when a program is started.
+pub fn pipe_raw(inout fds: [i32; 2]) -> i64 {
+    // O_CLOEXEC
+    unsafe { syscall(sysno.PIPE2, &fds[0], 0x80000) }
+}
+
+pub unsafe fn read_dir_raw(fd: i32, buf: *u8, n: i64) -> i64 {
+    syscall(sysno.GETDENTS64, fd as i64, buf, n)
+}
+
+pub fn unlink_raw(path: str) -> i64 {
+    let p = c_path(path)
+    // unlinkat(AT_FDCWD, path, 0)
+    unsafe { syscall(sysno.UNLINKAT, CWD, p.ptr, 0) }
+}

@@ -1,65 +1,56 @@
-// Files, whole.
+// Files, whole. Failures are `os.Error`s.
 
+import std.os
 import std.sys
 
-// The whole file, or why it cannot be read.
-pub fn read_file(path: str) -> Result(String, String) {
-    let fd = sys.open_read(path)
-    if fd < 0 {
-        return Err("cannot open " + path)
-    }
+// The whole file as text. Its bytes are not checked to be UTF-8; see
+// `std.utf8.validate`.
+pub fn read_file(path: str) -> Result(String, os.Error) {
+    Ok(String { bytes: read_bytes(path)? })
+}
+
+// The whole file.
+pub fn read_bytes(path: str) -> Result(Vec(u8), os.Error) {
+    var f = os.File.open(path)?
     var out = Vec(u8).new()
-    loop {
-        out.reserve(65536)
-        let n = unsafe { sys.read_fd(fd, out.ptr + out.len, out.cap - out.len) }
-        if n < 0 {
-            sys.close(fd)
-            return Err("cannot read " + path)
-        }
-        if n == 0 {
-            break
-        }
-        out.len += n
-    }
-    sys.close(fd)
-    Ok(String { bytes: out })
+    f.read_to_end(&out)?
+    Ok(out)
 }
 
-pub fn write_file(path: str, text: str) -> Result((), String) {
-    let fd = sys.open_write(path)
-    if fd < 0 {
-        return Err("cannot create " + path)
-    }
-    let n = sys.write_fd(fd, text)
-    sys.close(fd)
-    if n < 0 {
-        return Err("cannot write " + path)
-    }
-    Ok(())
+// Replaces the file's contents with `text`, creating it if missing.
+pub fn write_file(path: str, text: str) -> Result((), os.Error) {
+    write_bytes(path, text.as_bytes())
 }
 
-// Removes a file, or says it cannot.
-pub fn remove_file(path: str) -> Result((), String) {
-    if !sys.remove_file(path) {
-        return Err("cannot remove " + path)
+pub fn write_bytes(path: str, data: [u8]) -> Result((), os.Error) {
+    var f = os.File.create(path)?
+    f.write_all(data)
+}
+
+// Adds `data` at the file's end, creating it if missing.
+pub fn append_bytes(path: str, data: [u8]) -> Result((), os.Error) {
+    var f = os.File.append(path)?
+    f.write_all(data)
+}
+
+pub fn remove_file(path: str) -> Result((), os.Error) {
+    for b in path {
+        if b == 0 { return Err(os.Error.InvalidInput) }
     }
+    let r = sys.unlink_raw(path)
+    if r < 0 { return Err(os.Error.from_code((0 - r) as i32)) }
     Ok(())
 }
 
 // The names in a directory, sorted, without `.` and `..`.
-pub fn read_dir(path: str) -> Result(Vec(String), String) {
-    let fd = sys.open_read(path)
-    if fd < 0 {
-        return Err("cannot open " + path)
-    }
+pub fn read_dir(path: str) -> Result(Vec(String), os.Error) {
+    let dir = os.File.open(path)?
     var names = Vec(String).new()
     var buf = [0 as u8; 8192]
     loop {
-        let n = unsafe { sys.read_dir_fd(fd, &buf[0], 8192) }
-        if n < 0 {
-            sys.close(fd)
-            return Err("cannot read the directory " + path)
-        }
+        let n = unsafe { sys.read_dir_raw(dir.fd(), &buf[0], 8192) }
+        if n == -4 { continue }
+        if n < 0 { return Err(os.Error.from_code((0 - n) as i32)) }
         if n == 0 {
             break
         }
@@ -79,7 +70,6 @@ pub fn read_dir(path: str) -> Result(Vec(String), String) {
             at += size
         }
     }
-    sys.close(fd)
     sort(&names)
     Ok(names)
 }
