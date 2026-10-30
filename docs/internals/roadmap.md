@@ -228,6 +228,81 @@ sequential one, and the programs it builds are no slower.
 At 0.3.0: a full build takes 15.2 s (2.4 times faster), `check` 0.53 s
 (32 times faster, on 2.5 CPUs), with the same output.
 
+### 5. Functional composition without cost (0.4)
+
+jihoo already removes most functional abstraction at compile time: enums
+and `match`, `comptime` closure parameters and `std.iter` pipelines compile
+to the loop a C programmer would write, and the
+[fusion benchmark](../../benchmarks/functional-fusion/README.md) checks it.
+0.4 closes the places where a functional program still has to pay, or
+fall back to flags and copies. Each item below starts from a reproducer that
+the 0.3.0 compiler rejects or accepts with a runtime failure; that is the
+condition the Direction section sets for changing the language. Lazy
+evaluation, garbage collection, implicit reference counting and
+higher-kinded types remain out of scope: they conflict with predictable
+memory, not with any one feature.
+
+1. Owned closures with static types. A closure is either a borrowing
+   `fn` (no allocation, inlined, but a view that cannot leave the function
+   that made it) or an owned `dyn fn` (returnable, but one allocation and
+   an indirect call). Nothing is in between, so a function cannot return a
+   pipeline whose closure captures its own locals without paying for
+   `dyn fn`:
+
+   ```jihoo
+   fn scaled(n: i64) -> iter.MapIter(iter.Range, i64) {
+       let k = n
+       iter.range(0, 5).map(fn(x) { x * k })   // error: borrows `k`
+   }
+   ```
+
+   Add closures that move their captures, as `dyn fn` does, but whose type
+   is known while compiling, so that calls stay direct and nothing is
+   allocated. Open questions, to settle with a design note before code:
+   how a function names such a type in its result (an opaque result type
+   such as `-> some Iterator` versus adapters generic over the closure
+   type), whether `std.iter` adapters store owned closures or both kinds,
+   and how a closure that captures a view is rejected. Completion: the
+   reproducer compiles; the fusion benchmark gains a returned-pipeline
+   kernel with no allocations and no callbacks in its optimized IR;
+   `tests/fail` covers captured views, use after a capture moved a value,
+   and returning a borrowing closure; `dyn fn` is unchanged.
+2. Patterns and `match` as expressions. Three gaps push programs toward
+   flags and clones:
+   - `A(x) | B(x)` is rejected ("cannot bind names yet"). Alternatives
+     should bind the same names with the same types and conventions.
+   - `let t = match o { Some(t) => t, None => return 0 }` fails when `o`
+     is borrowed, because the arm tries to move `t`. When every arm gives a
+     part of the matched place, the `match` should be a view of that
+     place, checked by the borrow kernel like any other view.
+   - `let Some(t) = o else { return 0 }`: a pattern that must match, with
+     a diverging `else`, replacing the `match` + flag idiom
+     [Coming from Rust](../language/from-rust.md#what-does-not-exist)
+     recommends.
+
+   Completion: each form has `tests/run` and `tests/fail` cases (borrowed
+   and owned scrutinees, values with destructors, moves on only some
+   paths), `from-rust.md` and the pattern reference describe them, and
+   the formatter preserves them.
+3. Format patterns checked while compiling. `fmt.format("{} {}", (1,))`
+   compiles and panics when it runs. When the pattern is a literal, check
+   its syntax and its placeholders against the tuple's arity and types with
+   compile-time evaluation, and report a source diagnostic; patterns only
+   known at run time keep the current panic. Completion: negative cases in
+   `tests/fail`, no change in the IR generated for valid patterns, and
+   compile-time cost recorded with `scripts/benchmark_compile.py`.
+4. The release. `compiler/` and the `lib/std` it imports use none of these
+   features in 0.4.0, since the seed (0.3.0) does not know them. After
+   0.4.0 is tagged and the seed moves, the compiler adopts them where they
+   replace flags or clones, which exercises them on a large program. The
+   editor work in section 1 (sema-resolved definitions, hover) continues
+   alongside and does not block the release.
+
+Completion: the three reproducers compile and run, or fail while
+compiling with a diagnostic, on both targets in both profiles; the
+fusion benchmark and the compile-time baseline show no regression;
+README's Status and the language pages describe 0.4.
+
 ## 0.1: the rewrite
 
 Done ([design](redesign.md)):
