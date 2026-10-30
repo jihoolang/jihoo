@@ -1,0 +1,5 @@
+// error: `#[panic_handler]` marks a function
+#[panic_handler]
+struct S {}
+
+fn main() {}

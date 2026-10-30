@@ -1,0 +1,5 @@
+// error: a `#[panic_handler]` function is `fn(msg: str) -> never`
+#[panic_handler]
+fn on_panic(msg: str) {}
+
+fn main() {}

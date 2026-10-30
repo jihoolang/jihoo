@@ -241,7 +241,7 @@ Sema folds constants in `i128` (a `u64` and a negative number both fit) and
 MIR keeps integer constants that way, so jihoo gained `i128` and `u128`
 before step 4. A 128-bit constant is held as its bit pattern and folded at
 that width (`fold_128` in `consts.rs`); freestanding programs get LLVM's
-128-bit helpers from `std/rt.freestanding.jh`, tested against libgcc's on
+128-bit helpers from `std/rt.jh`, tested against libgcc's on
 both targets. Literals stay at most 64 bits for now. Adding `i128`
 also found that a shift ignored the type its context expected:
 `let b: u8 = 1 << 3` was an error (`tests/run/int128.jh`).

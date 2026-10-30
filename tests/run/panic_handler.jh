@@ -1,0 +1,23 @@
+// A failed bounds check calls the program's `#[panic_handler]` with its
+// message instead of writing to standard error.
+import std.sys
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    println("handled: " + msg)
+    sys.exit(7)
+}
+
+fn main() {
+    let a = [1, 2, 3]
+    var i = 0
+    while i < 10 {
+        println(a[i])
+        i += 1
+    }
+}
+//> 1
+//> 2
+//> 3
+//> handled: index out of bounds
+// exit: 7

@@ -1,0 +1,19 @@
+#![freestanding]
+
+// `panic`, and so `unwrap`, calls the `#[panic_handler]` too.
+import std.sys
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    println("handled: " + msg)
+    sys.exit(9)
+}
+
+fn main() {
+    let o: Option(i64) = None
+    println("before")
+    println(o.unwrap())
+}
+//> before
+//> handled: unwrap of None
+// exit: 9

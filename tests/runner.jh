@@ -30,8 +30,8 @@
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, programs split into code generation units,
-//   cross-compiled objects, link errors, volatile accesses and a missing
-//   LLVM.
+//   cross-compiled objects, link errors, volatile accesses, a library
+//   object with its own panic handler and a missing LLVM.
 // - selfhost: the compiler builds itself, and the compiler it builds writes
 //   the same LLVM IR, errors included, for every .jh file of the checkout.
 // - uefi: the programs of tests/uefi, and those of tests/run that need
@@ -754,6 +754,61 @@ impl Tests {
         Ok(())
     }
 
+    // A library object with a `#[panic_handler]` reports failed checks
+    // through the C program's function and has no system calls, on either
+    // machine.
+    fn panic_handler_object(self) -> Result((), String) {
+        for t in ["x86_64", "aarch64"] {
+            var a = Vec(str).new()
+            a.push("emit-llvm")
+            a.push("--lib")
+            a.push("--target")
+            a.push(t)
+            a.push("tests/ffi/panic_handler.jh")
+            let o = exec(self.compiler.as_str(), a.as_slice())
+            let ir = o.stdout.as_str()
+            if !o.status.success() || ir.contains("syscall") || ir.contains("svc ") {
+                return Err("the " + t + " IR has system calls:\n" + ir + o.stderr.as_str())
+            }
+        }
+        let obj = self.temp("panic-handler.o")
+        let exe = self.temp("panic-host")
+        let cc = match env.get("JIHOO_CC") {
+            Some(c) => c
+            None => "clang"
+        }
+        var a = Vec(str).new()
+        a.push("emit-obj")
+        a.push("--lib")
+        a.push("tests/ffi/panic_handler.jh")
+        a.push("-o")
+        a.push(obj.as_str())
+        let o = exec(self.compiler.as_str(), a.as_slice())
+        if !o.status.success() {
+            return Err("emit-obj --lib fails:\n" + o.stderr.as_str())
+        }
+        var c = Vec(str).new()
+        c.push("tests/ffi/panic_host.c")
+        c.push(obj.as_str())
+        c.push("-o")
+        c.push(exe.as_str())
+        let linked = exec(cc, c.as_slice())
+        fs.remove_file(obj.as_str())
+        if !linked.status.success() {
+            return Err(cc + " cannot link the object:\n" + linked.stderr.as_str())
+        }
+        let r = exec(exe.as_str(), [])
+        fs.remove_file(exe.as_str())
+        let seven = match r.status {
+            Code(c) => c == 7
+            _ => false
+        }
+        if !seven || r.stdout != "6\nhost: index out of bounds\n" {
+            return Err("the C program prints\n" + r.stdout.as_str() + r.stderr.as_str())
+        }
+        Ok(())
+    }
+
     // A failed link reports clang's messages without its warnings.
     fn link_errors(self) -> Result((), String) {
         let exe = self.temp("no-link")
@@ -817,6 +872,8 @@ impl Tests {
         self.check("backend: link errors", r)
         let r = self.volatile_accesses()
         self.check("backend: volatile accesses", r)
+        let r = self.panic_handler_object()
+        self.check("backend: library panic handler", r)
         let r = self.missing_llvm()
         self.check("backend: missing LLVM", r)
     }

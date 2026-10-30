@@ -40,3 +40,28 @@ A bug stops the program right away, with a message on standard error:
 There is no unwinding and no catching: the process ends (by a trap, so a
 debugger stops right there). Functions that never return have the result
 type `never`.
+
+## Panic handlers
+
+A program can replace the way it reports these with a function of its own,
+marked `#[panic_handler]`:
+
+```jihoo
+import std.sys
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    println("stopped: " + msg)
+    sys.exit(70)
+}
+```
+
+Every failure listed above then calls it with its message (`index out of
+bounds`, `integer overflow`, `unwrap of None`, the text given to `panic`),
+instead of writing `panic: ` and the message to standard error and
+trapping. The handler is a free function written `fn(msg: str) -> never`:
+not generic, `extern`, `export` or `unsafe`, and a program (with all of its
+modules) has at most one. It must not return, and a panic inside it calls it
+again. Since nothing unwinds, it is where a program reports a bug its own
+way and stops, for example through the system calls of an operating system
+that is not Linux ([embedding](profiles.md#embedding-in-another-system)).

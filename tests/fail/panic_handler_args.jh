@@ -1,0 +1,7 @@
+// error: `#[panic_handler]` takes no arguments
+#[panic_handler(abort)]
+fn on_panic(msg: str) -> never {
+    loop {}
+}
+
+fn main() {}

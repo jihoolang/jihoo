@@ -2430,6 +2430,13 @@ impl Gen {
     // `jihoo.panic(msg, len)`: writes the message to standard error and
     // stops. Uses the system call directly, so it works without libc.
     fn runtime(inout self) {
+        match self.p.panic_handler {
+            Some(h) => {
+                self.handler_runtime(h)
+                return
+            }
+            None => {}
+        }
         match self.p.profile {
             Uefi => {
                 self.uefi_runtime()
@@ -2464,6 +2471,20 @@ impl Gen {
                 trap_call(self.p.target)
             ]
         ).as_str())
+        self.declare_runtime()
+    }
+
+    // With a `#[panic_handler]`, `jihoo.panic` passes the message to it as a
+    // `str` and calls nothing of the system or the firmware.
+    fn handler_runtime(inout self, h: u32) {
+        self.out.push_str(fmt.f(
+            "define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {\nentry:\n  %s = alloca { ptr, i64 }\n  store ptr %m, ptr %s\n  %l = getelementptr i8, ptr %s, i64 8\n  store i64 %n, ptr %l\n  call void {}(ptr %s)\n  unreachable\n}\n\n",
+            [sym(self.p.fns[h as i64].symbol.as_str()).as_str()]
+        ).as_str())
+        match self.p.profile {
+            Uefi => self.out.push_str(UEFI_RUNTIME)
+            _ => {}
+        }
         self.declare_runtime()
     }
 

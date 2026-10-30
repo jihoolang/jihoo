@@ -1,0 +1,11 @@
+// error: a `#[panic_handler]` function must be a free function
+struct S {}
+
+impl S {
+    #[panic_handler]
+    fn on_panic(msg: str) -> never {
+        loop {}
+    }
+}
+
+fn main() {}

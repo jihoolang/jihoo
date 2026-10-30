@@ -323,6 +323,8 @@ pub struct Lang {
     // `std.mem.dyn_box` and `dyn_drop`, which `dyn` values use.
     pub dyn_box: Option(u32)
     pub dyn_drop: Option(u32)
+    // The prelude's `panic`, which calls the `#[panic_handler]` if there is one.
+    pub panic: Option(u32)
 }
 
 // A method that a `dyn Trait` value can call: the trait's declaration, its
@@ -400,6 +402,10 @@ pub struct Sema {
     pub profile_comptime: bool
     pub evaluations: Vec(interp.Report)
     pub lang: Lang
+    // The functions marked `#[panic_handler]`, and the instance of the one
+    // a program may have.
+    handler_decls: Vec(u32)
+    pub panic_handler: Option(u32)
     pub profile: target.Profile
     pub target: target.Target
     pub checked: bool
@@ -483,8 +489,11 @@ impl Sema {
                 show: None,
                 derived: None,
                 dyn_box: None,
-                dyn_drop: None
+                dyn_drop: None,
+                panic: None
             }
+            handler_decls: Vec(u32).new()
+            panic_handler: None
             profile: profile
             target: tgt
             checked: checked
@@ -603,10 +612,37 @@ impl Sema {
         self.lang.vec = self.lang_adt(p, "Vec")
         self.lang.dyn_box = self.lang_fn(p, "dyn_box")
         self.lang.dyn_drop = self.lang_fn(p, "dyn_drop")
+        match self.lookup(p, "panic") {
+            Some(Fn(f)) => self.lang.panic = Some(f)
+            _ => {}
+        }
         match at(self.ast).derive {
             Some(d) => self.lang.derived = self.lang_trait(d, "Derived")
             None => {}
         }
+    }
+
+    // The instance of the program's `#[panic_handler]`, which must take a
+    // `str` and return `never`.
+    fn find_panic_handler(inout self) -> Result(Option(u32), Diag) {
+        if self.handler_decls.len() == 0 {
+            return Ok(None)
+        }
+        let f = self.handler_decls[0]
+        let d = at(self.fns[f as i64].decl)
+        if self.handler_decls.len() > 1 {
+            let other = at(self.fns[self.handler_decls[1] as i64].decl)
+            return Err(ty_err(other.name_span, "a program has one `#[panic_handler]`"))
+        }
+        let id = self.instance(f, Vec(CVal).new(), no_span())?
+        let sig = self.out[id as i64].sig.clone()
+        if sig.params[0] != types.STR || sig.ret != types.NEVER {
+            return Err(ty_err(
+                d.name_span,
+                "a `#[panic_handler]` function is `fn(msg: str) -> never`"
+            ))
+        }
+        Ok(Some(id))
     }
 
     fn lang_trait(self, p: u32, n: str) -> Option(u32) {
@@ -671,10 +707,14 @@ impl Sema {
 
     fn collect_item(inout self, module: u32, item: ref ast.Item) -> Result((), Diag) {
         test_attr(item, true)?
+        let handler = panic_handler_attr(item, true)?
         match item.kind {
             Import(_) => {}
             Fn(f) => {
                 let id = self.fns.len() as u32
+                if handler {
+                    self.handler_decls.push(id)
+                }
                 self.fns.push(FnDeclInfo {
                     module: module,
                     decl: &f,
@@ -758,6 +798,7 @@ impl Sema {
                                 literal_check: literal_check_attr(sub)?
                             })
                             test_attr(sub, false)?
+                            panic_handler_attr(sub, false)?
                             fns.insert(f.name.clone(), fid);
                         }
                         TypeAlias(_, _) => {}
@@ -793,6 +834,7 @@ impl Sema {
                                 literal_check: literal_check_attr(sub)?
                             })
                             test_attr(sub, false)?
+                            panic_handler_attr(sub, false)?
                             if fns.contains(f.name) {
                                 return Err(ty_err(f.name_span, ("`" + f.name.as_str() +
                                     "` is defined twice in this impl").as_str()))
@@ -3074,6 +3116,38 @@ fn test_attr(item: ast.Item, free: bool) -> Result((), Diag) {
     Ok(())
 }
 
+// `#[panic_handler]` marks the free function that panics and failed checks
+// call with their message, in place of writing it to standard error.
+fn panic_handler_attr(item: ast.Item, free: bool) -> Result(bool, Diag) {
+    for a in item.attrs {
+        if a.name != "panic_handler" { continue }
+        if a.args.len() > 0 {
+            return Err(ty_err(a.span, "`#[panic_handler]` takes no arguments"))
+        }
+        let Fn(f) = item.kind else {
+            return Err(ty_err(a.span, "`#[panic_handler]` marks a function"))
+        }
+        if !free {
+            return Err(ty_err(a.span, "a `#[panic_handler]` function must be a free function"))
+        }
+        let normal = match f.kind { Normal => true, _ => false }
+        if !normal || f.is_unsafe {
+            return Err(ty_err(
+                a.span,
+                "a `#[panic_handler]` function cannot be `extern`, `export` or `unsafe`"
+            ))
+        }
+        if f.params.len() != 1 || f.params[0].mode != ast.Mode.Let {
+            return Err(ty_err(
+                f.name_span,
+                "a `#[panic_handler]` function is `fn(msg: str) -> never`"
+            ))
+        }
+        return Ok(true)
+    }
+    Ok(false)
+}
+
 fn has_attr(item: ast.Item, name: str) -> bool {
     for a in item.attrs {
         if a.name == name {
@@ -3208,6 +3282,7 @@ fn compile_inner(
         }
         _ => {}
     }
+    s.panic_handler = s.find_panic_handler()?
     // Exported functions are compiled whether or not anything calls them,
     // and so is every function of the program that is not generic, so that
     // it is checked.
@@ -3311,6 +3386,7 @@ fn compile_inner(
         fns: mem.replace(&s.out, Vec(mir.Function).new())
         types: mem.replace(&s.types, Types.new())
         entry: entry
+        panic_handler: s.panic_handler
         profile: s.profile
         checked: checked
         statics: statics

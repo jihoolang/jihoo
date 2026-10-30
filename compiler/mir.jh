@@ -352,6 +352,9 @@ pub struct Program {
     pub fns: Vec(Function)
     pub types: Types
     pub entry: Option(u32)
+    // The `#[panic_handler]` function, which panics and failed checks call
+    // in place of the profile's way of reporting them.
+    pub panic_handler: Option(u32)
     pub profile: target.Profile
     // Integer overflow traps (debug builds).
     pub checked: bool

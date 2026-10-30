@@ -337,7 +337,8 @@ Done ([design](redesign.md)):
    methods, generic impls and associated types; marker traits from the
    compiler.
 6. Closures that borrow, `comptime` closure parameters, function pointers.
-7. `Option`, `Result` and `?`; panics.
+7. `Option`, `Result` and `?`; panics, and `#[panic_handler]` to report
+   them another way.
 8. `unsafe`: raw pointers, `static` globals, `extern fn` (with `...`),
    `export fn`, system calls, atomics, volatile accesses.
 9. The standard library in jihoo: `Vec`, `String`, `Map`, `Box`, sorting,
@@ -503,5 +504,10 @@ pointer without `(*p)`.
 - **Project tooling**: use the existing Nix setup while collecting concrete
   requirements for project manifests, dependency management and caching.
   A package registry is not an immediate milestone.
+- **The standard library on another operating system**: a library object
+  with a [`#[panic_handler]`](../language/profiles.md#embedding-in-another-system)
+  makes no system calls of its own, but `std.sys` (allocation, output) is
+  Linux's, libc's or UEFI's. A `std.sys` that the program supplies through
+  `extern fn`s would let a custom kernel use `Vec` and `String`.
 - **Tail calls** that never grow the stack.
 - **Macros**, if reflection turns out not to cover what they would do.

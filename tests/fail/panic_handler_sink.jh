@@ -1,0 +1,7 @@
+// error: a `#[panic_handler]` function is `fn(msg: str) -> never`
+#[panic_handler]
+fn on_panic(sink msg: String) -> never {
+    loop {}
+}
+
+fn main() {}

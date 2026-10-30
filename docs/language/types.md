@@ -37,7 +37,7 @@ type its context expects. A literal is at most 64 bits
 - `i128` and `u128` are 16 bytes, aligned to 16, as C's `__int128` on
   both targets. LLVM calls helpers for their division and their conversions
   to and from floats: libgcc's in native programs, the standard library's
-  (`std/rt.freestanding.jh`) in freestanding ones.
+  (`std/rt.jh`) in freestanding ones.
 
 ## Floats
 

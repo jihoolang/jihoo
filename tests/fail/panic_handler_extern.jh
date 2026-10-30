@@ -1,0 +1,5 @@
+// error: a `#[panic_handler]` function cannot be `extern`, `export` or `unsafe`
+#[panic_handler]
+extern fn host_panic(msg: str) -> never
+
+fn main() {}

@@ -1,0 +1,12 @@
+// error: a program has one `#[panic_handler]`
+#[panic_handler]
+fn first(msg: str) -> never {
+    loop {}
+}
+
+#[panic_handler]
+fn second(msg: str) -> never {
+    loop {}
+}
+
+fn main() {}

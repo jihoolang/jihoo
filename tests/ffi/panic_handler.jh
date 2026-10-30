@@ -1,0 +1,22 @@
+#![freestanding]
+
+// A library object for another operating system: its panics and failed
+// checks call `host_panic`, which the program linking it defines, and it
+// makes no system calls of its own.
+extern fn host_panic(msg: *u8, len: i64) -> never
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    unsafe { host_panic(msg.ptr, msg.len) }
+}
+
+export fn checked_byte(bytes: *u8, count: i64, index: i64) -> u8 {
+    unsafe {
+        let view = make_slice(bytes, count)
+        view[index]
+    }
+}
+
+export fn checked_increment(value: i64) -> i64 {
+    value + 1
+}

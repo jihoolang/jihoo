@@ -593,6 +593,20 @@ impl sema.Sema {
     pub fn lower_fn(inout self, id: u32, decl: u32, sink env: Env) -> Result((), Diag) {
         let d = sema.at(self.fns[decl as i64].decl)
         var fb = self.fn_builder(id, decl, env)
+        match self.panic_handler {
+            Some(h) => {
+                if self.lang.panic == Some(decl) {
+                    var args = Vec(Operand).new()
+                    args.push(copy_of(1))
+                    self.emit_call(&fb, mir.Callee.Fn(h), args, types.NEVER, d.name_span)?
+                    match fb {
+                        Fb { body, .. } => self.out[id as i64].body = Some(body)
+                    }
+                    return Ok(())
+                }
+            }
+            None => {}
+        }
         let sig = self.out[id as i64].sig.clone()
         let ret_val_ty = if is_ret_value(d.ret_mode) {
             sig.ret

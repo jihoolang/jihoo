@@ -1,0 +1,17 @@
+// Integer overflow checks call the `#[panic_handler]`.
+import std.sys
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    println(msg)
+    sys.exit(5)
+}
+
+fn main() {
+    var x: i8 = 120
+    while true {
+        x += 1
+    }
+}
+//> integer overflow
+// exit: 5

@@ -31,7 +31,7 @@ A freestanding program starts at `_start`, which the compiler writes: it
 records the arguments for `env.args()`, calls `main` and exits with its
 result. It also writes `jihoo_clone`, which starts a thread on a new stack
 for [`std.thread`](threads.md#profiles). What the C runtime would provide, LLVM's helpers for 128-bit
-division and float conversion, comes from `std/rt.freestanding.jh`;
+division and float conversion, comes from `std/rt.jh`;
 functions nothing calls are left out of the executable.
 
 ## UEFI
@@ -89,6 +89,46 @@ is AAPCS64, as on Linux. Each image also defines the memory functions,
 page) and `_fltused`. C code linked in must be compiled for the same
 convention, for example with
 `clang -target x86_64-unknown-windows -ffreestanding -c`.
+
+## Embedding in another system
+
+An object built with `jihoo emit-obj --lib` has no entry point and can be
+linked into a program of another operating system, a kernel included.
+Failed checks and panics still have to stop somewhere: by default
+`jihoo.panic`, which the object keeps to itself, writes the message with
+Linux's `write` system call (UEFI's console in `#![uefi]`) and traps. A
+[`#[panic_handler]`](errors.md#panic-handlers) takes its place, so that the
+object reports a bug through the host's own functions and calls no system
+service by itself:
+
+```jihoo
+#![freestanding]
+
+extern fn host_panic(msg: *u8, len: i64) -> never
+
+#[panic_handler]
+fn on_panic(msg: str) -> never {
+    unsafe { host_panic(msg.ptr, msg.len) }
+}
+
+export fn checked_byte(bytes: *u8, count: i64, index: i64) -> u8 {
+    unsafe {
+        let view = make_slice(bytes, count)
+        view[index]
+    }
+}
+```
+
+Bounds checks stay, and with `--release` too. `#![freestanding]` keeps the C
+library out: the object then refers to the `extern fn`s it declares, here
+`host_panic`, and to `memcpy`, `memmove` and `memset`, which the host
+provides as it does for C code, since C compilers call them the same way.
+It defines LLVM's helpers for 128-bit arithmetic (`std/rt.jh`) as global
+symbols. The rest of `std.sys` still means Linux, so allocation (`Vec`,
+`String`, `Box`) and input and output make Linux system calls; such a
+library uses what does not allocate (slices, `Option`, `Result`, iterators
+over borrowed data) and calls the host through `extern fn`s. `nm` on the
+object shows what it needs.
 
 ## Targets
 
