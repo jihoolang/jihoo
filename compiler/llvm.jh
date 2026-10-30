@@ -943,10 +943,7 @@ impl Gen {
     }
 
     fn widen_i64(inout self, inout cx: FnCx, v: str, t: u32) -> String {
-        let i = match self.p.types.int(t) {
-            Some(i) => i
-            None => return String.from(v)
-        }
+        let Some(i) = self.p.types.int(t) else { return String.from(v) }
         if i.bits == 64 {
             return String.from(v)
         }
@@ -2308,10 +2305,7 @@ impl Gen {
     // ---- the program's entry and runtime pieces ----
 
     fn entry(inout self) {
-        let main = match self.p.entry {
-            Some(m) => m
-            None => return
-        }
+        let Some(main) = self.p.entry else { return }
         let ret = self.p.fns[main as i64].sig.ret
         let s = sym(self.p.fns[main as i64].symbol.as_str())
         // Calls main and leaves its exit status, as an i32, in %code.

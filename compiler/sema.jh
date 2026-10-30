@@ -585,10 +585,7 @@ impl Sema {
     }
 
     fn find_lang(inout self) {
-        let p = match at(self.ast).prelude {
-            Some(p) => p
-            None => return
-        }
+        let Some(p) = at(self.ast).prelude else { return }
         self.lang.drop = self.lang_trait(p, "Drop")
         self.lang.clone = self.lang_trait(p, "Clone")
         self.lang.iterator = self.lang_trait(p, "Iterator")
@@ -1333,20 +1330,14 @@ impl Sema {
             Type(t) => self.resolve_ty(t, env)?
             Unit => types.UNIT
             Name(_) | Field(_, _) => {
-                let p = match expr_path(e) {
-                    Some(p) => p
-                    None => return Ok(None)
-                }
+                let Some(p) = expr_path(e) else { return Ok(None) }
                 if !self.path_is_type(p, env) {
                     return Ok(None)
                 }
                 self.resolve_path_ty(p, None, env, e.span)?
             }
             Call(callee, args) => {
-                let p = match expr_path(callee.deref()) {
-                    Some(p) => p
-                    None => return Ok(None)
-                }
+                let Some(p) = expr_path(callee.deref()) else { return Ok(None) }
                 match self.lookup_path(env.module, p) {
                     Some((Adt(_), _)) => {
                         if env.get(p[0].as_str()).is_some() {
@@ -1365,19 +1356,13 @@ impl Sema {
             }
             Unary(op, inner) => match op {
                 Deref => {
-                    let t = match self.try_expr_ty(inner.deref(), env)? {
-                        Some(t) => t
-                        None => return Ok(None)
-                    }
+                    let Some(t) = self.try_expr_ty(inner.deref(), env)? else { return Ok(None) }
                     self.types.ptr(t)
                 }
                 _ => return Ok(None)
             }
             ArrayRepeat(el, n) => {
-                let t = match self.try_expr_ty(el.deref(), env)? {
-                    Some(t) => t
-                    None => return Ok(None)
-                }
+                let Some(t) = self.try_expr_ty(el.deref(), env)? else { return Ok(None) }
                 let n = self.const_int(n.deref(), env)?
                 self.types.intern(TyKind.Array(t, n as u64))
             }
@@ -1385,10 +1370,7 @@ impl Sema {
                 if items.len() != 1 {
                     return Ok(None)
                 }
-                let t = match self.try_expr_ty(items[0], env)? {
-                    Some(t) => t
-                    None => return Ok(None)
-                }
+                let Some(t) = self.try_expr_ty(items[0], env)? else { return Ok(None) }
                 self.types.intern(TyKind.Slice(t))
             }
             Tuple(items) => {
@@ -1543,10 +1525,7 @@ impl Sema {
         var seen = Map(u32, bool).new()
         var first = true
         loop {
-            let x = match stack.pop() {
-                Some(x) => x
-                None => break
-            }
+            let Some(x) = stack.pop() else { break }
             if !first && x == target {
                 return true
             }
@@ -1628,7 +1607,7 @@ impl Sema {
                         continue
                     }
                     let t = match self.impls[hit.imp as i64].assoc.get(name) {
-                        Some(t) => t
+                        Some(x) => x
                         None => continue
                     }
                     let env = self.impl_env(hit.imp, hit.args, base)
@@ -1824,10 +1803,7 @@ impl Sema {
                     for j, a in given {
                         match concrete[j] {
                             Type(ct) => {
-                                let at = match expr_as_ty(a) {
-                                    Some(at) => at
-                                    None => return Ok(false)
-                                }
+                                let Some(at) = expr_as_ty(a) else { return Ok(false) }
                                 if !self.match_ty(at, ct, params, module, &binds)? {
                                     return Ok(false)
                                 }
@@ -1965,10 +1941,7 @@ impl Sema {
     // `#[derive(...)]` impls are written by the compiler; they are
     // recorded as impl `DERIVED_IMPL`.
     fn derived_impl(self, tr: u32, t: u32) -> Option(ImplHit) {
-        let a = match self.types.adt_index(t) {
-            Some(a) => a
-            None => return None
-        }
+        let Some(a) = self.types.adt_index(t) else { return None }
         let decl = self.types.adts[a as i64].decl
         for d in self.adts[decl as i64].derives {
             if d == self.traits[tr as i64].name {
@@ -1995,7 +1968,7 @@ impl Sema {
         }
         for imp in candidates {
             let fid = match self.impls[imp as i64].fns.get(name) {
-                Some(f) => f
+                Some(x) => x
                 None => continue
             }
             match self.match_impl(imp, t)? {
@@ -2005,13 +1978,10 @@ impl Sema {
         }
         for tr in 0..self.traits.len() {
             let default_fid = match self.traits[tr].fns.get(name) {
-                Some(f) => f
+                Some(x) => x
                 None => continue
             }
-            let hit = match self.find_impl(tr as u32, t)? {
-                Some(h) => h
-                None => continue
-            }
+            let Some(hit) = self.find_impl(tr as u32, t)? else { continue }
             if hit.imp == BUILTIN_IMPL {
                 continue
             }
@@ -2049,10 +2019,7 @@ impl Sema {
         name: str,
         default_fid: u32
     ) -> Result(Option(ImplHit), Diag) {
-        let hit = match self.find_impl(tr, t)? {
-            Some(h) => h
-            None => return Ok(None)
-        }
+        let Some(hit) = self.find_impl(tr, t)? else { return Ok(None) }
         if hit.imp == BUILTIN_IMPL {
             return Ok(None)
         }
@@ -2507,10 +2474,7 @@ impl Sema {
     // pattern (a `u128` past `i128::MAX` is negative here); every such
     // pattern fits, except a negative literal for a `u128`.
     pub fn int_fits(self, v: i128, t: u32) -> bool {
-        let i = match self.types.int(t) {
-            Some(i) => i
-            None => return false
-        }
+        let Some(i) = self.types.int(t) else { return false }
         if i.bits == 128 {
             return i.signed || v >= 0
         }
@@ -2525,10 +2489,7 @@ impl Sema {
 
     // Wraps an integer to its type's width, sign-extending signed types.
     pub fn wrap_int(self, v: i128, t: u32) -> i128 {
-        let i = match self.types.int(t) {
-            Some(i) => i
-            None => return v
-        }
+        let Some(i) = self.types.int(t) else { return v }
         let one: i128 = 1
         let m = if i.bits == 128 { v } else { v & ((one << i.bits) - 1) }
         if i.signed && i.bits < 128 && (m >> (i.bits - 1)) & 1 == 1 {
@@ -2650,10 +2611,7 @@ impl Sema {
                 }
             }
             Field(_, _) => {
-                let p = match expr_path(e) {
-                    Some(p) => p
-                    None => return self.eval_const_expr(e, env, exp)
-                }
+                let Some(p) = expr_path(e) else { return self.eval_const_expr(e, env, exp) }
                 match self.lookup_path(env.module, p) {
                     Some((Const(c), _)) => self.const_value(c)
                     _ => self.eval_const_expr(e, env, exp)
@@ -3258,10 +3216,7 @@ fn compile_inner(
                     if drop_impls.contains(t) {
                         continue
                     }
-                    let hit = match s.find_impl(dr, t)? {
-                        Some(h) => h
-                        None => continue
-                    }
+                    let Some(hit) = s.find_impl(dr, t)? else { continue }
                     let fid = match s.impls[hit.imp as i64].fns.get("drop") {
                         Some(f) => f
                         None => return Err(ty_err(

@@ -462,19 +462,13 @@ fn with_move_note(sink d: Diag, body: Body, entry: Vec(St), b: i64, si: i64) -> 
             break
         }
     }
-    let l = match local {
-        Some(l) => l
-        None => return d
-    }
+    let Some(l) = local else { return d }
     var d = d
     var count = 0
     for mb in 0..body.blocks.len() {
         let n = body.blocks[mb].stmts.len()
         for k in 0..n + 1 {
-            let span = match move_at(body, mb, k, l) {
-                Some(sp) => sp
-                None => continue
-            }
+            let Some(span) = move_at(body, mb, k, l) else { continue }
             if count < 3 && reaches(body, l, mb, k, b, si) {
                 d = d.note(Some(span), "moved here")
                 count += 1

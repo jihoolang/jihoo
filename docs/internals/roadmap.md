@@ -296,12 +296,13 @@ memory, not with any one feature.
    (each checking instance keeps its prepared functions while the checks
    run); the compiler workload, which does not use `std.fmt`, is
    unchanged.
-4. The release. `compiler/` and the `lib/std` it imports use none of these
-   features in 0.4.0, since the seed (0.3.0) does not know them. After
-   0.4.0 is tagged and the seed moves, the compiler adopts them where they
-   replace flags or clones, which exercises them on a large program. The
+4. Done: the release. 0.4.0 is tagged and the seed is 0.4.0, so the
+   compiler now uses these features: `let ... else` replaces 39
+   `match`es that only unwrapped an `Option` or left. `Map.get` results stay
+   `match`es, since `let ... else` would keep their `ref V` a borrow of
+   the key's temporary ([from Rust](../language/from-rust.md)). The
    editor work in section 1 (sema-resolved definitions, hover) continues
-   alongside and does not block the release.
+   alongside.
 
 Completion: the three reproducers compile and run, or fail while
 compiling with a diagnostic, on both targets in both profiles; the

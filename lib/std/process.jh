@@ -104,10 +104,7 @@ fn read_both(sink out: os.File, sink err: os.File) -> Result((String, String), o
 fn start(program: str, args: [str], stdio: [i32; 3]) -> Result(i32, os.Error) {
     // C strings for the program, its arguments and argv.
     let name = c_string(program)?
-    let path = match find(program) {
-        Some(p) => p
-        None => return Err(os.Error.NotFound)
-    }
+    let Some(path) = find(program) else { return Err(os.Error.NotFound) }
     var strings = Vec(Vec(u8)).new()
     strings.push(c_string(path.as_str())?)
     strings.push(name)

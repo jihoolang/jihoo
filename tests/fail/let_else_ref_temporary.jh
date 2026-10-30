@@ -1,0 +1,13 @@
+// `let ... else` keeps a `ref V` from `Map.get` a borrow, which also borrows
+// the temporary `String` that the `str` key is lent as.
+// error: still borrowed
+
+fn find(m: Map(String, u32), k: str) -> u32 {
+    let Some(x) = m.get(k) else { return 0 }
+    x
+}
+fn main() {
+    var m = Map(String, u32).new()
+    let _ = m.insert(String.from("a"), 3)
+    println(find(m, "a"))
+}

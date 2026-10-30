@@ -1434,10 +1434,7 @@ impl sema.Sema {
         if self.types.adt_index(ty).is_none() {
             return Ok(None)
         }
-        let h = match self.find_method(ty, "deref")? {
-            Some(h) => h
-            None => return Ok(None)
-        }
+        let Some(h) = self.find_method(ty, "deref")? else { return Ok(None) }
         let id = self.instance(h.imp, h.args.clone(), Span.new(0, 0, 0))?
         let r = self.out[id as i64].sig.ret
         Ok(self.types.pointee(r))

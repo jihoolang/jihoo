@@ -164,10 +164,7 @@ pub fn serve(sink search: Vec(String), tgt: target.Target, version: str) -> i32 
         input: Input { buf: Vec(u8).filled(65536, 0), pos: 0, end: 0 }
     }
     loop {
-        let text = match s.input.message() {
-            Some(t) => t
-            None => return 1
-        }
+        let Some(text) = s.input.message() else { return 1 }
         match json.parse(text.as_str()) {
             Some(m) => {
                 let method = m.at(["method"]).str_or("")

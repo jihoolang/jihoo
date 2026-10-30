@@ -185,10 +185,10 @@ impl sema.Sema {
             need_unsafe(fb, n, span)?
             arity(args, 3, n, span)?
             let d = self.expr(&fb, args[0], None)?
-            let et = match self.raw_pointee(d.ty) {
-                Some(t) => t
-                None => return Err(Diag.new(args[0].span, "`mem_copy` copies between pointers"))
-            }
+            let Some(et) = self.raw_pointee(d.ty) else { return Err(Diag.new(
+                args[0].span,
+                "`mem_copy` copies between pointers"
+            )) }
             let dt = d.ty
             let s = self.expr(&fb, args[1], Some(dt))?
             let s = self.coerce(&fb, s, dt, args[1].span)?
@@ -236,10 +236,10 @@ impl sema.Sema {
             need_unsafe(fb, n, span)?
             arity(args, 1, n, span)?
             let p = self.expr(&fb, args[0], None)?
-            let et = match self.raw_pointee(p.ty) {
-                Some(t) => t
-                None => return Err(Diag.new(args[0].span, "`read` reads through a pointer"))
-            }
+            let Some(et) = self.raw_pointee(p.ty) else { return Err(Diag.new(
+                args[0].span,
+                "`read` reads through a pointer"
+            )) }
             let o = self.operand(&fb, p, span)?
             let pet = self.types.ptr(et)
             let pl = self.operand_local(&fb, o, pet, span)
@@ -250,10 +250,10 @@ impl sema.Sema {
             need_unsafe(fb, n, span)?
             arity(args, 2, n, span)?
             let p = self.expr(&fb, args[0], None)?
-            let et = match self.raw_pointee(p.ty) {
-                Some(t) => t
-                None => return Err(Diag.new(args[0].span, "`write` writes through a pointer"))
-            }
+            let Some(et) = self.raw_pointee(p.ty) else { return Err(Diag.new(
+                args[0].span,
+                "`write` writes through a pointer"
+            )) }
             let o = self.operand(&fb, p, span)?
             let pt = self.types.ptr(et)
             let pl = self.operand_local(&fb, o, pt, span)
@@ -281,10 +281,10 @@ impl sema.Sema {
             let is_str = n == "make_str"
             let pu8 = self.types.ptr(types.U8)
             let p = self.expr(&fb, args[0], if is_str { Some(pu8) } else { None })?
-            let et = match self.raw_pointee(p.ty) {
-                Some(t) => t
-                None => return Err(Diag.new(args[0].span, "expected a pointer"))
-            }
+            let Some(et) = self.raw_pointee(p.ty) else { return Err(Diag.new(
+                args[0].span,
+                "expected a pointer"
+            )) }
             if is_str && et != types.U8 {
                 return Err(Diag.new(args[0].span, "`make_str` takes a `*u8`"))
             }
@@ -394,10 +394,10 @@ impl sema.Sema {
                 return Err(Diag.new(span, "missing pointer"))
             }
             let p = self.expr(&fb, args[0], None)?
-            let et = match self.raw_pointee(p.ty) {
-                Some(t) => t
-                None => return Err(Diag.new(args[0].span, "atomics work through a pointer"))
-            }
+            let Some(et) = self.raw_pointee(p.ty) else { return Err(Diag.new(
+                args[0].span,
+                "atomics work through a pointer"
+            )) }
             if !self.types.is_int(et) && !self.types.is_ptr(et) && et != types.BOOL {
                 return Err(Diag.new(args[0].span, "atomics work on integers, bools and pointers"))
             }
@@ -786,10 +786,7 @@ impl sema.Sema {
         if self.same_package(self.adts[decl as i64].module, fb.env.module) {
             return true
         }
-        let dt = match self.lang.derived {
-            Some(t) => t
-            None => return false
-        }
+        let Some(dt) = self.lang.derived else { return false }
         if fb.id as i64 >= self.inst_info.len() {
             return false
         }

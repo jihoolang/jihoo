@@ -163,6 +163,11 @@ Rust struct with a lifetime parameter, without the annotation
   makes it owned.
 - Patterns see through `ref` and `inout` values, as Rust's default binding
   modes do: `Some(Circle(r))` matches an `Option(ref Shape)`.
+- `let Some(v) = m.get(k) else { ... }` keeps `v` a `ref V`, which borrows
+  what the call borrowed. When `k` is a `str` lent as a `String` key, that
+  is a temporary that ends with the statement, so using `v` afterwards is
+  an error. `let v = match m.get(k) { Some(v) => v, None => ... }` copies
+  a plain `V` out instead.
 - `None` (or another variant) alone as one arm of an `if` takes no type
   from the other arm: `let x: Option(u32) = if c { None } else { y }`.
 

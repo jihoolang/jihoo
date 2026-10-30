@@ -1726,10 +1726,7 @@ impl sema.Sema {
     }
 
     pub fn string_ty(inout self) -> Option(u32) {
-        let d = match self.lang.string {
-            Some(d) => d
-            None => return None
-        }
+        let Some(d) = self.lang.string else { return None }
         self.adt_instance(d, Vec(CVal).new(), Span.new(0, 0, 0)).ok()
     }
 
@@ -2889,7 +2886,7 @@ impl sema.Sema {
         let impls = self.adts[d as i64].impls.clone()
         for imp in impls {
             let fid = match self.impls[imp as i64].fns.get(name) {
-                Some(f) => f
+                Some(x) => x
                 None => continue
             }
             return self.call_decl(&fb, fid, Vec(CVal).new(), None, args, span, exp)
@@ -2986,10 +2983,7 @@ impl sema.Sema {
             }
         }
         let not_struct = "`" + self.types.show(t).as_str() + "` is not a struct"
-        let a = match self.types.adt_index(t) {
-            Some(a) => a
-            None => return Err(err(path.span, not_struct.as_str()))
-        }
+        let Some(a) = self.types.adt_index(t) else { return Err(err(path.span, not_struct.as_str())) }
         let fs = match self.types.adts[a as i64].body {
             Struct(fs) => fs.clone()
             _ => return Err(err(path.span, not_struct.as_str()))
@@ -3758,10 +3752,7 @@ impl sema.Sema {
                 return Ok(val_unit())
             }
         }
-        let t = match rty {
-            Some(t) => t
-            None => return Ok(val_never())
-        }
+        let Some(t) = rty else { return Ok(val_never()) }
         if t == types.UNIT {
             return Ok(val_unit())
         }
@@ -3936,10 +3927,7 @@ impl sema.Sema {
         let t = v.ty
         let needs = "`?` needs an `Option` or a `Result`, found `" +
             self.types.show(t).as_str() + "`"
-        let a = match self.types.adt_index(t) {
-            Some(a) => a
-            None => return Err(err(span, needs.as_str()))
-        }
+        let Some(a) = self.types.adt_index(t) else { return Err(err(span, needs.as_str())) }
         let decl = self.types.adts[a as i64].decl
         let is_opt = self.lang.option == Some(decl)
         let is_res = self.lang.result == Some(decl)
@@ -5035,10 +5023,7 @@ impl sema.Sema {
         } else {
             None
         }
-        let d = match decl {
-            Some(d) => d
-            None => return Ok(None)
-        }
+        let Some(d) = decl else { return Ok(None) }
         if n == "Some" && args.len() == 1 {
             let v = self.expr(&fb, args[0], None)?
             var targs = Vec(CVal).new()
@@ -6237,10 +6222,7 @@ impl sema.Sema {
                 // What coerces to a slice: arrays, and types with `as_slice`.
                 Array(x, _) => return self.match_ty_env(inner.deref(), x, params, env, &binds)
                 Adt(_) => {
-                    let h = match self.find_method(t, "as_slice")? {
-                        Some(h) => h
-                        None => return Ok(false)
-                    }
+                    let Some(h) = self.find_method(t, "as_slice")? else { return Ok(false) }
                     let id = self.instance(h.imp, h.args.clone(), pat.span)?
                     let r = self.out[id as i64].sig.ret
                     return match self.types.kind(r).clone() {
@@ -6290,8 +6272,14 @@ impl sema.Sema {
                 _ => {}
             }
             Fn(ps, r) => match k {
-                Closure(sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
-                Lambda(_, _, sig) => return self.match_fn_ty(ps, r, sig, params, env, &binds)
+                Closure(sig) | Lambda(_, _, sig) => return self.match_fn_ty(
+                    ps,
+                    r,
+                    sig,
+                    params,
+                    env,
+                    &binds
+                )
                 _ => {}
             }
             FnPtr(ps, r, variadic) => match k {
@@ -6328,10 +6316,7 @@ impl sema.Sema {
                         for ai, a in args {
                             match concrete[ai] {
                                 Type(ct) => {
-                                    let at = match sema.expr_as_ty(a) {
-                                        Some(at) => at
-                                        None => return Ok(false)
-                                    }
+                                    let Some(at) = sema.expr_as_ty(a) else { return Ok(false) }
                                     if !self.match_ty_env(at, ct, params, env, &binds)? {
                                         return Ok(false)
                                     }
@@ -6844,18 +6829,12 @@ impl sema.Sema {
         inout ids: Vec(u32),
         span: Span
     ) -> Result((), Diag) {
-        let dr = match self.lang.drop {
-            Some(dr) => dr
-            None => return Ok(())
-        }
+        let Some(dr) = self.lang.drop else { return Ok(()) }
         for t in interp.drop_types(&self.types, body) {
             if drops.contains(t) { continue }
-            let hit = match self.find_impl(dr, t)? {
-                Some(h) => h
-                None => continue
-            }
+            let Some(hit) = self.find_impl(dr, t)? else { continue }
             let fid = match self.impls[hit.imp as i64].fns.get("drop") {
-                Some(f) => f
+                Some(x) => x
                 None => continue
             }
             let id = self.instance(fid, hit.args, span)?
@@ -7092,10 +7071,10 @@ impl sema.Sema {
 
     // `std.mem.dyn_box(T, v)`: the value moved to the heap, as a `*u8`.
     fn box_dyn(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result(Operand, Diag) {
-        let fid = match self.lang.dyn_box {
-            Some(f) => f
-            None => return Err(err(span, "`dyn` values need `std.mem.dyn_box`"))
-        }
+        let Some(fid) = self.lang.dyn_box else { return Err(err(
+            span,
+            "`dyn` values need `std.mem.dyn_box`"
+        )) }
         var iargs = Vec(CVal).new()
         iargs.push(CVal.Type(v.ty))
         var args = Vec(Val).new()
@@ -7106,10 +7085,10 @@ impl sema.Sema {
 
     // `std.mem.dyn_drop(T)`: drops the value behind a `*u8` and frees it.
     fn dyn_destroy(inout self, t: u32, span: Span) -> Result(u32, Diag) {
-        let fid = match self.lang.dyn_drop {
-            Some(f) => f
-            None => return Err(err(span, "`dyn` values need `std.mem.dyn_drop`"))
-        }
+        let Some(fid) = self.lang.dyn_drop else { return Err(err(
+            span,
+            "`dyn` values need `std.mem.dyn_drop`"
+        )) }
         var iargs = Vec(CVal).new()
         iargs.push(CVal.Type(t))
         self.instance(fid, iargs, span)
