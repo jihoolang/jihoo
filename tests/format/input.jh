@@ -31,4 +31,11 @@ _=>0
 let Point{x,..}=Point{x:4,
 y:5}
 println(x)
+let maybe=Some(3)
+let Some(n)=maybe else{return}
+let (first,_)|(_,first)=pair
+let shown=match maybe{Some(t)=>t,None=>return}
+match maybe{Some(1)|Some(2)=>{},Some(k)|Some(k) if k>n=>println(k),_=>{}}
+let held=move fn(y:i64){y+first+shown}
+println(held(n))
 }

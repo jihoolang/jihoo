@@ -266,8 +266,8 @@ memory, not with any one feature.
    kernel returns such a pipeline; its optimized IR has no allocations and
    no callbacks, the other kernels' optimized IR is unchanged, and `dyn fn`
    is unchanged.
-2. Patterns and `match` as expressions. Three gaps push programs toward
-   flags and clones:
+2. Done: patterns and `match` as expressions. Three gaps pushed
+   programs toward flags and clones:
    - Done: `A(x) | B(x)` binds the same names in every alternative, with
      the same types and `var`-ness, in `match` arms (guards included) and
      in `let` (`tests/run/or_patterns.jh`, `tests/fail/or_pattern_*`).
@@ -280,10 +280,10 @@ memory, not with any one feature.
      match, with a diverging `else` that does not see its names
      (`tests/run/let_else.jh`, `tests/fail/let_else_*`).
 
-   Completion: each form has `tests/run` and `tests/fail` cases (borrowed
-   and owned scrutinees, values with destructors, moves on only some
-   paths), `from-rust.md` and the pattern reference describe them, and
-   the formatter preserves them.
+   Each form has `tests/run` and `tests/fail` cases (borrowed and owned
+   scrutinees, values with destructors, moves on only some paths),
+   `from-rust.md` and the pattern reference describe them, and the
+   formatter preserves them (`tests/format/input.jh`).
 3. Done: format patterns checked while compiling. A function's
    `#[literal_check(param, check)]` runs `check` in the interpreter for a
    literal argument; `std.fmt` checks syntax, placeholders against the
