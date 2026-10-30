@@ -362,6 +362,11 @@ impl Tests {
                 return Err("the error does not say `" + w.trim() + "`:\n" + o.stderr.as_str())
             }
         }
+        for w in directives(src.as_str(), "// no-error:") {
+            if o.stderr.as_str().contains(w.trim()) {
+                return Err("the error says `" + w.trim() + "`:\n" + o.stderr.as_str())
+            }
+        }
         // The debug MIR switch must never bypass validation in check mode.
         let checked = exec("env", ["JIHOO_NO_ELAB=1", self.compiler.as_str(), "check", path])
         if status(checked) != 1 || checked.stderr != o.stderr.as_str() || checked.stdout.len() != 0 {

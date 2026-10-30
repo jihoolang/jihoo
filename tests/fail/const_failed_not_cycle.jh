@@ -1,0 +1,10 @@
+// error: contains a pointer, borrow or owned value
+// no-error: depends on itself
+// A constant whose value failed is not a cycle when used again.
+const LABELS: [str; 1] = ["ready"]
+
+fn first() -> i64 { LABELS[0].len }
+
+fn second() -> i64 { LABELS[0].len }
+
+fn main() { println(first() + second()) }

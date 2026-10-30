@@ -2599,9 +2599,20 @@ impl Sema {
                 "this constant's value depends on itself"
             ))
         }
+        self.consts[id as i64].busy = true
+        let r = self.eval_const(id)
+        // Cleared on failure too, so that a later use of a constant that
+        // failed reports its error again (once, as errors are deduplicated)
+        // instead of a cycle.
+        self.consts[id as i64].busy = false
+        let v = r?
+        self.consts[id as i64].value = Some(v.clone())
+        Ok(v)
+    }
+
+    fn eval_const(inout self, id: u32) -> Result(TypedConst, Diag) {
         let decl = at(self.consts[id as i64].decl)
         let env = Env.new(self.consts[id as i64].module)
-        self.consts[id as i64].busy = true
         var exp: Option(u32) = None
         match decl.ty {
             Some(t) => exp = Some(self.resolve_ty(t, env)?)
@@ -2616,8 +2627,6 @@ impl Sema {
             }
             None => {}
         }
-        self.consts[id as i64].busy = false
-        self.consts[id as i64].value = Some(v.clone())
         Ok(v)
     }
 

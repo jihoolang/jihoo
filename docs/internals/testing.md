@@ -58,7 +58,8 @@ the runner. Its suites:
   they import are in `tests/test/lib`. Every file of `lib/std` with
   `#[test]` functions must then pass `jihoo test`.
 - **fail**: every file in `tests/fail/` must not compile, and each
-  `// error: text` must appear in the error message. `check` must return the
+  `// error: text` must appear in the error message and no `// no-error: text`
+  may. `check` must return the
   same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
