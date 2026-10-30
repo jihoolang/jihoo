@@ -49,3 +49,4 @@ See [Reflection and derive](../language/reflection.md).
 | `atomic_swap`, `atomic_add`, `atomic_sub`, `atomic_and`, `atomic_or`, `atomic_xor` | `(p, v)`, returning the old value |
 | `atomic_cas(p, expected, new)` | returns whether it swapped |
 | `fence()` | a full memory fence |
+| `read_volatile(p)`, `write_volatile(p, v)` | one access of exactly the pointee's width, for memory-mapped device registers ([unsafe](../language/unsafe.md#device-registers)) |

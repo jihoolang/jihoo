@@ -339,7 +339,7 @@ Done ([design](redesign.md)):
 6. Closures that borrow, `comptime` closure parameters, function pointers.
 7. `Option`, `Result` and `?`; panics.
 8. `unsafe`: raw pointers, `static` globals, `extern fn` (with `...`),
-   `export fn`, system calls, atomics.
+   `export fn`, system calls, atomics, volatile accesses.
 9. The standard library in jihoo: `Vec`, `String`, `Map`, `Box`, sorting,
    files, arguments, the environment, running other programs
    (`std.process`), printing; native and freestanding.

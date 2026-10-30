@@ -30,7 +30,8 @@
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, programs split into code generation units,
-//   cross-compiled objects, link errors and a missing LLVM.
+//   cross-compiled objects, link errors, volatile accesses and a missing
+//   LLVM.
 // - selfhost: the compiler builds itself, and the compiler it builds writes
 //   the same LLVM IR, errors included, for every .jh file of the checkout.
 // - uefi: the programs of tests/uefi, and those of tests/run that need
@@ -725,6 +726,34 @@ impl Tests {
         Ok(())
     }
 
+    // read_volatile and write_volatile become LLVM volatile accesses of the
+    // pointee's type, which the optimizer keeps one for one.
+    fn volatile_accesses(self) -> Result((), String) {
+        var a = Vec(str).new()
+        a.push("emit-llvm")
+        a.push("tests/run/volatile.jh")
+        let o = exec(self.compiler.as_str(), a.as_slice())
+        let ir = o.stdout.as_str()
+        for want in [
+            "store volatile i32 1, ptr",
+            "store volatile i32 3, ptr",
+            "store volatile i8 ",
+            "store volatile double ",
+            "store volatile ptr ",
+            "store volatile i64 ",
+            "load volatile i32, ptr",
+            "load volatile i8, ptr",
+            "load volatile double, ptr",
+            "load volatile ptr, ptr",
+            "load volatile i64, ptr"
+        ] {
+            if !o.status.success() || !ir.contains(want) {
+                return Err("no `" + want + "` in\n" + ir + o.stderr.as_str())
+            }
+        }
+        Ok(())
+    }
+
     // A failed link reports clang's messages without its warnings.
     fn link_errors(self) -> Result((), String) {
         let exe = self.temp("no-link")
@@ -786,6 +815,8 @@ impl Tests {
         self.check("backend: cross-compiled objects", r)
         let r = self.link_errors()
         self.check("backend: link errors", r)
+        let r = self.volatile_accesses()
+        self.check("backend: volatile accesses", r)
         let r = self.missing_llvm()
         self.check("backend: missing LLVM", r)
     }

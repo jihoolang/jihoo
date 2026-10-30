@@ -28,6 +28,8 @@ fn main() {
         atomic_store(px, 1)
         let sw = atomic_add(px, 2)
         let ok = atomic_cas(px, 1, 2)
+        let vl = read_volatile(px)
+        write_volatile(px, 3)
         let r = syscall(39)
     }
     fence()

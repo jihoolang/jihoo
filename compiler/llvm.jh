@@ -2280,6 +2280,30 @@ impl Gen {
                 self.store_scalar(&cx, dt, r.as_str(), dptr)
             }
             Fence => cx.line("fence seq_cst")
+            VolatileLoad(t) => {
+                let lt = self.mem_scalar(t)
+                let a = fmt.n(self.align(t) as i128)
+                var r = cx.t()
+                cx.line(fmt.f(
+                    "{} = load volatile {}, ptr {}, align {}",
+                    [r.as_str(), lt.as_str(), vals[0].as_str(), a.as_str()]
+                ).as_str())
+                if t == types.BOOL {
+                    let b = cx.t()
+                    cx.line(fmt.f("{} = trunc i8 {} to i1", [b.as_str(), r.as_str()]).as_str())
+                    r = b
+                }
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            VolatileStore(t) => {
+                let lt = self.mem_scalar(t)
+                let a = fmt.n(self.align(t) as i128)
+                let v = self.widen_bool(&cx, t, vals[1].as_str())
+                cx.line(fmt.f(
+                    "store volatile {} {}, ptr {}, align {}",
+                    [lt.as_str(), v.as_str(), vals[0].as_str(), a.as_str()]
+                ).as_str())
+            }
             Asm(_, _, _) => {}
         }
     }

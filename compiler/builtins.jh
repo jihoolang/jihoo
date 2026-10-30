@@ -263,6 +263,45 @@ impl sema.Sema {
             fb.assign(Place.deref(pl), Rvalue.Use(vo), span)
             return Ok(Some(body.val_unit()))
         }
+        if n == "read_volatile" || n == "write_volatile" {
+            // Device memory: each call is exactly one access of the pointee's
+            // width, which the optimizer neither removes, repeats nor merges.
+            need_unsafe(fb, n, span)?
+            let load = n == "read_volatile"
+            arity(args, if load { 1 } else { 2 }, n, span)?
+            let p = self.expr(&fb, args[0], None)?
+            let Some(et) = self.raw_pointee(p.ty) else { return Err(Diag.new(
+                args[0].span,
+                ("`" + n + "` works through a pointer").as_str()
+            )) }
+            if !self.types.is_int(et) && !self.types.is_float(et) && !self.types.is_ptr(et) &&
+                et != types.BOOL {
+                return Err(Diag.new(
+                    args[0].span,
+                    "volatile accesses work on integers, floats, bools and pointers"
+                ))
+            }
+            var ops = ops1(self.operand(&fb, p, span)?)
+            if load {
+                return Ok(Some(self.emit_call(
+                    &fb,
+                    Callee.Intrinsic(Intrinsic.VolatileLoad(et)),
+                    ops,
+                    et,
+                    span
+                )?))
+            }
+            let v = self.expr(&fb, args[1], Some(et))?
+            let v = self.coerce(&fb, v, et, args[1].span)?
+            ops.push(self.operand(&fb, v, args[1].span)?)
+            return Ok(Some(self.emit_call(
+                &fb,
+                Callee.Intrinsic(Intrinsic.VolatileStore(et)),
+                ops,
+                types.UNIT,
+                span
+            )?))
+        }
         if n == "forget" {
             // forget(v): v's destructor does not run.
             arity(args, 1, n, span)?

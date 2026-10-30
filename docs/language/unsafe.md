@@ -31,8 +31,47 @@ In `unsafe` code:
 | `make_slice(p, n)`, `make_str(p, n)` | a view of `n` elements at `p` |
 | `syscall(n, args...)` | a Linux system call |
 | atomics | `atomic_load`, `atomic_store`, `atomic_swap`, `atomic_add`, ..., `atomic_cas`, `fence` |
+| `read_volatile(p)`, `write_volatile(p, v)` | access a device register ([below](#device-registers)) |
 
 See [Builtins](../reference/builtins.md) for all of them.
+
+## Device registers
+
+`read(p)` and `write(p, v)` are ordinary memory accesses: the optimizer may
+read once where the program reads in a loop, drop a store that a later one
+overwrites, or access fewer bytes than the type has. That is wrong for a
+memory-mapped device register, where every access is an event. In unsafe
+code, `read_volatile(p)` and `write_volatile(p, v)` access such memory:
+
+```jihoo
+fn wait_ready(status: *u32) {
+    unsafe {
+        while (read_volatile(status) & 1) == 0 {}
+    }
+}
+
+fn ring_twice(doorbell: *u32) {
+    unsafe {
+        write_volatile(doorbell, 1)
+        write_volatile(doorbell, 2)
+    }
+}
+```
+
+Each call is one load or store of exactly the pointee's type, which must be
+an integer, float, `bool` or pointer (a struct's registers are accessed one
+field at a time). The compiler keeps the number, order relative to other
+volatile accesses, and width of these accesses; they become LLVM `volatile`
+loads and stores. The pointer must be aligned for its type.
+
+Volatile is not atomic and not a fence: it does not synchronize threads
+and does not order ordinary memory accesses around it, nor make the CPU do
+so. Use [atomics](../reference/builtins.md#in-unsafe-code) between threads,
+and `fence()` where a device needs memory ordered, for example before
+ringing a doorbell for a buffer just written (a barrier that `fence()` does
+not give, such as one for uncached memory on some machines, needs an
+assembly helper). Mapping the device's memory with the right
+cache attributes is also the caller's (the kernel's) work.
 
 ## Globals
 

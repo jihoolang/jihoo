@@ -239,6 +239,9 @@ pub enum Intrinsic {
     AtomicRmw(String, u32)
     AtomicCas(u32)
     Fence
+    // `read_volatile(p)` and `write_volatile(p, v)` of a scalar.
+    VolatileLoad(u32)
+    VolatileStore(u32)
     // `args()` support: the C `argc`/`argv` kept by `main`.
     Argc
     Argv
@@ -589,6 +592,8 @@ fn show_intrinsic(inout s: String, i: Intrinsic) {
         }
         AtomicCas(t) => debug_call1(&s, "AtomicCas", t)
         Fence => s.push_str("Fence")
+        VolatileLoad(t) => debug_call1(&s, "VolatileLoad", t)
+        VolatileStore(t) => debug_call1(&s, "VolatileStore", t)
         Argc => s.push_str("Argc")
         Argv => s.push_str("Argv")
         EfiImage => s.push_str("EfiImage")
@@ -794,6 +799,8 @@ impl Clone for Intrinsic {
             AtomicRmw(op, t) => Intrinsic.AtomicRmw(op.clone(), t)
             AtomicCas(t) => Intrinsic.AtomicCas(t)
             Fence => Intrinsic.Fence
+            VolatileLoad(t) => Intrinsic.VolatileLoad(t)
+            VolatileStore(t) => Intrinsic.VolatileStore(t)
             Argc => Intrinsic.Argc
             Argv => Intrinsic.Argv
             EfiImage => Intrinsic.EfiImage

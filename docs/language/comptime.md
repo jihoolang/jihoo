@@ -166,8 +166,8 @@ Current limitations:
   through a scalar byte reinterpretation. A returned string or slice must
   refer to live memory, which the compiler copies; its elements must not
   contain addresses.
-- Float arithmetic and numeric casts work; the math and atomic intrinsics
-  are not implemented in the interpreter. `mem_copy` and `mem_fill` work
+- Float arithmetic and numeric casts work; the math, atomic and volatile
+  intrinsics are not implemented in the interpreter. `mem_copy` and `mem_fill` work
   on interpreter memory.
 
 This feature is implemented in the compiler written in jihoo

@@ -1,0 +1,41 @@
+// read_volatile and write_volatile: one access of the pointee's width each,
+// for memory-mapped device registers. Here they work on ordinary memory.
+
+struct Regs {
+    status: u32
+    ready: bool
+    scale: f64
+    next: *u8
+    wide: u64
+}
+
+fn main() {
+    var r = Regs { status: 0, ready: false, scale: 0.0, next: null, wide: 0 }
+    var b: u8 = 7
+    unsafe {
+        write_volatile(&r.status, 1)
+        write_volatile(&r.status, 3)
+        write_volatile(&r.ready, true)
+        write_volatile(&r.scale, 2.5)
+        write_volatile(&r.next, &b)
+        write_volatile(&r.wide, 0xffff_ffff_ffff)
+        var polls = 0
+        while (read_volatile(&r.status) & 4) == 0 {
+            polls += 1
+            write_volatile(&r.status, read_volatile(&r.status) + 1)
+        }
+        println(polls)
+        println(read_volatile(&r.status))
+        println(read_volatile(&r.ready))
+        println(read_volatile(&r.scale))
+        println(*read_volatile(&r.next))
+        println(read_volatile(&r.wide))
+    }
+}
+
+//> 1
+//> 4
+//> true
+//> 2.5
+//> 7
+//> 281474976710655

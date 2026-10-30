@@ -1,0 +1,10 @@
+struct Pair {
+    a: u32
+    b: u32
+}
+
+fn main() {
+    var p = Pair { a: 1, b: 2 }
+    unsafe { write_volatile(&p, Pair { a: 3, b: 4 }) }
+}
+// error: volatile accesses work on integers, floats, bools and pointers

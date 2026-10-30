@@ -126,7 +126,8 @@ that inline, and `move fn` closures that own their captures without
 allocating, returned as `-> impl Iterator` or `-> impl fn(A) -> R`; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions and callbacks (including structs by value, 128-bit
 integers and variadic function pointers on both targets), dynamic libraries
-(`std.ffi`), system calls and atomics; the standard library,
+(`std.ffi`), system calls, atomics and volatile accesses for device
+registers; the standard library,
 including running other programs.
 
 [Compile-time evaluation](docs/language/comptime.md) runs ordinary functions
