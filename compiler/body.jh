@@ -89,6 +89,8 @@ pub struct Fb {
     thread_scopes: Vec((u32, u32, u32))
     // The next lambda transfers its capture tuple to a scoped job.
     scoped_work: bool
+    // The results of `match`es that are views of the parts their arms give.
+    pub match_views: Vec(u32)
 }
 
 // The result of lowering an expression: a place to read or borrow, or an
@@ -183,6 +185,7 @@ impl Fb {
             owned_env: false
             thread_scopes: Vec((u32, u32, u32)).new()
             scoped_work: false
+            match_views: Vec(u32).new()
         }
         fb.new_local(ret, None, true, LocalKind.Ret, span)
         fb.cur = fb.new_block()
@@ -1287,7 +1290,14 @@ impl sema.Sema {
                 }
                 "a part of `" + n.as_str() + "`"
             }
-            None => "this value".to_string()
+            None => {
+                for l in fb.match_views {
+                    if l == p.local {
+                        return "the value of this `match`".to_string()
+                    }
+                }
+                "this value".to_string()
+            }
         }
     }
 

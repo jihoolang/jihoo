@@ -1,4 +1,4 @@
-// A match arm cannot hand out a borrowed part as the match's value.
+// A `match` whose arm gives a borrowed part is a view: it cannot move out.
 // error: cannot move
 
 fn first_name(o: Option(String)) -> String {

@@ -1,0 +1,11 @@
+// A `match` that is a view cannot also give a new value.
+// error: which makes the `match` a view
+
+fn f(o: Option(String)) -> i64 {
+    let t = match o {
+        Some(t) => t
+        None => String.from("none")
+    }
+    t.len()
+}
+fn main() { println(f(None)) }

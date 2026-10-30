@@ -1,0 +1,13 @@
+// A view of an element keeps the vector borrowed.
+// error: `v` is changed here while it is borrowed
+
+fn main() {
+    var v = Vec(Option(String)).new()
+    v.push(Some(String.from("a")))
+    let s = match v[0] {
+        Some(s) => s
+        None => return
+    }
+    v.push(None)
+    println(s)
+}

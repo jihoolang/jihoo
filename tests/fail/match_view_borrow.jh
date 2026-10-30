@@ -1,0 +1,15 @@
+// A `match` that gives a borrowed part keeps the matched place borrowed.
+// error: `h` goes away here while it is still borrowed
+
+struct H {
+    o: Option(String)
+}
+fn main() {
+    var h = H { o: Some(String.from("a")) }
+    let t = match h.o {
+        Some(t) => t
+        None => return
+    }
+    h.o = None
+    println(t)
+}

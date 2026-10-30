@@ -239,6 +239,8 @@ impl sema.Sema {
             }
         }
         let done = fb.new_block()
+        // Whether the `match` is a view of the parts its arms give.
+        var view: Option(bool) = None
         for arm in arms {
             let fail = fb.new_block()
             let alts = expand_or(arm.pat)
@@ -271,9 +273,38 @@ impl sema.Sema {
                         rty = Some(bv.ty)
                     }
                     if bv.ty != types.UNIT {
-                        fb.body.locals[result as i64].ty = bv.ty
-                        let o = self.operand(&fb, bv, arm.body.span)?
-                        fb.assign(Place.local(result), Rvalue.Use(o), arm.span)
+                        let t = bv.ty
+                        var part: Option(Place) = None
+                        var borrowed = false
+                        match bv.vk {
+                            Place(p) => {
+                                if !bv.temp && !self.types.is_plain(t) {
+                                    borrowed = self.place_movable(fb, p).is_some()
+                                    part = Some(p.clone())
+                                }
+                            }
+                            Op(_) => {}
+                        }
+                        // The first arm that gives a value decides: a part
+                        // it cannot move out of makes the `match` a view.
+                        if view.is_none() {
+                            view = Some(borrowed)
+                        }
+                        if view == Some(true) {
+                            let p = match part {
+                                Some(p) => p
+                                None => return Err(err(
+                                    arm.body.span,
+                                    "this arm gives a new value, but an earlier arm gives a borrowed part, which makes the `match` a view; use `.clone()` there to give owned values"
+                                ))
+                            }
+                            fb.body.locals[result as i64].ty = self.types.refty(t)
+                            fb.assign(Place.local(result), Rvalue.Ref(p), arm.span)
+                        } else {
+                            fb.body.locals[result as i64].ty = t
+                            let o = self.operand(&fb, bv, arm.body.span)?
+                            fb.assign(Place.local(result), Rvalue.Use(o), arm.span)
+                        }
                     }
                 } else {
                     self.discard_val(&fb, bv, arm.body.span)?
@@ -295,6 +326,10 @@ impl sema.Sema {
             Some(t) => {
                 if t == types.UNIT || !want {
                     return Ok(body.val_unit())
+                }
+                if view == Some(true) {
+                    fb.match_views.push(result)
+                    return Ok(Val { vk: VK.Place(Place.deref(result)), ty: t, temp: false })
                 }
                 fb.body.locals[result as i64].ty = t
                 Ok(Val { vk: VK.Place(Place.local(result)), ty: t, temp: true })

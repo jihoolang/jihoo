@@ -1,0 +1,87 @@
+// A `match` whose arms give borrowed parts of the matched value is a view
+// of them: nothing is copied or moved.
+
+enum Shape {
+    Circle(String)
+    Rect(String, String)
+    Dot
+}
+
+struct Pair {
+    a: String
+    b: String
+}
+
+fn label(s: Shape) -> i64 {
+    let name = match s {
+        Circle(n) => n
+        Rect(_, n) => n
+        Dot => return 0
+    }
+    name.len()
+}
+
+fn first(o: Option(String), fallback: String) -> str {
+    let t = match o {
+        Some(t) => t
+        None => fallback
+    }
+    t.as_str()
+}
+
+fn pick(p: Pair, left: bool) -> String {
+    let s = match left {
+        true => p.a
+        false => p.b
+    }
+    s.clone()
+}
+
+// A view of an element, used in a loop.
+fn longest(v: Vec(Option(String))) -> i64 {
+    var best = 0
+    for o in v {
+        let s = match o {
+            Some(s) => s
+            None => continue
+        }
+        if s.len() > best {
+            best = s.len()
+        }
+    }
+    best
+}
+
+fn main() {
+    println(label(Shape.Circle(String.from("ab"))))
+    println(label(Shape.Rect(String.from("x"), String.from("abcd"))))
+    println(label(Shape.Dot))
+    let fb = String.from("default")
+    println(first(Some(String.from("given")), fb))
+    println(first(None, fb))
+    let p = Pair { a: String.from("left"), b: String.from("right") }
+    println(pick(p, true))
+    println(pick(p, false))
+    var v = Vec(Option(String)).new()
+    v.push(Some(String.from("abc")))
+    v.push(None)
+    v.push(Some(String.from("abcdef")))
+    println(longest(v))
+    // A plain payload is copied, as before.
+    let o = Some(5)
+    let n = match o {
+        Some(n) => n
+        None => 0
+    }
+    println(n + 1)
+}
+
+//> 2
+//> 4
+//> 0
+//> given
+//> default
+//> left
+//> right
+//> 6
+//> 6

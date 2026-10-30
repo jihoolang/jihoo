@@ -1,0 +1,17 @@
+// A view from a `match` cannot leave the block that owns what it borrows.
+// error: cannot move the value of this `match` out of its place
+
+struct Pair {
+    a: String
+    b: String
+}
+fn main() {
+    let t = {
+        let p = Pair { a: String.from("a"), b: String.from("b") }
+        match true {
+            true => p.a
+            false => p.b
+        }
+    }
+    println(t)
+}

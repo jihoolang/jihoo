@@ -272,10 +272,11 @@ memory, not with any one feature.
    - Done: `A(x) | B(x)` binds the same names in every alternative, with
      the same types and `var`-ness, in `match` arms (guards included) and
      in `let` (`tests/run/or_patterns.jh`, `tests/fail/or_pattern_*`).
-   - `let t = match o { Some(t) => t, None => return 0 }` fails when `o`
-     is borrowed, because the arm tries to move `t`. When every arm gives a
-     part of the matched place, the `match` should be a view of that
-     place, checked by the borrow kernel like any other view.
+   - Done: `let t = match o { Some(t) => t, None => return 0 }` with `o`
+     borrowed. When the first arm that gives a value gives a place it
+     cannot move out of, the `match` is a view (a borrow of what each arm
+     gives), checked by the borrow kernel like any other view
+     (`tests/run/match_views.jh`, `tests/fail/match_view_*`).
    - Done: `let Some(t) = o else { return 0 }`, a pattern that must
      match, with a diverging `else` that does not see its names
      (`tests/run/let_else.jh`, `tests/fail/let_else_*`).

@@ -1,5 +1,5 @@
 // Alternatives on a borrowed value bind borrows, which cannot move out.
-// error: cannot move `t`
+// error: cannot move the value of this `match` out of its place
 
 enum Msg {
     Text(String)

@@ -84,6 +84,10 @@ How bindings get their values:
   `T`, and bindings borrow; on an `Option(inout T)` (`map.get_mut(k)`) they
   can change. A plain name binds the borrow itself.
 
+A `match` whose arms give borrowed parts (`Some(t) => t` on a borrowed
+`Option(String)`) is a view of them, borrowed as a `let x = place` is;
+an arm that gives a new value then is an error.
+
 `let` destructures too, with a pattern that must always match:
 `let (a, b) = pair`. With `else`, the pattern may fail to match, and the
 block after `else` then runs. It must not finish (`return`, `break`,
