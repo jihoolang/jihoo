@@ -298,9 +298,11 @@ memory, not with any one feature.
    unchanged.
 4. Done: the release. 0.4.0 is tagged and the seed is 0.4.0, so the
    compiler now uses these features: `let ... else` replaces 39
-   `match`es that only unwrapped an `Option` or left. `Map.get` results stay
-   `match`es, since `let ... else` would keep their `ref V` a borrow of
-   the key's temporary ([from Rust](../language/from-rust.md)). The
+   `match`es that only unwrapped an `Option` or left. `Map.get` results with
+   a `str` key stay `match`es until the next seed: in 0.4.0 the `String`
+   such a key is lent as ends with the statement, while `let ... else`
+   keeps it borrowed; it now lives to the end of the block
+   ([from Rust](../language/from-rust.md)). The
    editor work in section 1 (sema-resolved definitions, hover) continues
    alongside.
 

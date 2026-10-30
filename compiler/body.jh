@@ -6072,7 +6072,14 @@ impl sema.Sema {
                 if borrow && v.ty == types.STR && self.string_ty() == Some(vt) {
                     var sargs = Vec(Val).new()
                     sargs.push(v)
-                    v = self.call_static(&fb, vt, "from_static", sargs, sp)?
+                    let lent = self.call_static(&fb, vt, "from_static", sargs, sp)?
+                    // It lives to the end of the block, as what the call
+                    // gives may borrow it (`let Some(v) = m.get(k) else`);
+                    // it owns no memory, so nothing is held longer.
+                    let o = self.operand(&fb, lent, sp)?
+                    let keep = fb.block_temp(vt, sp)
+                    fb.assign(Place.local(keep), Rvalue.Use(o), sp)
+                    v = Val { vk: VK.Place(Place.local(keep)), ty: vt, temp: true }
                 } else {
                     v = self.coerce(&fb, v, vt, sp)?
                 }

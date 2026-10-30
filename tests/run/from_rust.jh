@@ -34,13 +34,10 @@ fn count_words(text: str) -> Map(String, i64) {
     counts
 }
 
-// `match` copies a plain value out of `Map.get`'s `ref V`; `let ... else`
-// would keep it a borrow of the temporary `String` key.
+// `n` is a `ref i64` that borrows the `String` the `str` key is lent as,
+// which lives to the end of the block.
 fn count_of(m: Map(String, i64), k: str) -> i64 {
-    let n = match m.get(k) {
-        Some(n) => n
-        None => return 0
-    }
+    let Some(n) = m.get(k) else { return 0 }
     n
 }
 
