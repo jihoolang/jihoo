@@ -544,6 +544,82 @@ impl sema.Sema {
         }
     }
 
+    // `let pattern = value else { ... }`: the block runs, and must not
+    // finish, when the pattern does not match. It does not see the
+    // pattern's names, and an owned value that did not match is dropped
+    // on its way out.
+    pub fn let_else(
+        inout self,
+        inout fb: Fb,
+        pat: ast.Pat,
+        sink v: Val,
+        mode: BindMode,
+        els: ast.Block,
+        span: Span
+    ) -> Result((), Diag) {
+        let ty = v.ty
+        var is_op = false
+        match v.vk {
+            Op(_) => is_op = true
+            _ => {}
+        }
+        let owned = mode == BindMode.Owned || v.temp || is_op
+        var whole: Option(Place) = None
+        match v.vk {
+            Place(p) => {
+                if owned && v.temp && p.proj.len() == 0 {
+                    whole = Some(p.clone())
+                }
+            }
+            _ => {}
+        }
+        let place = match whole {
+            Some(p) => p
+            None => {
+                if owned {
+                    let o = self.operand(&fb, v, span)?
+                    let tmp = fb.temp(ty, span)
+                    fb.assign(Place.local(tmp), Rvalue.Use(o), span)
+                    Place.local(tmp)
+                } else {
+                    let (p, _) = self.as_place(&fb, v, span)
+                    p
+                }
+            }
+        }
+        let m = if owned {
+            BindMode.Owned
+        } else if mode == BindMode.BorrowMut {
+            BindMode.BorrowMut
+        } else {
+            BindMode.Borrow
+        }
+        // The `else` block first, before the names exist.
+        let here = fb.cur
+        let fail = fb.new_block()
+        fb.switch_to(fail)
+        let ev = self.block(&fb, els, None, true)?
+        if ev.ty != types.NEVER {
+            return Err(err(
+                els.span,
+                "the `else` of a `let` must not finish: end it with `return`, `break`, `continue` or `panic`"
+            ))
+        }
+        fb.term(Term.Unreachable)
+        fb.switch_to(here)
+        let alts = expand_or(pat)
+        if alts.len() > 1 {
+            return self.bind_alts(&fb, alts, None, place, ty, m, fail)
+        }
+        self.test_pat(&fb, pat, place.clone(), ty, fail)?
+        self.bind(&fb, pat, place.clone(), ty, m)?
+        if m == BindMode.Owned && self.types.needs_drop(ty) {
+            self.drop_rest(&fb, pat, place.clone(), ty, span)?
+            fb.push(Stmt.Forget(place.local))
+        }
+        Ok(())
+    }
+
     // `let A(x) | B(x) = v`: one alternative matches.
     fn destructure_alts(
         inout self,

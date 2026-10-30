@@ -1,0 +1,8 @@
+// `let ... else` on a borrowed value binds borrows.
+// error: cannot move `t`
+
+fn f(o: Option(String)) -> String {
+    let Some(t) = o else { return String.new() }
+    t
+}
+fn main() { println(f(None)) }

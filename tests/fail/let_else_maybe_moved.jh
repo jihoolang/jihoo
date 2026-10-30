@@ -1,0 +1,15 @@
+// The `else` block sees moves made only on some paths.
+// error: it may have been moved away before
+
+fn eat(sink s: String) {}
+fn main() {
+    let s = String.from("a")
+    let o: Option(i64) = None
+    if true {
+        eat(s)
+    }
+    let Some(x) = o else {
+        println(s)
+        return
+    }
+}

@@ -889,7 +889,7 @@ impl sema.Sema {
                 Ok(never)
             }
             Let(l) => {
-                self.let_stmt(&fb, l.kind, l.pat, l.ty, l.value, s.span)?
+                self.let_stmt(&fb, l.kind, l.pat, l.ty, l.value, l.els, s.span)?
                 Ok(false)
             }
             Assign(place, value) => {
@@ -1006,6 +1006,7 @@ impl sema.Sema {
         pat: ast.Pat,
         ty: Option(ast.Ty),
         value: ast.Expr,
+        els: Option(ast.Block),
         span: Span
     ) -> Result((), Diag) {
         let env = fb.env.clone()
@@ -1017,6 +1018,9 @@ impl sema.Sema {
         let is_inout = match kind {
             Inout => true
             _ => false
+        }
+        if is_inout && els.is_some() {
+            return Err(err(span, "`inout` binds one name; it cannot have an `else`"))
         }
         if is_inout {
             let name = match pat.kind {
@@ -1048,6 +1052,13 @@ impl sema.Sema {
         let is_var = match kind {
             Var => true
             _ => false
+        }
+        match els {
+            Some(b) => {
+                let mode = if is_var { BindMode.Owned } else { BindMode.Auto }
+                return self.let_else(&fb, pat, v, mode, b, value.span)
+            }
+            None => {}
         }
         match pat.kind {
             Name(name, var_) => {
@@ -6188,7 +6199,13 @@ struct Capture {
 pub fn collect_names_block(b: ast.Block, inout out: Vec(String)) {
     for s in b.stmts {
         match s.kind {
-            Let(l) => collect_names(l.value, &out)
+            Let(l) => {
+                collect_names(l.value, &out)
+                match l.els {
+                    Some(b) => collect_names_block(b, &out)
+                    None => {}
+                }
+            }
             Assign(a, v) => {
                 collect_names(a, &out)
                 collect_names(v, &out)

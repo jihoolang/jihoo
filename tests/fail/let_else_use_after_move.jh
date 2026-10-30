@@ -1,0 +1,10 @@
+// `let ... else` reads its value like any other use.
+// error: `o` is used here after it was moved away
+
+fn eat(sink s: Option(String)) {}
+fn main() {
+    let o = Some(String.from("a"))
+    eat(o)
+    let Some(t) = o else { return }
+    println(t)
+}

@@ -691,7 +691,13 @@ impl Parser {
                 let ty = if self.eat(Tok.Colon) { Some(self.ty()?) } else { None }
                 self.expect(Tok.Assign)?
                 let value = self.expr()?
-                StmtKind.Let(ast.LetStmt { kind: kind, pat: pat, ty: ty, value: value })
+                let els = if self.at(Tok.Else) && !self.nl() {
+                    self.bump()
+                    Some(self.block()?)
+                } else {
+                    None
+                }
+                StmtKind.Let(ast.LetStmt { kind: kind, pat: pat, ty: ty, value: value, els: els })
             }
             _ => {
                 let e = self.expr()?

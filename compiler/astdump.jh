@@ -403,6 +403,13 @@ impl Dump {
                 self.opt_ty(l.ty)
                 self.s(" ")
                 self.expr(l.value)
+                match l.els {
+                    Some(b) => {
+                        self.s(" else ")
+                        self.block(b)
+                    }
+                    None => {}
+                }
             }
             Assign(l, r) => {
                 self.open("assign", st.span)

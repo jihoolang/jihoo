@@ -276,10 +276,9 @@ memory, not with any one feature.
      is borrowed, because the arm tries to move `t`. When every arm gives a
      part of the matched place, the `match` should be a view of that
      place, checked by the borrow kernel like any other view.
-   - `let Some(t) = o else { return 0 }`: a pattern that must match, with
-     a diverging `else`, replacing the `match` + flag idiom
-     [Coming from Rust](../language/from-rust.md#what-does-not-exist)
-     recommends.
+   - Done: `let Some(t) = o else { return 0 }`, a pattern that must
+     match, with a diverging `else` that does not see its names
+     (`tests/run/let_else.jh`, `tests/fail/let_else_*`).
 
    Completion: each form has `tests/run` and `tests/fail` cases (borrowed
    and owned scrutinees, values with destructors, moves on only some

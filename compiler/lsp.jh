@@ -916,9 +916,17 @@ fn block_locals(b: ast.Block, off: u32, inout out: Vec(Binding)) {
         if st.span.lo > off { break }
         match st.kind {
             Let(l) => {
+                // The `else` block does not see the pattern's names.
+                let in_else = match l.els {
+                    Some(b) => {
+                        block_locals(b, off, &out)
+                        contains(b.span, off)
+                    }
+                    None => false
+                }
                 if contains(l.value.span, off) {
                     expr_locals(l.value, off, &out)
-                } else {
+                } else if !in_else {
                     pat_bindings(l.pat, &out)
                 }
             }

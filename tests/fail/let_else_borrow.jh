@@ -1,0 +1,12 @@
+// A `let ... else` binding borrows the matched place.
+// error: `h` goes away here while it is still borrowed
+
+struct H {
+    o: Option(String)
+}
+fn main() {
+    var h = H { o: Some(String.from("a")) }
+    let Some(t) = h.o else { return }
+    h.o = None
+    println(t)
+}

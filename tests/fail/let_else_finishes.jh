@@ -1,0 +1,8 @@
+// The `else` of a `let` must not finish.
+// error: the `else` of a `let` must not finish
+
+fn f(o: Option(i64)) -> i64 {
+    let Some(x) = o else { 0 }
+    x
+}
+fn main() { println(f(None)) }

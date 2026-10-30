@@ -197,6 +197,8 @@ pub struct LetStmt {
     pub pat: Pat
     pub ty: Option(Ty)
     pub value: Expr
+    // `let P = v else { ... }`: runs when the pattern does not match.
+    pub els: Option(Block)
 }
 
 pub enum StmtKind {
@@ -466,7 +468,8 @@ impl Clone for StmtKind {
                 kind: l.kind,
                 pat: l.pat.clone(),
                 ty: l.ty.clone(),
-                value: l.value.clone()
+                value: l.value.clone(),
+                els: l.els.clone()
             })
             Assign(a, b) => StmtKind.Assign(a.clone(), b.clone())
             OpAssign(op, a, b) => StmtKind.OpAssign(op, a.clone(), b.clone())

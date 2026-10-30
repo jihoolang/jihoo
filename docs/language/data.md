@@ -85,7 +85,19 @@ How bindings get their values:
   can change. A plain name binds the borrow itself.
 
 `let` destructures too, with a pattern that must always match:
-`let (a, b) = pair`.
+`let (a, b) = pair`. With `else`, the pattern may fail to match, and the
+block after `else` then runs. It must not finish (`return`, `break`,
+`continue`, `panic`), and it does not see the pattern's names:
+
+```jihoo
+fn radius(s: Shape) -> f64 {
+    let Circle(r) = s else { return 0.0 }
+    r
+}
+```
+
+The names bind as they would in a `match` arm: a borrow of a place, or
+the parts of a new value (`let Some(line) = lines.next() else { break }`).
 
 ## Loops
 

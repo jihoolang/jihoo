@@ -32,7 +32,8 @@ if you know Rust, and check here when code that "should work" does not. The
 | `usize`, `char` | `i64` for lengths and indices; `u8` for bytes (`'a'` is a `u8`) |
 | `0..=n` in a `for` | `0..n + 1` (`..=` exists only in patterns) |
 | `if let Some(x) = o { ... }` | `match o { Some(x) => ..., None => {} }` |
-| `while let Some(x) = it.next()` | `loop { match it.next() { Some(x) => ..., None => break } }` |
+| `while let Some(x) = it.next()` | `loop { let Some(x) = it.next() else { break } ... }` |
+| `let Some(x) = o else { return }` | the same; `x` borrows when `o` is a place |
 | `format!("{} {:>5.2}", a, b)` | `fmt.format("{} {:>5.2}", (a, b))` (`import std.fmt`): the values are a tuple |
 | `println!("{}", x)` | `println(x)` (one argument, with `Show`), or `fmt.println("{} {}", (a, b))` |
 | `#[derive(Clone, PartialEq, Debug)]` | `#[derive(Clone, Eq, Show)]`; `Show` prints like `{:?}` without quotes around strings |
@@ -48,8 +49,9 @@ if you know Rust, and check here when code that "should work" does not. The
 
 ## What does not exist
 
-- No `if let`, `while let`, `let else`, labeled loops or `break value`. Use
-  `match` and flags.
+- No `if let`, `while let`, labeled loops or `break value`. Use `match`,
+  or `let pattern = value else { ... }`, whose block must not finish
+  (`return`, `break`, `continue`, `panic`).
 - No macros. `println`, `print`, `panic` and `assert` are functions, and
   [`std.fmt`](../reference/standard-library.md#formatting) formats several
   values from a tuple. Its patterns are read when the program runs: a

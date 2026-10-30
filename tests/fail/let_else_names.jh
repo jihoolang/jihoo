@@ -1,0 +1,8 @@
+// The `else` of a `let` does not see the names of its pattern.
+// error: unknown name `x`
+
+fn f(o: Option(i64)) -> i64 {
+    let Some(x) = o else { return x }
+    x
+}
+fn main() { println(f(None)) }

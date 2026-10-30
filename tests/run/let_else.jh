@@ -1,0 +1,133 @@
+// `let pattern = value else { ... }`: a pattern that must match, with an
+// `else` that does not finish.
+
+enum Shape {
+    Circle(i64)
+    Rect(i64, i64)
+}
+
+struct Loud {
+    name: String
+}
+
+impl Drop for Loud {
+    fn drop(inout self) {
+        print("drop ")
+        println(self.name)
+    }
+}
+
+fn radius(s: Shape) -> i64 {
+    let Circle(r) = s else { return -1 }
+    r
+}
+
+// A borrowed scrutinee: `t` borrows the payload, no clone.
+fn first_len(o: Option(String)) -> i64 {
+    let Some(t) = o else { return 0 }
+    t.len()
+}
+
+// An owned value moves its part out; the rest is dropped.
+fn make(ok: bool) -> Option(Loud) {
+    if ok {
+        Some(Loud { name: String.from("a") })
+    } else {
+        None
+    }
+}
+
+fn take(ok: bool) -> String {
+    let Some(l) = make(ok) else { return String.from("none") }
+    l.name.clone()
+}
+
+// A result that did not match is dropped when `else` leaves.
+fn make_r(ok: bool) -> Result(i64, Loud) {
+    if ok {
+        Ok(5)
+    } else {
+        Err(Loud { name: String.from("b") })
+    }
+}
+
+fn ok_value(ok: bool) -> i64 {
+    let Ok(n) = make_r(ok) else { return -1 }
+    n
+}
+
+fn sum_circles(v: Vec(Shape)) -> i64 {
+    var total = 0
+    for s in v {
+        let Circle(r) = s else { continue }
+        total += r
+    }
+    total
+}
+
+fn drain(sink v: Vec(i64)) -> i64 {
+    var v = v
+    var total = 0
+    loop {
+        let Some(x) = v.pop() else { break }
+        total = total * 10 + x
+    }
+    total
+}
+
+fn either(r: Result(i64, i64)) -> i64 {
+    let Ok(x) | Err(x) = r else { return -1 }
+    x
+}
+
+fn pair(p: (Option(i64), i64)) -> i64 {
+    let (Some(a), b) = p else { panic("no a") }
+    a + b
+}
+
+fn counter(o: Option(i64)) -> i64 {
+    let Some(var n) = o else { return 0 }
+    n += 10
+    n
+}
+
+fn main() {
+    println(radius(Shape.Circle(4)))
+    println(radius(Shape.Rect(1, 2)))
+    println(first_len(Some(String.from("abc"))))
+    println(first_len(None))
+    println(take(true))
+    println(take(false))
+    println(ok_value(true))
+    println(ok_value(false))
+    var v = Vec(Shape).new()
+    v.push(Shape.Circle(1))
+    v.push(Shape.Rect(5, 5))
+    v.push(Shape.Circle(2))
+    println(sum_circles(v))
+    var w = Vec(i64).new()
+    w.push(3)
+    w.push(7)
+    println(drain(w))
+    println(either(Err(9)))
+    println(pair((Some(1), 2)))
+    println(counter(Some(1)))
+    println(pair((None, 2)))
+}
+
+// exit: 134
+//> 4
+//> -1
+//> 3
+//> 0
+//> drop a
+//> a
+//> none
+//> 5
+//> drop b
+//> -1
+//> 3
+//> 73
+//> 9
+//> 3
+//> 11

@@ -107,7 +107,7 @@ type, must be on the same line as what comes before.
 ```text
 block    = "{" { stmt end } [ expr ] "}"
 end      = ";" | newline | before "}"
-stmt     = ( "let" | "var" | "inout" ) pattern [ ":" type ] "=" expr
+stmt     = ( "let" | "var" | "inout" ) pattern [ ":" type ] "=" expr [ "else" block ]
          | expr "=" expr
          | expr opassign expr
          | expr
@@ -117,7 +117,8 @@ opassign = "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
 
 A block whose last statement is an expression with no `;` after it has that
 expression's value. The `=` or `op=` of an assignment must be on the same
-line as its left side.
+line as its left side, and the `else` of a `let` on the same line as the
+end of its value.
 
 ## Expressions
 
