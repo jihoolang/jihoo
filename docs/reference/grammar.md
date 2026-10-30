@@ -69,7 +69,8 @@ alias    = "type" name [ "=" type ]
   ([derive](../language/reflection.md#derive)), `#[interior]`
   ([unsafe code](../language/unsafe.md#changing-behind-a-shared-borrow))
   and, on functions, `#[literal_check(param, check)]`
-  ([compile-time evaluation](../language/comptime.md#checking-literal-arguments)).
+  ([compile-time evaluation](../language/comptime.md#checking-literal-arguments))
+  and `#[test]` ([tests](command-line.md#tests)).
 - A parameter's type may be left out only for `self`. A function without a
   block is a declaration: an `extern fn`, or a trait function without a
   default body. Items do not nest inside function bodies.

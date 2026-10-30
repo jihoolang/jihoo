@@ -78,6 +78,11 @@ if you know Rust, and check here when code that "should work" does not. The
 - No `char`: text is UTF-8 bytes, and `'가'` is an error because it is more
   than one byte.
 - No default or named arguments, no variadic functions except `extern fn`.
+- No `#[cfg(test)]`, test modules, `assert_eq!` or `#[should_panic]`.
+  [`jihoo test f.jh`](../reference/command-line.md#tests) runs the
+  `#[test]` functions of `f.jh` itself, not of the modules it imports, each
+  in a process of its own, since a panic stops the whole process rather
+  than unwinding.
 
 ## Ownership differences
 

@@ -102,7 +102,7 @@ jihoo run tests/runner.jh                    # the tests
 
 Version 0.4: the 0.1 rewrite, which broke compatibility with everything
 before it ([why](docs/internals/redesign.md)), with a self-hosted compiler
-and checking, diagnostic and formatting tools. Native (libc) and
+and checking, testing, diagnostic and formatting tools. Native (libc) and
 freestanding (no libc, static) programs for x86_64 and aarch64 Linux, and
 [UEFI applications](docs/language/profiles.md#uefi) (PE32+ images) for
 both machines.

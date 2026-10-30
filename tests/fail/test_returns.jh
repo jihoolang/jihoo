@@ -1,0 +1,8 @@
+// A test reports failure by panicking or trapping, not by its result.
+// error: a `#[test]` function takes no parameters and returns nothing
+#[test]
+fn checks() -> bool {
+    true
+}
+
+fn main() {}

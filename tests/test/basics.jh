@@ -1,0 +1,64 @@
+// `jihoo test` runs each `#[test]` function of the file in a process of
+// its own and leaves `main` alone: a failed assertion or a trap fails only
+// its test, and the output of failed tests follows the list.
+// exit: 1
+//> running 4 tests
+//> test adds ... ok
+//> test fails ... FAILED
+//> test traps ... FAILED
+//> test counts_down ... ok
+//>
+//> failures:
+//>
+//> ---- fails ----
+//> before the assertion
+//> panic: 2 + 2 is not 5
+//> signal 6
+//>
+//> ---- traps ----
+//> panic: integer overflow
+//> signal 4
+//>
+//> test result: FAILED. 2 passed; 2 failed; 0 filtered out
+
+fn add(a: i64, b: i64) -> i64 {
+    a + b
+}
+
+fn main() {
+    println("main does not run")
+}
+
+#[test]
+fn adds() {
+    assert(add(2, 3) == 5, "2 + 3 is 5")
+}
+
+#[test]
+fn fails() {
+    println("before the assertion")
+    assert(add(2, 2) == 5, "2 + 2 is not 5")
+}
+
+#[test]
+fn traps() {
+    let big: i64 = 9223372036854775807
+    let x = big + add(0, 1)
+    println(x.to_string())
+}
+
+// Not a test: only `#[test]` functions run.
+fn helper() -> i64 {
+    3
+}
+
+#[test]
+fn counts_down() {
+    var n = helper()
+    var v = Vec(i64).new()
+    while n > 0 {
+        v.push(n)
+        n -= 1
+    }
+    assert(v.len() == 3 && v[0] == 3, "three items")
+}

@@ -1,0 +1,9 @@
+// error: a `#[test]` function must be a free function
+struct S {}
+
+impl S {
+    #[test]
+    fn check() {}
+}
+
+fn main() {}

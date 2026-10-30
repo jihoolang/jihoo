@@ -5,6 +5,7 @@
 // prelude (`std/prelude.jh`).
 
 import std.env
+import std.mem
 import ast
 import diag
 import lex
@@ -39,7 +40,15 @@ pub struct Ast {
     pub prelude: Option(u32)
     // std.derive, loaded when some item has `#[derive(...)]`.
     pub derive: Option(u32)
+    // The function the program starts in: `main`, or for `jihoo test` the
+    // harness `load_tests` adds.
+    pub entry: String
+    // For `jihoo test`, the root's `#[test]` functions, in order.
+    pub tests: Vec(String)
 }
+
+// The name of the harness `jihoo test` adds to the root module.
+pub const TEST_ENTRY = "__jihoo_tests"
 
 struct Loader {
     search: Vec(String)
@@ -109,6 +118,18 @@ pub fn load(
     load_with(root, search, target, &sources, no_prelude, Map(String, String).new())
 }
 
+// Loads a program for `jihoo test`: its root module also gets a harness,
+// the entry, that runs the `#[test]` function its argument names and
+// returns 0, or returns 2 for a name it does not know.
+pub fn load_tests(
+    root: str,
+    sink search: Vec(String),
+    target: str,
+    inout sources: diag.Sources
+) -> Result(Ast, Diag) {
+    load_all(root, search, target, &sources, false, Map(String, String).new(), true)
+}
+
 // The key of a file in an overlay: its canonical path, or the path itself
 // if it does not exist.
 pub fn file_key(path: str) -> String {
@@ -128,6 +149,18 @@ pub fn load_with(
     no_prelude: bool,
     overlay: Map(String, String)
 ) -> Result(Ast, Diag) {
+    load_all(root, search, target, &sources, no_prelude, overlay, false)
+}
+
+fn load_all(
+    root: str,
+    sink search: Vec(String),
+    target: str,
+    inout sources: diag.Sources,
+    no_prelude: bool,
+    overlay: Map(String, String),
+    tests: bool
+) -> Result(Ast, Diag) {
     // The profile decides which files the standard library's modules come
     // from, so it is read from the root's attributes first.
     let profile = match read(root, overlay) {
@@ -142,6 +175,12 @@ pub fn load_with(
         modules: Vec(ModuleAst).new()
     }
     let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources, overlay)?
+    var entry = String.from("main")
+    var names = Vec(String).new()
+    if tests {
+        names = l.add_tests(root_idx, root, &sources, overlay)?
+        entry = String.from(TEST_ENTRY)
+    }
     var prelude: Option(u32) = None
     if !no_prelude {
         var p = Vec(String).new()
@@ -185,7 +224,9 @@ pub fn load_with(
             modules: modules,
             root: root_idx,
             prelude: prelude,
-            derive: derive
+            derive: derive,
+            entry: entry,
+            tests: names
         })
     }
 }
@@ -211,6 +252,71 @@ fn profile_of(text: str) -> str {
 }
 
 impl Loader {
+    // Adds the test harness to the root module and returns the names of the
+    // tests it runs: the root's free functions with `#[test]` that take
+    // nothing and return nothing (sema reports the others).
+    fn add_tests(
+        inout self,
+        root_idx: u32,
+        root: str,
+        inout sources: diag.Sources,
+        overlay: Map(String, String)
+    ) -> Result(Vec(String), Diag) {
+        var names = Vec(String).new()
+        for it in self.modules[root_idx as i64].ast.items {
+            var test = false
+            for a in it.attrs {
+                if a.name == "test" { test = true }
+            }
+            if !test { continue }
+            match it.kind {
+                Fn(f) => {
+                    let plain = match f.kind { Normal => true, _ => false }
+                    if plain && !f.is_unsafe && f.params.len() == 0 && f.ret.is_none() {
+                        names.push(f.name.clone())
+                    }
+                }
+                _ => {}
+            }
+        }
+        // The harness sees std.env as `__jihoo_env`.
+        var path = Vec(String).new()
+        path.push(String.from("std"))
+        path.push(String.from("env"))
+        let at = Span.new(self.modules[root_idx as i64].ast.file, 0, 0)
+        let p = match self.find(path, root) {
+            Some(p) => p
+            None => return Err(Diag.new(at, "cannot find module `std.env`, which tests need"))
+        }
+        let m = self.load_file(p.as_str(), "std.env", at, &sources, overlay)?
+        self.modules[root_idx as i64].imports.push(ModImport {
+            alias: String.from("__jihoo_env"),
+            module: m,
+            public: false,
+            span: at
+        })
+        var text = String.from("fn ")
+        text.push_str(TEST_ENTRY)
+        text.push_str(
+            "() -> i32 {\n    let __jihoo_args = __jihoo_env.args()\n    if __jihoo_args.len() != 2 { return 2 }\n    let __jihoo_name = __jihoo_args[1]\n"
+        )
+        for n in names {
+            text.push_str("    if __jihoo_name == \"")
+            text.push_str(n.as_str())
+            text.push_str("\" {\n        ")
+            text.push_str(n.as_str())
+            text.push_str("()\n        return 0\n    }\n")
+        }
+        text.push_str("    2\n}\n")
+        let file = sources.add(String.from("<tests>"), text)
+        let toks = lex.lex(file, sources.files[file as i64].text.as_str())?
+        var harness = parse.parse_module(file, toks)?
+        for it in mem.take(&harness.items).into_iter() {
+            self.modules[root_idx as i64].ast.items.push(it)
+        }
+        Ok(names)
+    }
+
     // Whether an item of a loaded module derives a trait.
     fn any_derive(self) -> bool {
         for m in self.modules {

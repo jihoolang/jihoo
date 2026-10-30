@@ -15,6 +15,8 @@
 //   are its standard output in order, `// exit: N` its exit status (128 + N
 //   for a signal N, so a trap is 132), `// args: a b` its arguments and
 //   `// link: f.c` more inputs.
+// - test: `jihoo test` runs each file in tests/test, with the directives
+//   of tests/run: its output is the list of tests and results.
 // - fail: each program in tests/fail must not compile, and the error must
 //   contain every `// error: text`, with the same diagnostics from check.
 // - check: valid programs pass without LLVM or linkers, produce no files
@@ -285,6 +287,36 @@ impl Tests {
         Ok(())
     }
 
+    fn test_one(self, path: str) -> Result((), String) {
+        let src = read_file(path)?
+        let lines = directives(src.as_str(), "//>")
+        var want = Vec(str).new()
+        for d in lines {
+            want.push(if d.starts_with(" ") { d[1..] } else { d })
+        }
+        var code: i64 = 0
+        let exits = directives(src.as_str(), "// exit:")
+        if exits.len() > 0 {
+            code = exits[0].trim().parse_int().unwrap()
+        }
+        var a = Vec(str).new()
+        a.push("test")
+        a.push("-O1")
+        a.push(path)
+        words(src.as_str(), "// args:", &a)
+        let r = exec(self.compiler.as_str(), a.as_slice())
+        let got = r.stdout.as_str().lines()
+        let st = status(r)
+        if !same(got, want) || st != code {
+            return Err(
+                "expected (exit " + code.to_string().as_str() + "):\n" + join(want).as_str() +
+                    "\ngot (exit " + st.to_string().as_str() + "):\n" + join(got).as_str() +
+                    "\nstderr:\n" + r.stderr.as_str()
+            )
+        }
+        Ok(())
+    }
+
     fn fail_one(self, path: str) -> Result((), String) {
         let src = read_file(path)?
         let want = directives(src.as_str(), "// error:")
@@ -479,6 +511,8 @@ impl Tests {
                 self.run_one(f.as_str())
             } else if kind == "fail" {
                 self.fail_one(f.as_str())
+            } else if kind == "test" {
+                self.test_one(f.as_str())
             } else if kind == "check" {
                 self.check_one(f.as_str(), [])
             } else {
@@ -1055,7 +1089,7 @@ fn main() -> i32 {
         suites.push(args[i])
     }
     if suites.len() == 0 {
-        for s in ["format", "check", "run", "fail", "examples", "backend", "selfhost", "uefi"] {
+        for s in ["format", "check", "run", "test", "fail", "examples", "backend", "selfhost", "uefi"] {
             suites.push(s)
         }
     }
@@ -1108,6 +1142,8 @@ fn main() -> i32 {
             t.suite_files("examples", "check")
         } else if s == "run" {
             t.suite_files("tests/run", "run")
+        } else if s == "test" {
+            t.suite_files("tests/test", "test")
         } else if s == "fail" {
             t.suite_files("tests/fail", "fail")
         } else if s == "examples" {
@@ -1119,7 +1155,7 @@ fn main() -> i32 {
         } else if s == "uefi" {
             t.uefi()
         } else {
-            eprintln("unknown suite " + s + "; the suites are format, check, run, fail, examples, backend, selfhost and uefi")
+            eprintln("unknown suite " + s + "; the suites are format, check, run, test, fail, examples, backend, selfhost and uefi")
             return 2
         }
     }

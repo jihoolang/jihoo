@@ -1,0 +1,6 @@
+// A file without tests runs none, successfully.
+//> running 0 tests
+//>
+//> test result: ok. 0 passed; 0 failed; 0 filtered out
+
+fn main() {}

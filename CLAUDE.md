@@ -42,6 +42,7 @@ out/jihoo fmt examples/hello.jh --width 80       # change the soft byte width
 out/jihoo fmt compiler lib/std --write           # rewrite every file that needs it
 out/jihoo lsp                                    # language server on stdio
 out/jihoo run examples/calc.jh -- a b            # args after --
+out/jihoo test f.jh -- name                      # f.jh's #[test] functions (with `name`)
 out/jihoo build examples/freestanding.jh -o out/hello
 out/jihoo emit-mir examples/hello.jh             # the compiler's MIR
 out/jihoo emit-llvm examples/hello.jh            # the LLVM IR it writes
@@ -59,7 +60,7 @@ the previous pipeline for comparison. `import` searches the importing file's dir
 
 ```sh
 jihoo run tests/runner.jh                          # everything (tests compiler/ built by the seed)
-jihoo run tests/runner.jh -- check fail            # suites: format check run fail examples backend selfhost
+jihoo run tests/runner.jh -- check fail            # suites: format check run test fail examples backend selfhost uefi
 JIHOO_TEST=maps jihoo run tests/runner.jh          # those whose path contains `maps`
 JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh # with a compiler already built
 nix flake check                                    # everything CI runs
@@ -71,6 +72,8 @@ nix flake check                                    # everything CI runs
   `fmt --check` on them, so after editing run
   `out/jihoo fmt compiler lib/std --write`. Break long expressions
   without a list after an operator such as `+` or `&&`.
+- `tests/test/*.jh`: run with `jihoo test`, with the same directives; the
+  output is the list of tests and results.
 - `tests/fail/*.jh`: each `// error: text` must appear in the compile error.
   Add one for every error the compiler should give, especially borrow rules.
 - `selfhost`: the tested compiler builds `compiler/main.jh`, and the result must

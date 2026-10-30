@@ -52,6 +52,9 @@ the runner. Its suites:
   diagnostics, checking both ends of source ranges, related notes, Unicode,
   invalid UTF-8, escaping and truncation. Python is supplied by the dev shell
   and Nix test derivation, not required by the installed compiler.
+- **test**: `jihoo test` runs every file in `tests/test/`, with the
+  directives of `tests/run`: the expected output is the list of tests,
+  failures and the summary, and `// args:` holds `--` and names.
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message. `check` must return the
   same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.

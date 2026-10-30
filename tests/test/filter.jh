@@ -1,0 +1,28 @@
+// Arguments after `--` keep the tests whose names contain one of them. A
+// test file needs no `main`.
+// args: -- map
+//> running 2 tests
+//> test map_insert ... ok
+//> test map_remove ... ok
+//>
+//> test result: ok. 2 passed; 0 failed; 1 filtered out
+
+#[test]
+fn map_insert() {
+    var m = Map(i64, i64).new()
+    m.insert(1, 10)
+    assert(m.contains(1), "inserted")
+}
+
+#[test]
+fn map_remove() {
+    var m = Map(i64, i64).new()
+    m.insert(1, 10)
+    m.remove(1)
+    assert(m.get(1).is_none(), "removed")
+}
+
+#[test]
+fn vec_push() {
+    trap()
+}

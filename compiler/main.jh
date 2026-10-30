@@ -34,7 +34,7 @@ import timing
 // the package version.
 const VERSION = "0.4.1"
 
-const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux, or UEFI with #![uefi])\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
+const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux, or UEFI with #![uefi])\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -205,7 +205,12 @@ fn drive() {
     // Source to MIR, checked and with drops elaborated (before elaboration
     // with `JIHOO_NO_ELAB` set).
     var timer = timing.Timer.start()
-    let a = match load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude) {
+    let loaded = if cmd == "test" {
+        load.load_tests(file, load.default_search(search), tgt.name(), &sources)
+    } else {
+        load.load(file, load.default_search(search), tgt.name(), &sources, no_prelude)
+    }
+    let a = match loaded {
         Ok(a) => a
         Err(d) => {
             timer.lap("load")
@@ -214,7 +219,7 @@ fn drive() {
         }
     }
     timer.lap("load")
-    if library && (cmd == "build" || cmd == "run") {
+    if library && (cmd == "build" || cmd == "run" || cmd == "test") {
         usage("use `emit-obj --lib` to build a C-linkable library object")
     }
     match comptime_report {
@@ -309,16 +314,17 @@ fn drive() {
             }
         }
         report_times(timer, time_passes)
-    } else if cmd == "build" || cmd == "run" {
+    } else if cmd == "build" || cmd == "run" || cmd == "test" {
         let profile = prog.profile
         let uefi = match profile { Uefi => true, _ => false }
-        if uefi && cmd == "run" {
+        if uefi && cmd != "build" {
             failure(
                 diag.Kind.Usage,
                 "a UEFI program runs in firmware, not here; build it and boot the .efi file"
             )
         }
         let ll = llvm.emit(prog)
+        let tests = a.tests.clone()
         // Nothing refers to the syntax trees any more; LLVM can use their
         // memory.
         drop(a)
@@ -352,6 +358,13 @@ fn drive() {
             Ok(_) => {}
             Err(e) => failure(diag.Kind.Backend, e.as_str())
         }
+        if cmd == "test" {
+            let passed = run_tests(exe.as_str(), tests, prog_args)
+            if out.is_none() {
+                os.remove(exe.as_str())
+            }
+            sys.exit(if passed { 0 } else { 1 })
+        }
         if cmd == "run" {
             let status = process.run(exe.as_str(), prog_args.as_slice())
             if out.is_none() {
@@ -371,6 +384,59 @@ fn drive() {
     } else {
         usage_help("unknown command `" + cmd + "`")
     }
+}
+
+// Runs each test, or those whose names contain one of `filters`, in a
+// process of its own, as the harness's argument: a panic or a trap fails
+// only that test. Prints a line per test, then the output of those that
+// failed, and returns whether all passed.
+fn run_tests(exe: str, tests: Vec(String), filters: Vec(str)) -> bool {
+    var chosen = Vec(str).new()
+    for t in tests {
+        var wanted = filters.len() == 0
+        for f in filters {
+            if t.as_str().contains(f) { wanted = true }
+        }
+        if wanted { chosen.push(t.as_str()) }
+    }
+    let noun = if chosen.len() == 1 { " test" } else { " tests" }
+    println("running " + fmt.n(chosen.len() as i128).as_str() + noun)
+    var failures = String.new()
+    var failed = 0
+    for t in chosen {
+        print("test " + t + " ... ")
+        let o = match process.output(exe, [t]) {
+            Ok(o) => o
+            Err(e) => failure(
+                diag.Kind.Io,
+                ("cannot run " + exe + ": " + e.to_string().as_str()).as_str()
+            )
+        }
+        if o.status.success() {
+            println("ok")
+            continue
+        }
+        println("FAILED")
+        failed += 1
+        failures.push_str("\n---- " + t + " ----\n")
+        failures.push_str(o.stdout.as_str())
+        failures.push_str(o.stderr.as_str())
+        match o.status {
+            Code(c) => failures.push_str("exit status " + fmt.n(c as i128).as_str() + "\n")
+            Signal(sig) => failures.push_str("signal " + fmt.n(sig as i128).as_str() + "\n")
+        }
+    }
+    if failed > 0 {
+        print("\nfailures:\n" + failures.as_str())
+    }
+    let passed = chosen.len() - failed
+    let result = if failed == 0 { "ok" } else { "FAILED" }
+    println(
+        "\ntest result: " + result + ". " +
+            fmt.n(passed as i128).as_str() + " passed; " + fmt.n(failed as i128).as_str() +
+            " failed; " + fmt.n((tests.len() - chosen.len()) as i128).as_str() + " filtered out"
+    )
+    failed == 0
 }
 
 // Where the file name starts in a path.

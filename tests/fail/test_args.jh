@@ -1,0 +1,5 @@
+// error: `#[test]` takes no arguments
+#[test(slow)]
+fn waits() {}
+
+fn main() {}

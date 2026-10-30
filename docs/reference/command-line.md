@@ -6,6 +6,7 @@ jihoo check <file.jh> [--lib]                check without generating code
 jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio
 jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
+jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions
 jihoo emit-mir <file.jh>                      print the compiler's MIR
 jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
 jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
@@ -146,6 +147,58 @@ checking. Compile-time obligations still execute and may fail or reach the
 interpreter's limits. Checking does not establish that backend code
 generation or linking will succeed. `JIHOO_NO_ELAB`, the debug switch for
 unelaborated MIR dumps, never disables move or borrow checking in this mode.
+
+## Tests
+
+```sh
+jihoo test parser.jh                  # every #[test] function of parser.jh
+jihoo test parser.jh -- number string # those whose names contain `number` or `string`
+```
+
+```jihoo
+fn add(a: i64, b: i64) -> i64 {
+    a + b
+}
+
+#[test]
+fn adds() {
+    assert(add(2, 3) == 5, "2 + 3 is 5")
+}
+```
+
+`#[test]` marks a free function that takes no parameters and returns
+nothing. `jihoo test` builds the file with a harness in place of `main`
+(the file needs none, and its `main` does not run) and runs each test
+function of the file in a process of its own. A test passes when it
+returns. It fails when it panics (`assert` included), traps or exits with
+another status, and only that test fails: the others still run. Output:
+
+```text
+running 2 tests
+test adds ... ok
+test fails ... FAILED
+
+failures:
+
+---- fails ----
+panic: 2 + 2 is not 5
+signal 6
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Each test's standard output and standard error are kept and printed only
+when it fails, followed by its exit status or signal. `jihoo test` exits
+with status 0 when every test chosen passed and 1 otherwise. Arguments
+after `--` choose the tests whose names contain one of them.
+
+Only the root file's tests run: `#[test]` functions of imported modules are
+checked and compiled like other functions, but not run. Tests run in
+native and freestanding programs; UEFI programs cannot run here. Elsewhere,
+`#[test]` functions are ordinary functions, checked by `check` and `build`.
+With `-o`, the test program is kept; given the name of a test as its one
+argument, it runs it and exits with status 0, or with 2 for a name it does
+not know.
 
 ## Compile-time resource reports
 

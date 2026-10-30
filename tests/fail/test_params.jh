@@ -1,0 +1,8 @@
+// The harness has nothing to pass a test.
+// error: a `#[test]` function takes no parameters and returns nothing
+#[test]
+fn adds(n: i64) {
+    assert(n + n == 2 * n, "doubles")
+}
+
+fn main() {}

@@ -63,8 +63,15 @@ errors with their notes as related information, finds definitions in the
 loaded syntax trees and formats documents. A client test drives it over
 the protocol in both position encodings.
 
+Implemented: [`jihoo test`](../reference/command-line.md#tests) runs the
+root file's `#[test]` functions, each in a process of its own, so that a
+panic or a trap fails one test, and prints their results and the output of
+those that failed. The `test` suite checks its output and status.
+
 Next:
 
+- Running the `#[test]` functions of imported modules, so that the
+  standard library can keep unit tests next to its code.
 - Definitions resolved by sema rather than by name, so that `value.method`
   finds the receiver type's method; hover with types; checks that do not
   block replies.

@@ -670,6 +670,7 @@ impl Sema {
     }
 
     fn collect_item(inout self, module: u32, item: ref ast.Item) -> Result((), Diag) {
+        test_attr(item, true)?
         match item.kind {
             Import(_) => {}
             Fn(f) => {
@@ -756,6 +757,7 @@ impl Sema {
                                 owner: Owner.Trait(id),
                                 literal_check: literal_check_attr(sub)?
                             })
+                            test_attr(sub, false)?
                             fns.insert(f.name.clone(), fid);
                         }
                         TypeAlias(_, _) => {}
@@ -790,6 +792,7 @@ impl Sema {
                                 owner: Owner.Impl(id),
                                 literal_check: literal_check_attr(sub)?
                             })
+                            test_attr(sub, false)?
                             if fns.contains(f.name) {
                                 return Err(ty_err(f.name_span, ("`" + f.name.as_str() +
                                     "` is defined twice in this impl").as_str()))
@@ -3044,6 +3047,33 @@ fn literal_check_attr(item: ast.Item) -> Result(Option((String, String)), Diag) 
     Ok(None)
 }
 
+// `#[test]` marks a free function that takes nothing and returns nothing,
+// which `jihoo test` runs.
+fn test_attr(item: ast.Item, free: bool) -> Result((), Diag) {
+    for a in item.attrs {
+        if a.name != "test" { continue }
+        if a.args.len() > 0 { return Err(ty_err(a.span, "`#[test]` takes no arguments")) }
+        let Fn(f) = item.kind else {
+            return Err(ty_err(a.span, "`#[test]` marks a function"))
+        }
+        if !free { return Err(ty_err(a.span, "a `#[test]` function must be a free function")) }
+        let normal = match f.kind { Normal => true, _ => false }
+        if !normal || f.is_unsafe {
+            return Err(ty_err(
+                a.span,
+                "a `#[test]` function cannot be `extern`, `export` or `unsafe`"
+            ))
+        }
+        if f.params.len() > 0 || f.ret.is_some() {
+            return Err(ty_err(
+                f.name_span,
+                "a `#[test]` function takes no parameters and returns nothing"
+            ))
+        }
+    }
+    Ok(())
+}
+
 fn has_attr(item: ast.Item, name: str) -> bool {
     for a in item.attrs {
         if a.name == name {
@@ -3170,7 +3200,7 @@ fn compile_inner(
     s.collect()?
     let root = a.root
     var entry: Option(u32) = None
-    match s.lookup(root, "main") {
+    match s.lookup(root, a.entry.as_str()) {
         Some(Fn(f)) => {
             if !library && s.fns[f as i64].module == root {
                 entry = Some(s.instance(f, Vec(CVal).new(), no_span())?)

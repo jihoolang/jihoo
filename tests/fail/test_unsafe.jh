@@ -1,0 +1,5 @@
+// error: a `#[test]` function cannot be `extern`, `export` or `unsafe`
+#[test]
+unsafe fn raw() {}
+
+fn main() {}
