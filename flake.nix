@@ -9,7 +9,7 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      version = "0.4.0";
+      version = "0.4.1";
 
       # Only what the compiler needs, so that editing the website (or docs)
       # does not rebuild it.
