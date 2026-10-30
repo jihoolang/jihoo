@@ -16,7 +16,8 @@
 //   for a signal N, so a trap is 132), `// args: a b` its arguments and
 //   `// link: f.c` more inputs.
 // - test: `jihoo test` runs each file in tests/test, with the directives
-//   of tests/run: its output is the list of tests and results.
+//   of tests/run: its output is the list of tests and results. The tests
+//   of each file of lib/std that has them must pass.
 // - fail: each program in tests/fail must not compile, and the error must
 //   contain every `// error: text`, with the same diagnostics from check.
 // - check: valid programs pass without LLVM or linkers, produce no files
@@ -315,6 +316,30 @@ impl Tests {
             )
         }
         Ok(())
+    }
+
+    // `jihoo test` passes for each file of the standard library with tests.
+    fn std_tests(inout self) {
+        var files = Vec(String).new()
+        jh_files("lib/std", true, &files)
+        for f in files {
+            if !self.selected(f.as_str()) { continue }
+            let src = match read_file(f.as_str()) {
+                Ok(s) => s
+                Err(e) => {
+                    self.check(f.as_str(), Err(e))
+                    continue
+                }
+            }
+            if !src.as_str().contains("#[test]") { continue }
+            let o = exec(self.compiler.as_str(), ["test", "-O1", f.as_str()])
+            let r: Result((), String) = if o.status.success() {
+                Ok(())
+            } else {
+                Err("tests failed:\n" + o.stdout.as_str() + o.stderr.as_str())
+            }
+            self.check(f.as_str(), r)
+        }
     }
 
     fn fail_one(self, path: str) -> Result((), String) {
@@ -1144,6 +1169,7 @@ fn main() -> i32 {
             t.suite_files("tests/run", "run")
         } else if s == "test" {
             t.suite_files("tests/test", "test")
+            t.std_tests()
         } else if s == "fail" {
             t.suite_files("tests/fail", "fail")
         } else if s == "examples" {

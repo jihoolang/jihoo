@@ -1,0 +1,22 @@
+// The tests of the modules a file imports run too, after the file's own and
+// named with their module; those of the standard library do not.
+// exit: 1
+//> running 3 tests
+//> test wide ... ok
+//> test lib.shapes.square ... ok
+//> test lib.shapes.negative ... FAILED
+//>
+//> failures:
+//>
+//> ---- lib.shapes.negative ----
+//> panic: a negative height
+//> signal 6
+//>
+//> test result: FAILED. 2 passed; 1 failed; 0 filtered out
+
+import lib.shapes
+
+#[test]
+fn wide() {
+    assert(shapes.area(10, 2) == 20, "10 by 2")
+}

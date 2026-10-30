@@ -64,14 +64,16 @@ loaded syntax trees and formats documents. A client test drives it over
 the protocol in both position encodings.
 
 Implemented: [`jihoo test`](../reference/command-line.md#tests) runs the
-root file's `#[test]` functions, each in a process of its own, so that a
-panic or a trap fails one test, and prints their results and the output of
-those that failed. The `test` suite checks its output and status.
+`#[test]` functions of a file and of the modules it imports outside the
+standard library, each in a process of its own, so that a panic or a trap
+fails one test, and prints their results and the output of those that
+failed. Given a file of the standard library, it runs that module's tests;
+the `test` suite checks its output and runs every std module's tests.
 
 Next:
 
-- Running the `#[test]` functions of imported modules, so that the
-  standard library can keep unit tests next to its code.
+- Unit tests for more of the standard library, next to its code
+  (`std.string` has the first).
 - Definitions resolved by sema rather than by name, so that `value.method`
   finds the receiver type's method; hover with types; checks that do not
   block replies.

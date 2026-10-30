@@ -73,7 +73,8 @@ nix flake check                                    # everything CI runs
   `out/jihoo fmt compiler lib/std --write`. Break long expressions
   without a list after an operator such as `+` or `&&`.
 - `tests/test/*.jh`: run with `jihoo test`, with the same directives; the
-  output is the list of tests and results.
+  output is the list of tests and results. `lib/std` files keep `#[test]`
+  functions at their end, run by `jihoo test lib/std/<file>.jh`.
 - `tests/fail/*.jh`: each `// error: text` must appear in the compile error.
   Add one for every error the compiler should give, especially borrow rules.
 - `selfhost`: the tested compiler builds `compiler/main.jh`, and the result must

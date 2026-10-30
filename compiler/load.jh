@@ -174,13 +174,8 @@ fn load_all(
         by_path: Map(String, u32).new(),
         modules: Vec(ModuleAst).new()
     }
-    let root_idx = l.load_file(root, "main", Span.new(0, 0, 0), &sources, overlay)?
-    var entry = String.from("main")
-    var names = Vec(String).new()
-    if tests {
-        names = l.add_tests(root_idx, root, &sources, overlay)?
-        entry = String.from(TEST_ENTRY)
-    }
+    let name = l.root_name(root)
+    let root_idx = l.load_file(root, name.as_str(), Span.new(0, 0, 0), &sources, overlay)?
     var prelude: Option(u32) = None
     if !no_prelude {
         var p = Vec(String).new()
@@ -219,6 +214,12 @@ fn load_all(
             ))
         }
     }
+    var entry = String.from("main")
+    var names = Vec(String).new()
+    if tests {
+        names = l.add_tests(root_idx, root, &sources, overlay)?
+        entry = String.from(TEST_ENTRY)
+    }
     match l {
         Loader { modules, .. } => Ok(Ast {
             modules: modules,
@@ -252,9 +253,13 @@ fn profile_of(text: str) -> str {
 }
 
 impl Loader {
-    // Adds the test harness to the root module and returns the names of the
-    // tests it runs: the root's free functions with `#[test]` that take
-    // nothing and return nothing (sema reports the others).
+    // Adds the test harness and returns the names of the tests it runs:
+    // the free functions with `#[test]` that take nothing and return nothing
+    // (sema reports the others) of the root and of every module it loads
+    // outside the standard library, named with their module but for the
+    // root's. Each module with tests gets `__jihoo_run_test(name)`, which
+    // can call its private functions, and the root the entry, which asks
+    // each module in turn.
     fn add_tests(
         inout self,
         root_idx: u32,
@@ -263,23 +268,55 @@ impl Loader {
         overlay: Map(String, String)
     ) -> Result(Vec(String), Diag) {
         var names = Vec(String).new()
-        for it in self.modules[root_idx as i64].ast.items {
-            var test = false
-            for a in it.attrs {
-                if a.name == "test" { test = true }
+        // `__jihoo_run_test` calls: the root's, then `__jihoo_m<i>.`'s.
+        var calls = Vec(String).new()
+        for i in 0..self.modules.len() {
+            let own = i == root_idx as i64
+            if !own && self.modules[i].name.as_str().starts_with("std.") { continue }
+            var prefix = String.new()
+            if !own {
+                prefix = self.modules[i].name.clone()
+                prefix.push('.')
             }
-            if !test { continue }
-            match it.kind {
-                Fn(f) => {
-                    let plain = match f.kind { Normal => true, _ => false }
-                    if plain && !f.is_unsafe && f.params.len() == 0 && f.ret.is_none() {
-                        names.push(f.name.clone())
-                    }
+            var text = String.from("pub fn __jihoo_run_test(__jihoo_name: str) -> bool {\n")
+            var any = false
+            for it in self.modules[i].ast.items {
+                let Fn(f) = it.kind else { continue }
+                var test = false
+                for a in it.attrs {
+                    if a.name == "test" { test = true }
                 }
-                _ => {}
+                let plain = match f.kind { Normal => true, _ => false }
+                if !test || !plain || f.is_unsafe || f.params.len() > 0 || f.ret.is_some() {
+                    continue
+                }
+                let name = prefix.as_str() + f.name.as_str()
+                text.push_str("    if __jihoo_name == \"")
+                text.push_str(name.as_str())
+                text.push_str("\" {\n        ")
+                text.push_str(f.name.as_str())
+                text.push_str("()\n        return true\n    }\n")
+                names.push(name)
+                any = true
+            }
+            if !any { continue }
+            text.push_str("    false\n}\n")
+            self.add_items(i, text, &sources)?
+            if own {
+                calls.push(String.from("__jihoo_run_test"))
+            } else {
+                let alias = "__jihoo_m" + i.to_string().as_str()
+                let span = Span.new(self.modules[root_idx as i64].ast.file, 0, 0)
+                self.modules[root_idx as i64].imports.push(ModImport {
+                    alias: alias.clone(),
+                    module: i as u32,
+                    public: false,
+                    span: span
+                })
+                calls.push(alias + ".__jihoo_run_test")
             }
         }
-        // The harness sees std.env as `__jihoo_env`.
+        // The entry sees std.env as `__jihoo_env`.
         var path = Vec(String).new()
         path.push(String.from("std"))
         path.push(String.from("env"))
@@ -300,21 +337,51 @@ impl Loader {
         text.push_str(
             "() -> i32 {\n    let __jihoo_args = __jihoo_env.args()\n    if __jihoo_args.len() != 2 { return 2 }\n    let __jihoo_name = __jihoo_args[1]\n"
         )
-        for n in names {
-            text.push_str("    if __jihoo_name == \"")
-            text.push_str(n.as_str())
-            text.push_str("\" {\n        ")
-            text.push_str(n.as_str())
-            text.push_str("()\n        return 0\n    }\n")
+        for c in calls {
+            text.push_str("    if ")
+            text.push_str(c.as_str())
+            text.push_str("(__jihoo_name) { return 0 }\n")
         }
         text.push_str("    2\n}\n")
+        self.add_items(root_idx as i64, text, &sources)?
+        Ok(names)
+    }
+
+    // Parses generated source into a module's items.
+    fn add_items(
+        inout self,
+        module: i64,
+        sink text: String,
+        inout sources: diag.Sources
+    ) -> Result((), Diag) {
         let file = sources.add(String.from("<tests>"), text)
         let toks = lex.lex(file, sources.files[file as i64].text.as_str())?
-        var harness = parse.parse_module(file, toks)?
-        for it in mem.take(&harness.items).into_iter() {
-            self.modules[root_idx as i64].ast.items.push(it)
+        var parsed = parse.parse_module(file, toks)?
+        for it in mem.take(&parsed.items).into_iter() {
+            self.modules[module].ast.items.push(it)
         }
-        Ok(names)
+        Ok(())
+    }
+
+    // The root module's name: `main`, or for a file of the standard library
+    // its module's, such as `std.map` for `std/map.x86_64.jh`, so that it
+    // sees the library's private items and is not loaded twice.
+    fn root_name(self, root: str) -> String {
+        let Some(file) = os.canonical(root) else { return String.from("main") }
+        for d in self.search {
+            let Some(dir) = os.canonical(os.join(d.as_str(), "std").as_str()) else { continue }
+            let prefix = dir + "/"
+            let f = file.as_str()
+            if !f.starts_with(prefix.as_str()) { continue }
+            var name = String.from("std.")
+            var i = prefix.len()
+            while i < f.len && f[i] != '.' {
+                name.push(if f[i] == '/' { '.' } else { f[i] })
+                i += 1
+            }
+            return name
+        }
+        String.from("main")
     }
 
     // Whether an item of a loaded module derives a trait.

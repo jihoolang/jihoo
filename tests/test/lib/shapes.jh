@@ -1,0 +1,21 @@
+// Imported by tests/test/modules.jh; its tests can call its private
+// functions.
+
+pub fn area(w: i64, h: i64) -> i64 {
+    w * checked(h)
+}
+
+fn checked(h: i64) -> i64 {
+    assert(h >= 0, "a negative height")
+    h
+}
+
+#[test]
+fn square() {
+    assert(area(3, 3) == 9, "3 by 3")
+}
+
+#[test]
+fn negative() {
+    assert(checked(-1) == -1, "never reached")
+}

@@ -54,7 +54,9 @@ the runner. Its suites:
   and Nix test derivation, not required by the installed compiler.
 - **test**: `jihoo test` runs every file in `tests/test/`, with the
   directives of `tests/run`: the expected output is the list of tests,
-  failures and the summary, and `// args:` holds `--` and names.
+  failures and the summary, and `// args:` holds `--` and names. Modules
+  they import are in `tests/test/lib`. Every file of `lib/std` with
+  `#[test]` functions must then pass `jihoo test`.
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message. `check` must return the
   same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.
@@ -87,6 +89,9 @@ shell with them:
 ```sh
 nix develop .#uefi -c jihoo run tests/runner.jh -- uefi
 ```
+
+Unit tests of the standard library are `#[test]` functions at the end of
+its files (`out/jihoo test lib/std/string.jh`).
 
 Add a `tests/run` program for every feature and every bug fixed, and a
 `tests/fail` one for every error the compiler should give, in particular

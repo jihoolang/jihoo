@@ -322,3 +322,33 @@ impl Default for String {
         String.new()
     }
 }
+
+// ---- tests (`jihoo test lib/std/string.jh`) ----
+
+#[test]
+fn push_grows() {
+    var s = String.new()
+    for _ in 0..100 {
+        s.push('a')
+    }
+    s.push_str("bc")
+    assert(s.len() == 102 && s.bytes.cap >= 102, "100 bytes and two more")
+    assert(s.as_str().ends_with("abc"), "ends with abc")
+}
+
+#[test]
+fn finds_and_splits() {
+    let s = "  a,bb,,c  "
+    assert(s.find(",") == Some(3), "first comma")
+    assert(s.find(";").is_none(), "no semicolon")
+    let parts = s.trim().split(",")
+    assert(parts.len() == 4 && parts[1] == "bb" && parts[2] == "", "four parts")
+}
+
+#[test]
+fn parses_ints() {
+    assert("42".parse_int() == Some(42), "42")
+    assert("-7".parse_int() == Some(-7), "-7")
+    assert("".parse_int().is_none(), "empty")
+    assert("4x".parse_int().is_none(), "4x")
+}

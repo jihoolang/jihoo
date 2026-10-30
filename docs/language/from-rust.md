@@ -80,9 +80,10 @@ if you know Rust, and check here when code that "should work" does not. The
 - No default or named arguments, no variadic functions except `extern fn`.
 - No `#[cfg(test)]`, test modules, `assert_eq!` or `#[should_panic]`.
   [`jihoo test f.jh`](../reference/command-line.md#tests) runs the
-  `#[test]` functions of `f.jh` itself, not of the modules it imports, each
-  in a process of its own, since a panic stops the whole process rather
-  than unwinding.
+  `#[test]` functions of `f.jh` and of the modules it imports outside the
+  standard library, each in a process of its own, since a panic stops the
+  whole process rather than unwinding. Tests sit next to the code they
+  test, private functions included.
 
 ## Ownership differences
 

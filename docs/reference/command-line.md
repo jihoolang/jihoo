@@ -169,7 +169,10 @@ fn adds() {
 `#[test]` marks a free function that takes no parameters and returns
 nothing. `jihoo test` builds the file with a harness in place of `main`
 (the file needs none, and its `main` does not run) and runs each test
-function of the file in a process of its own. A test passes when it
+function in a process of its own: the file's, then those of the modules
+it imports, directly or not, outside the standard library. Those are
+named with their module, as in `util.text.trims`, and may be private:
+each module calls its own. A test passes when it
 returns. It fails when it panics (`assert` included), traps or exits with
 another status, and only that test fails: the others still run. Output:
 
@@ -192,8 +195,10 @@ when it fails, followed by its exit status or signal. `jihoo test` exits
 with status 0 when every test chosen passed and 1 otherwise. Arguments
 after `--` choose the tests whose names contain one of them.
 
-Only the root file's tests run: `#[test]` functions of imported modules are
-checked and compiled like other functions, but not run. Tests run in
+The standard library's tests run when one of its files is the one given:
+`jihoo test lib/std/string.jh`. A file of the library given to any command
+is that module (`std.string`), with the access to the library's private
+items it has when imported. Tests run in
 native and freestanding programs; UEFI programs cannot run here. Elsewhere,
 `#[test]` functions are ordinary functions, checked by `check` and `build`.
 With `-o`, the test program is kept; given the name of a test as its one
