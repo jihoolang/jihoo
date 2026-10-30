@@ -242,6 +242,9 @@ pub enum Intrinsic {
     // `args()` support: the C `argc`/`argv` kept by `main`.
     Argc
     Argv
+    // `#![uefi]`: the image handle and system table `efi_main` was given.
+    EfiImage
+    EfiSystemTable
 }
 
 pub struct SwitchTarget {
@@ -346,7 +349,7 @@ pub struct Program {
     pub fns: Vec(Function)
     pub types: Types
     pub entry: Option(u32)
-    pub freestanding: bool
+    pub profile: target.Profile
     // Integer overflow traps (debug builds).
     pub checked: bool
     pub statics: Vec(StaticDef)
@@ -588,6 +591,8 @@ fn show_intrinsic(inout s: String, i: Intrinsic) {
         Fence => s.push_str("Fence")
         Argc => s.push_str("Argc")
         Argv => s.push_str("Argv")
+        EfiImage => s.push_str("EfiImage")
+        EfiSystemTable => s.push_str("EfiSystemTable")
     }
 }
 
@@ -791,6 +796,8 @@ impl Clone for Intrinsic {
             Fence => Intrinsic.Fence
             Argc => Intrinsic.Argc
             Argv => Intrinsic.Argv
+            EfiImage => Intrinsic.EfiImage
+            EfiSystemTable => Intrinsic.EfiSystemTable
         }
     }
 }

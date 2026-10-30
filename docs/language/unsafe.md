@@ -123,7 +123,10 @@ export fn scale(p: Point) -> Point {
 }
 ```
 
-The compiler uses the System V AMD64 ABI on x86_64 and AAPCS64 on aarch64.
+The compiler uses the System V AMD64 ABI on x86_64 and AAPCS64 on aarch64;
+[UEFI programs](profiles.md#uefi) on x86_64 use the Microsoft x64
+convention, where aggregates of 1, 2, 4 or 8 bytes go in one register,
+others and 128-bit integers by reference.
 It handles integer and floating-point register groups, homogeneous
 floating-point aggregates, stack arguments and indirect returns, including
 when earlier arguments have exhausted the available registers. `i128`

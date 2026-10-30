@@ -179,10 +179,10 @@ pub fn object(
     path: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     inout timer: timing.Timer
 ) -> Result((), String) {
-    unsafe { emit_objects(ir, path, false, opt, tgt, freestanding, &timer)? }
+    unsafe { emit_objects(ir, path, false, opt, tgt, profile, &timer)? }
     Ok(())
 }
 
@@ -194,10 +194,10 @@ pub fn objects(
     stem: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     inout timer: timing.Timer
 ) -> Result(Vec(String), String) {
-    unsafe { emit_objects(ir, stem, true, opt, tgt, freestanding, &timer) }
+    unsafe { emit_objects(ir, stem, true, opt, tgt, profile, &timer) }
 }
 
 // Instructions per code generation unit, and at most this many units. The
@@ -218,7 +218,7 @@ unsafe fn emit_objects(
     split: bool,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     inout timer: timing.Timer
 ) -> Result(Vec(String), String) {
     let lib = open_llvm()?
@@ -249,7 +249,7 @@ unsafe fn emit_objects(
     if msg != null { api.LLVMDisposeMessage(msg) }
     msg = null
     timer.lap("LLVM parse")
-    let triple = ffi.c_string(tgt.triple())?
+    let triple = ffi.c_string(tgt.triple_in(profile))?
     var llvm_target: *u8 = null
     if api.LLVMGetTargetFromTriple(triple.as_str().ptr, &llvm_target, &msg) != 0 {
         return Err("LLVM target: " + message(api, msg).as_str())
@@ -268,7 +268,8 @@ unsafe fn emit_objects(
     let pipeline = "default<" + opt[1..opt.len] + ">"
     run_passes(api, r.module, pipeline.as_str(), r.machine, level >= 2)?
     timer.lap("LLVM optimize")
-    if freestanding {
+    let sections = match profile { Freestanding => true, _ => false }
+    if sections {
         var f = api.LLVMGetFirstFunction(r.module)
         var i = 0
         while f != null {

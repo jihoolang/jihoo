@@ -103,7 +103,9 @@ jihoo run tests/runner.jh                    # the tests
 Version 0.4: the 0.1 rewrite, which broke compatibility with everything
 before it ([why](docs/internals/redesign.md)), with a self-hosted compiler
 and checking, diagnostic and formatting tools. Native (libc) and
-freestanding (no libc, static) programs for x86_64 and aarch64 Linux.
+freestanding (no libc, static) programs for x86_64 and aarch64 Linux, and
+[UEFI applications](docs/language/profiles.md#uefi) (PE32+ images) for
+both machines.
 
 The compiler uses its own threads: it elaborates, infers borrow effects and
 checks borrows one function per thread, the costliest first, and emits
@@ -188,7 +190,7 @@ Supported pipelines also run in the compile-time interpreter.
 
 LLVM 21's C API optimizes and emits objects directly, with loop and SLP
 vectorization at `-O2`/`-O3`. Native linking uses a C driver; freestanding
-linking uses lld. `JIHOO_BACKEND=clang` selects the previous backend for
+linking uses lld, and UEFI linking lld's COFF linker. `JIHOO_BACKEND=clang` selects the previous backend for
 comparison. [Backend benchmarks](docs/internals/testing.md#backend-performance)
 compare compilation time and generated program speed.
 [Compilation baselines](docs/internals/testing.md#compilation-time-and-memory)

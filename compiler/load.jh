@@ -10,6 +10,7 @@ import diag
 import lex
 import os
 import parse
+import target
 
 type Diag = diag.Diag
 type Span = diag.Span
@@ -43,7 +44,7 @@ pub struct Ast {
 struct Loader {
     search: Vec(String)
     target: String
-    // `native` or `freestanding`.
+    // `native`, `freestanding` or `uefi`.
     profile: String
     // By canonical path.
     by_path: Map(String, u32)
@@ -129,14 +130,9 @@ pub fn load_with(
 ) -> Result(Ast, Diag) {
     // The profile decides which files the standard library's modules come
     // from, so it is read from the root's attributes first.
-    var profile = "native"
-    match read(root, overlay) {
-        Ok(text) => {
-            if is_freestanding(text.as_str()) {
-                profile = "freestanding"
-            }
-        }
-        Err(_) => {}
+    let profile = match read(root, overlay) {
+        Ok(text) => profile_of(text.as_str())
+        Err(_) => "native"
     }
     var l = Loader {
         search: search,
@@ -196,19 +192,22 @@ pub fn load_with(
 
 // Read module attributes as tokens, just as the parser does. Whitespace
 // inside an attribute and leading block comments must not change profiles.
-fn is_freestanding(text: str) -> bool {
+fn profile_of(text: str) -> str {
     let tokens = match lex.lex(0, text) {
         Ok(t) => t
-        Err(_) => return false
+        Err(_) => return "native"
     }
     var i = 0
     while i + 3 < tokens.len() && tokens[i].tok == lex.Tok.HashBang {
         if tokens[i + 1].tok != lex.Tok.LBracket || tokens[i + 2].tok != lex.Tok.Ident ||
-            tokens[i + 3].tok != lex.Tok.RBracket { return false }
-        if tokens[i + 2].text == "freestanding" { return true }
+            tokens[i + 3].tok != lex.Tok.RBracket { return "native" }
+        match target.Profile.parse(tokens[i + 2].text.as_str()) {
+            Some(p) => return p.name()
+            None => {}
+        }
         i += 4
     }
-    false
+    "native"
 }
 
 impl Loader {

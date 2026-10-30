@@ -1,7 +1,9 @@
-// Linux C calling conventions for the types jihoo can represent.
+// C calling conventions for the types jihoo can represent.
 // SysV AMD64: classify eightbytes and roll back aggregate registers as a
 // unit. AAPCS64: preserve HFA groups and the alignment of integer groups.
-// Keep LLVM coercions separate from the language's memory layout.
+// Win64 (UEFI on x86_64): aggregates of 1, 2, 4 or 8 bytes in one integer,
+// others by reference. Keep LLVM coercions separate from the language's
+// memory layout.
 
 import types
 import target
@@ -21,7 +23,7 @@ pub enum Mode {
     Ignore
     Scalar
     Direct(Vec(Part))
-    // For arguments: SysV uses byval, AAPCS64 uses a caller-made copy.
+    // For arguments: SysV uses byval, AAPCS64 and Win64 a caller-made copy.
     Indirect
 }
 
@@ -32,6 +34,23 @@ impl Clone for Mode {
             Scalar => Mode.Scalar
             Direct(ps) => Mode.Direct(ps.clone())
             Indirect => Mode.Indirect
+        }
+    }
+}
+
+// The convention of a machine and profile. UEFI on aarch64 uses AAPCS64.
+pub enum Abi {
+    SysV
+    Aapcs64
+    Win64
+}
+
+pub fn abi(t: target.Target, p: target.Profile) -> Abi {
+    match t {
+        Aarch64 => Abi.Aapcs64
+        X86_64 => match p {
+            Uefi => Abi.Win64
+            _ => Abi.SysV
         }
     }
 }
@@ -58,21 +77,21 @@ pub fn indirect(m: Mode) -> bool { match m { Indirect => true, _ => false } }
 
 pub fn plan(
     inout ts: types.Types,
-    target: target.Target,
+    abi: Abi,
     sig: types.Sig,
     actual: Vec(u32)
 ) -> Plan {
     var regs = Regs { gp: 0, fp: 0 }
-    let ret = classify(&ts, target, sig.ret, true, &regs)
-    if indirect(ret) { match target { X86_64 => regs.gp = 1, _ => {} } }
+    let ret = classify(&ts, abi, sig.ret, true, &regs)
+    if indirect(ret) { match abi { SysV => regs.gp = 1, _ => {} } }
     var args = Vec(Mode).new()
-    for t in actual { args.push(classify(&ts, target, t, false, &regs)) }
+    for t in actual { args.push(classify(&ts, abi, t, false, &regs)) }
     Plan { ret: ret, args: args }
 }
 
 fn classify(
     inout ts: types.Types,
-    target: target.Target,
+    abi: Abi,
     t: u32,
     result: bool,
     inout regs: Regs
@@ -89,8 +108,17 @@ fn classify(
         }
         return Mode.Scalar
     }
-    match target {
-        Aarch64 => {
+    match abi {
+        // `i128` goes by reference and returns in XMM0, as clang's
+        // `__int128` and LLVM's 128-bit helpers (`__divti3`) do.
+        Win64 => {
+            if wide { return if result { one("<2 x i64>", 16) } else { Mode.Indirect } }
+            if l.size == 1 || l.size == 2 || l.size == 4 || l.size == 8 {
+                return one(("i" + fmt.n((l.size * 8) as i128)).as_str(), l.size)
+            }
+            Mode.Indirect
+        }
+        Aapcs64 => {
             if wide { return Mode.Scalar }
             let (bits, n) = hfa(ts, t)
             if bits > 0 && n > 0 && n <= 4 {
@@ -106,7 +134,7 @@ fn classify(
             if l.size <= 8 { return one("i64", 8) }
             one("[2 x i64]", 16)
         }
-        X86_64 => {
+        SysV => {
             if l.size > 16 { return Mode.Indirect }
             var slots = Vec(Eight).new()
             slots.push(Eight { integer: false, double: false, floats: 0 })

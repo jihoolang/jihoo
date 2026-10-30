@@ -30,6 +30,13 @@
 //   cross-compiled objects, link errors and a missing LLVM.
 // - selfhost: the compiler builds itself, and the compiler it builds writes
 //   the same LLVM IR, errors included, for every .jh file of the checkout.
+// - uefi: the programs of tests/uefi, and those of tests/run that need
+//   nothing UEFI lacks, built as `#![uefi]` programs for x86_64 and run in
+//   QEMU with OVMF and the UEFI shell, given JIHOO_QEMU (the
+//   qemu-system-x86_64 to use), JIHOO_OVMF (its firmware) and
+//   JIHOO_UEFI_SHELL (the shell's .efi), as `nix develop .#uefi` sets
+//   them; without them they are only built. Some are also built for
+//   aarch64.
 
 import std.env
 import std.fs
@@ -435,6 +442,9 @@ impl Tests {
 
     fn example_one(self, path: str) -> Result((), String) {
         let src = read_file(path)?
+        if src.as_str().starts_with("#![uefi]") {
+            return self.uefi_build(path, "x86_64", self.temp("example.efi").as_str())
+        }
         let exe = self.temp(stem(path))
         var a = Vec(str).new()
         a.push("build")
@@ -721,6 +731,187 @@ impl Tests {
         self.check("backend: missing LLVM", r)
     }
 
+    // ---- uefi ----
+
+    // `path` as a UEFI program for `target`, at `out`. A program of
+    // tests/run gets the attribute in a copy, which finds its modules with
+    // `-I`; C link inputs are compiled for the target first.
+    fn uefi_build(self, path: str, target: str, out: str) -> Result((), String) {
+        let src = read_file(path)?
+        var file = String.from(path)
+        var objs = Vec(String).new()
+        var a = Vec(str).new()
+        a.push("build")
+        a.push("-O1")
+        a.push("--target")
+        a.push(target)
+        var end = path.len
+        while end > 0 && path[end - 1] != '/' {
+            end -= 1
+        }
+        let dir = if end == 0 { "." } else { path[0..end] }
+        if !src.as_str().starts_with("#![uefi]") {
+            file = self.temp("uefi-" + stem(path) + ".jh")
+            write_file(file.as_str(), ("#![uefi]\n" + src.as_str()).as_str())?
+            a.push("-I")
+            a.push(dir)
+        }
+        a.push(file.as_str())
+        var inputs = Vec(str).new()
+        words(src.as_str(), "// link:", &inputs)
+        for c in inputs {
+            let obj = self.temp(stem(c) + "-" + target + ".obj")
+            let triple = target + "-unknown-windows"
+            let cc = match env.get("JIHOO_CC") {
+                Some(cc) => cc
+                None => "clang"
+            }
+            // The Nix wrapper's hardening flags (-fPIC) do not apply to
+            // Windows triples.
+            let o = exec(
+                "env",
+                ["NIX_HARDENING_ENABLE=", cc, "-target", triple.as_str(), "-ffreestanding",
+                    "-fno-stack-protector", "-O1", "-c", c, "-o", obj.as_str()]
+            )
+            if !o.status.success() {
+                return Err(
+                    c + " does not compile for " + triple.as_str() + ":\n" + o.stderr.as_str()
+                )
+            }
+            objs.push(obj)
+        }
+        for o in objs { a.push(o.as_str()) }
+        a.push("-o")
+        a.push(out)
+        let built = exec(self.compiler.as_str(), a.as_slice())
+        if !built.status.success() {
+            return Err("does not compile for " + target + ":\n" + built.stderr.as_str())
+        }
+        // a PE image for the machine: "MZ", the PE header's offset at 0x3c,
+        // "PE\0\0" and the machine, 0x8664 or 0xaa64
+        let b = match fs.read_bytes(out) {
+            Ok(b) => b
+            Err(e) => return Err("cannot read " + out + ": " + e.to_string().as_str())
+        }
+        let want: i64 = if target == "x86_64" { 0x8664 } else { 0xaa64 }
+        var pe: i64 = 0
+        if b.len() > 0x40 { pe = b[0x3c] as i64 | (b[0x3d] as i64) << 8 }
+        if b.len() < 0x40 || b[0] != 'M' || b[1] != 'Z' || pe + 6 > b.len() || b[pe] != 'P' ||
+            b[pe + 1] != 'E' || (b[pe + 4] as i64 | (b[pe + 5] as i64) << 8) != want {
+            return Err(out + " is not a PE image for " + target)
+        }
+        Ok(())
+    }
+
+    fn uefi(inout self) {
+        var files = Vec(String).new()
+        jh_files("tests/uefi", false, &files)
+        var run = Vec(String).new()
+        jh_files("tests/run", false, &run)
+        for f in run {
+            if runs_on_uefi(f.as_str()) { files.push(f.clone()) }
+        }
+        for f in ["tests/uefi/services.jh", "tests/run/ffi_aggregates.jh"] {
+            if self.selected(f) {
+                let r = self.uefi_build(f, "aarch64", self.temp("aarch64.efi").as_str())
+                self.check(("uefi: aarch64 " + f).as_str(), r)
+            }
+        }
+        let esp = self.temp("esp")
+        exec("mkdir", ["-p", (esp.as_str() + "/EFI/BOOT").as_str()])
+        // The shell runs startup.nsh: each program with its standard output
+        // and error in files, then its status, then it turns QEMU off.
+        var script = String.from("@echo -off\r\nfs0:\r\n")
+        var names = Vec(String).new()
+        var paths = Vec(String).new()
+        for f in files {
+            if !self.selected(f.as_str()) { continue }
+            let name = "t" + names.len().to_string().as_str()
+            let out = esp.as_str() + "/" + name.as_str() + ".efi"
+            match self.uefi_build(f.as_str(), "x86_64", out.as_str()) {
+                Ok(_) => {}
+                Err(e) => {
+                    self.check(("uefi: " + f.as_str()).as_str(), Err(e))
+                    continue
+                }
+            }
+            let n = name.as_str()
+            script.push_str(n + ".efi > " + n + ".out 2> " + n + ".err\r\n")
+            script.push_str("echo %lasterror% > " + n + ".st\r\n")
+            names.push(name)
+            paths.push(f.clone())
+        }
+        script.push_str("reset -s\r\n")
+        let qemu = env.get("JIHOO_QEMU")
+        let ovmf = env.get("JIHOO_OVMF")
+        let shell = env.get("JIHOO_UEFI_SHELL")
+        if qemu.is_none() || ovmf.is_none() || shell.is_none() || names.len() == 0 {
+            if names.len() > 0 {
+                eprintln(
+                    "uefi: built, not run: set JIHOO_QEMU, JIHOO_OVMF and JIHOO_UEFI_SHELL (nix develop .#uefi)"
+                )
+            }
+            return
+        }
+        let boot = esp.as_str() + "/EFI/BOOT/BOOTX64.EFI"
+        exec("cp", [shell.unwrap(), boot.as_str()])
+        let r = write_file((esp.as_str() + "/startup.nsh").as_str(), script.as_str())
+        self.check("uefi: startup.nsh", r)
+        let disk = "format=raw,file=fat:rw:" + esp.as_str()
+        let console = exec(
+            "timeout",
+            ["900", qemu.unwrap(), "-accel", "kvm", "-accel", "tcg", "-m", "512", "-nographic",
+                "-no-reboot", "-bios", ovmf.unwrap(), "-drive", disk.as_str(), "-net", "none"]
+        )
+        for i, name in names {
+            let r = self.uefi_result(
+                paths[i].as_str(),
+                (esp.as_str() + "/" + name.as_str()).as_str(),
+                console
+            )
+            self.check(("uefi: " + paths[i].as_str()).as_str(), r)
+        }
+    }
+
+    // What the program `path` wrote to `stem.out` and its status in
+    // `stem.st`, against its `//>` lines and `// exit:`.
+    fn uefi_result(self, path: str, stem: str, console: process.Output) -> Result((), String) {
+        let src = read_file(path)?
+        let lines = directives(src.as_str(), "//>")
+        var want = Vec(str).new()
+        for d in lines {
+            want.push(if d.starts_with(" ") { d[1..] } else { d })
+        }
+        var code: i64 = 0
+        let exits = directives(src.as_str(), "// exit:")
+        if exits.len() > 0 {
+            code = exits[0].trim().parse_int().unwrap()
+        }
+        let out = utf16_file((stem + ".out").as_str())
+        let st = utf16_file((stem + ".st").as_str())
+        if out.is_none() || st.is_none() {
+            let text = console.stdout.as_str()
+            let tail = if text.len > 4000 { text[text.len - 4000..] } else { text }
+            return Err("no result; the console showed:\n" + tail)
+        }
+        let out = out.unwrap()
+        let st = st.unwrap()
+        let got = out.as_str().lines()
+        let status = parse_hex(st.as_str().trim())
+        if !same(got, want) || status != code {
+            let err = match utf16_file((stem + ".err").as_str()) {
+                Some(e) => e
+                None => String.new()
+            }
+            return Err(
+                "expected (exit " + code.to_string().as_str() + "):\n" + join(want).as_str() +
+                    "\ngot (exit " + status.to_string().as_str() + "):\n" + join(got).as_str() +
+                    "\nstandard error:\n" + err.as_str()
+            )
+        }
+        Ok(())
+    }
+
     // ---- selfhost ----
 
     fn selfhost(inout self) {
@@ -770,6 +961,89 @@ impl Tests {
     }
 }
 
+// Whether a program of tests/run can run as a UEFI program: not those that
+// need files, processes, threads, arguments or dynamic libraries, nor the
+// variants for another profile.
+fn runs_on_uefi(path: str) -> bool {
+    let name = stem(path)
+    if name.ends_with("_freestanding") {
+        return false
+    }
+    for n in [
+        "buffered_utf8",
+        "channel_closed",
+        "channels",
+        "dirs",
+        "dyn_threads",
+        "ffi",
+        "freestanding",
+        "files_args",
+        "os_io",
+        "process",
+        "scoped_threads",
+        "sync",
+        "threads"
+    ] {
+        if name == n {
+            return false
+        }
+    }
+    true
+}
+
+// A text file the UEFI shell wrote: UTF-16LE after a byte order mark, as
+// UTF-8 without carriage returns.
+fn utf16_file(path: str) -> Option(String) {
+    let b = match fs.read_bytes(path) {
+        Ok(b) => b
+        Err(_) => return None
+    }
+    var s = String.new()
+    var i = 0
+    if b.len() >= 2 && b[0] == 0xff && b[1] == 0xfe {
+        i = 2
+    }
+    while i + 1 < b.len() {
+        let u = b[i] as u32 | (b[i + 1] as u32) << 8
+        i += 2
+        if u == 13 {
+            continue
+        }
+        if u < 0x80 {
+            s.push(u as u8)
+        } else if u < 0x800 {
+            s.push((0xc0 | u >> 6) as u8)
+            s.push((0x80 | u & 0x3f) as u8)
+        } else {
+            s.push((0xe0 | u >> 12) as u8)
+            s.push((0x80 | (u >> 6) & 0x3f) as u8)
+            s.push((0x80 | u & 0x3f) as u8)
+        }
+    }
+    Some(s)
+}
+
+// `0x1f` and the like, as the shell writes statuses; -1 for anything else.
+fn parse_hex(s: str) -> i64 {
+    if !s.starts_with("0x") || s.len < 3 {
+        return -1
+    }
+    var n: i64 = 0
+    for c in s[2..] {
+        let d = if c >= '0' && c <= '9' {
+            (c - '0') as i64
+        } else if c >= 'a' && c <= 'f' {
+            (c - 'a') as i64 + 10
+        } else if c >= 'A' && c <= 'F' {
+            (c - 'A') as i64 + 10
+        } else {
+            return -1
+        }
+        n = n * 16 + d
+    }
+    n
+}
+
 fn main() -> i32 {
     if !fs.read_file("compiler/main.jh").is_ok() {
         eprintln("run tests/runner.jh from the root of the checkout")
@@ -781,7 +1055,7 @@ fn main() -> i32 {
         suites.push(args[i])
     }
     if suites.len() == 0 {
-        for s in ["format", "check", "run", "fail", "examples", "backend", "selfhost"] {
+        for s in ["format", "check", "run", "fail", "examples", "backend", "selfhost", "uefi"] {
             suites.push(s)
         }
     }
@@ -830,6 +1104,7 @@ fn main() -> i32 {
                 r
             )
             t.suite_files("tests/run", "check")
+            t.suite_files("tests/uefi", "check")
             t.suite_files("examples", "check")
         } else if s == "run" {
             t.suite_files("tests/run", "run")
@@ -841,8 +1116,10 @@ fn main() -> i32 {
             t.backend()
         } else if s == "selfhost" {
             t.selfhost()
+        } else if s == "uefi" {
+            t.uefi()
         } else {
-            eprintln("unknown suite " + s + "; the suites are format, check, run, fail, examples, backend and selfhost")
+            eprintln("unknown suite " + s + "; the suites are format, check, run, fail, examples, backend, selfhost and uefi")
             return 2
         }
     }

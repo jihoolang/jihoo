@@ -1,0 +1,7 @@
+// The firmware's tables exist only in UEFI programs.
+// error: `efi_system_table()` needs `#![uefi]`
+
+fn main() {
+    let st = efi_system_table()
+    println(st == null)
+}

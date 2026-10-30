@@ -400,7 +400,7 @@ pub struct Sema {
     pub profile_comptime: bool
     pub evaluations: Vec(interp.Report)
     pub lang: Lang
-    pub freestanding: bool
+    pub profile: target.Profile
     pub target: target.Target
     pub checked: bool
     lambda_count: u32
@@ -434,10 +434,14 @@ fn no_span() -> Span {
 
 impl Sema {
     pub fn new(a: load.Ast, tgt: target.Target, checked: bool) -> Sema {
-        var freestanding = false
+        var profile = target.Profile.Native
         for at in a.modules[a.root as i64].ast.attrs {
-            if at == "freestanding" {
-                freestanding = true
+            match target.Profile.parse(at.as_str()) {
+                Some(p) => {
+                    profile = p
+                    break
+                }
+                None => {}
             }
         }
         Sema {
@@ -481,7 +485,7 @@ impl Sema {
                 dyn_box: None,
                 dyn_drop: None
             }
-            freestanding: freestanding
+            profile: profile
             target: tgt
             checked: checked
             lambda_count: 0
@@ -2109,10 +2113,12 @@ impl Sema {
         self.fn_self_ty(fid, &env)?
         let decl = at(self.fns[fid as i64].decl)
         let module = self.fns[fid as i64].module
-        // std.rt's i128 arithmetic helpers implement LLVM's libcall ABI.
+        // std.rt's i128 arithmetic helpers implement LLVM's libcall ABI,
+        // which is the internal one on Linux and the C one on Win64.
+        let uefi = match self.profile { Uefi => true, _ => false }
         let c_signature = match decl.kind {
             Normal => false
-            Export => self.module_name(module) != "std.rt"
+            Export => uefi || self.module_name(module) != "std.rt"
             Extern => true
         }
         for p in decl.params {
@@ -3275,7 +3281,7 @@ fn compile_inner(
         fns: mem.replace(&s.out, Vec(mir.Function).new())
         types: mem.replace(&s.types, Types.new())
         entry: entry
-        freestanding: s.freestanding
+        profile: s.profile
         checked: checked
         statics: statics
         drop_impls: drop_impls

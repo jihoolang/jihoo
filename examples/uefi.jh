@@ -1,0 +1,28 @@
+#![uefi]
+// A UEFI application: the firmware starts it, before any operating system.
+// `#![uefi]` makes the program a PE image whose entry point the compiler
+// writes; the standard library prints to the firmware's console and
+// allocates from its memory pool, and `std.uefi` reaches the rest of the
+// firmware's services. The same code builds for aarch64 (`--target`).
+//   jihoo build examples/uefi.jh             # uefi.efi
+//   mkdir -p esp/EFI/BOOT && cp uefi.efi esp/EFI/BOOT/BOOTX64.EFI
+//   qemu-system-x86_64 -bios OVMF.fd -drive format=raw,file=fat:rw:esp
+
+import std.uefi
+
+fn main() {
+    let st = uefi.system_table()
+    let revision = unsafe { st.hdr.revision }
+    println("Hello from jihoo, UEFI " + (revision >> 16).to_string().as_str() + "." +
+        ((revision & 0xffff) / 10).to_string().as_str())
+    var squares = Vec(i64).new()
+    for i in 1..11 {
+        squares.push(i * i)
+    }
+    var sum = 0
+    for x in squares {
+        sum += x
+    }
+    println(sum)
+    uefi.stall(500000)
+}

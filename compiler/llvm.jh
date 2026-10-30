@@ -249,12 +249,18 @@ impl Gen {
     }
 
     fn emit(inout self) -> String {
-        let triple = self.p.target.triple()
+        let triple = self.p.target.triple_in(self.p.profile)
         var head = String.from("; jihoo\n")
         head.push_str(fmt.f("target triple = \"{}\"\n\n", [triple]).as_str())
         self.globals.push_str(
             "@jihoo.argc = internal global i64 0\n@jihoo.argv = internal global ptr null\n"
         )
+        match self.p.profile {
+            Uefi => self.globals.push_str(
+                "@jihoo.efi.image = internal global ptr null\n@jihoo.efi.system_table = internal global ptr null\n"
+            )
+            _ => {}
+        }
         for i in 0..self.p.statics.len() {
             let name = self.p.statics[i].symbol.clone()
             let t = self.p.statics[i].ty
@@ -313,7 +319,11 @@ impl Gen {
         }
     }
 
-    // ---- Linux C ABI ----
+    // ---- C ABI ----
+
+    fn abi(self) -> cabi.Abi {
+        cabi.abi(self.p.target, self.p.profile)
+    }
 
     fn c_result_ty(self, t: u32, mode: cabi.Mode, attrs: bool) -> String {
         match mode {
@@ -344,8 +354,8 @@ impl Gen {
             }
             Indirect => {
                 var ty = String.from("ptr")
-                match self.p.target {
-                    X86_64 => if attrs {
+                match self.abi() {
+                    SysV => if attrs {
                         let size = self.size(t)
                         let align = self.align(t)
                         ty = fmt.f(
@@ -432,7 +442,7 @@ impl Gen {
 
     fn c_function(inout self, f: u32) {
         let sig = self.p.fns[f as i64].sig.clone()
-        let plan = cabi.plan(&self.p.types, self.p.target, sig, sig.params)
+        let plan = cabi.plan(&self.p.types, self.abi(), sig, sig.params)
         let rty = self.c_result_ty(sig.ret, plan.ret, true)
         var params = Vec(String).new()
         let sret = cabi.indirect(plan.ret)
@@ -517,7 +527,7 @@ impl Gen {
 
     fn c_return(inout self, inout cx: FnCx, f: u32) {
         let sig = self.p.fns[f as i64].sig.clone()
-        let plan = cabi.plan(&self.p.types, self.p.target, sig, Vec(u32).new())
+        let plan = cabi.plan(&self.p.types, self.abi(), sig, Vec(u32).new())
         let ptr = cx.locals[0].clone()
         let ty = self.c_result_ty(sig.ret, plan.ret, false)
         match plan.ret {
@@ -566,7 +576,7 @@ impl Gen {
         for i, o in args { actual.push(
             if i < sig.params.len() { sig.params[i] } else { self.operand_ty(body, o) }
         ) }
-        let plan = cabi.plan(&self.p.types, self.p.target, sig, actual)
+        let plan = cabi.plan(&self.p.types, self.abi(), sig, actual)
         var values = Vec(String).new()
         var fixed = Vec(String).new()
         if cabi.indirect(plan.ret) {
@@ -590,11 +600,11 @@ impl Gen {
                 _ => {
                     let size = self.size(t)
                     let align = self.align(t)
-                    // AArch64's indirect storage belongs to the callee.
+                    // AAPCS64's and Win64's indirect storage belongs to the callee.
                     // SysV byval also promises at least eight-byte source
                     // alignment, even for a naturally byte-aligned struct.
                     let copy = cabi.indirect(mode) &&
-                        match self.p.target { Aarch64 => true, X86_64 => align < 8 }
+                        match self.abi() { SysV => align < 8, _ => true }
                     let slot_align = if copy && align < 8 { 8 as u64 } else { align }
                     var ptr: Option(String) = if copy { None } else { mem_of(v) }
                     if ptr.is_none() {
@@ -2120,7 +2130,7 @@ impl Gen {
         }
         match i {
             Trap => {
-                cx.line(trap_call(self.p.target))
+                cx.line(self.trap_call())
                 cx.line("unreachable")
                 let id = cx.id()
                 cx.block((id.as_str() + ".dead").as_str())
@@ -2194,6 +2204,16 @@ impl Gen {
             Argv => {
                 let r = cx.t()
                 cx.line(fmt.f("{} = load ptr, ptr @jihoo.argv", [r.as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            EfiImage => {
+                let r = cx.t()
+                cx.line(fmt.f("{} = load ptr, ptr @jihoo.efi.image", [r.as_str()]).as_str())
+                self.store_scalar(&cx, dt, r.as_str(), dptr)
+            }
+            EfiSystemTable => {
+                let r = cx.t()
+                cx.line(fmt.f("{} = load ptr, ptr @jihoo.efi.system_table", [r.as_str()]).as_str())
                 self.store_scalar(&cx, dt, r.as_str(), dptr)
             }
             AtomicLoad(t) => {
@@ -2334,30 +2354,65 @@ impl Gen {
             }
             call.push_str(fmt.f("  {}\n", [conv.as_str()]).as_str())
         }
-        if self.p.freestanding {
-            // `_start`: the stack holds argc, then argv.
-            self.out.push_str(fmt.f("module asm \"{}\"\n\n", [start_asm(self.p.target)]).as_str())
-            let (exit_asm, cons) = syscall_asm(self.p.target, 2)
-            let exit_no = match self.p.target {
-                X86_64 => "231"
-                Aarch64 => "94"
-            }
-            self.out.push_str(fmt.f(
-                "define void @jihoo.start(ptr %sp) {\nentry:\n  %argc = load i64, ptr %sp\n  store i64 %argc, ptr @jihoo.argc\n  %argv = getelementptr i8, ptr %sp, i64 8\n  store ptr %argv, ptr @jihoo.argv\n{}  %c64 = sext i32 %code to i64\n  %x = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 %c64)\n  unreachable\n}\n\n",
-                [call.as_str(), exit_asm.as_str(), cons.as_str(), exit_no]
-            ).as_str())
-            self.out.push_str(MEM_FUNCTIONS)
-        } else {
-            self.out.push_str(fmt.f(
+        match self.p.profile {
+            Native => self.out.push_str(fmt.f(
                 "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  %a = sext i32 %argc to i64\n  store i64 %a, ptr @jihoo.argc\n  store ptr %argv, ptr @jihoo.argv\n{}  ret i32 %code\n}\n\n",
                 [call.as_str()]
             ).as_str())
+            Freestanding => self.freestanding_start(call.as_str())
+            Uefi => self.uefi_main(call.as_str())
+        }
+    }
+
+    fn freestanding_start(inout self, call: str) {
+        // `_start`: the stack holds argc, then argv.
+        self.out.push_str(fmt.f("module asm \"{}\"\n\n", [start_asm(self.p.target)]).as_str())
+        let (exit_asm, cons) = syscall_asm(self.p.target, 2)
+        let exit_no = match self.p.target {
+            X86_64 => "231"
+            Aarch64 => "94"
+        }
+        self.out.push_str(fmt.f(
+            "define void @jihoo.start(ptr %sp) {\nentry:\n  %argc = load i64, ptr %sp\n  store i64 %argc, ptr @jihoo.argc\n  %argv = getelementptr i8, ptr %sp, i64 8\n  store ptr %argv, ptr @jihoo.argv\n{}  %c64 = sext i32 %code to i64\n  %x = call i64 asm sideeffect \"{}\", \"{}\"(i64 {}, i64 %c64)\n  unreachable\n}\n\n",
+            [call, exit_asm.as_str(), cons.as_str(), exit_no]
+        ).as_str())
+        self.out.push_str(MEM_FUNCTIONS)
+    }
+
+    // `efi_main(image, system_table)`, where the firmware starts the
+    // image: it keeps both for `efi_image()` and `efi_system_table()`,
+    // calls main and returns its exit status as an EFI status, 0 for 0 and
+    // otherwise the code with the error bit set. Without a C runtime, the
+    // module also defines the memory functions, `__chkstk` (Windows
+    // conventions probe the stack of large frames) and `_fltused`.
+    fn uefi_main(inout self, call: str) {
+        self.out.push_str(fmt.f("module asm \"{}\"\n\n", [chkstk_asm(self.p.target)]).as_str())
+        self.out.push_str(fmt.f(
+            "define i64 @efi_main(ptr %image, ptr %table) {\nentry:\n  store ptr %image, ptr @jihoo.efi.image\n  store ptr %table, ptr @jihoo.efi.system_table\n{}  %c64 = zext i32 %code to i64\n  %err = or i64 %c64, {}\n  %failed = icmp ne i32 %code, 0\n  %status = select i1 %failed, i64 %err, i64 0\n  ret i64 %status\n}\n\n@_fltused = weak global i32 0\n\n",
+            [call, EFI_ERROR]
+        ).as_str())
+        self.out.push_str(MEM_FUNCTIONS)
+    }
+
+    // How a trap stops the program: UEFI firmware would halt on the
+    // invalid instruction, so a UEFI program exits with status 132 instead.
+    fn trap_call(self) -> str {
+        match self.p.profile {
+            Uefi => "call void @jihoo.efi.exit(i64 -9223372036854775676)"
+            _ => trap_call(self.p.target)
         }
     }
 
     // `jihoo.panic(msg, len)`: writes the message to standard error and
     // stops. Uses the system call directly, so it works without libc.
     fn runtime(inout self) {
+        match self.p.profile {
+            Uefi => {
+                self.uefi_runtime()
+                return
+            }
+            _ => {}
+        }
         let (wasm, wcons) = syscall_asm(self.p.target, 4)
         let (prefix, plen) = self.str_global("panic: ")
         let (nl, _) = self.str_global("\n")
@@ -2385,6 +2440,25 @@ impl Gen {
                 trap_call(self.p.target)
             ]
         ).as_str())
+        self.declare_runtime()
+    }
+
+    // `jihoo.panic` writes to the firmware's standard error console (or its
+    // output console), a byte at a time: ASCII as it is, `?` for other
+    // characters, a line break as CR LF. `jihoo.efi.exit(status)` ends the
+    // image with the boot services' `Exit`.
+    fn uefi_runtime(inout self) {
+        let (prefix, plen) = self.str_global("panic: ")
+        let (nl, _) = self.str_global("\n")
+        self.out.push_str(fmt.f(
+            "define internal void @jihoo.panic(ptr %m, i64 %n) cold noreturn {\nentry:\n  call void @jihoo.efi.write(ptr {}, i64 {})\n  call void @jihoo.efi.write(ptr %m, i64 %n)\n  call void @jihoo.efi.write(ptr {}, i64 1)\n  {}\n  unreachable\n}\n\n",
+            [prefix.as_str(), fmt.n(plen as i128).as_str(), nl.as_str(), self.trap_call()]
+        ).as_str())
+        self.out.push_str(UEFI_RUNTIME)
+        self.declare_runtime()
+    }
+
+    fn declare_runtime(inout self) {
         self.declare(
             "llvm.memcpy.p0.p0.i64",
             "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)"
@@ -2471,6 +2545,25 @@ fn start_asm(t: Target) -> str {
         Aarch64 => ".globl _start\\0A_start:\\0A  mov x29, #0\\0A  mov x30, #0\\0A  mov x0, sp\\0A  bl jihoo.start\\0A  brk #0\\0A.globl jihoo_clone\\0Ajihoo_clone:\\0A  and x1, x1, #-16\\0A  stp x5, x4, [x1, #-16]!\\0A  mov x4, x3\\0A  mov x3, xzr\\0A  mov x8, #220\\0A  svc #0\\0A  cbnz x0, 1f\\0A  mov x29, xzr\\0A  mov x30, xzr\\0A  ldp x0, x1, [sp], #16\\0A  blr x1\\0A  mov x0, xzr\\0A  mov x8, #93\\0A  svc #0\\0A  brk #0\\0A1:\\0A  ret\\0A"
     }
 }
+
+// The error bit of an EFI status.
+const EFI_ERROR = "-9223372036854775808"
+
+// `__chkstk`, which Windows conventions call before a frame of more than a
+// page to touch each of its pages in order: on x86_64 with the size in rax,
+// on aarch64 with the size / 16 in x15 (compiler-rt's).
+fn chkstk_asm(t: Target) -> str {
+    match t {
+        X86_64 => ".globl __chkstk\\0A__chkstk:\\0A  push %rcx\\0A  push %rax\\0A  cmp $0x1000, %rax\\0A  lea 24(%rsp), %rcx\\0A  jb 1f\\0A2:\\0A  sub $0x1000, %rcx\\0A  test %rcx, (%rcx)\\0A  sub $0x1000, %rax\\0A  cmp $0x1000, %rax\\0A  ja 2b\\0A1:\\0A  sub %rax, %rcx\\0A  test %rcx, (%rcx)\\0A  pop %rax\\0A  pop %rcx\\0A  ret\\0A"
+        Aarch64 => ".globl __chkstk\\0A__chkstk:\\0A  lsl x16, x15, #4\\0A  mov x17, sp\\0A1:\\0A  sub x17, x17, #4096\\0A  subs x16, x16, #4096\\0A  ldr xzr, [x17]\\0A  b.gt 1b\\0A  ret\\0A"
+    }
+}
+
+// `jihoo.efi.write(bytes, n)` and `jihoo.efi.exit(status)` (see
+// `uefi_runtime`). The offsets are those of the UEFI system table (ConOut
+// 64, StdErr 80, BootServices 96), the text output protocol (OutputString
+// 8) and the boot services (Exit 216).
+const UEFI_RUNTIME = "define internal void @jihoo.efi.write(ptr %m, i64 %n) cold {\nentry:\n  %buf = alloca [3 x i16], align 2\n  %st = load ptr, ptr @jihoo.efi.system_table\n  %nost = icmp eq ptr %st, null\n  br i1 %nost, label %done, label %find\nfind:\n  %errp = getelementptr i8, ptr %st, i64 80\n  %err = load ptr, ptr %errp\n  %outp = getelementptr i8, ptr %st, i64 64\n  %out0 = load ptr, ptr %outp\n  %noerr = icmp eq ptr %err, null\n  %out = select i1 %noerr, ptr %out0, ptr %err\n  %fp = getelementptr i8, ptr %out, i64 8\n  %f = load ptr, ptr %fp\n  br label %head\nhead:\n  %i = phi i64 [ 0, %find ], [ %i1, %next ]\n  %more = icmp ult i64 %i, %n\n  br i1 %more, label %body, label %done\nbody:\n  %bp = getelementptr i8, ptr %m, i64 %i\n  %b = load i8, ptr %bp\n  %top = and i8 %b, -64\n  %cont = icmp eq i8 %top, -128\n  br i1 %cont, label %next, label %show\nshow:\n  %ascii = icmp sge i8 %b, 0\n  %bw = zext i8 %b to i16\n  %c = select i1 %ascii, i16 %bw, i16 63\n  %nl = icmp eq i8 %b, 10\n  %c0 = select i1 %nl, i16 13, i16 %c\n  %c1 = select i1 %nl, i16 10, i16 0\n  store i16 %c0, ptr %buf\n  %p1 = getelementptr i16, ptr %buf, i64 1\n  store i16 %c1, ptr %p1\n  %p2 = getelementptr i16, ptr %buf, i64 2\n  store i16 0, ptr %p2\n  %r = call i64 %f(ptr %out, ptr %buf)\n  br label %next\nnext:\n  %i1 = add i64 %i, 1\n  br label %head\ndone:\n  ret void\n}\n\ndefine internal void @jihoo.efi.exit(i64 %status) cold noreturn {\nentry:\n  %st = load ptr, ptr @jihoo.efi.system_table\n  %bsp = getelementptr i8, ptr %st, i64 96\n  %bs = load ptr, ptr %bsp\n  %fp = getelementptr i8, ptr %bs, i64 216\n  %f = load ptr, ptr %fp\n  %image = load ptr, ptr @jihoo.efi.image\n  %r = call i64 %f(ptr %image, i64 %status, i64 0, ptr null)\n  call void @llvm.trap()\n  unreachable\n}\n\n"
 
 // Without libc, LLVM's calls to `memcpy` and friends need definitions;
 // "no-builtins" keeps LLVM from turning their loops back into calls.

@@ -231,3 +231,22 @@ patterns see through it.
 | `std.libc` | C library declarations (native programs) |
 | `std.ffi` | native Linux `Library.open`/`symbol` (unsafe), `c_string`, `copy_c_string` (unsafe), and C integer aliases; see [C interoperation](../language/unsafe.md#shared-libraries-and-c-strings) |
 | `std.sysno` | Linux system call numbers for the target |
+| `std.uefi` | UEFI programs: the firmware's tables and common services ([UEFI](#uefi)) |
+
+## UEFI
+
+`std.uefi`, for [UEFI programs](../language/profiles.md#uefi), describes
+what the firmware gives a program, following the UEFI specification for
+64-bit machines:
+
+| | |
+|---|---|
+| `Handle`, `Status`, `Guid` | `*u8`, `u64`, and protocol GUIDs |
+| `SUCCESS`, `ERROR`, `LOAD_ERROR` ... `ABORTED`, `is_error(s)` | statuses; `ERROR` is the high bit every error status has |
+| `SystemTable`, `BootServices`, `RuntimeServices`, `TextInput`, `TextOutput`, `ConfigurationTable`, `MemoryDescriptor`, `Time`, `InputKey` | the tables, with `fnptr` fields for the services programs commonly call and `*u8` for the others |
+| `image()`, `system_table()`, `boot_services()`, `runtime_services()` | this program's handle and the firmware's tables |
+| `output(out, s)`, `ucs2(s)` | write a `str` to a text console, without allocating; a `str` as a UCS-2 string ending with a zero |
+| `stall(us)`, `disable_watchdog()`, `read_key()` | wait, turn off the five-minute watchdog, wait for a key |
+| `reset(kind, status)`, `exit(status)` | reset the machine (`RESET_COLD`, `RESET_WARM`, `RESET_SHUTDOWN`), end the program with a status |
+
+A service is called through its table: `(*uefi.boot_services()).stall(10)`.

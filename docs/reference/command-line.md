@@ -34,7 +34,7 @@ once the program has none.
 |--------|---|
 | `-O0` … `-O3` | LLVM optimization (default `-O2`) |
 | `--release` | integer overflow wraps instead of trapping |
-| `--target x86_64\|aarch64` | the machine to compile for (Linux) |
+| `--target x86_64\|aarch64` | the machine to compile for (Linux, or UEFI for a `#![uefi]` program) |
 | `-I <dir>` | also look for modules in `<dir>` |
 | `-o <file>` | the output |
 | `--keep-ll` | keep the LLVM IR next to the output |
@@ -339,7 +339,7 @@ and `exit`, and 1 when its input ends or `exit` comes first.
 |----------|---|
 | `JIHOO_LLVM` | path to LLVM 21's shared library; otherwise search `libLLVM-21.so`, `libLLVM.so.21.1`, `libLLVM.so` |
 | `JIHOO_CC` | native linker driver and compiler for C source inputs (default `cc` on the host, `clang` for cross compilation) |
-| `JIHOO_LD` | freestanding linker (default `ld.lld`) |
+| `JIHOO_LD` | freestanding and UEFI linker (default `ld.lld`; UEFI images use its COFF linker, `-flavor link`) |
 | `JIHOO_BACKEND` | `llvm` (default), or `clang` for comparison with the previous backend |
 | `JIHOO_CODEGEN_UNITS` | the number of code generation units for `build` and `run`, instead of one per 20,000 LLVM instructions (at most 8) |
 | `JIHOO_PATH` | more directories to find modules in, separated by `:` |
@@ -363,7 +363,11 @@ that uses them. `emit-obj` always writes a single object.
 
 Native objects are linked by `JIHOO_CC`, including libc startup code, libm
 and libdl. Freestanding objects are linked directly with `JIHOO_LD`,
-statically, with unused function sections removed. `emit-obj` needs only
+statically, with unused function sections removed. UEFI programs are COFF
+objects that `JIHOO_LD -flavor link` links into an EFI application
+(`/subsystem:efi_application /entry:efi_main`); `build` names the image
+`<file>.efi` unless `-o` says otherwise, and `JIHOO_BACKEND=clang` does not
+build them. `emit-obj` needs only
 libLLVM and can cross-compile without a linker or target libc. Native
 cross linking additionally needs a suitable linker driver and target
 libraries; a GCC cross driver supplied in `JIHOO_CC` selects its own target.

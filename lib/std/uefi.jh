@@ -1,0 +1,303 @@
+// UEFI: the tables the firmware gives a `#![uefi]` program, and the
+// services in them that programs commonly call. Pointers to firmware data
+// are raw, and so is using them; the functions here wrap the common calls.
+//
+// The layouts follow the UEFI specification for 64-bit machines (`UINTN`
+// is `u64`). Services this module does not use are `*u8`; cast one to
+// the `fnptr` type the specification gives it to call it.
+
+import std.utf8
+
+pub type Handle = *u8
+pub type Status = u64
+
+pub const SUCCESS: Status = 0
+// The high bit, set in every error status.
+pub const ERROR: Status = 0x8000000000000000
+pub const LOAD_ERROR: Status = ERROR | 1
+pub const INVALID_PARAMETER: Status = ERROR | 2
+pub const UNSUPPORTED: Status = ERROR | 3
+pub const BUFFER_TOO_SMALL: Status = ERROR | 5
+pub const NOT_READY: Status = ERROR | 6
+pub const OUT_OF_RESOURCES: Status = ERROR | 9
+pub const NOT_FOUND: Status = ERROR | 14
+pub const ABORTED: Status = ERROR | 21
+
+pub fn is_error(s: Status) -> bool {
+    s & ERROR != 0
+}
+
+pub struct Guid {
+    pub a: u32
+    pub b: u16
+    pub c: u16
+    pub d: [u8; 8]
+}
+
+pub struct TableHeader {
+    pub signature: u64
+    pub revision: u32
+    pub header_size: u32
+    pub crc32: u32
+    pub reserved: u32
+}
+
+pub struct SystemTable {
+    pub hdr: TableHeader
+    pub firmware_vendor: *u16
+    pub firmware_revision: u32
+    pub console_in_handle: Handle
+    pub con_in: *TextInput
+    pub console_out_handle: Handle
+    pub con_out: *TextOutput
+    pub standard_error_handle: Handle
+    pub std_err: *TextOutput
+    pub runtime_services: *RuntimeServices
+    pub boot_services: *BootServices
+    pub number_of_table_entries: u64
+    pub configuration_table: *ConfigurationTable
+}
+
+pub struct ConfigurationTable {
+    pub vendor_guid: Guid
+    pub vendor_table: *u8
+}
+
+pub struct InputKey {
+    pub scan_code: u16
+    pub unicode_char: u16
+}
+
+// EFI_SIMPLE_TEXT_INPUT_PROTOCOL
+pub struct TextInput {
+    pub reset: fnptr(*TextInput, bool) -> Status
+    pub read_key_stroke: fnptr(*TextInput, *InputKey) -> Status
+    // an event: `wait_for_event` waits for a key with it
+    pub wait_for_key: *u8
+}
+
+// EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL. Strings are UCS-2 and end with a zero.
+pub struct TextOutput {
+    pub reset: fnptr(*TextOutput, bool) -> Status
+    pub output_string: fnptr(*TextOutput, *u16) -> Status
+    pub test_string: fnptr(*TextOutput, *u16) -> Status
+    pub query_mode: fnptr(*TextOutput, u64, *u64, *u64) -> Status
+    pub set_mode: fnptr(*TextOutput, u64) -> Status
+    pub set_attribute: fnptr(*TextOutput, u64) -> Status
+    pub clear_screen: fnptr(*TextOutput) -> Status
+    pub set_cursor_position: fnptr(*TextOutput, u64, u64) -> Status
+    pub enable_cursor: fnptr(*TextOutput, bool) -> Status
+    pub mode: *u8
+}
+
+// EFI_MEMORY_TYPE
+pub const LOADER_DATA: u32 = 2
+
+// EFI_RESET_TYPE
+pub const RESET_COLD: u32 = 0
+pub const RESET_WARM: u32 = 1
+pub const RESET_SHUTDOWN: u32 = 2
+
+pub struct MemoryDescriptor {
+    pub kind: u32
+    pub physical_start: u64
+    pub virtual_start: u64
+    pub number_of_pages: u64
+    pub attribute: u64
+}
+
+pub struct BootServices {
+    pub hdr: TableHeader
+    pub raise_tpl: *u8
+    pub restore_tpl: *u8
+    // (type, memory type, pages, address)
+    pub allocate_pages: fnptr(u32, u32, u64, *u64) -> Status
+    pub free_pages: fnptr(u64, u64) -> Status
+    // (map size, map, map key, descriptor size, descriptor version)
+    pub get_memory_map: fnptr(*u64, *MemoryDescriptor, *u64, *u64, *u32) -> Status
+    pub allocate_pool: fnptr(u32, u64, **u8) -> Status
+    pub free_pool: fnptr(*u8) -> Status
+    pub create_event: *u8
+    pub set_timer: *u8
+    // (number of events, events, index)
+    pub wait_for_event: fnptr(u64, **u8, *u64) -> Status
+    pub signal_event: *u8
+    pub close_event: *u8
+    pub check_event: *u8
+    pub install_protocol_interface: *u8
+    pub reinstall_protocol_interface: *u8
+    pub uninstall_protocol_interface: *u8
+    pub handle_protocol: fnptr(Handle, *Guid, **u8) -> Status
+    pub reserved: *u8
+    pub register_protocol_notify: *u8
+    pub locate_handle: *u8
+    pub locate_device_path: *u8
+    pub install_configuration_table: *u8
+    pub load_image: *u8
+    pub start_image: *u8
+    // (image, status, size of exit data, exit data)
+    pub exit: fnptr(Handle, Status, u64, *u16) -> Status
+    pub unload_image: *u8
+    pub exit_boot_services: fnptr(Handle, u64) -> Status
+    pub get_next_monotonic_count: *u8
+    // (microseconds)
+    pub stall: fnptr(u64) -> Status
+    // (seconds, code, size of data, data)
+    pub set_watchdog_timer: fnptr(u64, u64, u64, *u16) -> Status
+    pub connect_controller: *u8
+    pub disconnect_controller: *u8
+    pub open_protocol: *u8
+    pub close_protocol: *u8
+    pub open_protocol_information: *u8
+    pub protocols_per_handle: *u8
+    pub locate_handle_buffer: *u8
+    // (protocol, registration, interface)
+    pub locate_protocol: fnptr(*Guid, *u8, **u8) -> Status
+    pub install_multiple_protocol_interfaces: *u8
+    pub uninstall_multiple_protocol_interfaces: *u8
+    pub calculate_crc32: *u8
+    pub copy_mem: *u8
+    pub set_mem: *u8
+    pub create_event_ex: *u8
+}
+
+pub struct Time {
+    pub year: u16
+    pub month: u8
+    pub day: u8
+    pub hour: u8
+    pub minute: u8
+    pub second: u8
+    pub pad1: u8
+    pub nanosecond: u32
+    pub time_zone: i16
+    pub daylight: u8
+    pub pad2: u8
+}
+
+pub struct RuntimeServices {
+    pub hdr: TableHeader
+    // (time, capabilities)
+    pub get_time: fnptr(*Time, *u8) -> Status
+    pub set_time: *u8
+    pub get_wakeup_time: *u8
+    pub set_wakeup_time: *u8
+    pub set_virtual_address_map: *u8
+    pub convert_pointer: *u8
+    pub get_variable: *u8
+    pub get_next_variable_name: *u8
+    pub set_variable: *u8
+    pub get_next_high_monotonic_count: *u8
+    // (reset type, status, size of data, data)
+    pub reset_system: fnptr(u32, Status, u64, *u8) -> ()
+    pub update_capsule: *u8
+    pub query_capsule_capabilities: *u8
+    pub query_variable_info: *u8
+}
+
+// The handle of this program's image.
+pub fn image() -> Handle {
+    efi_image()
+}
+
+pub fn system_table() -> *SystemTable {
+    efi_system_table() as *SystemTable
+}
+
+pub fn boot_services() -> *BootServices {
+    unsafe { system_table().boot_services }
+}
+
+pub fn runtime_services() -> *RuntimeServices {
+    unsafe { system_table().runtime_services }
+}
+
+// `s` as a UCS-2 string ending with a zero, for the firmware. A line break
+// becomes CR LF, as consoles need; a character outside the Basic
+// Multilingual Plane, or a byte that is not UTF-8, becomes U+FFFD.
+pub fn ucs2(s: str) -> Vec(u16) {
+    var out = Vec(u16).with_capacity(s.len + 1)
+    var at = 0
+    while at < s.len {
+        let (c, width) = unit_at(s, at)
+        if c == 10 { out.push(13) }
+        out.push(c)
+        at += width
+    }
+    out.push(0)
+    out
+}
+
+// The UCS-2 unit for the character at `at`, and the character's width.
+fn unit_at(s: str, at: i64) -> (u16, i64) {
+    let b = s[at]
+    if b < 0x80 { return (b as u16, 1) }
+    match utf8.decode(s, at) {
+        Ok((c, w)) => (if c < 0x10000 { c as u16 } else { 0xfffd }, w)
+        Err(_) => (0xfffd, 1)
+    }
+}
+
+// Writes `s` to a text console, converted as `ucs2` does, a piece at a
+// time without allocating; the firmware's status (the last error).
+pub fn output(out: *TextOutput, s: str) -> Status {
+    if out == null { return UNSUPPORTED }
+    var buf: [u16; 128] = [0; 128]
+    var n = 0
+    var at = 0
+    var status = SUCCESS
+    while at < s.len {
+        let (c, width) = unit_at(s, at)
+        if c == 10 {
+            buf[n] = 13
+            n += 1
+        }
+        buf[n] = c
+        n += 1
+        at += width
+        if n >= 126 || at >= s.len {
+            buf[n] = 0
+            let r = unsafe { (*out).output_string(out, &buf[0]) }
+            if is_error(r) { status = r }
+            n = 0
+        }
+    }
+    status
+}
+
+// Waits `us` microseconds.
+pub fn stall(us: u64) {
+    unsafe { (*boot_services()).stall(us) }
+}
+
+// Turns off the firmware's watchdog, which otherwise restarts the machine
+// five minutes after the boot manager started this program.
+pub fn disable_watchdog() {
+    unsafe { (*boot_services()).set_watchdog_timer(0, 0, 0, null) }
+}
+
+// Waits for a key and reads it.
+pub fn read_key() -> InputKey {
+    var key = InputKey { scan_code: 0, unicode_char: 0 }
+    unsafe {
+        let input = system_table().con_in
+        var event = input.wait_for_key
+        var index: u64 = 0
+        while (*input).read_key_stroke(input, &key) == NOT_READY {
+            (*boot_services()).wait_for_event(1, &event, &index)
+        }
+    }
+    key
+}
+
+// Resets the machine: `RESET_COLD`, `RESET_WARM` or `RESET_SHUTDOWN`.
+pub fn reset(kind: u32, status: Status) -> never {
+    unsafe { (*runtime_services()).reset_system(kind, status, 0, null) }
+    trap()
+}
+
+// Ends this program with `status`, as returning it from `main` would.
+pub fn exit(status: Status) -> never {
+    unsafe { (*boot_services()).exit(image(), status, 0, null) }
+    trap()
+}

@@ -28,6 +28,7 @@ fn main() {
 
 `import a` prefers, in order, `a.<target>.<profile>.jh`,
 `a.<profile>.jh`, `a.<target>.jh` and `a.jh`, where the target is `x86_64`
-or `aarch64` and the profile `native` or `freestanding`
+or `aarch64` and the profile `native`, `freestanding` or `uefi`
 ([Profiles](profiles.md)). This is how `std.sys` talks to libc in one
-profile and to the kernel in the other, with one interface.
+profile, to the kernel in another and to firmware in the third, with one
+interface.

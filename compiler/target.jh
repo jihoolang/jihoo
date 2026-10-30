@@ -1,4 +1,4 @@
-// The machines jihoo compiles for.
+// The machines jihoo compiles for, and what a program runs on there.
 
 import host
 
@@ -34,6 +34,58 @@ impl Target {
         match self {
             X86_64 => "x86_64-unknown-linux-gnu"
             Aarch64 => "aarch64-unknown-linux-gnu"
+        }
+    }
+
+    // The LLVM triple of a program of `profile`: UEFI applications are
+    // PE/COFF images with the Windows calling convention.
+    pub fn triple_in(self, profile: Profile) -> str {
+        match profile {
+            Uefi => match self {
+                X86_64 => "x86_64-unknown-windows"
+                Aarch64 => "aarch64-unknown-windows"
+            }
+            _ => self.triple()
+        }
+    }
+}
+
+// What a program runs on, chosen by its root file's attributes: Linux with
+// the C library, Linux through system calls (`#![freestanding]`), or UEFI
+// firmware (`#![uefi]`).
+pub enum Profile {
+    Native
+    Freestanding
+    Uefi
+}
+
+impl Profile {
+    // The attribute that selects a profile, which is also the suffix of its
+    // files (`std/sys.uefi.jh`).
+    pub fn parse(s: str) -> Option(Profile) {
+        if s == "freestanding" {
+            Some(Profile.Freestanding)
+        } else if s == "uefi" {
+            Some(Profile.Uefi)
+        } else {
+            None
+        }
+    }
+
+    pub fn name(self) -> str {
+        match self {
+            Native => "native"
+            Freestanding => "freestanding"
+            Uefi => "uefi"
+        }
+    }
+
+    // Without the C library: the compiler writes the entry point and the
+    // memory functions.
+    pub fn bare(self) -> bool {
+        match self {
+            Native => false
+            _ => true
         }
     }
 }

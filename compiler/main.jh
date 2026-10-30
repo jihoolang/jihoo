@@ -34,7 +34,7 @@ import timing
 // the package version.
 const VERSION = "0.4.0"
 
-const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux)\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
+const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux, or UEFI with #![uefi])\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -294,14 +294,14 @@ fn drive() {
             None => print(ll)
         }
     } else if cmd == "emit-obj" {
-        let freestanding = prog.freestanding
+        let profile = prog.profile
         let ll = llvm.emit(prog)
         timer.lap("IR generation")
         let output = match out {
             Some(o) => String.from(o)
             None => with_extension(file_stem(file), "o")
         }
-        match backend.object(ll.as_str(), output.as_str(), opt, tgt, freestanding, &timer) {
+        match backend.object(ll.as_str(), output.as_str(), opt, tgt, profile, &timer) {
             Ok(_) => {}
             Err(e) => {
                 report_times(timer, time_passes)
@@ -310,7 +310,14 @@ fn drive() {
         }
         report_times(timer, time_passes)
     } else if cmd == "build" || cmd == "run" {
-        let freestanding = prog.freestanding
+        let profile = prog.profile
+        let uefi = match profile { Uefi => true, _ => false }
+        if uefi && cmd == "run" {
+            failure(
+                diag.Kind.Usage,
+                "a UEFI program runs in firmware, not here; build it and boot the .efi file"
+            )
+        }
         let ll = llvm.emit(prog)
         // Nothing refers to the syntax trees any more; LLVM can use their
         // memory.
@@ -322,6 +329,7 @@ fn drive() {
             None => {
                 if cmd == "build" {
                     exe = String.from(file_stem(file))
+                    if uefi { exe.push_str(".efi") }
                 } else {
                     exe = os.join(os.temp_dir().as_str(), ("jihoo-run-" +
                         fmt.n(os.pid() as i128).as_str()).as_str())
@@ -333,7 +341,7 @@ fn drive() {
             exe.as_str(),
             opt,
             tgt,
-            freestanding,
+            profile,
             link,
             keep_ll,
             &timer
@@ -400,7 +408,7 @@ fn link_exe(
     exe: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     link: Vec(str),
     keep: bool,
     inout timer: timing.Timer
@@ -410,10 +418,15 @@ fn link_exe(
         None => "llvm"
     }
     if selected == "llvm" {
-        return link_object(ll, exe, opt, tgt, freestanding, link, keep, &timer)
+        return link_object(ll, exe, opt, tgt, profile, link, keep, &timer)
     }
     if selected != "clang" {
         return Err(String.from("unknown JIHOO_BACKEND; use llvm or clang"))
+    }
+    let freestanding = match profile {
+        Native => false
+        Freestanding => true
+        Uefi => return Err(String.from("JIHOO_BACKEND=clang does not build UEFI programs"))
     }
     var ll_path = String.new()
     if keep {
@@ -492,7 +505,7 @@ fn link_object(
     exe: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     link: Vec(str),
     keep: bool,
     inout timer: timing.Timer
@@ -507,8 +520,8 @@ fn link_object(
     let name = "jihoo-" + fmt.n(os.pid() as i128).as_str() + "-" +
         exe[name_start(exe)..exe.len] + "."
     let stem = os.join(os.temp_dir().as_str(), name.as_str())
-    let objs = backend.objects(ll, stem.as_str(), opt, tgt, freestanding, &timer)?
-    let r = link_objects(objs, exe, opt, tgt, freestanding, link)
+    let objs = backend.objects(ll, stem.as_str(), opt, tgt, profile, &timer)?
+    let r = link_objects(objs, exe, opt, tgt, profile, link)
     for o in objs {
         os.remove(o.as_str())
     }
@@ -521,9 +534,11 @@ fn link_objects(
     exe: str,
     opt: str,
     tgt: target.Target,
-    freestanding: bool,
+    profile: target.Profile,
     link: Vec(str)
 ) -> Result((), String) {
+    let freestanding = profile.bare()
+    let uefi = match profile { Uefi => true, _ => false }
     let driver = if freestanding {
         match env.get("JIHOO_LD") {
             Some(s) => s
@@ -535,8 +550,18 @@ fn link_objects(
             None => if tgt.name() == target.Target.host().name() { "cc" } else { "clang" }
         }
     }
+    let out = "/out:" + exe
     var c = Vec(str).new()
-    if freestanding {
+    if uefi {
+        // lld's COFF linker, which `ld.lld` also is with `-flavor link`
+        c.push("-flavor")
+        c.push("link")
+        c.push("/subsystem:efi_application")
+        c.push("/entry:efi_main")
+        c.push("/nodefaultlib")
+        c.push("/opt:ref")
+        c.push(match tgt { X86_64 => "/machine:x64", Aarch64 => "/machine:arm64" })
+    } else if freestanding {
         c.push("-m")
         c.push(match tgt { X86_64 => "elf_x86_64", Aarch64 => "aarch64linux" })
         c.push("-static")
@@ -557,8 +582,12 @@ fn link_objects(
         c.push("-lm")
         c.push("-ldl")
     }
-    c.push("-o")
-    c.push(exe)
+    if uefi {
+        c.push(out.as_str())
+    } else {
+        c.push("-o")
+        c.push(exe)
+    }
     let o = match process.output(driver, c.as_slice()) {
         Ok(o) => o
         Err(e) => {

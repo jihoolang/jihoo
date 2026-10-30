@@ -11,7 +11,7 @@ module, once optimized whole, is emitted in up to eight units on separate
 threads, each reading the optimized bitcode into its own LLVM context and
 keeping its run of functions ([Command line](../reference/command-line.md#environment)). Native linking uses
 a C driver for libc startup files; freestanding linking calls `ld.lld`
-directly. The compiler needs no LLVM headers or C++ shim to build.
+directly, and UEFI linking its COFF linker (`-flavor link`). The compiler needs no LLVM headers or C++ shim to build.
 `JIHOO_BACKEND=clang` retains the previous pipeline for comparisons.
 
 The compiler is written in jihoo, in `compiler/`, and a released build of
@@ -142,7 +142,13 @@ large part becomes a compile error and not a dangling pointer.
 
 The C `main` stores `argc` and `argv` and calls the program's `main`; a
 freestanding program gets a `_start` in module-level assembly, and
-definitions of `memcpy`, `memmove`, `memset` and `memcmp`.
+definitions of `memcpy`, `memmove`, `memset` and `memcmp`. A UEFI program
+(triple `x86_64-unknown-windows` or `aarch64-unknown-windows`, so a COFF
+object with the Windows calling convention) gets `efi_main`, the same
+memory functions, `__chkstk` in module-level assembly, and a `jihoo.panic`
+and traps that write to the firmware's console and end the image through
+the boot services' `Exit`. `cabi.jh` classifies C arguments for System V,
+AAPCS64 and Win64.
 
 ## Written to be ported
 

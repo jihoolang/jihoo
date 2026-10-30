@@ -1,0 +1,68 @@
+#![uefi]
+// The firmware's tables and services through std.uefi, a call with stack
+// arguments, the allocator's alignment, and frames larger than a page,
+// which call `__chkstk`.
+
+import std.uefi
+
+//> true
+//> true
+//> true
+//> true
+//> to the console
+//> true
+//> true
+//> true
+//> 396
+//> 15
+
+struct Wide {
+    tag: u8
+    x: u128
+}
+
+// Each frame holds more than four pages.
+fn deep(n: i64) -> i64 {
+    var buf: [u8; 20000] = [0; 20000]
+    buf[n] = n as u8
+    buf[19999] = 1
+    if n == 0 {
+        return buf[19999] as i64 - 1
+    }
+    deep(n - 1) + buf[n] as i64
+}
+
+fn main() {
+    let st = uefi.system_table()
+    unsafe {
+        // "IBI SYST", "BOOTSERV", "RUNTSERV"
+        println(st.hdr.signature == 0x5453595320494249)
+        println(st.boot_services.hdr.signature == 0x56524553544f4f42)
+        println(st.runtime_services.hdr.signature == 0x56524553544e5552)
+    }
+    println(uefi.image() != null)
+    unsafe { uefi.output(st.con_out, "to the console\n") }
+    uefi.stall(1000)
+
+    // five arguments: the fifth goes on the stack
+    var size: u64 = 0
+    var key: u64 = 0
+    var desc: u64 = 0
+    var version: u32 = 0
+    let s = unsafe {
+        (*uefi.boot_services()).get_memory_map(&size, null, &key, &desc, &version)
+    }
+    println(s == uefi.BUFFER_TOO_SMALL && size > 0)
+
+    var t = unsafe { zeroed(uefi.Time) }
+    let s = unsafe { (*uefi.runtime_services()).get_time(&t, null) }
+    println(s == uefi.SUCCESS && t.year >= 2024 && t.month >= 1 && t.month <= 12)
+
+    var v = Vec(Wide).new()
+    for i in 0..100 {
+        v.push(Wide { tag: i as u8, x: (i as u128) << 100 })
+    }
+    println((&v[0] as u64) % 16 == 0)
+    println(v[99].x / (1 as u128 << 98))
+    println(deep(5))
+}

@@ -458,6 +458,25 @@ The repository no longer has experimental directories:
   and the evaluator speedups. Whether any of it belongs in the standard
   library is decided once it has a stable interface.
 
+### 6. UEFI applications (0.4.1)
+
+Done ([profiles](../language/profiles.md#uefi)): a third profile,
+`#![uefi]`, for programs that firmware starts.
+
+- PE32+ images for x86_64 and aarch64: COFF objects with the Windows
+  calling convention, linked by lld's COFF linker, with `efi_main`,
+  `__chkstk` and the memory functions written by the compiler.
+- The Microsoft x64 C ABI in `cabi.jh`, checked against clang with the
+  aggregate C oracle.
+- `std.sys` on the boot services (consoles and memory pools), and
+  `std.uefi` for the firmware's tables.
+- The uefi test suite runs the programs of `tests/uefi` and most of
+  `tests/run` under OVMF in QEMU.
+
+Left: files (the simple file system protocol), program arguments from the
+loaded image's options, and calling a service through a field of a raw
+pointer without `(*p)`.
+
 ## Verification boundaries and deferred features
 
 - **Proofs and checked generation**: jihoo-proofs checks general theorems

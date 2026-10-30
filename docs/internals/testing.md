@@ -66,8 +66,24 @@ the runner. Its suites:
   builds writes the same `emit-llvm` output, errors included, for every
   `.jh` file in the checkout on both targets
   ([Self-hosting](self-hosting.md)).
+- **uefi**: the programs of `tests/uefi`, and those of `tests/run` that need
+  nothing UEFI lacks (files, processes, threads, arguments, dynamic
+  libraries), are built as `#![uefi]` programs for x86_64, with their C link
+  inputs compiled by clang for `x86_64-unknown-windows`, and checked to be
+  PE images for the machine; some are also built for aarch64. Given
+  `JIHOO_QEMU`, `JIHOO_OVMF` and `JIHOO_UEFI_SHELL`, one QEMU boot runs
+  them all: the UEFI shell runs a `startup.nsh` that writes each program's
+  standard output, standard error and `%lasterror%` to files, and the
+  runner compares them with the `//>` lines and `// exit:`. Without those
+  variables the programs are only built.
 
-`nix flake check` runs every suite with the installed compiler.
+`nix flake check` runs every suite with the installed compiler; on x86_64
+it sets the UEFI variables. In a checkout, `nix develop .#uefi` is the dev
+shell with them:
+
+```sh
+nix develop .#uefi -c jihoo run tests/runner.jh -- uefi
+```
 
 Add a `tests/run` program for every feature and every bug fixed, and a
 `tests/fail` one for every error the compiler should give, in particular
@@ -99,8 +115,24 @@ qemu-aarch64 /tmp/ffi-arm
 ```
 
 `compiler/cabi.jh` implements the classification described by the
-[AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex)
-and [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst).
+[AMD64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex),
+[AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)
+and, for UEFI on x86_64, the
+[Microsoft x64 convention](https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention);
+the uefi suite runs `ffi_aggregates.jh` against the C oracle compiled for
+Windows.
+
+A UEFI program for aarch64 runs in `qemu-system-aarch64 -M virt` with
+ARM firmware, such as the `edk2-aarch64-code.fd` that QEMU ships, whose
+internal shell runs `startup.nsh` from the first FAT disk:
+
+```sh
+out/jihoo build --target aarch64 examples/uefi.jh -o esp/uefi.efi
+printf 'fs0:\r\nuefi.efi\r\nreset -s\r\n' > esp/startup.nsh
+qemu-system-aarch64 -M virt -cpu max -nographic \
+  -bios $QEMU/share/qemu/edk2-aarch64-code.fd \
+  -drive format=raw,file=fat:rw:esp,if=virtio
+```
 The C oracle exercises mixed register classes, homogeneous aggregates,
 register exhaustion and rollback, stack alignment, independent argument
 copies, callbacks, dynamic symbols, and variadic promotions and aggregates.

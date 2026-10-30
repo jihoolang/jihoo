@@ -41,6 +41,14 @@
         platforms = lib.platforms.linux;
       };
 
+      # What the uefi suite of tests/runner.jh runs UEFI programs with: QEMU,
+      # OVMF and the UEFI shell, for x86_64 programs on x86_64 machines.
+      uefiTestEnv = pkgs: lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+        JIHOO_QEMU = "${pkgs.qemu_test}/bin/qemu-system-x86_64";
+        JIHOO_OVMF = "${pkgs.OVMF.fd}/FV/OVMF.fd";
+        JIHOO_UEFI_SHELL = "${pkgs.edk2-uefi-shell}/shell.efi";
+      };
+
       # LLVM's C API optimizes IR and emits objects in process. Keep the
       # shared library at major version 21, as checked by both backends.
       llvmFor = pkgs: pkgs.llvmPackages_21;
@@ -160,8 +168,9 @@
         {
           # tests/runner.jh, built and run by the installed compiler, tests
           # it: the programs of tests/run, tests/fail and examples, the
-          # backend, and that it builds a compiler that writes the same IR.
-          tests = pkgs.stdenv.mkDerivation {
+          # backend, that it builds a compiler that writes the same IR, and
+          # UEFI programs in QEMU.
+          tests = pkgs.stdenv.mkDerivation ({
             pname = "jihoo-tests";
             inherit version src;
             nativeBuildInputs = [ jihoo llvm.clang llvm.lld pkgs.python3 ];
@@ -171,7 +180,7 @@
               jihoo run tests/runner.jh
             '';
             installPhase = "touch $out";
-          };
+          } // uefiTestEnv pkgs);
 
           toolchain = pkgs.runCommand "jihoo-toolchain-check" { nativeBuildInputs = [ jihoo ]; } ''
             cp ${./examples}/*.jh .
@@ -189,9 +198,9 @@
         });
 
       devShells = forAllSystems (pkgs:
-        let llvm = llvmFor pkgs; in
-        {
-          default = pkgs.mkShell {
+        let
+          llvm = llvmFor pkgs;
+          shell = {
             nativeBuildInputs = [
               # `jihoo`: the seed, which builds compiler/
               self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo-seed
@@ -208,6 +217,13 @@
               export JIHOO_PATH=$PWD/lib
             '';
           };
+        in
+        {
+          default = pkgs.mkShell shell;
+
+          # The default shell with QEMU, OVMF and the UEFI shell, which the
+          # uefi suite of tests/runner.jh runs UEFI programs with (x86_64).
+          uefi = pkgs.mkShell (shell // uefiTestEnv pkgs);
 
           # For working on the website in site/.
           site = pkgs.mkShell { packages = [ pkgs.nodejs ]; };

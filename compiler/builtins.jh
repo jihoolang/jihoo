@@ -386,6 +386,16 @@ impl sema.Sema {
                 span
             )?))
         }
+        if n == "efi_image" || n == "efi_system_table" {
+            arity(args, 0, n, span)?
+            match self.profile {
+                Uefi => {}
+                _ => return Err(Diag.new(span, ("`" + n + "()` needs `#![uefi]`").as_str()))
+            }
+            let i = if n == "efi_image" { Intrinsic.EfiImage } else { Intrinsic.EfiSystemTable }
+            let pu8 = self.types.ptr(types.U8)
+            return Ok(Some(self.emit_call(&fb, Callee.Intrinsic(i), no_ops(), pu8, span)?))
+        }
         if n == "atomic_load" || n == "atomic_store" || n == "atomic_swap" ||
             n == "atomic_add" || n == "atomic_sub" || n == "atomic_and" || n == "atomic_or" ||
             n == "atomic_xor" || n == "atomic_cas" {
