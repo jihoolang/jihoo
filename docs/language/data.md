@@ -64,7 +64,7 @@ match shape {
 ```
 
 Patterns are `_`, names, literals (integers, bytes, strings, `true`),
-ranges `1..=9`, alternatives `A | B` (which may not bind names), tuples,
+ranges `1..=9`, alternatives `A | B` (each binding the same names), tuples,
 variants `Some(x)`, and structs `Point { x, y: 0.0 }` or `Point { x, .. }`.
 Patterns see through `Box`: `Add(Num(a), b)`.
 

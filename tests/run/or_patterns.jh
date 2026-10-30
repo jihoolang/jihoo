@@ -1,0 +1,146 @@
+// `|` patterns whose alternatives bind the same names.
+
+enum Shape {
+    Circle(i64)
+    Square(i64)
+    Rect(i64, i64)
+    Dot
+}
+
+enum Msg {
+    Text(String)
+    Shout(String)
+    Quit
+}
+
+struct Named {
+    name: String
+    n: i64
+}
+
+fn size(s: Shape) -> i64 {
+    match s {
+        Circle(r) | Square(r) => r
+        Rect(w, _) | Rect(_, w) if w > 100 => w
+        Rect(w, h) => w * h
+        Dot => 0
+    }
+}
+
+// Borrowed parts: `t` is a borrow of the scrutinee in either alternative.
+fn text_len(m: Msg) -> i64 {
+    match m {
+        Text(t) | Shout(t) => t.len()
+        Quit => -1
+    }
+}
+
+// Owned parts with destructors move out of a new value.
+fn make(i: i64) -> Msg {
+    if i == 0 {
+        Msg.Text(String.from("hello"))
+    } else if i == 1 {
+        Msg.Shout(String.from("HEY"))
+    } else {
+        Msg.Quit
+    }
+}
+
+fn take(i: i64) -> String {
+    match make(i) {
+        Text(t) | Shout(t) => t
+        Quit => String.from("quit")
+    }
+}
+
+// Nested: the `|` is inside a tuple and next to other bindings.
+fn pick(p: (Option(i64), Option(i64)), k: i64) -> i64 {
+    match p {
+        (Some(x), None) | (None, Some(x)) => x + k
+        (Some(a), Some(b)) => a + b
+        (None, None) => k
+    }
+}
+
+fn first_name(v: Vec(Named)) -> String {
+    match v.len() {
+        0 => String.from("-")
+        _ => match v[0] {
+            Named { name: s, n: 0 } | Named { name: s, n: 1 } => s.clone()
+            Named { name: _, n } => {
+                var out = String.from("#")
+                n.show(&out)
+                out
+            }
+        }
+    }
+}
+
+// `let` with alternatives that cover every value.
+fn either(r: Result(i64, i64)) -> i64 {
+    let Ok(x) | Err(x) = r
+    x
+}
+
+fn mutable(r: Result(i64, i64)) -> i64 {
+    match r {
+        Ok(var x) | Err(var x) => {
+            x += 1
+            x
+        }
+    }
+}
+
+fn main() {
+    println(size(Shape.Circle(3)))
+    println(size(Shape.Square(4)))
+    println(size(Shape.Rect(2, 5)))
+    println(size(Shape.Rect(2, 500)))
+    println(size(Shape.Dot))
+    println(text_len(Msg.Text(String.from("abc"))))
+    println(text_len(Msg.Shout(String.from("abcde"))))
+    println(text_len(Msg.Quit))
+    for i in 0..3 {
+        println(take(i))
+    }
+    println(pick((Some(1), None), 10))
+    println(pick((None, Some(2)), 10))
+    println(pick((Some(3), Some(4)), 10))
+    println(pick((None, None), 10))
+    var v = Vec(Named).new()
+    v.push(Named { name: String.from("ann"), n: 1 })
+    println(first_name(v))
+    v[0].n = 7
+    println(first_name(v))
+    println(either(Ok(5)))
+    println(either(Err(6)))
+    println(mutable(Err(41)))
+    // A variant with a destructor matched by a variable: it is used up.
+    let m = make(1)
+    match m {
+        Text(t) | Shout(t) => println(t)
+        Quit => {}
+    }
+}
+
+//> 3
+//> 4
+//> 10
+//> 500
+//> 0
+//> 3
+//> 5
+//> -1
+//> hello
+//> HEY
+//> quit
+//> 11
+//> 12
+//> 7
+//> 10
+//> ann
+//> #7
+//> 5
+//> 6
+//> 42
+//> HEY

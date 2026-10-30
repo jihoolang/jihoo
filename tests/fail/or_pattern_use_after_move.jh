@@ -1,0 +1,17 @@
+// A `|` arm that moves a part uses the variable up.
+// error: `m` is used here after it was moved away
+
+enum Msg {
+    Text(String)
+    Shout(String)
+}
+fn eat(sink s: String) {}
+fn main() {
+    let m = Msg.Text(String.from("a"))
+    match m {
+        Text(t) | Shout(t) => eat(t)
+    }
+    match m {
+        Text(t) | Shout(t) => println(t)
+    }
+}

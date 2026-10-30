@@ -1,0 +1,9 @@
+// The alternatives of a `|` pattern bind the same names.
+// error: `y` is not bound in the first alternative
+
+fn f(r: Result(i64, i64)) -> i64 {
+    match r {
+        Ok(x) | Err(y) => 0
+    }
+}
+fn main() { println(f(Ok(1))) }

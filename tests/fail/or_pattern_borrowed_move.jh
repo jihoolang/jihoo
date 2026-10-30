@@ -1,0 +1,13 @@
+// Alternatives on a borrowed value bind borrows, which cannot move out.
+// error: cannot move `t`
+
+enum Msg {
+    Text(String)
+    Shout(String)
+}
+fn f(m: Msg) -> String {
+    match m {
+        Text(t) | Shout(t) => t
+    }
+}
+fn main() { println(f(Msg.Text(String.from("a")))) }

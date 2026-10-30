@@ -129,7 +129,10 @@ Rust struct with a lifetime parameter, without the annotation
   distinction by case: `Eq =>` matches the variant `Eq` if `Tok` has one.
 - Variants are written alone when the type is known (`Circle(r)`), or as
   `Shape.Circle(r)`; `Some`, `None`, `Ok` and `Err` always work alone.
-- `A(x) | B(x)` is an error: alternatives cannot bind names.
+- `A(x) | B(x)` binds `x` from whichever alternative matches, as in Rust;
+  every alternative binds the same names with the same types, and a name
+  is `var` in all of them or in none. With a guard, `A(x) | B(x) if x > 0`
+  tries the guard for each alternative that matches.
 - A `match` arm's body may be a statement: `Run(c) => c += 1`. Arms are
   separated by newlines or commas.
 - `match &x` lets the arms change what they bind. A plain `match x` on a

@@ -269,8 +269,9 @@ memory, not with any one feature.
    and returning a borrowing closure; `dyn fn` is unchanged.
 2. Patterns and `match` as expressions. Three gaps push programs toward
    flags and clones:
-   - `A(x) | B(x)` is rejected ("cannot bind names yet"). Alternatives
-     should bind the same names with the same types and conventions.
+   - Done: `A(x) | B(x)` binds the same names in every alternative, with
+     the same types and `var`-ness, in `match` arms (guards included) and
+     in `let` (`tests/run/or_patterns.jh`, `tests/fail/or_pattern_*`).
    - `let t = match o { Some(t) => t, None => return 0 }` fails when `o`
      is borrowed, because the arm tries to move `t`. When every arm gives a
      part of the matched place, the `match` should be a view of that

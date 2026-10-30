@@ -231,4 +231,6 @@ lit      = [ "-" ] integer | char
   or a slice, leaves out its end.)
 - A single name is a variant if the matched type has a variant of that name
   without payload (`Stop`, `None`); otherwise it binds.
-- `A | B` alternatives cannot bind names.
+- The alternatives of `A | B` bind the same names, with the same types
+  and `var`-ness; the first that matches binds them. A `|` may also
+  appear inside other patterns: `(Some(x), None) | (None, Some(x))`.

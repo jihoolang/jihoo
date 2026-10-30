@@ -241,36 +241,22 @@ impl sema.Sema {
         let done = fb.new_block()
         for arm in arms {
             let fail = fb.new_block()
-            self.test_pat(&fb, arm.pat, place.clone(), ty, fail)?
-            fb.push_scope(false)
-            match arm.guard {
-                Some(g) => {
-                    // The guard sees borrows; owned bindings move after it holds.
-                    let gmode = if mode == BindMode.Owned { BindMode.Borrow } else { mode }
-                    fb.push_scope(false)
-                    self.bind(&fb, arm.pat, place.clone(), ty, gmode)?
-                    let gv = self.expr(&fb, g, Some(types.BOOL))?
-                    let gv = self.coerce(&fb, gv, types.BOOL, g.span)?
-                    let go = self.operand(&fb, gv, g.span)?
-                    let c = fb.new_local(types.BOOL, None, true, mir.LocalKind.Temp, g.span)
-                    fb.assign(Place.local(c), Rvalue.Use(go), g.span)
-                    let pass = fb.new_block()
-                    let reject = fb.new_block()
-                    self.pop_scope(&fb)
-                    var ts = Vec(mir.SwitchTarget).new()
-                    ts.push(mir.SwitchTarget { value: 0, block: reject })
-                    fb.term(Term.Switch(Operand.Copy(Place.local(c)), ts, pass))
-                    fb.switch_to(reject)
-                    // Leave the arm scope (nothing bound in it yet).
-                    fb.goto(fail)
-                    fb.switch_to(pass)
+            let alts = expand_or(arm.pat)
+            if alts.len() > 1 {
+                fb.push_scope(false)
+                self.bind_alts(&fb, alts, arm.guard, place.clone(), ty, mode, fail)?
+            } else {
+                self.test_pat(&fb, arm.pat, place.clone(), ty, fail)?
+                fb.push_scope(false)
+                match arm.guard {
+                    Some(g) => self.arm_guard(&fb, g, arm.pat, place.clone(), ty, mode, fail)?
+                    None => {}
                 }
-                None => {}
-            }
-            self.bind(&fb, arm.pat, place.clone(), ty, mode)?
-            if mode == BindMode.Owned && self.types.needs_drop(ty) {
-                self.drop_rest(&fb, arm.pat, place.clone(), ty, arm.span)?
-                fb.push(Stmt.Forget(place.local))
+                self.bind(&fb, arm.pat, place.clone(), ty, mode)?
+                if mode == BindMode.Owned && self.types.needs_drop(ty) {
+                    self.drop_rest(&fb, arm.pat, place.clone(), ty, arm.span)?
+                    fb.push(Stmt.Forget(place.local))
+                }
             }
             fb.push_scope(true)
             let bv = self.expr(&fb, arm.body, if want { rty } else { Some(types.UNIT) })?
@@ -314,6 +300,155 @@ impl sema.Sema {
                 Ok(Val { vk: VK.Place(Place.local(result)), ty: t, temp: true })
             }
         }
+    }
+
+    // Jumps to `fail` unless the guard holds for the pattern's bindings.
+    fn arm_guard(
+        inout self,
+        inout fb: Fb,
+        g: ast.Expr,
+        pat: ast.Pat,
+        place: Place,
+        ty: u32,
+        mode: BindMode,
+        fail: u32
+    ) -> Result((), Diag) {
+        // The guard sees borrows; owned bindings move after it holds.
+        let gmode = if mode == BindMode.Owned { BindMode.Borrow } else { mode }
+        fb.push_scope(false)
+        self.bind(&fb, pat, place.clone(), ty, gmode)?
+        let gv = self.expr(&fb, g, Some(types.BOOL))?
+        let gv = self.coerce(&fb, gv, types.BOOL, g.span)?
+        let go = self.operand(&fb, gv, g.span)?
+        let c = fb.new_local(types.BOOL, None, true, mir.LocalKind.Temp, g.span)
+        fb.assign(Place.local(c), Rvalue.Use(go), g.span)
+        let pass = fb.new_block()
+        let reject = fb.new_block()
+        self.pop_scope(&fb)
+        var ts = Vec(mir.SwitchTarget).new()
+        ts.push(mir.SwitchTarget { value: 0, block: reject })
+        fb.term(Term.Switch(Operand.Copy(Place.local(c)), ts, pass))
+        fb.switch_to(reject)
+        // Leave the arm scope (nothing bound in it yet).
+        fb.goto(fail)
+        fb.switch_to(pass)
+        Ok(())
+    }
+
+    // Tests the alternatives of a pattern whose `|` binds names, in order,
+    // and binds the names of the one that matches in the current scope.
+    // Each name is one local, which every alternative's binding moves into.
+    fn bind_alts(
+        inout self,
+        inout fb: Fb,
+        alts: Vec(ast.Pat),
+        guard: Option(ast.Expr),
+        place: Place,
+        ty: u32,
+        mode: BindMode,
+        fail: u32
+    ) -> Result((), Diag) {
+        let start = fb.cur
+        let joined = fb.new_block()
+        var names = Vec(String).new()
+        var shared = Vec(body.Var).new()
+        for k, a in alts {
+            let next = if k + 1 == alts.len() { fail } else { fb.new_block() }
+            self.test_pat(&fb, a, place.clone(), ty, next)?
+            match guard {
+                Some(g) => self.arm_guard(&fb, g, a, place.clone(), ty, mode, next)?
+                None => {}
+            }
+            fb.push_scope(false)
+            self.bind(&fb, a, place.clone(), ty, mode)?
+            if mode == BindMode.Owned && self.types.needs_drop(ty) {
+                self.drop_rest(&fb, a, place.clone(), ty, a.span)?
+                fb.push(Stmt.Forget(place.local))
+            }
+            let vars = fb.scope_vars()
+            if k == 0 {
+                for (n, v) in vars {
+                    let d = fb.body.locals[v.local as i64].clone()
+                    let l = fb.new_local(
+                        d.ty,
+                        Some(n.clone()),
+                        d.mutable,
+                        mir.LocalKind.Var,
+                        d.span
+                    )
+                    fb.own_local_outer(l, start)
+                    names.push(n.clone())
+                    shared.push(body.Var { local: l, kind: v.kind })
+                }
+            } else {
+                self.check_alt_vars(fb, vars, names, shared, a.span)?
+            }
+            for i, n in names {
+                for (m, v) in vars {
+                    if m == n {
+                        fb.assign(
+                            Place.local(shared[i].local),
+                            Rvalue.Use(Operand.Move(Place.local(v.local))),
+                            a.span
+                        )
+                    }
+                }
+            }
+            self.pop_scope(&fb)
+            fb.goto(joined)
+            if next != fail {
+                fb.switch_to(next)
+            }
+        }
+        fb.switch_to(joined)
+        for i, n in names {
+            fb.bind_var(n.as_str(), shared[i])
+        }
+        Ok(())
+    }
+
+    // An alternative binds the names of the first, with the same types.
+    fn check_alt_vars(
+        inout self,
+        fb: Fb,
+        vars: Vec((String, body.Var)),
+        names: Vec(String),
+        shared: Vec(body.Var),
+        span: Span
+    ) -> Result((), Diag) {
+        for (m, _) in vars {
+            if !contains_name(names, m.as_str()) {
+                return Err(err(span, ("`" + m.as_str() +
+                    "` is not bound in the first alternative of this `|` pattern").as_str()))
+            }
+        }
+        for i, n in names {
+            var found: Option(body.Var) = None
+            for (m, v) in vars {
+                if m == n {
+                    found = Some(v)
+                }
+            }
+            let v = match found {
+                Some(v) => v
+                None => return Err(err(span, ("`" + n.as_str() +
+                    "` is not bound in this alternative of the `|` pattern").as_str()))
+            }
+            let want = fb.ty_of(shared[i].local)
+            let got = fb.ty_of(v.local)
+            if want != got {
+                return Err(err(span, ("`" + n.as_str() + "` is a `" +
+                    self.types.show(got).as_str() + "` here but a `" +
+                    self.types.show(want).as_str() +
+                    "` in the first alternative").as_str()))
+            }
+            if fb.body.locals[v.local as i64].mutable !=
+                fb.body.locals[shared[i].local as i64].mutable {
+                return Err(err(span, ("`" + n.as_str() +
+                    "` must be `var` in every alternative or in none").as_str()))
+            }
+        }
+        Ok(())
     }
 
     fn discard_val(inout self, inout fb: Fb, sink v: Val, span: Span) -> Result((), Diag) {
@@ -360,6 +495,7 @@ impl sema.Sema {
             }
             None => {}
         }
+        let alts = expand_or(pat)
         var is_op = false
         match v.vk {
             Op(_) => is_op = true
@@ -389,6 +525,9 @@ impl sema.Sema {
                     Place.local(tmp)
                 }
             }
+            if alts.len() > 1 {
+                return self.destructure_alts(&fb, alts, place, ty, BindMode.Owned)
+            }
             self.bind(&fb, pat, place.clone(), ty, BindMode.Owned)?
             if self.types.needs_drop(ty) {
                 self.drop_rest(&fb, pat, place.clone(), ty, span)?
@@ -398,8 +537,29 @@ impl sema.Sema {
         } else {
             let (place, _) = self.as_place(&fb, v, span)
             let m = if mode == BindMode.BorrowMut { BindMode.BorrowMut } else { BindMode.Borrow }
+            if alts.len() > 1 {
+                return self.destructure_alts(&fb, alts, place, ty, m)
+            }
             self.bind(&fb, pat, place, ty, m)
         }
+    }
+
+    // `let A(x) | B(x) = v`: one alternative matches.
+    fn destructure_alts(
+        inout self,
+        inout fb: Fb,
+        alts: Vec(ast.Pat),
+        place: Place,
+        ty: u32,
+        mode: BindMode
+    ) -> Result((), Diag) {
+        let fail = fb.new_block()
+        self.bind_alts(&fb, alts, None, place, ty, mode, fail)?
+        let after = fb.cur
+        fb.switch_to(fail)
+        fb.term(Term.Unreachable)
+        fb.switch_to(after)
+        Ok(())
     }
 
     // The enum variant a pattern path names, checking any type prefix.
@@ -1474,6 +1634,109 @@ fn default_rows(m: Vec(Vec(P))) -> Vec(Vec(P)) {
         }
     }
     out
+}
+
+fn contains_name(names: Vec(String), n: str) -> bool {
+    for m in names {
+        if m == n {
+            return true
+        }
+    }
+    false
+}
+
+// Whether a `|` inside the pattern binds names.
+fn has_binding_or(p: ast.Pat) -> bool {
+    match p.kind {
+        Or(ps) => any_binds(ps)
+        Tuple(ps) => any_binding_or(ps)
+        Variant(_, ps) => any_binding_or(ps)
+        Struct(_, fs, _) => {
+            for f in fs {
+                if has_binding_or(f.pat) {
+                    return true
+                }
+            }
+            false
+        }
+        _ => false
+    }
+}
+
+fn any_binding_or(ps: Vec(ast.Pat)) -> bool {
+    for p in ps {
+        if has_binding_or(p) {
+            return true
+        }
+    }
+    false
+}
+
+// The pattern as alternatives without a `|` that binds names:
+// `(A(x) | B(x), y)` is `(A(x), y)` then `(B(x), y)`.
+fn expand_or(p: ast.Pat) -> Vec(ast.Pat) {
+    var out = Vec(ast.Pat).new()
+    if !has_binding_or(p) {
+        out.push(p.clone())
+        return out
+    }
+    match p.kind {
+        Or(alts) => {
+            for a in alts {
+                for e in expand_or(a) {
+                    out.push(e.clone())
+                }
+            }
+        }
+        Tuple(ps) => {
+            for parts in expand_parts(ps) {
+                out.push(ast.Pat { kind: PatKind.Tuple(parts.clone()), span: p.span })
+            }
+        }
+        Variant(path, ps) => {
+            for parts in expand_parts(ps) {
+                out.push(ast.Pat {
+                    kind: PatKind.Variant(path.clone(), parts.clone()),
+                    span: p.span
+                })
+            }
+        }
+        Struct(path, fs, rest) => {
+            var ps = Vec(ast.Pat).new()
+            for f in fs {
+                ps.push(f.pat.clone())
+            }
+            for parts in expand_parts(ps) {
+                var nfs = Vec(ast.FieldPat).new()
+                for i, f in fs {
+                    nfs.push(ast.FieldPat { name: f.name.clone(), pat: parts[i].clone() })
+                }
+                out.push(ast.Pat { kind: PatKind.Struct(path.clone(), nfs, rest), span: p.span })
+            }
+        }
+        _ => out.push(p.clone())
+    }
+    out
+}
+
+// Every combination of the parts' alternatives, the first part's
+// alternatives outermost.
+fn expand_parts(ps: Vec(ast.Pat)) -> Vec(Vec(ast.Pat)) {
+    var rows = Vec(Vec(ast.Pat)).new()
+    rows.push(Vec(ast.Pat).new())
+    for p in ps {
+        let es = expand_or(p)
+        var next = Vec(Vec(ast.Pat)).new()
+        for r in rows {
+            for e in es {
+                var r2 = r.clone()
+                r2.push(e.clone())
+                next.push(r2)
+            }
+        }
+        rows = next
+    }
+    rows
 }
 
 pub fn pat_binds(p: ast.Pat) -> bool {

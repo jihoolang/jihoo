@@ -1,0 +1,9 @@
+// A name is `var` in every alternative or in none.
+// error: must be `var` in every alternative
+
+fn f(r: Result(i64, i64)) -> i64 {
+    match r {
+        Ok(var x) | Err(x) => x
+    }
+}
+fn main() { println(f(Ok(1))) }

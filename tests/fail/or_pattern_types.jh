@@ -1,0 +1,9 @@
+// A name bound by several alternatives has one type.
+// error: `x` is a `bool` here but a `i64` in the first alternative
+
+fn f(r: Result(i64, bool)) -> i64 {
+    match r {
+        Ok(x) | Err(x) => 0
+    }
+}
+fn main() { println(f(Ok(1))) }

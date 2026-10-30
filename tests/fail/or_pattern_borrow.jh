@@ -1,0 +1,19 @@
+// A binding made by either alternative borrows the matched place.
+// error: `h` goes away here while it is still borrowed
+
+enum Msg {
+    Text(String)
+    Shout(String)
+}
+struct H {
+    m: Msg
+}
+fn main() {
+    var h = H { m: Msg.Text(String.from("a")) }
+    match h.m {
+        Text(t) | Shout(t) => {
+            h.m = Msg.Shout(String.from("b"))
+            println(t)
+        }
+    }
+}

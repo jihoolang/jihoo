@@ -347,6 +347,27 @@ impl Fb {
         let n = self.scopes.len()
         self.scopes[n - 1].locals.push(l)
     }
+
+    // The variables of the innermost scope, in the order they were made.
+    pub fn scope_vars(self) -> Vec((String, Var)) {
+        var out = Vec((String, Var)).new()
+        let n = self.scopes.len()
+        for sv in self.scopes[n - 1].vars {
+            out.push((sv.name.clone(), sv.v))
+        }
+        out
+    }
+
+    // Registers a local with the block scope around the innermost one,
+    // live from the end of block `b`.
+    pub fn own_local_outer(inout self, l: u32, b: u32) {
+        self.body.blocks[b as i64].stmts.push(Stmt.StorageLive(l))
+        var i = self.scopes.len() - 2
+        while self.scopes[i].temp {
+            i -= 1
+        }
+        self.scopes[i].locals.push(l)
+    }
 }
 
 impl sema.Sema {
