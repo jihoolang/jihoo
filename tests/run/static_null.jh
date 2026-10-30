@@ -1,0 +1,31 @@
+// `null` assigned to a static takes its type from the static's written type,
+// as it does for a local (issue #19).
+
+static FREE: [*u8; 3] = zeroed([*u8; 3])
+static HEAD: *u8 = zeroed(*u8)
+
+fn main() {
+    var b: u8 = 7
+    unsafe {
+        HEAD = &b
+        for i in 0..3 {
+            FREE[i] = &b
+        }
+        println(HEAD == null)
+        HEAD = null
+        FREE[0] = null
+        println(HEAD == null)
+        println(FREE[0] == null)
+        println(FREE[1] == null)
+        for i in 0..3 {
+            FREE[i] = null
+        }
+        println(FREE[2] == null)
+    }
+}
+
+//> false
+//> true
+//> true
+//> false
+//> true

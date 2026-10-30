@@ -2297,9 +2297,21 @@ impl sema.Sema {
     fn peek_type(inout self, fb: Fb, e: ast.Expr) -> Option(u32) {
         match e.kind {
             Name(n) => {
-                let v = fb.lookup(n.as_str())?
-                let p = self.var_place(fb, v)
-                Some(self.place_ty(fb, p))
+                match fb.lookup(n.as_str()) {
+                    Some(v) => {
+                        let p = self.var_place(fb, v)
+                        return Some(self.place_ty(fb, p))
+                    }
+                    None => {}
+                }
+                if fb.env.get(n.as_str()).is_some() {
+                    return None
+                }
+                // A `static`: its written type.
+                match self.lookup(fb.env.module, n.as_str())? {
+                    Static(i) => Some(self.static_info(i).ok()?.ty)
+                    _ => None
+                }
             }
             Cast(_, t) => {
                 let env = fb.env.clone()
