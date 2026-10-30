@@ -89,6 +89,7 @@ type     = path [ "(" expr { sep expr } ")" ]      Vec(i64), std.map.Map(K, V)
          | "(" type "," [ type { "," type } ] ")"   tuple
          | "fn" fn_ty | "fnptr" fnptr_ty            closure; function pointer
          | "dyn" path | "dyn" "fn" fn_ty            owned trait value; owning closure
+         | "impl" path | "impl" "fn" fn_ty          a type known while compiling
          | ( "ref" | "inout" ) type                 a borrow, as a type argument
          | "type"                                   the type of types
 path     = name { "." name }
@@ -204,7 +205,10 @@ rules:
 `fn(...)` starts a closure when a block follows, and is a type otherwise:
 `fn(x, y: i64) { ... }` is a closure (parameter types are optional),
 `fn(i64) -> bool` is a type, written where a value is expected only as a
-compile-time argument.
+compile-time argument. `move fn(x) { ... }` is a closure that owns what
+it captures. `impl fn(A) -> R` and `impl Trait` are types only as the bound
+of a compile-time type parameter (`comptime F: impl fn(i64) -> i64`) and
+as a function's result (`-> impl Iterator`).
 
 ### Struct literals
 

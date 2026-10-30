@@ -293,6 +293,7 @@ impl Interpreter {
                 let offs = t.field_offsets(ty)
                 for i, f in ts { self.pointer_fields(&t, addr + offs[i], f, span)? }
             }
+            Lambda(_, e, _) => self.pointer_fields(&t, addr, e, span)?
             _ => {}
         }
         Ok(())
@@ -322,6 +323,7 @@ impl Interpreter {
                 for i, f in ts { self.validate(&t, addr + offs[i], f, span)? }
                 return Ok(())
             }
+            Lambda(_, e, _) => return self.validate(&t, addr, e, span)
             Array(el, n) => {
                 let stride = t.layout(el).size
                 if stride > 0 {
@@ -972,6 +974,7 @@ impl Interpreter {
                     self.drop_value(&t, fns, addr + offs[i], f, checked, depth, span)?
                 }
             }
+            Lambda(_, e, _) => self.drop_value(&t, fns, addr, e, checked, depth, span)?
             Adt(_) => match t.variants(ty) {
                 Some(vs) => {
                     let variants = vs.clone()
@@ -1365,6 +1368,7 @@ fn persistable(t: Types, ty: u32) -> bool {
     match t.kind(ty) {
         Int(_) | Float(_) | Bool | Never => true
         Tuple(ts) => { for el in ts { if !persistable(t, el) { return false } }; true }
+        Lambda(_, e, _) => persistable(t, e)
         Array(el, _) => persistable(t, el)
         Adt(i) => {
             if t.adts[i as i64].has_drop { return false }
@@ -1393,6 +1397,7 @@ fn drop_parts(inout t: Types, ty: u32, inout out: Vec(u32)) {
     match k {
         Array(el, _) => drop_parts(&t, el, &out)
         Tuple(ts) => { for f in ts { drop_parts(&t, f, &out) } }
+        Lambda(_, e, _) => drop_parts(&t, e, &out)
         Adt(i) => {
             if t.adts[i as i64].has_drop {
                 for x in out { if x == ty { return } }

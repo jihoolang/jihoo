@@ -404,6 +404,12 @@ pub struct Sema {
     pub target: target.Target
     pub checked: bool
     lambda_count: u32
+    // The lifted function of each `move fn` expression, by instance,
+    // position and compile-time names.
+    pub lambda_ids: Map(String, u32)
+    // Functions declared `-> impl ...` whose bodies are being lowered to
+    // find their result types.
+    inferring: Vec(u32)
     // Instances being lowered, for "required by" notes.
     stack: Vec(u32)
     pub comptime_closures: Vec(ComptimeClosure)
@@ -479,6 +485,8 @@ impl Sema {
             target: tgt
             checked: checked
             lambda_count: 0
+            lambda_ids: Map(String, u32).new()
+            inferring: Vec(u32).new()
             stack: Vec(u32).new()
             comptime_closures: Vec(ComptimeClosure).new()
             errors: Vec(Diag).new()
@@ -924,8 +932,12 @@ impl Sema {
 
     // "expected `T`, found `U`"
     pub fn expected_found(self, t: u32, u: u32) -> String {
-        "expected `" + self.types.show(t).as_str() + "`, found `" +
-            self.types.show(u).as_str() + "`"
+        let (a, b) = (self.types.show(t), self.types.show(u))
+        var m = "expected `" + a.as_str() + "`, found `" + b.as_str() + "`"
+        if a == b && a.as_str().contains("move fn") {
+            m.push_str(" (each `move fn` has a type of its own, even with the same signature)")
+        }
+        m
     }
 
     // ---- types ----
@@ -997,6 +1009,10 @@ impl Sema {
                     Ok(self.types.intern(TyKind.Dyn(tr)))
                 }
             }
+            Impl(_) => Err(ty_err(
+                t.span,
+                "`impl` is written only as the bound of a compile-time type parameter or as a function's result"
+            ))
         }
     }
 
@@ -1260,10 +1276,12 @@ impl Sema {
         }
     }
 
-    // `comptime T: type` and `comptime T: Ord` take types.
+    // `comptime T: type`, `comptime T: Ord` and `comptime F: impl fn(A) -> R`
+    // take types.
     pub fn param_is_type(self, prm: ast.Param, module: u32) -> bool {
         match prm.ty {
             Some(t) => match t.kind {
+                Impl(_) => true
                 Path(p, None) => {
                     if p.len() == 1 && p[0] == "type" {
                         return true
@@ -1287,6 +1305,10 @@ impl Sema {
                 Path(p, None) => match self.lookup_path(module, p) {
                     Some((Trait(id), _)) => out.push(id)
                     _ => {}
+                }
+                Impl(inner) => match inner.kind {
+                    Fn(_, _) => {}
+                    _ => out.push(self.resolve_trait(module, inner.deref())?)
                 }
                 _ => {}
             }
@@ -2099,7 +2121,15 @@ impl Sema {
     pub fn instance(inout self, fid: u32, args: Vec(CVal), span: Span) -> Result(u32, Diag) {
         let key = inst_key(fid, args)
         match self.fn_insts.get(key) {
-            Some(id) => return Ok(id)
+            Some(id) => {
+                for i in self.inferring {
+                    if i == id { return Err(ty_err(
+                        span,
+                        "this function's result type (`impl ...`) comes from its body, which uses the function itself; write the result type"
+                    )) }
+                }
+                return Ok(id)
+            }
             None => {}
         }
         if self.fn_insts.len() > 20000 {
@@ -2167,9 +2197,31 @@ impl Sema {
             params.push(lp.0)
             pass.push(lp.1)
         }
-        let ret_t = match decl.ret {
-            Some(t) => self.resolve_ty(t, env)?
-            None => types.UNIT
+        // `-> impl Trait`: the body decides, once the function exists.
+        var opaque: Option(ast.Ty) = None
+        match decl.ret {
+            Some(t) => match t.kind {
+                Impl(inner) => {
+                    let by_value = match decl.ret_mode { Value => true, _ => false }
+                    if c_signature || !by_value {
+                        return Err(ty_err(
+                            t.span,
+                            "an `impl` result is a value of a jihoo function, not `ref`, `inout` or C"
+                        ))
+                    }
+                    opaque = Some(inner.deref().clone())
+                }
+                _ => {}
+            }
+            None => {}
+        }
+        let ret_t = if opaque.is_some() {
+            types.UNIT
+        } else {
+            match decl.ret {
+                Some(t) => self.resolve_ty(t, env)?
+                None => types.UNIT
+            }
         }
         let value_ret = match decl.ret_mode { Value => true, _ => false }
         if c_signature && (!value_ret ||
@@ -2268,9 +2320,54 @@ impl Sema {
             if decl.body.is_none() {
                 return Err(ty_err(decl.name_span, "this function needs a body"))
             }
-            self.queue.push(Pending { id: id, decl: fid, env: env })
+            self.queue.push(Pending { id: id, decl: fid, env: env.clone() })
+        }
+        match opaque {
+            Some(bound) => self.infer_opaque(id, fid, env, bound)?
+            None => {}
         }
         Ok(id)
+    }
+
+    // Lowers the body of a function declared `-> impl ...` to learn its
+    // result type, and checks the type against what `impl` names.
+    fn infer_opaque(
+        inout self,
+        id: u32,
+        fid: u32,
+        sink env: Env,
+        bound: ast.Ty
+    ) -> Result((), Diag) {
+        let bound_env = env.clone()
+        let hint = match bound.kind {
+            Fn(_, _) => Some(self.resolve_ty(bound, bound_env)?)
+            _ => None
+        }
+        self.inferring.push(id)
+        self.stack.push(id)
+        let r = self.infer_result(id, fid, env, hint)
+        self.stack.pop()
+        let _ = self.inferring.pop()
+        let rt = r?
+        self.out[id as i64].sig.ret = rt
+        let (fits, wanted) = match bound.kind {
+            Fn(_, _) => {
+                let want = self.resolve_ty(bound, bound_env)?
+                (self.callable_as(rt, want), "a closure of type `" +
+                    self.types.show(want).as_str() + "`")
+            }
+            _ => {
+                let tr = self.resolve_trait(bound_env.module, bound)?
+                (self.implements(tr, rt)?, "of a type that implements `" +
+                    self.traits[tr as i64].name.as_str() + "`")
+            }
+        }
+        if !fits {
+            let decl = at(self.fns[fid as i64].decl)
+            return Err(ty_err(decl.name_span, ("this function's body gives `" +
+                self.types.show(rt).as_str() + "`, not a value " + wanted.as_str()).as_str()))
+        }
+        Ok(())
     }
 
     // Whether this type can cross a C function boundary by value.

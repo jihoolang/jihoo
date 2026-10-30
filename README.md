@@ -119,8 +119,9 @@ kernel; integers up to 128 bits; structs, enums, tuples, arrays, slices;
 `match` with exhaustiveness, `|` patterns that bind names, `let ... else`,
 and `match`es that are views of the borrowed parts they give; generics
 with inference; traits with default
-methods and generic impls; closures that borrow, and `comptime` closures
-that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
+methods and generic impls; closures that borrow, `comptime` closures
+that inline, and `move fn` closures that own their captures without
+allocating, returned as `-> impl Iterator` or `-> impl fn(A) -> R`; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions and callbacks (including structs by value, 128-bit
 integers and variadic function pointers on both targets), dynamic libraries
 (`std.ffi`), system calls and atomics; the standard library,

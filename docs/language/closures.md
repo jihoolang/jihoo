@@ -82,13 +82,60 @@ for those values.
 
 ## Closures that own what they capture
 
-A closure borrows, so it cannot outlive the block that made it. To return
-or store one, write it where a `dyn fn(A) -> R` is expected: it then owns
-what it captures, on the heap ([dynamic dispatch](dyn.md#dyn-fn)):
+A closure borrows, so it cannot outlive the block that made it. `move fn`
+makes one that owns what it captures instead: the captured values move
+into it (or are copied, if they are plain), and it can leave the function
+that made it. It allocates nothing, and calling it calls its function
+directly, so LLVM inlines it as it does a borrowing closure.
 
 ```jihoo
-fn adder(n: i64) -> dyn fn(i64) -> i64 {
-    fn(x) { x + n }
+fn adder(n: i64) -> impl fn(i64) -> i64 {
+    move fn(x) { x + n }
+}
+
+fn main() {
+    let add = adder(10)
+    println(add(5))                           // 15
+}
+```
+
+Each `move fn` expression has a type of its own, known while compiling
+and written in messages as `move fn(i64) -> i64`. Two closures are two
+types even when their signatures are the same. The type has no name to
+write; `impl` stands for it:
+
+- `-> impl fn(A) -> R` or `-> impl Trait` as a result: the type of the
+  function's body, which must be such a closure, or implement the trait.
+  The body decides the type, so every `return` must give that same type,
+  and the function cannot call itself.
+- `comptime F: impl fn(A) -> R` as a type parameter: the function has one
+  instance per closure type. A closure argument for `sink f: F` takes its
+  parameter types from the bound, and `F` is never written at the call.
+  A borrowing closure fits the bound too.
+
+```jihoo
+fn twice(comptime F: impl fn(i64) -> i64, sink f: F, x: i64) -> i64 {
+    f(f(x))
+}
+
+twice(move fn(x) { x * 3 }, 1)                // 9
+```
+
+A `move fn` is a value like any other: it moves, and a value it captured
+is dropped when it is. It reads what it captured but cannot change it,
+since a call borrows it shared. It cannot capture a view (a `str`, a slice,
+a borrowing closure, a struct holding one): what it holds must not borrow.
+It is lent where a `fn(A) -> R` is expected, and moves to the heap where a
+`dyn fn(A) -> R` is. [Iterator adapters](iterators.md#returning-a-pipeline)
+hold either kind of closure, so a function can return a pipeline.
+
+To return or store closures of different types in one place, write the
+closure where a `dyn fn(A) -> R` is expected: it then owns what it
+captures, on the heap ([dynamic dispatch](dyn.md#dyn-fn)):
+
+```jihoo
+fn pick(add: bool, n: i64) -> dyn fn(i64) -> i64 {
+    if add { fn(x) { x + n } } else { fn(x) { x * n } }
 }
 ```
 

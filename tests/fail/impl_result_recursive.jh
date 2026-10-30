@@ -1,0 +1,10 @@
+// A result type that comes from the body cannot depend on itself.
+// error: uses the function itself; write the result type
+
+import std.iter
+
+fn down(n: i64) -> impl Iterator {
+    if n > 0 { return down(n - 1) }
+    iter.range(0, n)
+}
+fn main() { println(down(3).count()) }

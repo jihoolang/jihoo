@@ -27,6 +27,19 @@ export fn iterator_zip(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) 
         .fold(0, fn(acc, x) { acc + x })
 }
 
+// A pipeline that a function builds and returns. Its `move fn` closures own
+// the runtime values they capture, so nothing borrows the builder's frame,
+// nothing is allocated and each call is direct.
+fn returned_pipeline(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> impl Iterator {
+    iter.range(0, n)
+        .map(move fn(i) { unsafe { *(data + i) } * scale + offset })
+        .filter(move fn(x) { x > limit })
+}
+
+export fn iterator_returned(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
+    returned_pipeline(data, n, scale, offset, limit).fold(0, fn(acc, x) { acc + x })
+}
+
 // The C harness owns the input; these views stay inside each call.
 export fn functional(data: *i64, n: i64, scale: i64, offset: i64, limit: i64) -> i64 {
     let xs = unsafe { make_slice(data, n) }

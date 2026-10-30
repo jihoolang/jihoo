@@ -1240,6 +1240,8 @@ impl Gen {
                     self.call_drop(&cx, ft, p.as_str())
                 }
             }
+            // An owned closure is laid out as its captures.
+            Lambda(_, e, _) => self.call_drop(&cx, e, "%p")
             Array(e, n) => {
                 let es = self.size(e)
                 for i in 0..n {

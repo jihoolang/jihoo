@@ -646,6 +646,7 @@ impl sema.Sema {
                 self.capture_contains(x, depth + 1, writable_views)
             Array(x, _) => self.capture_contains(x, depth + 1, writable_views)
             Slice(x) => self.capture_contains(x, depth + 1, writable_views)
+            Lambda(_, e, _) => self.capture_contains(e, depth + 1, writable_views)
             Tuple(ts) => {
                 for x in ts {
                     if self.capture_contains(x, depth + 1, writable_views) {

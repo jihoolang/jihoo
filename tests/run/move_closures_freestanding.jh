@@ -1,0 +1,27 @@
+#![freestanding]
+// `move fn` and `-> impl` results without libc, and while compiling.
+import std.iter
+
+fn scaled(n: i64) -> impl Iterator {
+    let k = n
+    iter.range(0, 5).map(move fn(x) { x * k })
+}
+
+fn indexer(sink v: Vec(i64)) -> impl fn(i64) -> i64 {
+    move fn(i) { v[i] * 2 }
+}
+
+const TOTAL = scaled(3).fold(0, fn(a, x) { a + x })
+
+fn main() {
+    println(TOTAL)
+    //> 30
+    println(scaled(2).count())
+    //> 5
+    var v = Vec(i64).new()
+    v.push(4)
+    v.push(5)
+    let at = indexer(v)
+    println(at(1))
+    //> 10
+}

@@ -242,12 +242,11 @@ evaluation, garbage collection, implicit reference counting and
 higher-kinded types remain out of scope: they conflict with predictable
 memory, not with any one feature.
 
-1. Owned closures with static types. A closure is either a borrowing
-   `fn` (no allocation, inlined, but a view that cannot leave the function
-   that made it) or an owned `dyn fn` (returnable, but one allocation and
-   an indirect call). Nothing is in between, so a function cannot return a
-   pipeline whose closure captures its own locals without paying for
-   `dyn fn`:
+1. Done: owned closures with static types
+   ([design](move-closures.md)). A borrowing `fn` cannot leave the
+   function that made it, and a `dyn fn` costs an allocation and an
+   indirect call, so a function could not return a pipeline whose closure
+   captures its own locals:
 
    ```jihoo
    fn scaled(n: i64) -> iter.MapIter(iter.Range, i64) {
@@ -256,17 +255,17 @@ memory, not with any one feature.
    }
    ```
 
-   Add closures that move their captures, as `dyn fn` does, but whose type
-   is known while compiling, so that calls stay direct and nothing is
-   allocated. Open questions, to settle with a design note before code:
-   how a function names such a type in its result (an opaque result type
-   such as `-> some Iterator` versus adapters generic over the closure
-   type), whether `std.iter` adapters store owned closures or both kinds,
-   and how a closure that captures a view is rejected. Completion: the
-   reproducer compiles; the fusion benchmark gains a returned-pipeline
-   kernel with no allocations and no callbacks in its optimized IR;
-   `tests/fail` covers captured views, use after a capture moved a value,
-   and returning a borrowing closure; `dyn fn` is unchanged.
+   `move fn(x) { ... }` owns its captures with a type of its own, so calls
+   stay direct and nothing is allocated; `-> impl Iterator` and
+   `-> impl fn(A) -> R` name such types in results, and
+   `comptime F: impl fn(A) -> R` takes them as type parameters. `map` and
+   `filter` hold either kind of closure, so the reproducer is
+   `fn scaled(n: i64) -> impl Iterator` with `move fn(x) { x * k }`
+   (`tests/run/move_closures.jh`, `tests/fail/move_closure_*`,
+   `tests/fail/impl_*`). The fusion benchmark's `iterator_returned`
+   kernel returns such a pipeline; its optimized IR has no allocations and
+   no callbacks, the other kernels' optimized IR is unchanged, and `dyn fn`
+   is unchanged.
 2. Patterns and `match` as expressions. Three gaps push programs toward
    flags and clones:
    - Done: `A(x) | B(x)` binds the same names in every alternative, with

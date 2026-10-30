@@ -66,6 +66,12 @@ pub enum TyKind {
     // `dyn fn(A) -> R`: a closure that owns what it captured, laid out as
     // `Dyn`.
     DynFn(Sig)
+    // `move fn(A) -> R`: a closure that owns what it captured, with its
+    // function known while compiling (the lifted function, then the tuple
+    // of captures it is laid out as). One type per closure expression; the
+    // signature is not part of its identity, since it is known only after
+    // the body.
+    Lambda(u32, u32, Sig)
 }
 
 impl Clone for TyKind {
@@ -88,6 +94,7 @@ impl Clone for TyKind {
             Type => TyKind.Type
             Dyn(t) => TyKind.Dyn(t)
             DynFn(s) => TyKind.DynFn(s.clone())
+            Lambda(f, e, s) => TyKind.Lambda(f, e, s.clone())
         }
     }
 }
@@ -167,6 +174,12 @@ pub fn kind_key(k: TyKind) -> String {
             ids(&s, sig.params)
             s.push('>')
             sig.ret.show(&s)
+        }
+        Lambda(f, e, _) => {
+            s.push('L')
+            f.show(&s)
+            s.push(',')
+            e.show(&s)
         }
     }
     s
@@ -472,6 +485,7 @@ impl Types {
         let b = match k {
             Dyn(_) | DynFn(_) => true
             Tuple(ts) => self.any_needs_drop(ts)
+            Lambda(_, e, _) => self.needs_drop(e)
             Array(e, n) => n > 0 && self.needs_drop(e)
             Adt(i) => {
                 let has_drop = self.adts[i as i64].has_drop
@@ -521,6 +535,7 @@ impl Types {
         match self.kind(t) {
             Str | Slice(_) | Ref(_) | RefMut(_) | Closure(_) => true
             Tuple(ts) => self.any_view(ts)
+            Lambda(_, e, _) => self.is_view(e)
             Array(e, _) => self.is_view(e)
             Adt(i) => {
                 let d = self.adts[i as i64]
@@ -562,6 +577,7 @@ impl Types {
         match self.kind(t) {
             RefMut(_) => true
             Tuple(ts) => self.any_refmut(ts)
+            Lambda(_, e, _) => self.has_refmut(e)
             Array(e, _) => self.has_refmut(e)
             Adt(i) => match self.adts[i as i64].body {
                 Struct(fs) => {
@@ -615,6 +631,7 @@ impl Types {
                 false
             }
             Array(e, _) => self.is_interior(e)
+            Lambda(_, e, _) => self.is_interior(e)
             Adt(i) => {
                 if self.adts[i as i64].interior {
                     return true
@@ -664,6 +681,7 @@ impl Types {
             Ptr(_) | Ref(_) | RefMut(_) | FnPtr(_) => Layout { size: p, align: p }
             Slice(_) | Str | Closure(_) | Dyn(_) | DynFn(_) => Layout { size: 2 * p, align: p }
             Tuple(ts) => self.struct_layout(ts).0
+            Lambda(_, e, _) => self.layout(e)
             Array(e, n) => {
                 let el = self.layout(e)
                 Layout { size: el.size * n, align: el.align }
@@ -700,6 +718,7 @@ impl Types {
         let k = self.kind(t).clone()
         match k {
             Tuple(ts) => self.struct_layout(ts).1
+            Lambda(_, e, _) => self.field_offsets(e)
             Adt(i) => {
                 let body = self.adts[i as i64].body.clone()
                 match body {
@@ -721,6 +740,7 @@ impl Types {
     pub fn field_tys(self, t: u32) -> Vec(u32) {
         match self.kind(t) {
             Tuple(ts) => ts.clone()
+            Lambda(_, e, _) => self.field_tys(e)
             Dyn(_) | DynFn(_) => {
                 var v = Vec(u32).new()
                 v.push(BYTES)
@@ -853,6 +873,12 @@ impl Types {
             }
             DynFn(sig) => {
                 s.push_str("dyn fn(")
+                self.show_list(&s, sig.params)
+                s.push(')')
+                self.show_ret(&s, sig.ret)
+            }
+            Lambda(_, _, sig) => {
+                s.push_str("move fn(")
                 self.show_list(&s, sig.params)
                 s.push(')')
                 self.show_ret(&s, sig.ret)

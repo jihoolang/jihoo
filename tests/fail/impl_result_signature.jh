@@ -1,0 +1,7 @@
+// The closure must have the signature that `impl fn` names.
+// error: not a value a closure of type `fn(i64) -> i64`
+
+fn check() -> impl fn(i64) -> i64 {
+    move fn(b: bool) { if b { 1 } else { 0 } }
+}
+fn main() { println(check()(1)) }

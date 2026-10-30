@@ -1,0 +1,5 @@
+// `impl` is a bound or a result, not a parameter's type.
+// error: `impl` is written only as the bound of a compile-time type parameter or as a function's result
+
+fn call(f: impl fn(i64) -> i64) -> i64 { f(1) }
+fn main() { println(call(move fn(x) { x })) }

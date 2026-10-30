@@ -167,6 +167,9 @@ pub enum TyKind {
     // `dyn Trait`, `dyn fn(A) -> R`: owned values whose type is known only
     // when the program runs.
     Dyn(Box(Ty))
+    // `impl fn(A) -> R`, `impl Trait`: some type with that property, known
+    // while compiling (a bound of a type parameter, or a result).
+    Impl(Box(Ty))
 }
 
 pub struct FnTyParam {
@@ -439,6 +442,7 @@ impl Clone for TyKind {
             Fn(ps, r) => TyKind.Fn(ps.clone(), r.clone())
             FnPtr(ps, r, v) => TyKind.FnPtr(ps.clone(), r.clone(), v)
             Dyn(t) => TyKind.Dyn(t.clone())
+            Impl(t) => TyKind.Impl(t.clone())
         }
     }
 }

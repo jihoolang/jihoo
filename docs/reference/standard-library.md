@@ -36,9 +36,11 @@ early does not reach are dropped with it).
 `import std.iter` enables `IteratorExt` for every `Iterator`: `map`,
 `filter`, `take`, `zip`, `fold`, `for_each`, `count`, `any` and `all`.
 Slices gain `.iter()`, and `iter.range(start, end)` supplies a half-open
-`i64` range. Adapters are lazy and own their input iterator; callbacks
-borrow their captures. See [Iterator pipelines](../language/iterators.md)
-for execution order, ownership and compile-time use.
+`i64` range. Adapters are lazy and own their input iterator; `map` and
+`filter` hold their callback as given, a borrowing closure or a `move fn`,
+so a function can return a pipeline (`-> impl Iterator`). See
+[Iterator pipelines](../language/iterators.md) for execution order,
+ownership and compile-time use.
 
 ## `String` and `str`
 

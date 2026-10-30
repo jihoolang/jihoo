@@ -10,6 +10,7 @@ extern int64_t functional(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t iterator(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t iterator_take(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t iterator_zip(const int64_t *, int64_t, int64_t, int64_t, int64_t);
+extern int64_t iterator_returned(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t staged(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t eager(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 extern int64_t handwritten(const int64_t *, int64_t, int64_t, int64_t, int64_t);
@@ -19,8 +20,8 @@ extern int64_t c_loop(const int64_t *, int64_t, int64_t, int64_t, int64_t);
 static const char *names[] = {"functional", "staged", "iterator", "eager", "handwritten", "c"};
 static Kernel kernels[] = {functional, staged, iterator, eager, handwritten, c_loop};
 #define KERNEL_COUNT (sizeof(kernels) / sizeof(kernels[0]))
-static const char *extra_names[] = {"iterator_take", "iterator_zip"};
-static Kernel extra_kernels[] = {iterator_take, iterator_zip};
+static const char *extra_names[] = {"iterator_take", "iterator_zip", "iterator_returned"};
+static Kernel extra_kernels[] = {iterator_take, iterator_zip, iterator_returned};
 static int counting;
 static uint64_t allocations, frees;
 extern void *__real_malloc(size_t);
@@ -82,6 +83,10 @@ static void verify(int wrapping) {
             fprintf(stderr, "trial %d: take/zip composition mismatch\n", trial);
             exit(1);
         }
+        if (iterator_returned(xs, n, scale, offset, limit) != expected) {
+            fprintf(stderr, "trial %d: returned pipeline mismatch\n", trial);
+            exit(1);
+        }
         // Small inputs keep this order-sensitive fold in range in checked mode.
         int64_t m = n % 6, acc = 7;
         for (int64_t i = 0; i < m; ++i) {
@@ -90,7 +95,7 @@ static void verify(int wrapping) {
         }
         if (ordered(xs, m, scale, offset, limit) != acc) abort();
     }
-    puts("600 differential cases, 1200 take/zip comparisons and 600 order-sensitive folds passed");
+    puts("600 differential cases, 1800 take/zip/returned comparisons and 600 order-sensitive folds passed");
 }
 
 static double seconds(void) {

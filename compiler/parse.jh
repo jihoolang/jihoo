@@ -572,6 +572,10 @@ impl Parser {
                 let (ps, r, _) = self.fn_ty_rest(false)?
                 TyKind.Fn(ps, r)
             }
+            Impl if self.peek(1) == Tok.Ident || self.peek(1) == Tok.Fn => {
+                self.bump()
+                TyKind.Impl(Box.new(self.ty()?))
+            }
             Type => {
                 self.bump()
                 TyKind.Path(one("type"), None)

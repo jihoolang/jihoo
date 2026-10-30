@@ -25,10 +25,12 @@ if you know Rust, and check here when code that "should work" does not. The
 | `&mut self`, `self` | `inout self`, `sink self`; plain `self` borrows |
 | `-> &T` (a part of the first argument) | `-> ref T`; `-> inout T` for `&mut T` |
 | `\|x\| x + 1` | `fn(x) { x + 1 }` |
-| `impl Fn(i64) -> bool` | `fn(i64) -> bool` (a borrowed closure) |
+| `impl Fn(i64) -> bool` (a parameter) | `fn(i64) -> bool` (a borrowed closure), or `comptime F: impl fn(i64) -> bool, sink f: F` |
+| `-> impl Iterator<Item = i64>`, `-> impl Fn(i64) -> i64` | `-> impl Iterator`, `-> impl fn(i64) -> i64`: the body's type, which callers see |
 | `fn(i64) -> i64` (a pointer) | `fnptr(i64) -> i64` |
 | `Box<dyn Shape>` | `dyn Shape` (owned; the value moves in where one is expected) |
-| `Box<dyn Fn(i64) -> i64>`, `move \|x\| x + n` | `dyn fn(i64) -> i64`, `fn(x) { x + n }` where one is expected |
+| `move \|x\| x + n` | `move fn(x) { x + n }`: owns its captures, no allocation |
+| `Box<dyn Fn(i64) -> i64>` | `dyn fn(i64) -> i64`, `fn(x) { x + n }` where one is expected |
 | `usize`, `char` | `i64` for lengths and indices; `u8` for bytes (`'a'` is a `u8`) |
 | `0..=n` in a `for` | `0..n + 1` (`..=` exists only in patterns) |
 | `if let Some(x) = o { ... }` | `match o { Some(x) => ..., None => {} }` |
@@ -62,7 +64,12 @@ if you know Rust, and check here when code that "should work" does not. The
 - No items inside function bodies: helper functions go at the top level.
 - No `mut` keyword (`var` instead), no `&T`/`&mut T` types, no lifetimes.
   [`dyn Trait`](dyn.md) is always owned: there is no `&dyn Trait`, and a
-  `dyn fn` cannot change what it captured (no `FnMut`).
+  `dyn fn` or `move fn` cannot change what it captured (no `FnMut`).
+- `impl` is not a parameter's type (`f: impl Fn(..)`): write a type
+  parameter, `comptime F: impl fn(A) -> R`, and `sink f: F`. A result
+  `-> impl Trait` is not opaque: the caller sees the body's type, and its
+  `Item`. Each `move fn` has its own type, so two `return`s of different
+  closures do not fit one `impl` result; use `dyn fn` for those.
 - No `Copy` trait to opt into: a type made only of plain parts copies by
   itself ([Values and ownership](ownership.md)).
 - No overloading of `/`, `%` or the bitwise operators. `==`/`!=` call `eq`,

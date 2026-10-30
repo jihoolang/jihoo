@@ -1,0 +1,9 @@
+// The captured `String` moved into the closure.
+// error: `s` is used here after it was moved away
+
+fn main() {
+    let s = String.from("abc")
+    let f = move fn() { s.len() }
+    println(f())
+    println(s.len())
+}

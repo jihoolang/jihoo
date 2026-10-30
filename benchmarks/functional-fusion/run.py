@@ -16,7 +16,8 @@ import time
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 NAMES = ["functional", "staged", "iterator", "eager", "handwritten", "c"]
-COMPOSED = ("functional", "staged", "iterator", "iterator_take", "iterator_zip")
+EXTRA = ("iterator_take", "iterator_zip", "iterator_returned")
+COMPOSED = ("functional", "staged", "iterator", *EXTRA)
 
 
 def run(command):
@@ -33,7 +34,7 @@ def inspect_ir(path):
         r"^define [^\n]*@([\w.$]+)\([^\n]*\)[^\n]*\{\n(.*?)^\}",
         source, re.M | re.S))
     results = {}
-    for entry in [*NAMES[:-1], "iterator_take", "iterator_zip"]:
+    for entry in [*NAMES[:-1], *EXTRA]:
         visited, pending, external, indirect = set(), [entry], set(), []
         while pending:
             name = pending.pop()

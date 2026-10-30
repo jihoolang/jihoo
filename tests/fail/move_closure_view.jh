@@ -1,0 +1,8 @@
+// A `move fn` owns what it captures, so it cannot hold a view.
+// error: a `move fn` owns what it captures, so it cannot capture `xs`, which holds a borrow
+
+fn main() {
+    let xs: [i64] = [1, 2, 3]
+    let f = move fn(i: i64) { xs[i] }
+    println(f(0))
+}

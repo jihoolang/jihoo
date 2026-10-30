@@ -1,0 +1,10 @@
+// Two closures have two types, even with the same signature.
+// error: each `move fn` has a type of its own
+
+import std.iter
+
+fn pick(n: i64) -> impl Iterator {
+    if n < 0 { return iter.range(0, 2).map(move fn(x) { x - n }) }
+    iter.range(0, 3).map(move fn(x) { x + n })
+}
+fn main() { println(pick(1).count()) }

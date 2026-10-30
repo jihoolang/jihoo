@@ -1,5 +1,7 @@
 // Lazy iterator adapters. Import std.iter to make the extension trait
-// available. Adapters own their input iterator and borrow their callbacks.
+// available. Adapters own their input iterator and hold their callbacks:
+// a closure that borrows (`fn(x) { ... }`), so the adapter is a view, or a
+// `move fn` that owns its captures, so the adapter can be returned.
 
 import std.vec
 
@@ -30,12 +32,12 @@ impl(T: type) [T] {
     }
 }
 
-pub struct MapIter(I: Iterator, U: type) {
+pub struct MapIter(I: Iterator, U: type, F: type) {
     inner: I
-    transform: fn(I.Item) -> U
+    transform: F
 }
 
-impl(I: Iterator, U: type) Iterator for MapIter(I, U) {
+impl(I: Iterator, U: type, F: type) Iterator for MapIter(I, U, F) {
     type Item = U
 
     fn next(inout self) -> Option(U) {
@@ -46,12 +48,12 @@ impl(I: Iterator, U: type) Iterator for MapIter(I, U) {
     }
 }
 
-pub struct FilterIter(I: Iterator) {
+pub struct FilterIter(I: Iterator, F: type) {
     inner: I
-    pred: fn(I.Item) -> bool
+    pred: F
 }
 
-impl(I: Iterator) Iterator for FilterIter(I) {
+impl(I: Iterator, F: type) Iterator for FilterIter(I, F) {
     type Item = I.Item
 
     fn next(inout self) -> Option(I.Item) {
@@ -64,7 +66,7 @@ impl(I: Iterator) Iterator for FilterIter(I) {
     }
 }
 
-impl(I: Iterator) FilterIter(I) {
+impl(I: Iterator, F: type) FilterIter(I, F) {
     // Fuse the consumer into the source traversal. Repeatedly calling the
     // filtering next() leaves a nested search loop that inhibits if-conversion
     // even after callback inlining. Rejected items still drop before pulling
@@ -121,12 +123,21 @@ impl(I: Iterator, J: Iterator) Iterator for ZipIter(I, J) {
 
 pub trait IteratorExt: Iterator {
     // U is inferred from the callback's result, or may be written explicitly.
-    fn map(sink self, comptime U: type, transform: fn(Self.Item) -> U) -> MapIter(Self, U) {
-        MapIter(Self, U) { inner: self, transform: transform }
+    fn map(
+        sink self,
+        comptime U: type,
+        comptime F: impl fn(Self.Item) -> U,
+        sink transform: F
+    ) -> MapIter(Self, U, F) {
+        MapIter(Self, U, F) { inner: self, transform: transform }
     }
 
-    fn filter(sink self, pred: fn(Self.Item) -> bool) -> FilterIter(Self) {
-        FilterIter(Self) { inner: self, pred: pred }
+    fn filter(
+        sink self,
+        comptime F: impl fn(Self.Item) -> bool,
+        sink pred: F
+    ) -> FilterIter(Self, F) {
+        FilterIter(Self, F) { inner: self, pred: pred }
     }
 
     // Zero and negative counts produce an empty iterator.

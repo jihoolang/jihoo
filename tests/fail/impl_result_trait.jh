@@ -1,0 +1,7 @@
+// The body's type must implement the trait that `impl` names.
+// error: this function's body gives `i64`, not a value of a type that implements `Iterator`
+
+fn numbers() -> impl Iterator {
+    5
+}
+fn main() { println(numbers().count()) }

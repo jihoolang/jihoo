@@ -56,7 +56,10 @@ This mode still runs every correctness configuration, checks allocation
 counts (including the eager allocating control), and inspects optimized IR.
 `iterator_take` and `iterator_zip` have separate C correctness oracles and
 zero-allocation checks; their optimized IR must retain no callbacks or
-external calls. They do not participate in the original timing comparison.
+external calls. `iterator_returned` checks the same: its pipeline is built
+and returned by another function (`-> impl Iterator`), with `move fn`
+closures that own the runtime values they capture, and it is compared
+with the C loop. They do not participate in the original timing comparison.
 The ordinary program suite also covers streaming line parsing through
 `map`, `filter`, `take` and `zip`, including unconsumed invalid input.
 
@@ -69,7 +72,7 @@ IR pipeline. The C harness is always built at O2, without LTO.
 
 For both checked and wrapping arithmetic, at O0 and O2, the harness checks
 600 differential cases against C for all six original implementations,
-1,200 comparisons for the `take`/`zip` compositions, and 600 order-sensitive
+1,800 comparisons for the `take`/`zip`/returned compositions, and 600 order-sensitive
 folds. Cases include empty input, negative values and
 scales, zero scales, and selection extremes; wrapping runs additionally
 use full-width random integers. Performance uses wrapping arithmetic/O2.

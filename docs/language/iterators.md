@@ -65,12 +65,40 @@ traps; it differs from constructing a complete mapped collection first.
 unpaired left item when the right input ends, and stays exhausted after
 either input returns `None`.
 
-Callbacks are [borrowed closures](closures.md). An adapter keeps its
-captures borrowed until its last use, and a borrowed input cannot change
-while the adapter still needs it. Adapters may be stored in locals; they
-cannot outlive their input or callback environments. An adapter owning an
-`into_iter()` drops unconsumed elements when it goes away, including after
-an early exit. These rules use the ordinary borrow checker and destructors.
+Callbacks are usually [borrowed closures](closures.md). An adapter keeps
+their captures borrowed until its last use, and a borrowed input cannot
+change while the adapter still needs it. Adapters may be stored in locals;
+they cannot outlive their input or callback environments. An adapter owning
+an `into_iter()` drops unconsumed elements when it goes away, including
+after an early exit. These rules use the ordinary borrow checker and
+destructors.
+
+## Returning a pipeline
+
+`map` and `filter` hold their callback as it is given, so an adapter is a
+view when its callback borrows and an ordinary value when it is a
+[`move fn`](closures.md#closures-that-own-what-they-capture). A function can
+then build a pipeline from its own locals and return it, naming its type
+with `impl Iterator`:
+
+```jihoo
+import std.iter
+
+fn scaled(n: i64) -> impl Iterator {
+    let k = n
+    iter.range(0, 5).map(move fn(x) { x * k })
+}
+
+fn main() {
+    println(scaled(3).fold(0, fn(acc, x) { acc + x }))   // 30
+}
+```
+
+The pipeline allocates nothing and calls its closures directly; the
+[fusion benchmark](../../benchmarks/functional-fusion/README.md) checks
+that a returned pipeline becomes one loop. The adapters' types are
+`MapIter(I, U, F)` and `FilterIter(I, F)`, with `F` the callback's type;
+`impl Iterator` saves writing them.
 
 ## Compile time and performance
 

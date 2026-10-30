@@ -1,0 +1,128 @@
+// `move fn`: closures that own what they capture, with a type of their own
+// known while compiling, so that calls stay direct and nothing is
+// allocated. `-> impl ...` names such a type in a result.
+
+import std.iter
+
+struct Loud {
+    name: String
+}
+
+impl Drop for Loud {
+    fn drop(inout self) {
+        print("drop ")
+        println(self.name)
+    }
+}
+
+// The pipeline captures `k`, a local of the function that returns it.
+fn scaled(n: i64) -> impl Iterator {
+    let k = n
+    iter.range(0, 5).map(move fn(x) { x * k })
+}
+
+fn adder(n: i64) -> impl fn(i64) -> i64 {
+    move fn(x) { x + n }
+}
+
+// A value with a destructor moves into the closure and is dropped with it.
+fn greeter(name: str) -> impl fn(i64) -> i64 {
+    let loud = Loud { name: String.from(name) }
+    move fn(x) { x + loud.name.len() }
+}
+
+fn evens_above(limit: i64) -> impl Iterator {
+    iter.range(0, 10).filter(move fn(x) { x % 2 == 0 && x > limit })
+}
+
+// `return` gives the same type as the end of the body.
+fn upto(n: i64) -> impl Iterator {
+    if n < 0 { return iter.range(0, 0) }
+    iter.range(0, n)
+}
+
+fn apply(f: fn(i64) -> i64, x: i64) -> i64 {
+    f(x)
+}
+
+// One instance per closure type.
+fn twice(comptime F: impl fn(i64) -> i64, sink f: F, x: i64) -> i64 {
+    f(f(x))
+}
+
+// A generic function returns a pipeline over its type argument.
+fn offsets(comptime T: Iterator, sink it: T, by: i64) -> impl Iterator {
+    it.map(move fn(x) { x + by })
+}
+
+fn main() {
+    for x in scaled(3) { print(" "); print(x) }
+    println("")
+    //>  0 3 6 9 12
+    println(scaled(2).fold(0, fn(a, x) { a + x }))
+    //> 20
+
+    let add = adder(10)
+    println(add(5))
+    //> 15
+    println(add(add(1)))
+    //> 21
+
+    // Lent where a closure is expected, and boxed where a `dyn fn` is.
+    println(apply(add, 7))
+    //> 17
+    println(apply(move fn(x) { x * 3 }, 7))
+    //> 21
+    let boxed: dyn fn(i64) -> i64 = adder(100)
+    println(boxed(1))
+    //> 101
+
+    println(twice(add, 0))
+    //> 20
+    let m = 4
+    println(twice(move fn(x) { x * m }, 1))
+    //> 16
+
+    println(evens_above(3).count())
+    //> 3
+    println(upto(4).count())
+    //> 4
+    println(upto(-1).count())
+    //> 0
+
+    println(offsets(iter.range(0, 3), 10).fold(0, fn(a, x) { a + x }))
+    //> 33
+    println(offsets(evens_above(5), 1).fold(0, fn(a, x) { a + x }))
+    //> 16
+
+    // Borrowing closures still work with the same adapters.
+    let xs: [i64] = [1, 2, 3, 4]
+    let lim = 2
+    println(xs.iter().map(fn(x) { x * 10 }).filter(fn(x) { x > lim * 10 }).count())
+    //> 2
+    println(iter.range(0, 4).map(u8, fn(x) { x as u8 }).fold(0 as u8, fn(a, x) { a + x }))
+    //> 6
+
+    // Consumers borrow their callback; a `move fn` is lent to them.
+    println(iter.range(0, 3).fold(0, move fn(a, x) { a + x + m }))
+    //> 15
+    println(iter.range(0, 4).any(move fn(x) { x == m - 1 }))
+    //> true
+
+    // A captured `String` moves in; the closure owns it.
+    let s = String.from("abc")
+    let len = move fn() { s.len() }
+    println(len())
+    //> 3
+
+    {
+        let g = greeter("ann")
+        println(g(1))
+        //> 4
+        println("end of block")
+        //> end of block
+    }
+    //> drop ann
+    println("done")
+    //> done
+}

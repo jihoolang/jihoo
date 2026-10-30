@@ -372,6 +372,11 @@ impl Dump {
                 self.s(" ")
                 self.ty(i.deref())
             }
+            Impl(i) => {
+                self.open("impl", t.span)
+                self.s(" ")
+                self.ty(i.deref())
+            }
         }
         self.s(")")
     }

@@ -1,0 +1,8 @@
+// A `move fn` is called through a shared borrow of itself.
+// error: a `move fn` cannot change what it captured
+
+fn main() {
+    var n = 0
+    let f = move fn() { n += 1 }
+    f()
+}

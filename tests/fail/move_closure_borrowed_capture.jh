@@ -1,0 +1,7 @@
+// A borrowed parameter cannot move into a closure; clone it first.
+// error: cannot move `s` out of its place
+
+fn keep(s: String) -> impl fn() -> i64 {
+    move fn() { s.len() }
+}
+fn main() { println(keep(String.from("ab"))()) }

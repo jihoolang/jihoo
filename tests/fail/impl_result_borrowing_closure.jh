@@ -1,0 +1,8 @@
+// A closure that borrows a local cannot be returned, even as `impl fn`.
+// error: still borrowed
+
+fn adder(n: i64) -> impl fn(i64) -> i64 {
+    let k = n
+    fn(x) { x + k }
+}
+fn main() { println(adder(1)(2)) }

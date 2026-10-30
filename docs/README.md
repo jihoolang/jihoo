@@ -50,6 +50,7 @@ same on GitHub.
 
 - [Architecture](internals/architecture.md)
 - [Design: jihoo 0.1](internals/redesign.md)
+- [Design: closures that own what they capture](internals/move-closures.md)
 - [Self-hosting](internals/self-hosting.md)
 - [Testing](internals/testing.md)
 - [Roadmap](internals/roadmap.md)
