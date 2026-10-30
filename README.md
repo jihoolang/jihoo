@@ -116,7 +116,9 @@ full `-O2` build 15.2 s, against 17.0 s and 36.8 s at 0.2.1
 Done: ownership with moves, destructors and drop flags; borrowing with
 parameter conventions, projections and views, checked by a separate borrow
 kernel; integers up to 128 bits; structs, enums, tuples, arrays, slices;
-`match` with exhaustiveness; generics with inference; traits with default
+`match` with exhaustiveness, `|` patterns that bind names, `let ... else`,
+and `match`es that are views of the borrowed parts they give; generics
+with inference; traits with default
 methods and generic impls; closures that borrow, and `comptime` closures
 that inline; `Option`, `Result` and `?`; `unsafe` pointers, `static`
 globals, C functions and callbacks (including structs by value, 128-bit
@@ -147,8 +149,9 @@ also return, and reads and writes bytes with one system call each, so
 partial operations, the end of input, interrupted calls and nonblocking
 readiness are explicit, in both profiles.
 [`std.fmt`](docs/reference/standard-library.md#formatting) formats several
-values with patterns such as `"{:>8.2} {:#x}"`, and floats print the
-shortest text that reads back as the same value.
+values with patterns such as `"{:>8.2} {:#x}"`, checked while compiling
+when they are literals ([`#[literal_check]`](docs/language/comptime.md#checking-literal-arguments)),
+and floats print the shortest text that reads back as the same value.
 The borrow kernel infers argument escape effects for direct calls, including
 recursive functions, so methods on views keep only the borrows they can
 actually retain; unknown calls and raw memory effects remain conservative.
