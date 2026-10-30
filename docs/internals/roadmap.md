@@ -340,7 +340,8 @@ Done ([design](redesign.md)):
 7. `Option`, `Result` and `?`; panics, and `#[panic_handler]` to report
    them another way.
 8. `unsafe`: raw pointers, `static` globals, `extern fn` (with `...`),
-   `export fn`, system calls, atomics, volatile accesses.
+   `export fn`, system calls, atomics, volatile accesses; kernel code
+   without the red zone or vector registers.
 9. The standard library in jihoo: `Vec`, `String`, `Map`, `Box`, sorting,
    files, arguments, the environment, running other programs
    (`std.process`), printing; native and freestanding.

@@ -362,6 +362,8 @@ pub struct Program {
     // The `drop` function of each type with a `Drop` impl.
     pub drop_impls: Map(u32, u32)
     pub target: target.Target
+    // Kernel settings: no red zone, general registers only.
+    pub codegen: target.Codegen
 }
 
 // ---- printing ----

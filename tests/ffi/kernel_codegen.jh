@@ -1,0 +1,26 @@
+#![freestanding]
+
+// A library object for a kernel, built with `-mno-red-zone` and
+// `-mgeneral-regs-only`: its stack slot is below an adjusted stack pointer,
+// the 64-byte fill uses general registers, and of std.rt it keeps only the
+// 128-bit integer helpers, not the float conversions.
+#[panic_handler]
+fn on_panic(message: str) -> never {
+    loop {}
+}
+
+export fn kernel_stack(value: u64) -> u64 {
+    var slot: u64 = 0
+    unsafe {
+        write_volatile(&slot, value)
+        read_volatile(&slot)
+    }
+}
+
+export fn clear_buffer(buffer: *u8) {
+    unsafe { mem_fill(buffer, 0, 64) }
+}
+
+export fn quotient(a: u128, b: u128) -> u128 {
+    a / b
+}

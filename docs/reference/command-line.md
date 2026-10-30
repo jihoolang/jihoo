@@ -40,6 +40,8 @@ once the program has none.
 | `-o <file>` | the output |
 | `--keep-ll` | keep the LLVM IR next to the output |
 | `--lib` | omit the entry point, using `check`, `emit-obj` or `emit-llvm` |
+| `-mno-red-zone` | never keep data below the stack pointer ([kernels](../language/profiles.md#kernel-code-generation)) |
+| `-mgeneral-regs-only` | use no floating-point or vector registers, and reject floats ([kernels](../language/profiles.md#kernel-code-generation)) |
 | `--error-format=text\|json` | diagnostic format for every failure (default `text`) |
 | `--comptime-report <path>` | write interpreter resource measurements as a separate JSON file |
 | `--time-passes` | report the time and memory of each phase on standard error |

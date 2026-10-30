@@ -34,7 +34,7 @@ import timing
 // the package version.
 const VERSION = "0.4.2"
 
-const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux, or UEFI with #![uefi])\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
+const USAGE = "usage:\n  jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout\n  jihoo check <file.jh> [--lib]                check without generating code\n  jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio\n  jihoo run <file.jh> [link inputs] [-- args]   compile and run a program\n  jihoo build <file.jh> [-o out] [link inputs]  compile a program\n  jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions\n  jihoo emit-mir <file.jh>                      print the compiler's MIR\n  jihoo emit-llvm <file.jh> [-o out]            print LLVM IR\n  jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM\n  jihoo emit-tokens <file.jh>                   print the tokens of one file\n  jihoo emit-ast <file.jh>                      print the syntax tree of one file\n  jihoo emit-program <file.jh>                  print every module a program loads\n  jihoo --version                               print the compiler's version\n\noptions:\n  -O0 -O1 -O2 -O3   optimization (default -O2)\n  --release         integer overflow wraps instead of trapping\n  --target <t>      x86_64 or aarch64 (Linux, or UEFI with #![uefi])\n  -I <dir>          also look for modules in <dir>\n  -o <file>         output file\n  --lib             omit the entry point (check/emit-obj/emit-llvm)\n  -mno-red-zone     never use the stack below the stack pointer (for kernels)\n  -mgeneral-regs-only  no floating-point or vector registers (for kernels)\n  --keep-ll         keep the LLVM IR next to the output\n  --error-format=text|json   diagnostics for every failure (default text)\n  --comptime-report <path>   write interpreter resource measurements as JSON\n  --time-passes     report the time and memory of each phase on standard error"
 
 fn main() {
     // The parser and sema recurse once per level of nesting, and a frame
@@ -70,6 +70,7 @@ fn drive() {
     var tgt = target.Target.host()
     var checked = true
     var library = false
+    var codegen = target.Codegen.default()
     var link = Vec(str).new()
     var prog_args = Vec(str).new()
     var keep_ll = false
@@ -144,6 +145,10 @@ fn drive() {
             no_prelude = true
         } else if a == "--lib" {
             library = true
+        } else if a == "-mno-red-zone" {
+            codegen.no_red_zone = true
+        } else if a == "-mgeneral-regs-only" {
+            codegen.general_regs_only = true
         } else if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" {
             opt = a
         } else if a == "-h" || a == "--help" {
@@ -239,7 +244,15 @@ fn drive() {
         None => {}
     }
     var evaluations = Vec(interp.Report).new()
-    let compiled = sema.compile(a, tgt, checked, library, comptime_report.is_some(), &evaluations)
+    let compiled = sema.compile(
+        a,
+        tgt,
+        checked,
+        library,
+        codegen,
+        comptime_report.is_some(),
+        &evaluations
+    )
     timer.lap("sema")
     match comptime_report {
         Some(path) => {

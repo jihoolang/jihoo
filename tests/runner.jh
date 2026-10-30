@@ -31,7 +31,8 @@
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, programs split into code generation units,
 //   cross-compiled objects, link errors, volatile accesses, a library
-//   object with its own panic handler and a missing LLVM.
+//   object with its own panic handler, kernel code generation and a
+//   missing LLVM.
 // - selfhost: the compiler builds itself, and the compiler it builds writes
 //   the same LLVM IR, errors included, for every .jh file of the checkout.
 // - uefi: the programs of tests/uefi, and those of tests/run that need
@@ -754,6 +755,74 @@ impl Tests {
         Ok(())
     }
 
+    // `-mno-red-zone` and `-mgeneral-regs-only` give every function the
+    // compiler writes their attributes, on either machine, leave out
+    // std.rt's float conversions and reject floats; without them the IR has
+    // no attributes.
+    fn kernel_codegen(self) -> Result((), String) {
+        let file = "tests/ffi/kernel_codegen.jh"
+        for t in ["x86_64", "aarch64"] {
+            let o = exec(
+                self.compiler.as_str(),
+                ["emit-llvm", "--lib", "--target", t, "-mno-red-zone", "-mgeneral-regs-only", file]
+            )
+            let ir = o.stdout.as_str()
+            if !o.status.success() || !ir.contains("attributes #0 = { noredzone \"target-features\"=\"-") {
+                return Err("the " + t + " IR has no kernel attributes:\n" + ir + o.stderr.as_str())
+            }
+            for line in ir.lines() {
+                if line.starts_with("define ") && !line.ends_with(" #0 {") {
+                    return Err("`" + line + "` has no attributes")
+                }
+            }
+            if ir.contains("__float") || ir.contains("__fix") || !ir.contains("@\"__udivti3\"") {
+                return Err("the " + t + " IR has the wrong std.rt helpers:\n" + ir)
+            }
+            let obj = self.temp("kernel.o")
+            let built = exec(
+                self.compiler.as_str(),
+                ["emit-obj", "--lib", "--target", t, "-mno-red-zone", "-mgeneral-regs-only", file, "-o", obj.as_str()]
+            )
+            fs.remove_file(obj.as_str())
+            if !built.status.success() {
+                return Err("the " + t + " object does not build:\n" + built.stderr.as_str())
+            }
+        }
+        let red = exec(self.compiler.as_str(), ["emit-llvm", "--lib", "-mno-red-zone", file])
+        if !red.stdout.as_str().contains("attributes #0 = { noredzone }") {
+            return Err("-mno-red-zone alone:\n" + red.stdout.as_str() + red.stderr.as_str())
+        }
+        let plain = exec(self.compiler.as_str(), ["emit-llvm", "--lib", file])
+        if !plain.status.success() || plain.stdout.as_str().contains("attributes #0") {
+            return Err("the default IR has attributes:\n" + plain.stdout.as_str())
+        }
+        let floats = "tests/ffi/kernel_floats.jh"
+        let rejected = exec(self.compiler.as_str(), ["check", "--lib", "-mgeneral-regs-only", floats])
+        let err = rejected.stderr.as_str()
+        if status(rejected) != 1 || !err.contains("`half` uses a floating-point value") ||
+            err.contains("`address`") {
+            return Err("floats with -mgeneral-regs-only:\n" + err)
+        }
+        let accepted = exec(self.compiler.as_str(), ["check", "--lib", floats])
+        if !accepted.status.success() {
+            return Err("floats without -mgeneral-regs-only:\n" + accepted.stderr.as_str())
+        }
+        let exe = self.temp("kernel-flags")
+        let built = exec(
+            self.compiler.as_str(),
+            ["build", "-mno-red-zone", "-mgeneral-regs-only", "examples/freestanding.jh", "-o", exe.as_str()]
+        )
+        if !built.status.success() {
+            return Err("a program with both flags does not build:\n" + built.stderr.as_str())
+        }
+        let ran = exec(exe.as_str(), [])
+        fs.remove_file(exe.as_str())
+        if ran.stdout != "5050\n" {
+            return Err("a program with both flags prints " + ran.stdout.as_str())
+        }
+        Ok(())
+    }
+
     // A library object with a `#[panic_handler]` reports failed checks
     // through the C program's function and has no system calls, on either
     // machine.
@@ -874,6 +943,8 @@ impl Tests {
         self.check("backend: volatile accesses", r)
         let r = self.panic_handler_object()
         self.check("backend: library panic handler", r)
+        let r = self.kernel_codegen()
+        self.check("backend: kernel code generation", r)
         let r = self.missing_llvm()
         self.check("backend: missing LLVM", r)
     }

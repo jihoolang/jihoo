@@ -309,7 +309,13 @@ impl Gen {
             decls.push_str(d.as_str())
             decls.push('\n')
         }
-        head + self.globals.as_str() + "\n" + decls.as_str() + "\n" + self.out.as_str()
+        let attrs = self.p.codegen.attributes(self.p.target)
+        let body = if attrs.len() == 0 {
+            mem.replace(&self.out, String.new())
+        } else {
+            with_attributes(self.out.as_str(), attrs.as_str())
+        }
+        head + self.globals.as_str() + "\n" + decls.as_str() + "\n" + body.as_str()
     }
 
     fn declare(inout self, name: str, decl: str) {
@@ -2515,6 +2521,26 @@ impl Gen {
         self.declare("llvm.memset.p0.i64", "declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)")
         self.declare("llvm.trap", "declare void @llvm.trap() cold noreturn nounwind")
     }
+}
+
+// The functions of `ir`, each with the attribute group `attrs`: every
+// `define` the compiler writes, its runtime and memory functions included,
+// is one line that ends with its opening brace.
+fn with_attributes(ir: str, attrs: str) -> String {
+    var out = String.new()
+    for line in ir.lines() {
+        if line.starts_with("define ") && line.ends_with(" {") {
+            out.push_str(line[0..line.len - 2])
+            out.push_str(" #0 {\n")
+        } else {
+            out.push_str(line)
+            out.push('\n')
+        }
+    }
+    out.push_str("attributes #0 = { ")
+    out.push_str(attrs)
+    out.push_str(" }\n")
+    out
 }
 
 fn mem_of(v: V) -> Option(String) {

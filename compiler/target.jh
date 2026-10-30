@@ -89,3 +89,37 @@ impl Profile {
         }
     }
 }
+
+// Code generation for a kernel, beyond what the target's Linux ABI allows
+// by default: no red zone (`-mno-red-zone`), since an interrupt on the same
+// stack writes below the stack pointer, and only general registers
+// (`-mgeneral-regs-only`), for code that runs where the floating-point and
+// vector registers are neither enabled nor saved. Each is an attribute of
+// every function the compiler writes.
+pub struct Codegen {
+    pub no_red_zone: bool
+    pub general_regs_only: bool
+}
+
+impl Codegen {
+    pub fn default() -> Codegen {
+        Codegen { no_red_zone: false, general_regs_only: false }
+    }
+
+    // The LLVM function attributes, or "" for the Linux ABI's defaults.
+    pub fn attributes(self, t: Target) -> String {
+        var a = String.new()
+        if self.no_red_zone { a.push_str("noredzone") }
+        if self.general_regs_only {
+            if a.len() > 0 { a.push(' ') }
+            // What Rust's x86_64-unknown-none and aarch64-unknown-none-softfloat
+            // turn off. Programs have no floats here (sema rejects them), so
+            // soft-float only keeps x87 out.
+            a.push_str(match t {
+                X86_64 => "\"target-features\"=\"-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2,-avx512f,+soft-float\""
+                Aarch64 => "\"target-features\"=\"-neon,-fp-armv8\""
+            })
+        }
+        a
+    }
+}

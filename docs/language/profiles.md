@@ -130,6 +130,41 @@ library uses what does not allocate (slices, `Option`, `Result`, iterators
 over borrowed data) and calls the host through `extern fn`s. `nm` on the
 object shows what it needs.
 
+### Kernel code generation
+
+The compiler follows the Linux ABI of each machine, which lets a function
+keep data in the 128 bytes below the stack pointer on x86_64 (the red zone)
+and lets the optimizer use vector registers for copies and fills of plain
+integers. In a kernel, an interrupt taken on the same stack overwrites the
+red zone, and the floating-point and vector registers may be neither
+enabled nor saved between tasks. Two options, for any profile and both
+machines, turn these off:
+
+```sh
+jihoo emit-obj --lib -mno-red-zone -mgeneral-regs-only kernel.jh -o kernel.o
+```
+
+- `-mno-red-zone` gives every function LLVM's `noredzone`: a function
+  moves the stack pointer before it stores anything on the stack.
+- `-mgeneral-regs-only` turns off MMX, SSE and AVX on x86_64 (with
+  `soft-float`, so no x87 either) and NEON and floating point on aarch64,
+  as Rust's `x86_64-unknown-none` and `aarch64-unknown-none-softfloat`
+  do: copies and fills use general registers. A program
+  then has no floats: a function that keeps an `f32` or `f64`, or a
+  value holding one, is an error (`` `half` uses a floating-point value
+  ``), once per function and only for functions that are compiled. A
+  pointer to a float is allowed. `std/rt.jh`'s conversions between floats
+  and 128-bit integers (`__floattidf`, `__fixdfti`, ...) are left out;
+  its 128-bit division stays.
+
+Each applies to every function the compiler writes, generic instances,
+`std.rt`'s helpers, `jihoo.panic` and the memory functions of a
+freestanding program included, as attributes in the IR, so `emit-llvm`
+shows them (`attributes #0`) and `JIHOO_BACKEND=clang` gets the same code.
+Assembly in `module asm` and `asm` expressions is not changed. Enabling
+and saving the vector registers, if a kernel does, is the kernel's work;
+the options only keep the compiler from using them.
+
 ## Targets
 
 jihoo compiles for x86_64 and aarch64 Linux, and UEFI on both machines.

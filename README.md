@@ -128,7 +128,9 @@ globals, C functions and callbacks (including structs by value, 128-bit
 integers and variadic function pointers on both targets), dynamic libraries
 (`std.ffi`), system calls, atomics and volatile accesses for device
 registers; [panic handlers](docs/language/errors.md#panic-handlers) for
-library objects that another operating system links; the standard library,
+library objects that another operating system links, and
+[kernel code generation](docs/language/profiles.md#kernel-code-generation)
+without the red zone or vector registers; the standard library,
 including running other programs.
 
 [Compile-time evaluation](docs/language/comptime.md) runs ordinary functions

@@ -611,6 +611,46 @@ impl Types {
         false
     }
 
+    // Holds a float in place, not behind a pointer: a value that would go
+    // through floating-point registers.
+    pub fn has_float(self, t: u32) -> bool {
+        match self.kind(t) {
+            Float(_) => true
+            Tuple(ts) => self.any_float(ts)
+            Lambda(_, e, _) => self.has_float(e)
+            Array(e, _) => self.has_float(e)
+            Adt(i) => match self.adts[i as i64].body {
+                Struct(fs) => {
+                    for f in fs {
+                        if self.has_float(f.ty) {
+                            return true
+                        }
+                    }
+                    false
+                }
+                Enum(vs) => {
+                    for v in vs {
+                        if self.any_float(v.fields) {
+                            return true
+                        }
+                    }
+                    false
+                }
+                Pending => false
+            }
+            _ => false
+        }
+    }
+
+    fn any_float(self, ts: Vec(u32)) -> bool {
+        for x in ts {
+            if self.has_float(x) {
+                return true
+            }
+        }
+        false
+    }
+
     // Plain values copy implicitly. A value that changes behind shared
     // borrows does not: a copy would be another value.
     pub fn is_plain(inout self, t: u32) -> bool {

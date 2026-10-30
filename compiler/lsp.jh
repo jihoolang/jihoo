@@ -589,7 +589,7 @@ pub fn analyze(
 ) -> Result((), Diag) {
     let a = load.load_with(path, load.default_search(search), tgt.name(), &sources, false, overlay)?
     var reports = Vec(interp.Report).new()
-    var prog = sema.compile(a, tgt, true, true, false, &reports)?
+    var prog = sema.compile(a, tgt, true, true, target.Codegen.default(), false, &reports)?
     var timer = timing.Timer.start()
     check.program(&prog, &timer)
 }

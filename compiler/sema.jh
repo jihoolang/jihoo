@@ -622,6 +622,44 @@ impl Sema {
         }
     }
 
+    // With `-mgeneral-regs-only` there are no registers for floats: a
+    // function that holds one in a local, or whose C signature passes one,
+    // is an error, one per function.
+    fn reject_floats(inout self) {
+        var errors = Vec(Diag).new()
+        for f in self.out {
+            var at_span: Option(Span) = None
+            match f.body {
+                Some(b) => {
+                    for l in b.locals {
+                        if self.types.has_float(l.ty) {
+                            at_span = Some(if l.span.hi > l.span.lo { l.span } else { f.span })
+                            break
+                        }
+                    }
+                }
+                None => {
+                    var holds = self.types.has_float(f.sig.ret)
+                    for p in f.sig.params {
+                        if self.types.has_float(p) { holds = true }
+                    }
+                    if holds { at_span = Some(f.span) }
+                }
+            }
+            match at_span {
+                Some(span) => errors.push(ty_err(
+                    span,
+                    (
+                        "`" + f.name.as_str() +
+                            "` uses a floating-point value, which -mgeneral-regs-only leaves no registers for"
+                    ).as_str()
+                ))
+                None => {}
+            }
+        }
+        for e in errors.into_iter() { self.errors.push(e) }
+    }
+
     // The instance of the program's `#[panic_handler]`, which must take a
     // `str` and return `never`.
     fn find_panic_handler(inout self) -> Result(Option(u32), Diag) {
@@ -3254,12 +3292,13 @@ pub fn compile(
     tgt: target.Target,
     checked: bool,
     library: bool,
+    codegen: target.Codegen,
     profile: bool,
     inout reports: Vec(interp.Report)
 ) -> Result(mir.Program, Diag) {
     var s = Sema.new(a, tgt, checked)
     s.profile_comptime = profile
-    let result = compile_inner(&s, a, tgt, checked, library)
+    let result = compile_inner(&s, a, tgt, checked, library, codegen)
     reports = mem.replace(&s.evaluations, Vec(interp.Report).new())
     result
 }
@@ -3269,7 +3308,8 @@ fn compile_inner(
     a: load.Ast,
     tgt: target.Target,
     checked: bool,
-    library: bool
+    library: bool,
+    codegen: target.Codegen
 ) -> Result(mir.Program, Diag) {
     s.collect()?
     let root = a.root
@@ -3307,6 +3347,14 @@ fn compile_inner(
         let exported = match decl.kind {
             Export => true
             _ => false
+        }
+        // Without floating-point registers, std.rt's conversions between
+        // floats and 128-bit integers (LLVM's `__float*` and `__fix*`) have
+        // nothing to convert.
+        if exported && codegen.general_regs_only && !user &&
+            s.module_name(s.fns[fid].module) == "std.rt" &&
+            (decl.name.as_str().starts_with("__float") || decl.name.as_str().starts_with("__fix")) {
+            continue
         }
         if exported || (user && !generic) {
             s.instance(fid as u32, Vec(CVal).new(), no_span())?
@@ -3358,6 +3406,9 @@ fn compile_inner(
     }
     s.out.truncate(lowered)
     s.check_fns = Map(u32, ConstFns).new()
+    if codegen.general_regs_only {
+        s.reject_floats()
+    }
     if s.errors.len() > 0 {
         return Err(Diag.several(mem.replace(&s.errors, Vec(Diag).new())))
     }
@@ -3392,6 +3443,7 @@ fn compile_inner(
         statics: statics
         drop_impls: drop_impls
         target: tgt
+        codegen: codegen
     })
 }
 

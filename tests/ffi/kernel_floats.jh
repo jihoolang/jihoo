@@ -1,0 +1,16 @@
+#![freestanding]
+
+// With `-mgeneral-regs-only`, `half` is an error: it converts to a float.
+// A float behind a pointer is not, and neither is a function nothing calls.
+#[panic_handler]
+fn on_panic(message: str) -> never {
+    loop {}
+}
+
+export fn half(n: i64) -> i64 {
+    (n as f64 / 2.0) as i64
+}
+
+export fn address(p: *f64) -> u64 {
+    p as u64
+}
