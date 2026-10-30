@@ -1,0 +1,7 @@
+// A literal format pattern with more placeholders than values.
+// error: format pattern `{} {}` has more placeholders than values: `{}` takes value 1 (from 0), but 1 value is given
+import std.fmt
+
+fn main() {
+    fmt.println("{} {}", (1,))
+}

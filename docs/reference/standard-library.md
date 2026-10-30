@@ -180,9 +180,13 @@ value at index `N`; `{{` and `}}` are braces. After `:` comes
 Values format through the `Format` trait (`fn format(self, inout out:
 String, spec: fmt.Spec)`). Integers, floats, `bool`, `str` and `String`
 implement it; any other type with `Show` uses its `show` text, padded. A
-type can implement `Format` itself, using `fmt.pad` for the width. The
-pattern is read when the program runs: a malformed pattern or a placeholder
-without a value panics. Formatting works in compile-time code, so
+type can implement `Format` itself, using `fmt.pad` for the width. A
+pattern written as a literal is checked while compiling: a malformed one, a
+placeholder without a value, or a `kind` for a value that is not an integer
+(`x`, `X`, `o`, `b`) or a float (`e`) is a compile error at the literal.
+`fmt.check_pattern(T, pattern)` makes that check. A pattern made while the
+program runs is read then, and the same mistakes panic. Formatting works in
+compile-time code, so
 `const S = comptime fmt.format(...)` is a string constant.
 
 `std.float` has the digits beneath: `shortest` (the fewest that read back as

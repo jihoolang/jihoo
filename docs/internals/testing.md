@@ -154,8 +154,10 @@ compile-time evaluation, moves, drops and borrows) and full compilation
 (`build` at `-O2` for the host, `emit-obj` for another `--target` or a
 module without `main`). The built-in workloads are the compiler itself,
 [a compile-time generation program](../../benchmarks/compile/comptime.jh)
-(tables, maps, sorting and derived code evaluated by the interpreter) and the
-fusion benchmark's iterator kernels. `--proofs ../jihoo-proofs` adds that
+(tables, maps, sorting and derived code evaluated by the interpreter),
+[200 calls of `std.fmt`](../../benchmarks/compile/format.jh) whose literal
+patterns are each checked while compiling, and the fusion benchmark's
+iterator kernels. `--proofs ../jihoo-proofs` adds that
 repository's proof and codec examples, and `--external NAME=ENTRY[:INCLUDE...]`
 any other program, such as Banana's entry point; their revisions are
 recorded too.

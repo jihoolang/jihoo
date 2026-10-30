@@ -5461,6 +5461,8 @@ impl sema.Sema {
         // parameters as their types are seen.
         var vals = Vec(Option(Val)).new()
         var spans = Vec(Span).new()
+        // The argument written for each runtime parameter, by index.
+        var arg_of = Map(i64, i64).new()
         var ai = 0
         var vi = 0
         var ci = nimpl
@@ -5600,6 +5602,7 @@ impl sema.Sema {
                 continue
             }
             let a = args[ai]
+            arg_of.insert(vals.len(), ai)
             ai += 1
             let sp = a.span
             var v = val_unit()
@@ -5733,6 +5736,32 @@ impl sema.Sema {
             ci += 1
         }
         let id = self.instance(fid, all, span)?
+        let lc = match self.fns[fid as i64].literal_check {
+            Some((pname, check)) => Some((pname.clone(), check.clone()))
+            None => None
+        }
+        match lc {
+            Some((pname, check)) => {
+                for pi, p in params {
+                    if p.name == pname {
+                        match arg_of.get(pi) {
+                            Some(k) => match args[k].kind {
+                                Str(lit) => self.pending_checks.push(sema.PendingCheck {
+                                    fid: fid,
+                                    cargs: all.clone(),
+                                    check: check.clone(),
+                                    lit: lit.clone(),
+                                    span: args[k].span
+                                })
+                                _ => {}
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
         let fsig = self.out[id as i64].sig.clone()
         let pass = self.out[id as i64].pass.clone()
         // Pass each argument.
@@ -6388,6 +6417,96 @@ impl sema.Sema {
         }
     }
 
+    // `#[literal_check(param, check)]` on a called function, whose
+    // argument for `param` was the literal `lit` (at `span`): `check`,
+    // which takes the same compile-time arguments and the literal, runs
+    // while compiling; a message it returns is an error at the literal.
+    pub fn literal_check(
+        inout self,
+        fid: u32,
+        cargs: Vec(CVal),
+        check: str,
+        sink lit: String,
+        span: Span
+    ) -> Result((), Diag) {
+        let module = self.fns[fid as i64].module
+        var path = Vec(String).new()
+        path.push(check.to_string())
+        let cfid = match self.lookup_path(module, path) {
+            Some((Fn(c), _)) => c
+            _ => return Err(err(span, ("`literal_check` names `" + check +
+                "`, which is not a function of `" + self.module_name(module) + "`").as_str()))
+        }
+        let cid = self.instance(cfid, cargs, span)?
+        var key = String.new()
+        cid.show(&key)
+        key.push(':')
+        key.push_str(lit.as_str())
+        let msg = match self.literal_checks.get(key) {
+            Some(m) => m.clone()
+            None => {
+                let m = self.run_literal_check(cid, module, lit.clone(), span)?
+                self.literal_checks.insert(key, m.clone())
+                m
+            }
+        }
+        if msg.len() > 0 {
+            return Err(err(span, msg.as_str()))
+        }
+        Ok(())
+    }
+
+    fn run_literal_check(
+        inout self,
+        cid: u32,
+        module: u32,
+        sink lit: String,
+        span: Span
+    ) -> Result(String, Diag) {
+        let sig = self.out[cid as i64].sig.clone()
+        if sig.params.len() != 1 || sig.params[0] != types.STR {
+            return Err(err(
+                span,
+                "a `literal_check` function takes the compile-time arguments and a `str`"
+            ))
+        }
+        var fb = Fb.new(4294967295, Env.new(module), types.UNIT, ast.RetMode.Value, span)
+        fb.push_scope(true)
+        var ops = Vec(Operand).new()
+        ops.push(Operand.Const(Const.Str(lit)))
+        let v = self.emit_call(&fb, mir.Callee.Fn(cid), ops, sig.ret, span)?
+        if self.eval_depth >= 128 {
+            return Err(err(span, "compile-time evaluation exceeded its dependency depth limit"))
+        }
+        self.eval_depth += 1
+        let r = self.eval_check(cid, fb, v, span)
+        self.eval_depth -= 1
+        match r?.c {
+            Str(s) => Ok(s.clone())
+            _ => Err(err(span, "a `literal_check` function returns a `String` or `str`"))
+        }
+    }
+
+    // A literal check's evaluation, whose functions are prepared once for
+    // every literal that `cid` checks.
+    fn eval_check(
+        inout self,
+        cid: u32,
+        sink fb: Fb,
+        sink v: Val,
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
+        let (root, buffer) = self.const_root(fb, v, None, span)?
+        if !self.check_fns.contains(cid) {
+            let fns = self.const_fns(root, span)?
+            self.check_fns.insert(cid, fns)
+        }
+        let fns = self.check_fns.remove(cid).unwrap()
+        let r = self.run_const(root, fns, buffer, span)
+        self.check_fns.insert(cid, fns)
+        r
+    }
+
     // Where a `String` or `Vec(T)` keeps its elements.
     fn const_buffer(inout self, t: u32) -> Option(interp.Buffer) {
         let a = match self.types.kind(t) {
@@ -6455,23 +6574,50 @@ impl sema.Sema {
         )
         fb.push_scope(true)
         let v = self.expr(&fb, e, exp)?
+        self.eval_lowered(fb, v, exp, e.span)
+    }
+
+    // Runs a body lowered into `fb` so far, whose value is `v`.
+    fn eval_lowered(
+        inout self,
+        sink fb: Fb,
+        sink v: Val,
+        exp: Option(u32),
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
+        let (root, buffer) = self.const_root(fb, v, exp, span)?
+        let fns = self.const_fns(root, span)?
+        self.run_const(root, fns, buffer, span)
+    }
+
+    // The function an evaluation runs, from a body lowered into `fb` so
+    // far, whose value is `v`; where a `String` or `Vec(T)` result keeps
+    // its elements.
+    fn const_root(
+        inout self,
+        sink fb: Fb,
+        sink v: Val,
+        exp: Option(u32),
+        span: Span
+    ) -> Result((mir.Function, Option(interp.Buffer)), Diag) {
+        var fb = fb
         // A `String` or `Vec(T)` result becomes a `str` or `[T]` constant.
         let buffer = self.const_buffer(v.ty)
         var view: Option(u32) = None
         match buffer { Some(b) => view = Some(b.view), None => {} }
         let v = match exp {
-            Some(t) => if view == Some(t) { v } else { self.coerce(&fb, v, t, e.span)? }
+            Some(t) => if view == Some(t) { v } else { self.coerce(&fb, v, t, span)? }
             None => v
         }
         let ty = if v.ty == types.NEVER { exp.unwrap_or(types.UNIT) } else { v.ty }
         fb.body.locals[0].ty = ty
         if v.ty != types.NEVER {
-            let operand = self.operand(&fb, v, e.span)?
-            fb.assign(Place.local(mir.RET), Rvalue.Use(operand), e.span)
+            let operand = self.operand(&fb, v, span)?
+            fb.assign(Place.local(mir.RET), Rvalue.Use(operand), span)
         }
         self.exit_to(&fb, 0)
         fb.term(Term.Return)
-        var root = mir.Function {
+        let root = mir.Function {
             symbol: String.from("comptime")
             name: String.from("comptime")
             sig: types.Sig { params: Vec(u32).new(), ret: ty, c_abi: false, variadic: false }
@@ -6480,8 +6626,13 @@ impl sema.Sema {
             linkage: mir.Linkage.Internal
             variadic: false
             returns_ref: false
-            span: e.span
+            span: span
         }
+        Ok((root, buffer))
+    }
+
+    // The functions reachable from `root`, lowered, elaborated and checked.
+    fn const_fns(inout self, root: mir.Function, span: Span) -> Result(sema.ConstFns, Diag) {
         // Lower only the functions reachable from this expression. Draining
         // the global queue here could try to lower its enclosing function
         // a second time, or falsely make an unrelated constant cyclic.
@@ -6491,7 +6642,7 @@ impl sema.Sema {
         match root.body {
             Some(body) => {
                 ids = interp.function_ids(body)
-                self.const_drops(body, &drops, &ids, e.span)?
+                self.const_drops(body, &drops, &ids, span)?
             }
             None => {}
         }
@@ -6502,56 +6653,86 @@ impl sema.Sema {
             i += 1
             if seen.contains(id) { continue }
             seen.insert(id, true)
-            self.prepare_const_fn(id, e.span)?
+            self.prepare_const_fn(id, span)?
             let lowered = self.out[id as i64].body.clone()
             match lowered {
                 Some(body) => {
                     for f in interp.function_ids(body) { ids.push(f) }
-                    self.const_drops(body, &drops, &ids, e.span)?
+                    self.const_drops(body, &drops, &ids, span)?
                 }
                 None => {}
             }
         }
         // Check snapshots: the normal compilation pipeline must still see
         // the original MIR, including when JIHOO_NO_ELAB is requested.
-        elab.run(&root)?
         var functions = Vec(mir.Function).new()
         for id, f in self.out {
-            var copy = f.clone()
             if seen.contains(id as u32) {
+                var copy = f.clone()
                 elab.run(&copy)?
+                functions.push(copy)
             } else {
                 // Unprepared functions may still be under construction.
                 // They are unreachable from this evaluation.
-                copy.body = None
+                functions.push(mir.Function {
+                    symbol: f.symbol.clone()
+                    name: f.name.clone()
+                    sig: f.sig.clone()
+                    pass: f.pass.clone()
+                    body: None
+                    linkage: f.linkage
+                    variadic: f.variadic
+                    returns_ref: f.returns_ref
+                    span: f.span
+                })
             }
-            functions.push(copy)
         }
         let effects = check.infer_effects(self.types, functions)
-        check.run_with_effects(self.types, root, effects)?
-        for id, f in functions {
-            if seen.contains(id as u32) { check.run_with_effects(self.types, f, effects)? }
+        for f in functions {
+            check.run_with_effects(self.types, f, effects)?
+        }
+        var pairs = Vec((u32, u32)).new()
+        for k in drops.keys() {
+            let t: u32 = k
+            pairs.push((t, drops.get(t).unwrap()))
+        }
+        Ok(sema.ConstFns { functions: functions, drops: pairs, effects: effects })
+    }
+
+    // Checks the root and runs it.
+    fn run_const(
+        inout self,
+        sink root: mir.Function,
+        fns: sema.ConstFns,
+        buffer: Option(interp.Buffer),
+        span: Span
+    ) -> Result(sema.TypedConst, Diag) {
+        var root = root
+        elab.run(&root)?
+        check.run_with_effects(self.types, root, fns.effects)?
+        var drops = Map(u32, u32).new()
+        for (t, f) in fns.drops {
+            drops.insert(t, f)
         }
         var interpreter = interp.Interpreter.new(self.profile_comptime)
         let result = match root.body {
             Some(body) => interpreter.evaluate(
                 &self.types,
-                functions,
+                fns.functions,
                 drops,
                 buffer,
                 body,
                 self.checked,
-                e.span
+                span
             )
-            None => Err(err(e.span, "compile-time expression has no body"))
+            None => Err(err(span, "compile-time expression has no body"))
         }
         if self.profile_comptime {
             let success = match result { Ok(_) => true, Err(_) => false }
-            self.evaluations.push(interpreter.report(functions, e.span, success))
+            self.evaluations.push(interpreter.report(fns.functions, span, success))
         }
         result
     }
-
 }
 
 // ---- dyn values ----

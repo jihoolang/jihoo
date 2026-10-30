@@ -18,7 +18,10 @@
 //
 // Values format through the `Format` trait: integers, floats, `bool`, `str`
 // and `String` have it, and any other type with `Show` uses that, padded.
-// A malformed pattern or a missing value stops the program (`panic`).
+// A pattern written as a literal is checked while compiling: a malformed
+// one, a placeholder without a value, or a base or exponent for a value
+// that is not a number, is a compile error. A pattern made while the
+// program runs is checked then, and stops the program (`panic`).
 
 import std.float
 import std.sys
@@ -245,6 +248,7 @@ impl(T: Show) Format for T {
 // ---- patterns ----
 
 // Appends the formatted pattern to `out`.
+#[literal_check(pattern, check_pattern)]
 pub fn write(comptime T: type, inout out: String, pattern: str, values: T) {
     var next = 0
     var i = 0
@@ -279,6 +283,7 @@ pub fn write(comptime T: type, inout out: String, pattern: str, values: T) {
         var spec = Spec.default()
         if j < pattern.len && pattern[j] == ':' {
             j = parse_spec(pattern, j + 1, &spec)
+            if j < 0 { bad(pattern, "a `.` without a precision") }
         }
         if j >= pattern.len || pattern[j] != '}' { bad(pattern, "an unclosed `{`") }
         if index < 0 {
@@ -304,7 +309,7 @@ fn format_at(comptime T: type, inout out: String, values: T, index: i64, spec: S
 }
 
 // Reads `[[fill]align][+][#][0][width][.precision][kind]` from `at`; where
-// it ends.
+// it ends, or -1 for a `.` without a precision.
 fn parse_spec(pattern: str, at: i64, inout spec: Spec) -> i64 {
     var j = at
     let p = pattern
@@ -346,7 +351,7 @@ fn parse_spec(pattern: str, at: i64, inout spec: Spec) -> i64 {
     }
     if j < p.len && p[j] == '.' {
         j += 1
-        if j >= p.len || !is_digit(p[j]) { bad(pattern, "a `.` without a precision") }
+        if j >= p.len || !is_digit(p[j]) { return -1 }
         spec.precision = 0
         while j < p.len && is_digit(p[j]) {
             spec.precision = spec.precision * 10 + (p[j] - '0') as i64
@@ -360,6 +365,93 @@ fn parse_spec(pattern: str, at: i64, inout spec: Spec) -> i64 {
     j
 }
 
+// What is wrong with a pattern for values of type `T`, or "": what the
+// compiler runs for a literal pattern (`#[literal_check]`), with the
+// messages `write` would panic with.
+pub fn check_pattern(comptime T: type, pattern: str) -> String {
+    var names = Vec(str).new()
+    inline if is_tuple(T) {
+        inline for k in 0..field_count(T) {
+            names.push(type_name(field_type(T, k)))
+        }
+    } else {
+        names.push(type_name(T))
+    }
+    var next = 0
+    var i = 0
+    while i < pattern.len {
+        let b = pattern[i]
+        if b == '}' {
+            if i + 1 < pattern.len && pattern[i + 1] == '}' {
+                i += 2
+                continue
+            }
+            return pattern_error(pattern, "an unmatched `}`")
+        }
+        if b != '{' {
+            i += 1
+            continue
+        }
+        if i + 1 < pattern.len && pattern[i + 1] == '{' {
+            i += 2
+            continue
+        }
+        var j = i + 1
+        var index = -1
+        while j < pattern.len && is_digit(pattern[j]) {
+            index = if index < 0 { 0 } else { index * 10 }
+            index += (pattern[j] - '0') as i64
+            j += 1
+        }
+        var spec = Spec.default()
+        if j < pattern.len && pattern[j] == ':' {
+            j = parse_spec(pattern, j + 1, &spec)
+            if j < 0 { return pattern_error(pattern, "a `.` without a precision") }
+        }
+        if j >= pattern.len || pattern[j] != '}' {
+            return pattern_error(pattern, "an unclosed `{`")
+        }
+        if index < 0 {
+            index = next
+            next += 1
+        }
+        if index >= names.len() {
+            var m = String.from("more placeholders than values: `")
+            m.push_str(pattern[i..j + 1])
+            m.push_str("` takes value ")
+            index.show(&m)
+            m.push_str(" (from 0), but ")
+            names.len().show(&m)
+            m.push_str(if names.len() == 1 { " value is given" } else { " values are given" })
+            return pattern_error(pattern, m.as_str())
+        }
+        let name = names[index]
+        let int_kind = spec.kind == 'x' || spec.kind == 'X' || spec.kind == 'o' || spec.kind == 'b'
+        if (int_kind && !is_int_name(name)) || (spec.kind == 'e' && name != "f64" && name != "f32") {
+            var m = "format pattern `" + pattern + "`: `"
+            m.push_str(pattern[i..j + 1])
+            m.push_str(if int_kind { "` formats an integer" } else { "` formats a float" })
+            m.push_str(", but value ")
+            index.show(&m)
+            m.push_str(" is a `")
+            m.push_str(name)
+            m.push('`')
+            return m
+        }
+        i = j + 1
+    }
+    String.new()
+}
+
+fn pattern_error(pattern: str, what: str) -> String {
+    "format pattern `" + pattern + "` has " + what
+}
+
+fn is_int_name(n: str) -> bool {
+    n == "i8" || n == "i16" || n == "i32" || n == "i64" || n == "i128" || n == "u8" ||
+        n == "u16" || n == "u32" || n == "u64" || n == "u128"
+}
+
 fn is_align(b: u8) -> bool {
     b == '<' || b == '>' || b == '^'
 }
@@ -368,23 +460,27 @@ fn bad(pattern: str, what: str) -> never {
     panic(("format pattern `" + pattern + "` has " + what).as_str())
 }
 
+#[literal_check(pattern, check_pattern)]
 pub fn format(comptime T: type, pattern: str, values: T) -> String {
     var out = String.new()
     write(&out, pattern, values)
     out
 }
 
+#[literal_check(pattern, check_pattern)]
 pub fn print(comptime T: type, pattern: str, values: T) {
     let s = format(pattern, values)
     sys.write_fd(1, s.as_str())
 }
 
+#[literal_check(pattern, check_pattern)]
 pub fn println(comptime T: type, pattern: str, values: T) {
     var s = format(pattern, values)
     s.push('\n')
     sys.write_fd(1, s.as_str())
 }
 
+#[literal_check(pattern, check_pattern)]
 pub fn eprintln(comptime T: type, pattern: str, values: T) {
     var s = format(pattern, values)
     s.push('\n')

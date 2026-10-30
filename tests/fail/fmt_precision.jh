@@ -1,0 +1,7 @@
+// Malformed patterns.
+// error: format pattern `{:.}` has a `.` without a precision
+import std.fmt
+
+fn main() {
+    fmt.print("{:.}", 1.5)
+}

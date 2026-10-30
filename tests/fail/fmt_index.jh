@@ -1,0 +1,8 @@
+// An index past the values.
+// error: `{2}` takes value 2 (from 0), but 2 values are given
+import std.fmt
+
+fn main() {
+    let s = fmt.format("{0} {2}", ("a", 1))
+    println(s)
+}

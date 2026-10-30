@@ -1,0 +1,7 @@
+// An unclosed brace.
+// error: format pattern `x {` has an unclosed `{`
+import std.fmt
+
+fn main() {
+    fmt.eprintln("x {", 1)
+}

@@ -1,0 +1,7 @@
+// An unmatched closing brace.
+// error: format pattern `a } b` has an unmatched `}`
+import std.fmt
+
+fn main() {
+    fmt.println("a } b", ())
+}

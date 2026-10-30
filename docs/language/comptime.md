@@ -102,6 +102,30 @@ Other owning results, such as a `Map`, a `Box` or a `Vec(String)`, are
 errors: reduce them to such a value inside the calculation. What the
 calculation leaks is discarded with the interpreter's memory.
 
+## Checking literal arguments
+
+A function can have a literal argument checked where it is called:
+
+```jihoo
+#[literal_check(pattern, check_pattern)]
+pub fn format(comptime T: type, pattern: str, values: T) -> String { ... }
+
+// What is wrong with `pattern` for values of type `T`, or "".
+pub fn check_pattern(comptime T: type, pattern: str) -> String { ... }
+```
+
+When the argument for `pattern` is a string literal, the compiler calls
+the checking function, from the same module, with the call's compile-time
+arguments and the literal, and runs it in the interpreter. A message it
+returns is a compile error at the literal. Other arguments, known only when
+the program runs, are not checked. [`std.fmt`](../reference/standard-library.md#formatting)
+checks its patterns this way.
+
+The checks run after the rest of the program is lowered, once per checking
+instance and literal, and the functions only they need are left out of the
+program: a call that passes its check compiles to the same code as without
+one.
+
 ## What it sees
 
 A compile-time expression sees module constants and its enclosing function's

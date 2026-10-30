@@ -1,0 +1,12 @@
+// An exponent is for floats; the check runs for each instance of a generic function.
+// error: `{:e}` formats a float, but value 0 is a `i64`
+import std.fmt
+
+fn show(comptime T: type, x: T) {
+    fmt.println("{:e}", x)
+}
+
+fn main() {
+    show(1.5)
+    show(2)
+}

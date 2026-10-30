@@ -8,6 +8,7 @@
 // Rust hashes them.
 
 import std.mem
+import check
 import interp
 import ast
 import diag
@@ -170,6 +171,9 @@ pub struct FnDeclInfo {
     pub span: Span
     pub public: bool
     pub owner: Owner
+    // `#[literal_check(param, check)]`: a literal argument for `param` is
+    // checked by calling `check` while compiling.
+    pub literal_check: Option((String, String))
 }
 
 pub struct ImplInfo {
@@ -187,6 +191,25 @@ pub struct TraitInfo {
     pub decl: *ast.TraitDecl
     pub fns: Map(String, u32)
     pub impls: Vec(u32)
+}
+
+// A literal argument for a `#[literal_check]` parameter: the called
+// function, its compile-time arguments, the checking function's name.
+pub struct PendingCheck {
+    pub fid: u32
+    pub cargs: Vec(CVal)
+    pub check: String
+    pub lit: String
+    pub span: Span
+}
+
+// What a compile-time evaluation runs: every function (only the reachable
+// ones with bodies, elaborated), the destructors by type, and what the
+// borrow kernel knows of the functions.
+pub struct ConstFns {
+    pub functions: Vec(mir.Function)
+    pub drops: Vec((u32, u32))
+    pub effects: Vec(check.Effect)
 }
 
 pub struct TypedConst {
@@ -367,6 +390,13 @@ pub struct Sema {
     queue: Vec(Pending)
     queue_head: i64
     pub eval_depth: u32
+    // What `#[literal_check]` functions said, by instance and literal.
+    pub literal_checks: Map(String, String)
+    // The checks to run once the program is lowered.
+    pub pending_checks: Vec(PendingCheck)
+    // By checking instance: the functions its evaluations run, prepared
+    // and checked once.
+    pub check_fns: Map(u32, ConstFns)
     pub profile_comptime: bool
     pub evaluations: Vec(interp.Report)
     pub lang: Lang
@@ -424,6 +454,9 @@ impl Sema {
             queue: Vec(Pending).new()
             queue_head: 0
             eval_depth: 0
+            literal_checks: Map(String, String).new()
+            pending_checks: Vec(PendingCheck).new()
+            check_fns: Map(u32, ConstFns).new()
             profile_comptime: false
             evaluations: Vec(interp.Report).new()
             lang: Lang {
@@ -637,7 +670,8 @@ impl Sema {
                     decl: &f,
                     span: item.span,
                     public: item.public,
-                    owner: Owner.Free
+                    owner: Owner.Free,
+                    literal_check: literal_check_attr(item)?
                 })
                 self.define(module, f.name.as_str(), Sym.Fn(id), item.public, f.name_span)?
             }
@@ -710,7 +744,8 @@ impl Sema {
                                 decl: &f,
                                 span: sub.span,
                                 public: true,
-                                owner: Owner.Trait(id)
+                                owner: Owner.Trait(id),
+                                literal_check: literal_check_attr(sub)?
                             })
                             fns.insert(f.name.clone(), fid);
                         }
@@ -743,7 +778,8 @@ impl Sema {
                                 decl: &f,
                                 span: sub.span,
                                 public: sub.public || im.trait_.is_some(),
-                                owner: Owner.Impl(id)
+                                owner: Owner.Impl(id),
+                                literal_check: literal_check_attr(sub)?
                             })
                             if fns.contains(f.name) {
                                 return Err(ty_err(f.name_span, ("`" + f.name.as_str() +
@@ -2932,6 +2968,21 @@ pub fn is_reflect_ty(n: str) -> bool {
     n == "field_type" || n == "variant_field_type"
 }
 
+fn literal_check_attr(item: ast.Item) -> Result(Option((String, String)), Diag) {
+    for a in item.attrs {
+        if a.name == "literal_check" {
+            if a.args.len() != 2 {
+                return Err(ty_err(
+                    a.span,
+                    "`literal_check` takes a parameter and a checking function: `#[literal_check(pattern, check)]`"
+                ))
+            }
+            return Ok(Some((a.args[0].clone(), a.args[1].clone())))
+        }
+    }
+    Ok(None)
+}
+
 fn has_attr(item: ast.Item, name: str) -> bool {
     for a in item.attrs {
         if a.name == name {
@@ -3133,6 +3184,17 @@ fn compile_inner(
         }
         None => {}
     }
+    // Literal checks run last, so that the functions they need, and only
+    // those, are the ones made from here on; the program leaves them out.
+    let lowered = s.out.len()
+    for c in mem.replace(&s.pending_checks, Vec(PendingCheck).new()) {
+        match s.literal_check(c.fid, c.cargs, c.check.as_str(), c.lit.clone(), c.span) {
+            Ok(_) => {}
+            Err(d) => s.errors.push(d)
+        }
+    }
+    s.out.truncate(lowered)
+    s.check_fns = Map(u32, ConstFns).new()
     if s.errors.len() > 0 {
         return Err(Diag.several(mem.replace(&s.errors, Vec(Diag).new())))
     }

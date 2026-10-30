@@ -42,6 +42,7 @@ VERSION = 1
 WORKLOADS = {
     "compiler": (ROOT, "compiler/main.jh", []),
     "comptime": (ROOT, "benchmarks/compile/comptime.jh", []),
+    "format": (ROOT, "benchmarks/compile/format.jh", []),
     "fusion": (ROOT, "benchmarks/functional-fusion/kernels.jh", ["--lib"]),
 }
 

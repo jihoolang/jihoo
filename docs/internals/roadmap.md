@@ -285,13 +285,18 @@ memory, not with any one feature.
    and owned scrutinees, values with destructors, moves on only some
    paths), `from-rust.md` and the pattern reference describe them, and
    the formatter preserves them.
-3. Format patterns checked while compiling. `fmt.format("{} {}", (1,))`
-   compiles and panics when it runs. When the pattern is a literal, check
-   its syntax and its placeholders against the tuple's arity and types with
-   compile-time evaluation, and report a source diagnostic; patterns only
-   known at run time keep the current panic. Completion: negative cases in
-   `tests/fail`, no change in the IR generated for valid patterns, and
-   compile-time cost recorded with `scripts/benchmark_compile.py`.
+3. Done: format patterns checked while compiling. A function's
+   `#[literal_check(param, check)]` runs `check` in the interpreter for a
+   literal argument; `std.fmt` checks syntax, placeholders against the
+   values and integer or float kinds against their types
+   (`tests/fail/fmt_*`). The checks run after the program is lowered and
+   the functions only they need are dropped, so valid calls give the same
+   IR. On [200 checked calls](../../benchmarks/compile/format.jh) with 8
+   value types, `check` takes 0.18 s and 33 MiB instead of 0.055 s and
+   22 MiB, a full build 1.0 s and 87 MiB instead of 0.90 s and 77 MiB
+   (each checking instance keeps its prepared functions while the checks
+   run); the compiler workload, which does not use `std.fmt`, is
+   unchanged.
 4. The release. `compiler/` and the `lib/std` it imports use none of these
    features in 0.4.0, since the seed (0.3.0) does not know them. After
    0.4.0 is tagged and the seed moves, the compiler adopts them where they

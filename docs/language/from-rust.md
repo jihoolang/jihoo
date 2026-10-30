@@ -54,7 +54,9 @@ if you know Rust, and check here when code that "should work" does not. The
   (`return`, `break`, `continue`, `panic`).
 - No macros. `println`, `print`, `panic` and `assert` are functions, and
   [`std.fmt`](../reference/standard-library.md#formatting) formats several
-  values from a tuple. Its patterns are read when the program runs: a
+  values from a tuple. A literal pattern is checked while compiling, as
+  `format!`'s is (but a value no placeholder uses is not an error); one
+  made while the program runs is read then, and a
   malformed one, or a placeholder without a value, panics instead of
   failing to compile.
 - No items inside function bodies: helper functions go at the top level.

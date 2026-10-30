@@ -1,0 +1,8 @@
+// A base is for integers.
+// error: `{:x}` formats an integer, but value 1 is a `String`
+import std.fmt
+
+fn main() {
+    let s = String.from("ab")
+    fmt.println("{} {:x}", (1, s))
+}

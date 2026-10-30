@@ -1,0 +1,8 @@
+// One value that is not a tuple is value 0.
+// error: `{}` takes value 1 (from 0), but 1 value is given
+import std.fmt
+
+fn main() {
+    var out = String.new()
+    fmt.write(&out, "{}{}", 5)
+}

@@ -1,7 +1,10 @@
-// A placeholder without a value stops the program.
+// A placeholder without a value stops the program when the pattern is made
+// while it runs (a literal pattern is checked while compiling).
 // exit: 134
 import std.fmt
 
 fn main() {
-    fmt.println("{} {}", (1,))
+    var p = String.from("{} ")
+    p.push_str("{}")
+    fmt.println(p.as_str(), (1,))
 }
