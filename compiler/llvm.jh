@@ -295,6 +295,14 @@ impl Gen {
                 [sym(name.as_str()).as_str(), init.as_str(), fmt.n(align as i128).as_str()]
             ).as_str())
         }
+        // An `extern fn` whose symbol an `export fn` of this program defines
+        // (sema checked that the signatures agree) calls the definition: it
+        // needs no declaration.
+        for f in self.p.fns {
+            if f.body.is_some() && !is_internal(f.linkage) {
+                self.declared_names.insert(f.symbol.clone(), true)
+            }
+        }
         for i in 0..self.p.fns.len() {
             self.function(i as u32)
         }

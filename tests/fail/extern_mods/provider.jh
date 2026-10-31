@@ -1,0 +1,2 @@
+// Defines a C symbol that the tests importing it declares.
+export fn extern_export_add(value: i64) -> i64 { value + 1 }

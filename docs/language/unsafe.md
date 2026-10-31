@@ -136,6 +136,10 @@ fn main() {
 `-l` libraries given to `jihoo build` are linked in.
 
 `export fn` makes a function callable from C under its own name.
+A program defines each such name once. Another module of the same program
+may declare it with `extern fn` (to call it without importing the
+module's names, as C code would); the declaration must have the same
+signature, and calls go to the definition.
 
 To build a C-callable object without a jihoo `main`:
 

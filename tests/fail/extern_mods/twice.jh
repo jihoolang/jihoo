@@ -1,0 +1,2 @@
+// A second definition of `provider.jh`'s symbol.
+export fn extern_export_add(value: i64) -> i64 { value }

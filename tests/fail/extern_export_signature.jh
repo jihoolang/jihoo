@@ -1,0 +1,8 @@
+// error: `extern_export_add` is declared with a different signature than its `export fn`
+import extern_mods.provider
+
+extern fn extern_export_add(value: i32) -> i64
+
+fn main() {
+    println(unsafe { extern_export_add(41) })
+}

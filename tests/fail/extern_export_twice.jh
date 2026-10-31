@@ -1,0 +1,5 @@
+// error: `extern_export_add` is defined twice
+import extern_mods.provider
+import extern_mods.twice
+
+fn main() {}

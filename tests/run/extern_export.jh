@@ -1,0 +1,12 @@
+// An `extern fn` whose symbol an imported `export fn` defines calls that
+// definition, with one LLVM function for both.
+import extern_mods.provider
+
+extern fn extern_export_add(value: i64) -> i64
+
+fn main() {
+    println(unsafe { extern_export_add(41) })
+    println(provider.extern_export_add(1))
+}
+//> 42
+//> 2

@@ -386,6 +386,8 @@ pub struct Sema {
     pub other_impls: Vec(u32)
     adt_insts: Map(String, u32)
     fn_insts: Map(String, u32)
+    // The `export fn` defining each C symbol.
+    exports: Map(String, u32)
     impl_cache: Map(String, Option(ImplHit))
     pub out: Vec(mir.Function)
     pub inst_info: Vec(Option(InstInfo))
@@ -464,6 +466,7 @@ impl Sema {
             other_impls: Vec(u32).new()
             adt_insts: Map(String, u32).new()
             fn_insts: Map(String, u32).new()
+            exports: Map(String, u32).new()
             impl_cache: Map(String, Option(ImplHit)).new()
             out: Vec(mir.Function).new()
             inst_info: Vec(Option(InstInfo)).new()
@@ -2372,6 +2375,9 @@ impl Sema {
             Extern => true
             _ => false
         }
+        if !normal {
+            self.link_symbol(id, is_extern)?
+        }
         if !is_extern {
             if decl.body.is_none() {
                 return Err(ty_err(decl.name_span, "this function needs a body"))
@@ -2383,6 +2389,61 @@ impl Sema {
             None => {}
         }
         Ok(id)
+    }
+
+    // An `export fn` defines its C symbol once in the program, and an
+    // `extern fn` of the same symbol (in any module) calls that definition,
+    // so it must declare the same signature.
+    fn link_symbol(inout self, id: u32, is_extern: bool) -> Result((), Diag) {
+        let symbol = self.out[id as i64].symbol.clone()
+        let span = self.out[id as i64].span
+        if is_extern {
+            match self.exports.get(symbol.clone()) {
+                Some(def) => {
+                    if !self.same_c_sig(id, def) {
+                        return Err(ty_err(
+                            span,
+                            (
+                                "`" + symbol.as_str() +
+                                    "` is declared with a different signature than its `export fn`"
+                            ).as_str()
+                        ))
+                    }
+                }
+                None => {}
+            }
+            return Ok(())
+        }
+        if self.exports.contains(symbol.clone()) {
+            return Err(ty_err(span, ("`" + symbol.as_str() + "` is defined twice").as_str()))
+        }
+        for i in 0..id {
+            let declared = match self.out[i as i64].linkage {
+                Extern => self.out[i as i64].symbol == symbol
+                _ => false
+            }
+            if declared && !self.same_c_sig(i, id) {
+                return Err(ty_err(self.out[i as i64].span, ("`" + symbol.as_str() +
+                    "` is declared with a different signature than its `export fn`").as_str()))
+            }
+        }
+        self.exports.insert(symbol, id)
+        Ok(())
+    }
+
+    fn same_c_sig(self, a: u32, b: u32) -> bool {
+        let fa = self.out[a as i64]
+        let fb = self.out[b as i64]
+        if fa.sig.c_abi != fb.sig.c_abi || fa.sig.variadic != fb.sig.variadic ||
+            fa.sig.ret != fb.sig.ret || fa.sig.params.len() != fb.sig.params.len() {
+            return false
+        }
+        for i, t in fa.sig.params {
+            if t != fb.sig.params[i] || fa.pass[i] != fb.pass[i] {
+                return false
+            }
+        }
+        true
     }
 
     // Lowers the body of a function declared `-> impl ...` to learn its
