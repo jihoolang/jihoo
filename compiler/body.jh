@@ -2318,23 +2318,28 @@ impl sema.Sema {
                 self.resolve_ty(t, env).ok()
             }
             Field(b, f) => {
-                let bt = self.peek_type(fb, b.deref())?
-                var t = bt
-                if self.types.is_ref(bt) || self.types.is_ptr(bt) {
-                    t = self.types.pointee(bt).unwrap()
-                }
-                let a = self.types.adt_index(t)?
-                match self.types.adts[a as i64].body {
-                    Struct(fs) => {
-                        for x in fs {
-                            if x.name == f {
-                                return Some(x.ty)
+                var t = self.peek_type(fb, b.deref())?
+                // Through `deref`, as `field_expr` goes (`Box(T)` and the like).
+                for _ in 0..8 {
+                    if self.types.is_ref(t) || self.types.is_ptr(t) {
+                        t = self.types.pointee(t).unwrap()
+                    }
+                    let a = self.types.adt_index(t)?
+                    match self.types.adts[a as i64].body {
+                        Struct(fs) => {
+                            for x in fs {
+                                if x.name == f {
+                                    return Some(x.ty)
+                                }
                             }
                         }
-                        None
+                        _ => {}
                     }
-                    _ => None
+                    let h = self.find_method(t, "deref").ok()??
+                    let id = self.instance(h.imp, h.args.clone(), e.span).ok()?
+                    t = self.out[id as i64].sig.ret
                 }
+                None
             }
             // A call to a function or method without compile-time
             // parameters of its own: its return type.

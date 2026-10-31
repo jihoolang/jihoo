@@ -28,6 +28,10 @@ fn length(n: Node) -> i64 {
     }
 }
 
+struct Row {
+    value: Option(u64)
+}
+
 fn main() {
     let e = Expr.Add(num(2), Box.new(Expr.Mul(num(3), num(4))))
     println(eval(e))
@@ -39,8 +43,18 @@ fn main() {
     println(list.value)
     let b = Box.new(41)
     println(*b + 1)
+    // A field through `deref` gives a variant its type.
+    var row = Box.new(Row { value: Some(1) })
+    row.value = None
+    println(row.value.is_none())
+    var rows = Vec(Box(Row)).new()
+    rows.push(Box.new(Row { value: Some(1) }))
+    rows[0].value = None
+    println(rows[0].value.is_none())
 }
 //> 14
 //> 5
 //> 5
 //> 42
+//> true
+//> true
