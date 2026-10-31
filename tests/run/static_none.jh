@@ -1,0 +1,24 @@
+// A nullary variant initializes a static from the static's written type,
+// as it does for a local (issue #24).
+
+#[derive(Eq)]
+enum Flag { Off, On }
+
+static VALUE: Option(u64) = None
+static DIRTY: Option((u64, u64, u64, u64)) = None
+static FLAG: Flag = On
+
+fn main() {
+    unsafe {
+        println(VALUE.is_none())
+        println(DIRTY.is_none())
+        println(FLAG == Flag.On)
+        DIRTY = Some((1, 2, 3, 4))
+        println(DIRTY.is_some())
+    }
+}
+
+//> true
+//> true
+//> true
+//> true

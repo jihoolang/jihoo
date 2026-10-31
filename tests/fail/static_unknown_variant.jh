@@ -1,0 +1,4 @@
+// A name that is not a variant of the static's enum is still rejected.
+// error: `Nothing` is not a compile-time constant
+static VALUE: Option(u64) = Nothing
+fn main() { unsafe { println(VALUE.is_none()) } }

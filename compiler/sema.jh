@@ -2764,10 +2764,17 @@ impl Sema {
                     None => {}
                 }
                 match self.lookup(env.module, n.as_str()) {
-                    Some(Const(c)) => self.const_value(c)
-                    _ => Err(ty_err(e.span, ("`" + n.as_str() +
-                        "` is not a compile-time constant").as_str()))
+                    Some(Const(c)) => return self.const_value(c)
+                    _ => {}
                 }
+                // A variant of the expected enum, such as `None`.
+                if self.variant_owner(exp, n.as_str())?.is_some() {
+                    return self.eval_const_expr(e, env, exp)
+                }
+                Err(ty_err(
+                    e.span,
+                    ("`" + n.as_str() + "` is not a compile-time constant").as_str()
+                ))
             }
             Field(_, _) => {
                 let Some(p) = expr_path(e) else { return self.eval_const_expr(e, env, exp) }
