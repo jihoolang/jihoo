@@ -5000,8 +5000,13 @@ impl sema.Sema {
                 } else {
                     self.expr(&fb, base.deref(), None)?
                 }
-                // A field holding a function value is called as one.
-                match self.types.adt_index(recv.ty) {
+                // A field holding a function value is called as one, also
+                // through a borrow or a pointer (`field_of` reads through it).
+                var target = recv.ty
+                if self.types.is_ptr(recv.ty) || self.types.is_ref(recv.ty) {
+                    target = self.types.pointee(recv.ty).unwrap()
+                }
+                match self.types.adt_index(target) {
                     Some(a) => {
                         var has_field = false
                         match self.types.adts[a as i64].body {
@@ -5014,7 +5019,8 @@ impl sema.Sema {
                             }
                             _ => {}
                         }
-                        if has_field && self.find_method(recv.ty, name.as_str())?.is_none() {
+                        if has_field && self.find_method(target, name.as_str())?.is_none() &&
+                            self.find_method(recv.ty, name.as_str())?.is_none() {
                             let fv = self.field_of(&fb, recv, name.as_str(), span)?
                             return self.call_value(&fb, fv, args, span)
                         }

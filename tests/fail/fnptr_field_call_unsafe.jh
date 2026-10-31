@@ -1,0 +1,6 @@
+struct Callbacks { call: fnptr(i64) -> i64 }
+fn invoke(callbacks: *Callbacks, value: i64) -> i64 {
+    callbacks.call(value)
+}
+fn main() {}
+// error: only allowed in `unsafe` code

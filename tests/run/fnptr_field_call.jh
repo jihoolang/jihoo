@@ -1,0 +1,25 @@
+// A field holding a function pointer is called as one, through a raw
+// pointer and through a borrow as well as on the struct itself.
+struct Callbacks { call: fnptr(i64) -> i64 }
+
+fn increment(value: i64) -> i64 { value + 1 }
+
+fn through_pointer(callbacks: *Callbacks, value: i64) -> i64 {
+    unsafe { callbacks.call(value) }
+}
+
+fn borrowed(callbacks: Callbacks, value: i64) -> i64 {
+    callbacks.call(value)
+}
+
+fn main() {
+    var c = Callbacks { call: increment }
+    println(through_pointer(&c, 41))
+    println(borrowed(c, 1))
+    var v = Vec(Callbacks).new()
+    v.push(c)
+    println(v.first().unwrap().call(2))
+}
+//> 42
+//> 2
+//> 3
