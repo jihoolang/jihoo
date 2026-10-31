@@ -288,7 +288,40 @@ impl Gen {
                 } else {
                     zeros
                 }
-                _ => zeros
+                Bytes(b, _) => {
+                    var bytes = b.clone()
+                    while (bytes.len() as u64) < size {
+                        bytes.push(0)
+                    }
+                    let bs = bytes.as_slice()
+                    let s = unsafe { make_str(bs.ptr, bs.len) }
+                    fmt.f(
+                        "[{} x i8] c\"{}\"",
+                        [fmt.n(bytes.len() as i128).as_str(), esc(s).as_str()]
+                    )
+                }
+                Str(s) => {
+                    let (g, len) = self.str_global(s.as_str())
+                    fmt.f(
+                        "{ ptr, i64 } { ptr {}, i64 {} }",
+                        [g.as_str(), fmt.n(len as i128).as_str()]
+                    )
+                }
+                Slice(b, len, _) => {
+                    let n = fmt.n(self.nstr as i128)
+                    self.nstr += 1
+                    let bs = b.as_slice()
+                    let s = unsafe { make_str(bs.ptr, bs.len) }
+                    self.globals.push_str(fmt.f(
+                        "@.bytes.{} = private unnamed_addr constant [{} x i8] c\"{}\", align 16\n",
+                        [n.as_str(), fmt.n(b.len() as i128).as_str(), esc(s).as_str()]
+                    ).as_str())
+                    fmt.f(
+                        "{ ptr, i64 } { ptr @.bytes.{}, i64 {} }",
+                        [n.as_str(), fmt.n(len as i128).as_str()]
+                    )
+                }
+                _ => panic("static initializer")
             }
             self.globals.push_str(fmt.f(
                 "{} = internal global {}, align {}\n",

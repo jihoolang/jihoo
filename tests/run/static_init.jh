@@ -1,0 +1,40 @@
+// A static keeps the value its initializer computes, also when that value is
+// an aggregate laid out as bytes (issue #22).
+
+struct Pair {
+    a: u16,
+    b: u32,
+}
+
+static VALUES: [u8; 4] = [12, 30, 51, 63]
+static REPEAT: [u8; 4] = [12; 4]
+static WORDS: [i32; 3] = [4, -5, 6]
+static PAIR: Pair = Pair { a: 3, b: 90000 }
+static NAME: str = "kaguya"
+static BYTES: [u8] = "abc".as_bytes()
+
+fn main() {
+    unsafe {
+        for i in 0..4 {
+            println(VALUES[i])
+        }
+        println(REPEAT[3])
+        WORDS[1] += 10
+        println(WORDS[0] + WORDS[1] + WORDS[2])
+        println(PAIR.a as u32 + PAIR.b)
+        println(NAME)
+        println(BYTES.len)
+        println(BYTES[2] as i64)
+    }
+}
+
+//> 12
+//> 30
+//> 51
+//> 63
+//> 12
+//> 15
+//> 90003
+//> kaguya
+//> 3
+//> 99
