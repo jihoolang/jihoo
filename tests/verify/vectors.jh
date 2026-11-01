@@ -1,0 +1,51 @@
+// `std`'s contracts over lengths: `Vec.len` returns the length, `push`
+// adds one, `as_slice` has the same length. A loop over a vector proves
+// each `v[i]` cannot reach `Vec.index`'s panic, and the slice's bounds
+// checks; an index from outside the loop does not.
+
+fn sum(v: Vec(i64)) -> i64 {
+    var s = 0
+    var i = 0
+    while i < v.len() {
+        s += v[i]
+        i += 1
+    }
+    s
+}
+
+fn first_two(v: Vec(i64)) -> i64 {
+    if v.len() < 2 {
+        return 0
+    }
+    v[0] + v[1]
+}
+
+fn at(v: Vec(i64), i: i64) -> i64 {
+    v[i]
+}
+
+fn built() -> i64 {
+    var v = Vec(i64).new()
+    v.push(1)
+    v.push(2)
+    let xs = v.as_slice()
+    xs[1]
+}
+
+fn main() {
+    var v = Vec(i64).new()
+    for i in 0..5 { v.push(i) }
+    println(sum(v) + first_two(v) + built() + at(v, 4))
+}
+
+//> 38:13: kept integer overflow in main (call)
+//> 38:13: kept integer overflow in main (call)
+//> 38:13: kept integer overflow in main (call)
+//> 10:9: kept integer overflow in sum (loop, load)
+//> 11:9: proved integer overflow in sum
+//> 10:14: proved index out of bounds in sum
+//> 20:5: kept integer overflow in first_two (load)
+//> 20:5: proved index out of bounds in first_two
+//> 20:12: proved index out of bounds in first_two
+//> 24:5: kept index out of bounds in at (argument)
+//> 32:5: proved index out of bounds in built

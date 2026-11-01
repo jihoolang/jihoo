@@ -155,9 +155,8 @@ fn sum(v: Vec(i64)) -> i64 {
 }
 ```
 
-`v.len()`'s `ensures` relates its result to `v`'s length (`std` states
-its contracts once the compiler that builds it, the seed, reads fields in
-clauses), and `v[i]` cannot reach `Vec.index`'s panic: with `--verify` the call goes to a copy
+`v.len()`'s `ensures` relates its result to `v`'s length, and `v[i]`
+cannot reach `Vec.index`'s panic: with `--verify` the call goes to a copy
 of `Vec.index` without the check, and a call that cannot rule it out keeps
 it. A panic that the function rules out itself, as after
 `if x == x + 1 { panic(...) }`, is removed from it.

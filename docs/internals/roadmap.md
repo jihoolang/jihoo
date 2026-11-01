@@ -393,11 +393,12 @@ and moves into the compiler once its trust boundary is stated.
    function that never returns is a check, removed when proved; and a call
    to a small function that may panic proves the panic away itself, so
    `Vec.index` states no `requires` and each `v[i]` keeps or loses its own
-   check. On the compiler, bounds and overflow checks proved went from 378
-   to 698. Left: the contracts in `std` (`Vec.len`, `push`, `pop`,
-   `as_slice`, `String`), which need a seed that reads fields in clauses
-   (step 7), and type invariants for the checks inside `std`'s own
-   methods.
+   check. `std` states `ensures` on `Vec` (`new`, `len`, `reserve`,
+   `push`, `pop`, `insert`, `remove`, `as_slice`) and `String`, all proved.
+   On the compiler, bounds and overflow checks proved went from 378 to
+   720, and 120 calls prove `Vec.index`'s panic away. Left: type
+   invariants (`0 <= len <= cap`) for the checks inside `std`'s own
+   methods, and slicing of `str`.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:
