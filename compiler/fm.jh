@@ -102,12 +102,13 @@ fn renumber(x: Lin, ids: [i64]) -> Lin {
 }
 
 // The facts that share a variable with the claim, directly or through other
-// such facts. The others cannot help unless they contradict each other, so
-// their weight stays zero. With `latest`, instead those that share one with
-// the latest facts that do not name the claim's (the conditions that led
-// here, a case of a disjunction), which may; so do they for a claim without
-// variables (the path cannot be taken).
-fn relevant(facts: [Lin], claim: Lin, n: i64, latest: bool) -> Vec(bool) {
+// such facts, by how many facts away they are (0 for those that name the
+// claim's variables), -1 for the others. Those cannot help unless they
+// contradict each other, so their weight stays zero. With `latest`, instead
+// those that share one with the latest facts that do not name the claim's
+// (the conditions that led here, a case of a disjunction), which may; so
+// do they for a claim without variables (the path cannot be taken).
+fn relevant(facts: [Lin], claim: Lin, n: i64, latest: bool) -> Vec(i64) {
     var seen = Vec(bool).filled(n, false)
     if !latest {
         for t in claim.terms { seen[t.0] = true }
@@ -126,23 +127,52 @@ fn relevant(facts: [Lin], claim: Lin, n: i64, latest: bool) -> Vec(bool) {
             }
         }
     }
-    var used = Vec(bool).filled(facts.len, false)
+    var level = Vec(i64).filled(facts.len, -1)
     var changed = true
+    var round = 0
     while changed {
         changed = false
+        // The variables of the facts this round takes, seen in the next.
+        var more = Vec(i64).new()
         for i, f in facts {
-            if !used[i] {
+            if level[i] < 0 {
                 var touches = f.is_constant() && f.constant < 0
                 for t in f.terms {
                     if seen[t.0] { touches = true }
                 }
                 if touches {
-                    used[i] = true
+                    level[i] = round
                     changed = true
-                    for t in f.terms { seen[t.0] = true }
+                    for t in f.terms { more.push(t.0) }
                 }
             }
         }
+        for v in more { seen[v] = true }
+        round += 1
+    }
+    level
+}
+
+// A type's range: a bound beyond 2^62, which rarely helps.
+fn is_range(x: Lin) -> bool { x.terms.len() == 1 && linear.abs(x.constant) >= 1 << 62 }
+
+// The `cap` relevant facts nearest the claim (all of them if `cap` is
+// negative): by level, then single bounds before relations and ranges
+// last.
+fn nearest(facts: [Lin], level: [i64], cap: i64) -> Vec(bool) {
+    // The rank, then the fact's index, in one number.
+    var order = Vec(i64).new()
+    for i, f in facts {
+        if level[i] >= 0 {
+            let rank = level[i] * 1024 + (if is_range(f) { 512 } else { 0 }) + f.terms.len()
+            order.push(rank * (1 << 32) + i)
+        }
+    }
+    sort.sort(&order)
+    var used = Vec(bool).filled(facts.len, false)
+    for k, x in order {
+        if cap >= 0 && k >= cap { break }
+        used[x % (1 << 32)] = true
     }
     used
 }
@@ -177,15 +207,35 @@ fn certificate(r: Row, m: i64) -> linear.Certificate {
     linear.Certificate { weights }
 }
 
+// Most claims follow from a few facts near them, and elimination over all
+// the facts a path has can grow past its limit: the facts nearest the
+// claim first, then more.
 pub fn prove(g: linear.Goal) -> Result(linear.Certificate, str) {
-    match prove_with(g, false) {
-        Ok(c) => Ok(c)
-        // The latest facts may contradict the others without the claim.
-        Err(e) => if g.claim.is_constant() { Err(e) } else { prove_with(g, true) }
+    match differences(g) {
+        Some(c) => return Ok(c)
+        None => {}
     }
+    var last = -1
+    for cap in [8, 24, 64, -1] {
+        match prove_with(g, false, cap, &last) {
+            Ok(c) => return Ok(c)
+            Err(_) => {}
+        }
+    }
+    // The latest facts may contradict the others without the claim.
+    if g.claim.is_constant() { return Err("no linear proof") }
+    var none = -1
+    prove_with(g, true, -1, &none)
 }
 
-fn prove_with(g: linear.Goal, latest: bool) -> Result(linear.Certificate, str) {
+// `last` is how many facts the previous try used: a try that would use no
+// more fails at once.
+fn prove_with(
+    g: linear.Goal,
+    latest: bool,
+    cap: i64,
+    inout last: i64
+) -> Result(linear.Certificate, str) {
     let m = g.facts.len() + 1
     // The variables the goal names, sorted, so rows use small numbers.
     var ids = Vec(i64).new()
@@ -198,13 +248,20 @@ fn prove_with(g: linear.Goal, latest: bool) -> Result(linear.Certificate, str) {
     var facts = Vec(Lin).with_capacity(g.facts.len())
     for f in g.facts { facts.push(renumber(f, ids.as_slice())) }
     let claim = renumber(g.claim, ids.as_slice())
-    let used = relevant(facts.as_slice(), claim, n, latest)
+    let level = relevant(facts.as_slice(), claim, n, latest)
+    let used = nearest(facts.as_slice(), level.as_slice(), cap)
+    var count = 0
+    for u in used {
+        if u { count += 1 }
+    }
+    if count <= last { return Err("no linear proof") }
+    last = count
     // With `latest`, the claim is left out; facts that reach it were in
     // the first try.
     if latest {
         let first = relevant(facts.as_slice(), claim, n, false)
         for i in 0..facts.len() {
-            if used[i] && first[i] { return Err("no linear proof") }
+            if used[i] && first[i] >= 0 { return Err("no linear proof") }
         }
     }
     var rows = Vec(Row).new()
@@ -248,6 +305,72 @@ fn prove_with(g: linear.Goal, latest: bool) -> Result(linear.Certificate, str) {
     }
 }
 
+// Difference constraints, `x - y + c >= 0` and bounds `x + c >= 0` and
+// `-x + c >= 0`, contradict each other exactly when the graph with an edge
+// from `x` to `y` of weight `c` for each (`y <= x + c`, with a node for
+// zero) has a cycle of negative weight: its facts add up to a negative
+// constant. Most facts on a path are of this kind, and a search for the
+// cycle (Bellman-Ford) stays small where elimination does not.
+fn differences(g: linear.Goal) -> Option(linear.Certificate) {
+    let m = g.facts.len() + 1
+    var ids = Vec(i64).new()
+    for t in g.claim.terms { ids.push(t.0) }
+    for f in g.facts {
+        for t in f.terms { ids.push(t.0) }
+    }
+    sort_unique(&ids)
+    let zero = ids.len()
+    // (from, to, weight, fact), the negated claim being fact `m - 1`.
+    var edges = Vec((i64, i64, i128, i64)).new()
+    for i in 0..m {
+        let x = if i < g.facts.len() { g.facts[i].clone() } else { g.claim.scale(-1).shift(-1) }
+        let t = x.terms.as_slice()
+        if t.len == 1 && t[0].1 == 1 {
+            edges.push((position(ids.as_slice(), t[0].0), zero, x.constant, i))
+        } else if t.len == 1 && t[0].1 == -1 {
+            edges.push((zero, position(ids.as_slice(), t[0].0), x.constant, i))
+        } else if t.len == 2 && t[0].1 == 1 && t[1].1 == -1 {
+            edges.push(
+                (position(ids.as_slice(), t[0].0), position(ids.as_slice(), t[1].0), x.constant, i)
+            )
+        } else if t.len == 2 && t[0].1 == -1 && t[1].1 == 1 {
+            edges.push(
+                (position(ids.as_slice(), t[1].0), position(ids.as_slice(), t[0].0), x.constant, i)
+            )
+        }
+    }
+    let n = zero + 1
+    // Distances from a source joined to every node with weight 0; each is
+    // a sum of at most `n` weights below 2^66, far inside an i128.
+    var dist = Vec(i128).filled(n, 0)
+    var pred = Vec(i64).filled(n, -1)
+    var last = -1
+    for _ in 0..n + 1 {
+        last = -1
+        for k, e in edges {
+            if dist[e.0] + e.2 < dist[e.1] {
+                dist[e.1] = dist[e.0] + e.2
+                pred[e.1] = k
+                last = e.1
+            }
+        }
+        if last < 0 { return None }
+    }
+    // Still changing after `n` rounds: following predecessors `n` times
+    // from the last node changed ends on a negative cycle.
+    var x = last
+    for _ in 0..n { x = edges[pred[x]].0 }
+    var weights = Vec(i128).filled(m, 0)
+    var y = x
+    loop {
+        let e = edges[pred[y]]
+        weights[e.3] += 1
+        y = e.0
+        if y == x { break }
+    }
+    Some(linear.Certificate { weights })
+}
+
 // Sorts and removes duplicates.
 fn sort_unique(inout xs: Vec(i64)) {
     sort.sort(&xs)
@@ -256,6 +379,20 @@ fn sort_unique(inout xs: Vec(i64)) {
         if out.len() == 0 || out[out.len() - 1] != x { out.push(x) }
     }
     xs = out
+}
+
+#[test]
+fn finds_a_negative_cycle() {
+    // x - y >= 1, y - z >= 1 and 0 <= z imply x >= 2.
+    var facts = Vec(Lin).new()
+    facts.push(Lin.of(1).minus(Lin.of(2)).shift(-1))
+    facts.push(Lin.of(2).minus(Lin.of(3)).shift(-1))
+    facts.push(Lin.of(3))
+    let g = linear.Goal { facts, claim: Lin.of(1).shift(-2) }
+    let c = differences(g).unwrap()
+    assert(linear.check(g, c).is_ok(), "checked")
+    let h = linear.Goal { facts: g.facts.clone(), claim: Lin.of(1).shift(-3) }
+    assert(differences(h).is_none(), "not provable")
 }
 
 #[test]

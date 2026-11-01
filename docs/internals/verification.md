@@ -63,8 +63,8 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 
 | Part | Trusted | Why |
 | --- | --- | --- |
-| The checker (`linear.jh`, 120 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 1,540 lines, and the model `obligations.jh` builds from MIR, 2,250) | yes | it states what MIR means: a wrong rule proves a false thing |
+| The checker (`linear.jh`, 146 lines; later the Horn kernel) | yes | it accepts the proof |
+| The obligation generator (`vc.jh`, 1,590 lines, and the model `obligations.jh` builds from MIR, 2,250) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
@@ -360,6 +360,56 @@ loop invariants in `filled` and `truncate`; every writer proves it, and
 the compiler's bounds and overflow checks proved go from 907 to 939, for
 about 21 seconds instead of 15. `len <= cap || cap == 0` holds too, but
 costs more than it proves yet.
+
+### The checker's own checks
+
+Roadmap step 6.6 starts with the trusted checker, `linear.jh`: the loops
+of `Lin.combine` (merging two sorted lists of terms), `sorted` and
+`check` state their invariants, and the compiler proves every bounds check
+in the checker. Four changes made that possible, and raised the proved
+checks of the whole compiler too:
+
+- **Wrapping arithmetic** is followed (`AddWrap`, `SubWrap` in `vc.jh`):
+  a range `for` steps its counter with `+% 1`, which was opaque, so no
+  loop over `0..v.len()` kept its counter's bounds. The result is a new
+  variable that equals the exact sum when that fits the type, and
+  otherwise the sum minus or plus the type's size; both operands are in
+  the type's range, so it wraps at most once. A constant step that is not
+  negative cannot go below, which leaves two cases. 128-bit types are not
+  followed, as before. `--release` builds' `+` and `-` are the same.
+- **Candidates for a range's end.** The end is a variable assigned once
+  (a copy of `len()`), which a cut point forgets like any other. Inference
+  now proposes, for a variable assigned once that a counter is compared
+  with, that the counter is at most it and that it equals what it is a
+  copy of, through copies and the fields given to the call that made it
+  (`len()`'s `self.len`). Loops with written invariants get the candidates
+  after the written facts, which are never dropped, and cut points where
+  many paths meet get the written invariants' facts, since one inside a
+  loop must carry them to the head. Inference stops in a function once
+  its rounds have proved goals of 500,000 facts in all, and functions
+  above 400 blocks get no candidates about ends: there, rounds cost
+  seconds and settle on nothing.
+- **Differences first.** Most facts on a path are differences
+  (`x - y + c >= 0`) or bounds, and Fourier–Motzkin over 100 of them can
+  run out of rows on a goal as plain as `r == i + 1 && i >= 0` implies
+  `r >= 0`. The prover first looks for a negative cycle among them
+  (Bellman–Ford, with a node for zero): its facts, each weighted by how
+  often the cycle uses it, add up to a negative constant, which is the
+  certificate. Then elimination runs over the 8, 24 and 64 facts nearest
+  the claim, and last over all of them.
+- **Cases by relevance.** An obligation splits on the disjunctions that
+  name the claim's variables (or those of facts that do) first, and then
+  on the others while the cases stay at most 16; before, the latest ones
+  came first, and one unrelated `k != 0` could push out the `i != len` a
+  loop's invariant needed.
+
+The compiler then proves 969 of its 2,748 bounds and overflow checks
+(from 939), and 155 calls prove a panic away (from 129), in about 22
+seconds. What the checker keeps are the overflow checks of its `i128`
+arithmetic: products of a coefficient and a weight, which are not linear,
+and `i128` values, whose range the checker's own numbers cannot state.
+`check` no longer computes `abs` of its inputs (`i128::MIN` would trap) but
+tests each number against the bound.
 
 ## Open questions
 

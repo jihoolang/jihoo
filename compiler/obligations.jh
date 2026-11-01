@@ -1570,11 +1570,14 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
             operand(&s, t, m, o)
             s.push(')')
         }
-        // Without overflow checks `+` wraps, which the model does not follow.
+        // Without overflow checks `+` wraps, modulo the type's size; `*`
+        // then is not followed.
         Bin(op, x, y) => match op {
-            Add => if p.checked { binary(&s, t, m, "add", x, y) } else { opaque(&s, "wrap") }
-            Sub => if p.checked { binary(&s, t, m, "sub", x, y) } else { opaque(&s, "wrap") }
+            Add => binary(&s, t, m, if p.checked { "add" } else { "add-wrap" }, x, y)
+            Sub => binary(&s, t, m, if p.checked { "sub" } else { "sub-wrap" }, x, y)
             Mul => if p.checked { binary(&s, t, m, "mul", x, y) } else { opaque(&s, "wrap") }
+            AddWrap => binary(&s, t, m, "add-wrap", x, y)
+            SubWrap => binary(&s, t, m, "sub-wrap", x, y)
             And | LogAnd => {
                 if is_bool(t, b, x) { binary(&s, t, m, "and", x, y) } else { opaque(&s, "bits") }
             }
@@ -1593,7 +1596,7 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
                 None => opaque(&s, match op {
                     Div => "div"
                     Rem => "rem"
-                    AddWrap | SubWrap | MulWrap => "wrap"
+                    MulWrap => "wrap"
                     Shl | Shr => "shift"
                     LogOr => "bool"
                     _ => "bits"
@@ -2215,9 +2218,11 @@ fn model_rvalue(p: Program, b: Body, m: Model, rv: mir.Rvalue) -> vc.Rvalue {
             let a = model_operand(t, m, x)
             let c = model_operand(t, m, y)
             match op {
-                Add => if p.checked { vc.Rvalue.Add(a, c) } else { opaque_rv("wrap") }
-                Sub => if p.checked { vc.Rvalue.Sub(a, c) } else { opaque_rv("wrap") }
+                Add => if p.checked { vc.Rvalue.Add(a, c) } else { vc.Rvalue.AddWrap(a, c) }
+                Sub => if p.checked { vc.Rvalue.Sub(a, c) } else { vc.Rvalue.SubWrap(a, c) }
                 Mul => if p.checked { vc.Rvalue.Mul(a, c) } else { opaque_rv("wrap") }
+                AddWrap => vc.Rvalue.AddWrap(a, c)
+                SubWrap => vc.Rvalue.SubWrap(a, c)
                 And | LogAnd => if is_bool(t, b, x) { vc.Rvalue.And(a, c) } else { opaque_rv("bits") }
                 _ => match model_cmp(op) {
                     Some(k) => if is_bool(t, b, x) { opaque_rv("bool") } else { vc.Rvalue.Compare(
@@ -2228,7 +2233,7 @@ fn model_rvalue(p: Program, b: Body, m: Model, rv: mir.Rvalue) -> vc.Rvalue {
                     None => opaque_rv(match op {
                         Div => "div"
                         Rem => "rem"
-                        AddWrap | SubWrap | MulWrap => "wrap"
+                        MulWrap => "wrap"
                         Shl | Shr => "shift"
                         LogOr => "bool"
                         _ => "bits"

@@ -516,14 +516,16 @@ if it is a borrow; `P` 0 is the result) is variable `V` here. `trap()` is
 `(trap (at lo hi))`.
 
 The model follows integer and bool locals, `+ - *` that check for overflow,
-comparisons, `!`, `&&`, integer casts, `switch` on a bool, `assert`, calls
-and returns. Everything else is `(opaque why)`, a value known only to be in
+`+% -%` and, with `--release`, `+ -` (`(add-wrap A B)` and `(sub-wrap A B)`:
+the exact result if it fits the type, and otherwise the result minus or
+plus the type's size), comparisons, `!`, `&&`, integer casts, `switch` on a
+bool, `assert`, calls and returns. Everything else is `(opaque why)`, a value known only to be in
 its type's range, with the reason it is not followed: `load` (through a
 pointer or borrow), `field`, `variant`, `element`, `aggregate` (a local that
 is not an integer), `escaped` (a local whose address is taken, `&x` for an
 `inout` parameter or `&raw`, since it may change through that pointer,
 except a borrow only passed to one call, as `bump(&x)` passes it),
-`wrap` (wrapping arithmetic, all of it with `--release`), `div`, `rem`,
+`wrap` (`*%`, and `*` with `--release`), `div`, `rem`,
 `shift`, `bits`, `neg`, `bool`, `pointer`, `tag`, `constant` and `length`. A `switch`
 the model does not follow is `(any blocks...)`. Each check ends with
 `(at lo hi)`, the byte range where compile-time evaluation reports it

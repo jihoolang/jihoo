@@ -323,12 +323,13 @@ def main():
         assert debug["wide"]["locals"][1] == ["int", str(-(1 << 127)), str((1 << 127) - 1)], debug["wide"]["locals"]
         assert debug["wide"]["locals"][2] == ["int", "0", str((1 << 128) - 1)]
 
-        # Without overflow checks `+` and `-` wrap, which is opaque, and only
-        # the bounds check has a span.
+        # Without overflow checks `+` and `-` wrap, modulo the type's size,
+        # `*` is opaque, and only the bounds check has a span.
         release = emit("--release")
         for name in ["sum", "widths"]:
             for head in ["add", "sub", "mul"]:
                 assert not list(forms(release[name]["blocks"], head)), (name, head)
+        assert list(forms(release["sum"]["blocks"], "add-wrap")), release["sum"]["blocks"]
         assert len(list(forms(release["sum"]["blocks"], "at"))) == 1
     print("emit-obligations: structure, models and opaque values")
 

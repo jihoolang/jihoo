@@ -218,7 +218,7 @@ fn outcome(
     infer.cut(&g, heads.as_slice())
     let more = infer.bounded(g, heads.as_slice())
     infer.cut(&g, more.as_slice())
-    infer.infer(&g, heads.as_slice(), contracts)
+    infer.infer(&g, heads.as_slice(), more.as_slice(), contracts)
     var o = prove_all(g, contracts, lifts)
     o.written = written
     o
@@ -650,7 +650,7 @@ pub fn verify(p: mir.Program) -> Report {
             if r.proved && o.whole { continue }
             let error = match r.source {
                 Ensures(j) => Some((b.contract.ensures[j].span, "unproved `ensures`".to_string()))
-                Invariant(k, j) => if k < o.written {
+                Invariant(k, j) => if k < o.written && j < groups[k].1.len() {
                     Some((groups[k].1[j], "unproved invariant".to_string()))
                 } else { None }
                 Requires(block, callee) => Some((

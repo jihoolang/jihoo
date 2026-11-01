@@ -173,7 +173,11 @@ fn interesting(f: vc.Function) -> Vec(bool) {
         for s in b.stmts {
             match s {
                 Assign(dst, rv, _, _) => match rv {
-                    Add(x, y) | Sub(x, y) | Mul(x, y) | Compare(_, x, y) => {
+                    Add(x, y) | Sub(x, y) | Mul(x, y) | AddWrap(x, y) | SubWrap(x, y) | Compare(
+                        _,
+                        x,
+                        y
+                    ) => {
                         out[dst] = true
                         operand_local(x, &out)
                         operand_local(y, &out)
@@ -233,17 +237,75 @@ fn is_int(f: vc.Function, l: i64) -> bool {
 // Candidates per cut point, at most this many.
 pub const MAX_CANDIDATES: i64 = 96
 
+// The variables a comparison puts beside one of `moving`.
+fn compared_with(f: vc.Function, moving: [bool]) -> Vec(bool) {
+    var out = Vec(bool).filled(f.kinds.len(), false)
+    for b in f.blocks {
+        for s in b.stmts {
+            match s {
+                Assign(_, rv, _, _) => match rv {
+                    Compare(_, Local(x), Local(y)) => {
+                        if moving[x] { out[y] = true }
+                        if moving[y] { out[x] = true }
+                    }
+                    _ => {}
+                }
+                Check(_, _) => {}
+            }
+        }
+    }
+    out
+}
+
+// Each round of inference generates every obligation again, so the
+// functions larger than this get no candidates about ranges' ends.
+pub const MAX_BLOCKS_FOR_ENDS: i64 = 400
+
+// What each variable assigned once may be a copy of: the variable a `use`
+// copies, or the fields a call it is the result of is given (`len()`
+// returns one).
+fn copied_from(f: vc.Function, count: [i64]) -> Vec(Vec(i64)) {
+    var out = Vec(Vec(i64)).new()
+    for _ in 0..f.kinds.len() { out.push(Vec(i64).new()) }
+    for b in f.blocks {
+        for s in b.stmts {
+            match s {
+                Assign(dst, rv, _, _) => match rv {
+                    Use(Local(w)) => if count[dst] == 1 { out[dst].push(w) }
+                    _ => {}
+                }
+                Check(_, _) => {}
+            }
+        }
+        match b.term {
+            Call(dst, _, site) => if dst >= 0 && count[dst] == 1 {
+                for x in site.fields {
+                    if x.param > 0 { out[dst].push(x.v) }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 // Variables a loop counts with (assigned in two blocks or more: before the
 // loop and in it), and what they are compared with (never assigned:
-// arguments and lengths).
+// arguments and lengths). A variable assigned once that a counter is
+// compared with, such as a range's end, is proposed to be at least the
+// counter, and equal to what it is a copy of, through a few copies.
 fn candidates(f: vc.Function) -> Vec(vc.Fact) {
     let count = assigned_in(f)
     let useful = interesting(f)
     var moving = Vec(i64).new()
+    var is_moving = Vec(bool).filled(f.kinds.len(), false)
     var fixed = Vec(i64).new()
     for l in 1..f.kinds.len() {
         if is_int(f, l) && useful[l] {
-            if count[l] >= 2 { moving.push(l) }
+            if count[l] >= 2 {
+                moving.push(l)
+                is_moving[l] = true
+            }
             if count[l] == 0 { fixed.push(l) }
         }
     }
@@ -252,6 +314,8 @@ fn candidates(f: vc.Function) -> Vec(vc.Fact) {
     for p in f.callee.lengths {
         if count[p.1] == 0 && !useful[p.1] { fixed.push(p.1) }
     }
+    let beside = compared_with(f, is_moving.as_slice())
+    let copies = copied_from(f, count.as_slice())
     var out = Vec(vc.Fact).new()
     for v in moving {
         match f.kinds[v] {
@@ -262,6 +326,30 @@ fn candidates(f: vc.Function) -> Vec(vc.Fact) {
             )) }
             Other => {}
         }
+    }
+    for v in 1..f.kinds.len() {
+        if f.blocks.len() > MAX_BLOCKS_FOR_ENDS { break }
+        if !beside[v] || count[v] != 1 || !is_int(f, v) { continue }
+        for w in moving { out.push(vc.fact(vc.Cmp.Le, vc.Operand.Local(w), vc.Operand.Local(v))) }
+        var seen = Vec(i64).new()
+        var todo = copies[v].clone()
+        while todo.len() > 0 && seen.len() < 8 {
+            let w = todo.pop().unwrap()
+            var again = false
+            for x in seen {
+                if x == w { again = true }
+            }
+            if again || w == v || !is_int(f, w) { continue }
+            seen.push(w)
+            if count[w] <= 1 { out.push(vc.fact(
+                vc.Cmp.Eq,
+                vc.Operand.Local(v),
+                vc.Operand.Local(w)
+            )) }
+            for x in copies[w] { todo.push(x) }
+        }
+    }
+    for v in moving {
         for w in moving {
             if w != v { out.push(vc.fact(vc.Cmp.Le, vc.Operand.Local(v), vc.Operand.Local(w))) }
         }
@@ -276,6 +364,9 @@ fn candidates(f: vc.Function) -> Vec(vc.Fact) {
 }
 
 pub const MAX_ROUNDS: i64 = 20
+// The facts in the goals proved over all rounds, at most: inference in a
+// large function that does not settle soon gives up.
+pub const MAX_WORK: i64 = 500000
 
 pub fn proved(goals: [linear.Goal]) -> bool {
     for g in goals {
@@ -288,23 +379,37 @@ pub fn proved(goals: [linear.Goal]) -> bool {
     true
 }
 
-// `f` with candidates proposed for its cut points in `heads` that have no
-// facts, kept while they check.
-pub fn infer(inout f: vc.Function, heads: [i64], contracts: [Option(vc.Callee)]) {
+// `f` with candidates proposed for its cut points in `heads`, after the
+// facts written there, kept while they check; a written fact is never
+// dropped. The cut points in `joins`, where many paths meet, get the facts
+// of the written invariants: one inside a loop must carry them on to the
+// loop's head.
+pub fn infer(inout f: vc.Function, heads: [i64], joins: [i64], contracts: [Option(vc.Callee)]) {
     let proposed = candidates(f)
-    if proposed.len() == 0 { return }
-    // Which invariants this fills, by index into `f.invariants`.
-    var ours = Vec(bool).filled(f.invariants.len(), false)
+    var written = Vec(vc.Fact).new()
+    for inv in f.invariants {
+        for x in inv.1 { written.push(x.clone()) }
+    }
+    if proposed.len() == 0 && written.len() == 0 { return }
+    // Per invariant, the index of its first fact this adds (its length if
+    // none).
+    var first = Vec(i64).new()
     for i in 0..f.invariants.len() {
-        var head = false
+        first.push(f.invariants[i].1.len())
         for h in heads {
-            if h == f.invariants[i].0 { head = true }
+            if h == f.invariants[i].0 {
+                for x in proposed { f.invariants[i].1.push(x.clone()) }
+            }
         }
-        if head && f.invariants[i].1.len() == 0 {
-            f.invariants[i].1 = proposed.clone()
-            ours[i] = true
+        if first[i] == 0 {
+            for h in joins {
+                if h == f.invariants[i].0 {
+                    for x in written { f.invariants[i].1.push(x.clone()) }
+                }
+            }
         }
     }
+    var work = 0
     for _ in 0..MAX_ROUNDS {
         let obs = vc.generate(f, contracts, Vec(Option(vc.Lift)).new().as_slice())
         if obs.errors.len() > 0 { break }
@@ -313,26 +418,26 @@ pub fn infer(inout f: vc.Function, heads: [i64], contracts: [Option(vc.Callee)])
         var any = false
         for o in obs.list {
             match o.source {
-                Invariant(i, j) => if ours[i] && !failed[i][j] && !proved(o.goals.as_slice()) {
-                    failed[i][j] = true
-                    any = true
+                Invariant(i, j) => if j >= first[i] && !failed[i][j] {
+                    for g in o.goals { work += g.facts.len() }
+                    if !proved(o.goals.as_slice()) {
+                        failed[i][j] = true
+                        any = true
+                    }
                 }
                 _ => {}
             }
         }
         if !any { return }
+        if work > MAX_WORK { break }
         for i in 0..f.invariants.len() {
-            if ours[i] {
-                var kept = Vec(vc.Fact).new()
-                for j, x in f.invariants[i].1 {
-                    if !failed[i][j] { kept.push(x.clone()) }
-                }
-                f.invariants[i].1 = kept
+            var kept = Vec(vc.Fact).new()
+            for j, x in f.invariants[i].1 {
+                if !failed[i][j] { kept.push(x.clone()) }
             }
+            f.invariants[i].1 = kept
         }
     }
     // Not settled: drop what was proposed, which leaves the cut points.
-    for i in 0..f.invariants.len() {
-        if ours[i] { f.invariants[i].1 = Vec(vc.Fact).new() }
-    }
+    for i in 0..f.invariants.len() { f.invariants[i].1.truncate(first[i]) }
 }

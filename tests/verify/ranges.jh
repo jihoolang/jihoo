@@ -1,0 +1,53 @@
+// Range `for` loops step their counter with wrapping `+% 1`, which the
+// verifier follows: the result is the sum when it fits. Inference proposes
+// that a range's end, a copy of `len()`, equals the length it was copied
+// from, so `v[i]` over `0..v.len()` cannot panic, with or without written
+// invariants beside it.
+
+struct Pair {
+    a: Vec(i64)
+    b: Vec(i64)
+}
+
+fn total(v: Vec(i64)) -> i64 {
+    var s = 0
+    for i in 0..v.len() {
+        s = v[i]
+    }
+    s
+}
+
+// The written invariant carries what the early return says about `b`;
+// inference adds what the loop needs about `i`.
+fn zip(p: Pair) -> i64 {
+    let n = p.a.len()
+    if p.b.len() != n { return 0 }
+    var s = 0
+    for i in 0..n
+        invariant p.a.len() == n && p.b.len() == n
+    {
+        s = p.a[i] - p.b[i]
+    }
+    s
+}
+
+// Wrapping never traps, and a counter that wraps is still followed.
+fn wrap(x: u8) -> u8 {
+    let y = x +% 1
+    if x < 255 && y == 0 { trap() }
+    y
+}
+
+fn main() {
+    var v = Vec(i64).new()
+    v.push(1)
+    println(total(v.clone()))
+    println(zip(Pair { a: v.clone(), b: v }))
+    println(wrap(255))
+}
+
+//> 15:13: proved index out of bounds in total
+//> 29:13: kept integer overflow in zip (load)
+//> 29:13: proved index out of bounds in zip
+//> 29:22: proved index out of bounds in zip
+//> 37:28: proved trap in wrap

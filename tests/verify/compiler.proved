@@ -1,6 +1,6 @@
 # What `jihoo verify compiler/main.jh` proves at least, per kind of check:
 # the runner's verify suite fails when a change proves fewer. Raise the
 # numbers when a change proves more.
-939 bounds and overflow checks
+969 bounds and overflow checks
 0 panics
-129 calls that may panic
+155 calls that may panic

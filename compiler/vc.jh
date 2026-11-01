@@ -78,6 +78,9 @@ pub enum Rvalue {
     Sub(Operand, Operand)
     // Linear only when one side is a constant.
     Mul(Operand, Operand)
+    // `+% -%`, and `+ -` without overflow checks: modulo the type's size.
+    AddWrap(Operand, Operand)
+    SubWrap(Operand, Operand)
     Compare(Cmp, Operand, Operand)
     // `!b` and `a && b` on bools.
     Not(Operand)
@@ -765,33 +768,41 @@ fn cases_for(p: Path, claim: Lin, extra: [Lin]) -> Vec(i64) {
             }
         }
     }
+    // Those that name the claim's variables first, then the others while
+    // the cases stay few: a path's later conditions can push out an
+    // earlier one the claim needs.
     var cases = 1
-    var k = p.ors.len()
-    while k > 0 {
-        k -= 1
-        let n = p.ors[k].len()
-        var relevant = true
-        let typed = match p.or_tags[k] {
-            TypeInvariant(_) => true
-            _ => false
-        }
-        if any && typed {
-            relevant = false
-            for alt in p.ors[k] {
-                for x in alt {
-                    if touches(seen.as_slice(), x) { relevant = true }
+    var taken = Vec(bool).filled(p.ors.len(), false)
+    for pass in 0..2 {
+        var k = p.ors.len()
+        while k > 0 {
+            k -= 1
+            if taken[k] { continue }
+            let n = p.ors[k].len()
+            let typed = match p.or_tags[k] {
+                TypeInvariant(_) => true
+                _ => false
+            }
+            var relevant = !any
+            if any {
+                for alt in p.ors[k] {
+                    for x in alt {
+                        if touches(seen.as_slice(), x) { relevant = true }
+                    }
                 }
             }
-        }
-        if !relevant { continue }
-        if cases * n > MAX_CASES { break }
-        cases *= n
-        chosen.push(k)
-        if any {
-            for alt in p.ors[k] {
-                for x in alt {
-                    for t in x.terms {
-                        let _ = mark(&seen, t.0)
+            if pass == 0 && !relevant { continue }
+            if pass == 1 && typed { continue }
+            if cases * n > MAX_CASES { continue }
+            cases *= n
+            taken[k] = true
+            chosen.push(k)
+            if any {
+                for alt in p.ors[k] {
+                    for x in alt {
+                        for t in x.terms {
+                            let _ = mark(&seen, t.0)
+                        }
                     }
                 }
             }
@@ -1348,6 +1359,8 @@ fn assign(inout g: Gen, f: Function, inout p: Path, dst: i64, rv: Rvalue) {
             }
             arithmetic(&g, f, p, dst, r)
         }
+        AddWrap(a, b) => wrapping(&g, f, &p, dst, a, b, 1)
+        SubWrap(a, b) => wrapping(&g, f, &p, dst, a, b, -1)
         Compare(op, a, b) => compare(g, p, op, a, b)
         Not(a) => match bools(p, a) {
             Some(x) => Sym.Bool(x.1.clone(), x.0.clone())
@@ -1371,9 +1384,58 @@ fn assign(inout g: Gen, f: Function, inout p: Path, dst: i64, rv: Rvalue) {
         }
         Opaque(w) => w
         Cast(_) => WHY_CAST
+        AddWrap(_, _) | SubWrap(_, _) => why_code("wrap")
         _ => WHY_UNSTATED
     }
     havoc_or(&g, f, &p, dst, value, why)
+}
+
+// `a +% b` (`k` 1) or `a -% b` (`k` -1): a new variable, which is the
+// exact result when that fits the destination's type, and otherwise the
+// result minus or plus the type's size (both operands are in the type's
+// range, so it wraps at most once). Unknown for 128-bit types, whose size
+// is beyond the checker's numbers.
+fn wrapping(
+    inout g: Gen,
+    f: Function,
+    inout p: Path,
+    dst: i64,
+    a: Operand,
+    b: Operand,
+    k: i128
+) -> Sym {
+    let Int(lo, hi) = f.kinds[dst] else { return Sym.Unknown }
+    if lo < 0 - (1 << 63) || hi > (1 << 64) - 1 { return Sym.Unknown }
+    let size = hi - lo + 1
+    let x = match (term(&g, f, p, a, dst), term(&g, f, p, b, dst)) {
+        (Some(x), Some(y)) => sum(x, y, k)
+        _ => None
+    }
+    let Some(x) = x else { return Sym.Unknown }
+    if x.magnitude() > linear.MAX_VALUE - size { return Sym.Unknown }
+    let r = g.fresh(f.kinds[dst], why_code("wrap"))
+    var fits = Vec(Cond).new()
+    fits.push(Cond { op: Cmp.Le, a: Lin.num(lo), b: x.clone() })
+    fits.push(Cond { op: Cmp.Le, a: x.clone(), b: Lin.num(hi) })
+    fits.push(Cond { op: Cmp.Eq, a: r.clone(), b: x.clone() })
+    var above = Vec(Cond).new()
+    above.push(Cond { op: Cmp.Gt, a: x.clone(), b: Lin.num(hi) })
+    above.push(Cond { op: Cmp.Eq, a: r.clone(), b: x.shift(0 - size) })
+    var below = Vec(Cond).new()
+    below.push(Cond { op: Cmp.Lt, a: x.clone(), b: Lin.num(lo) })
+    below.push(Cond { op: Cmp.Eq, a: r.clone(), b: x.shift(size) })
+    // Adding a constant that is not negative never goes below, nor does
+    // subtracting one go above.
+    let up = match b {
+        Const(c) => if c >= 0 { k } else { 0 - k }
+        _ => 0
+    }
+    var d = Vec(Vec(Cond)).new()
+    d.push(fits)
+    if up >= 0 { d.push(above) }
+    if up <= 0 { d.push(below) }
+    assume_dnf(&p, d.as_slice(), Tag.Path)
+    Sym.Num(r)
 }
 
 // Gives the local the value, or a fresh variable in its range when the
