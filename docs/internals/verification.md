@@ -293,6 +293,13 @@ loops over `v` or after a length test; most of the other `v[i]` index
 with a value loaded from memory (a token's position, a block's number),
 which no contract on `Vec` can bound.
 
+`reserve` then also promised room: `self.len + n <= self.cap` on return.
+That proves `push`'s `self.len += 1` in each of its instances (871 bounds
+and overflow checks on the compiler). Working out what `Vec` can promise
+(its type invariant, next) found a bug: `push` and `insert` reserved only
+when `len == cap`, but a `String` from a literal borrows the literal's
+bytes with `cap` 0, so they wrote into the literal. They now reserve when `len >= cap`.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be

@@ -39,7 +39,7 @@ impl(T: type) Vec(T) {
 
     // Room for at least n more values.
     pub fn reserve(inout self, n: i64)
-        ensures self.len == old(self.len)
+        ensures self.len == old(self.len) && self.len + n <= self.cap
     {
         let need = self.len + n
         if need <= self.cap {
@@ -65,7 +65,8 @@ impl(T: type) Vec(T) {
     pub fn push(inout self, sink x: T)
         ensures self.len == old(self.len) + 1
     {
-        if self.len == self.cap {
+        // Above `cap` when the bytes are borrowed (`String.from_static`).
+        if self.len >= self.cap {
             self.reserve(1)
         }
         unsafe {
@@ -119,7 +120,8 @@ impl(T: type) Vec(T) {
         if i < 0 || i > self.len {
             panic("insert index out of bounds")
         }
-        if self.len == self.cap {
+        // Above `cap` when the bytes are borrowed (`String.from_static`).
+        if self.len >= self.cap {
             self.reserve(1)
         }
         unsafe {
