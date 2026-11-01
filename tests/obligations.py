@@ -52,6 +52,10 @@ fn main() {
 """
 
 
+REASONS = {"load", "field", "variant", "element", "escaped", "aggregate", "constant", "wrap",
+           "bits", "bool", "div", "rem", "shift", "neg", "pointer", "tag", "length"}
+
+
 def parse(text):
     tokens = text.replace("(", " ( ").replace(")", " ) ").split()
     stack = [[]]
@@ -150,7 +154,13 @@ def main():
         e = debug["escapes"]
         assert e["locals"][2] == "other", e["locals"]
         assert ["set", "0", ["use", ["local", "5"]]] in e["blocks"][1]
-        assert ["set", "5", ["use", "opaque"]] in e["blocks"][1], e["blocks"][1]
+        assert ["set", "5", ["use", ["opaque", "escaped"]]] in e["blocks"][1], e["blocks"][1]
+
+        # Every opaque value says why: a load through the slice's pointer.
+        assert ["set", "10", ["use", ["opaque", "load"]]] in s["blocks"][6], s["blocks"][6]
+        for name, f in debug.items():
+            for o in forms(f["blocks"], "opaque"):
+                assert len(o) == 2 and o[1] in REASONS, (name, o)
 
         # Ranges and constants are values, not bits.
         w = debug["widths"]

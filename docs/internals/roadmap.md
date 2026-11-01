@@ -352,9 +352,11 @@ and moves into the compiler once its trust boundary is stated.
    or a proved `ensures` does not hold, in debug and `--release` builds. Two
    deliberately wrong models are caught. The test runs over all 98 programs
    of `tests/run` and `examples` (317 checks, 25 proved, no proved check
-   failing; 66 proved with the untrusted invariant inference that step 4
-   needs, started early). Left: contracts that do not name MIR's local and
-   block numbers.
+   failing; 69 proved with the untrusted invariant inference that step 4
+   needs, started early). Each unproved check reports why: most depend on
+   a value loaded from memory or a call's result, which contracts (steps 4
+   and 5) address. Left: contracts that do not name MIR's local and block
+   numbers.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
    proved checks. `--verify-report` lists each check as proved or kept.

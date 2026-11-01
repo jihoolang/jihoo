@@ -61,7 +61,7 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 | --- | --- | --- |
 | The checker (linear; later the Horn kernel) | yes | it accepts the proof |
 | The obligation generator | yes | it states what MIR means: a wrong rule proves a false thing |
-| MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program |
+| MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
 | Provers, invariant inference | no | everything they say is checked |
 
@@ -121,6 +121,18 @@ the generator now keep every number within bounds where i128 arithmetic
 cannot overflow, give up on a function after 2,000 paths, and stop a path
 that comes back to a block instead of unrolling the loop; a function they
 gave up on proves none of its checks.
+
+Each opaque value now carries the reason the model does not follow it,
+and each unproved check reports where the values it depends on come from.
+Over the same corpus, with inference, 69 of 317 checks are proved; of the
+others, about 80 depend on a value loaded from memory (an element of a
+`Vec`, a field behind a borrow), about 35 on a call's result, about 70 on
+a loop the inferred invariants do not cover, 13 on an argument that only
+a `requires` could bound, and 30 are checks the model cannot state. Loads
+and calls need contracts (a `Vec`'s elements, the callee's `ensures`):
+that is where the proof rate comes from next, more than from a richer
+arithmetic. MIR's `unreachable` is trusted, as LLVM trusts it: a path that
+reaches it ends there.
 
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs

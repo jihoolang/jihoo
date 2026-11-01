@@ -417,10 +417,13 @@ of its own after the locals, listed under `lengths`.
 
 The model follows integer and bool locals, `+ - *` that check for overflow,
 comparisons, `!`, `&&`, integer casts, `switch` on a bool, `assert`, calls
-and returns. Everything else is `opaque`, a value known only to be in its
-type's range: loads, wrapping arithmetic (all of it with `--release`), and
-every read of a local whose address is taken (`&x` for an `inout`
-parameter, `&raw`), since it may change through that pointer. A `switch`
+and returns. Everything else is `(opaque why)`, a value known only to be in
+its type's range, with the reason it is not followed: `load` (through a
+pointer or borrow), `field`, `variant`, `element`, `aggregate` (a local that
+is not an integer), `escaped` (a local whose address is taken, `&x` for an
+`inout` parameter or `&raw`, since it may change through that pointer),
+`wrap` (wrapping arithmetic, all of it with `--release`), `div`, `rem`,
+`shift`, `bits`, `neg`, `bool`, `pointer`, `tag`, `constant` and `length`. A `switch`
 the model does not follow is `(any blocks...)`. Each check ends with
 `(at lo hi)`, the byte range where compile-time evaluation reports it
 failing: an `assert`, and a `set` whose `+ - *` checks for overflow. The format is research and

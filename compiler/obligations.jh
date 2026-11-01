@@ -1,7 +1,7 @@
 // `emit-obligations`: each function's MIR as the integer model that
 // jihoo-proofs/obligations proves things about (docs/internals/verification.md).
-// What the model cannot follow becomes `opaque`, a value known only to be in
-// its type's range, so the output never claims more than MIR says.
+// What the model cannot follow becomes `(opaque why)`, a value known only
+// to be in its type's range, so the output never claims more than MIR says.
 
 import diag
 import lex
@@ -21,6 +21,8 @@ struct Model {
     tracked: Vec(bool)
     // Per local: the variable of its length, for a `str` or slice local.
     lengths: Vec(Option(i64))
+    // Per local: its address is taken.
+    escaped: Vec(bool)
     count: i64
 }
 
@@ -77,7 +79,8 @@ fn escapes(b: Body) -> Vec(bool) {
 fn model(t: Types, b: Body) -> Model {
     let escaped = escapes(b)
     var m = Model {
-        tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(), count: b.locals.len()
+        tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(), escaped: escaped.clone(),
+        count: b.locals.len()
     }
     for i, l in b.locals {
         let scalar = match t.kind(l.ty) {
@@ -110,6 +113,32 @@ fn variable(m: Model, p: Place) -> Option(i64) {
     None
 }
 
+// A value the model does not follow, and why: `(opaque why)`.
+fn opaque(inout s: String, why: str) {
+    s.push_str("(opaque ")
+    s.push_str(why)
+    s.push(')')
+}
+
+// Why a place is not a variable of the model.
+fn place_reason(m: Model, p: Place) -> str {
+    if p.proj.len() == 0 {
+        return if m.escaped[p.local as i64] { "escaped" } else { "aggregate" }
+    }
+    for pr in p.proj {
+        match pr {
+            Deref => return "load"
+            _ => {}
+        }
+    }
+    match p.proj[0] {
+        Field(_) => "field"
+        Variant(_) => "variant"
+        Index(_) => "element"
+        Deref => "load"
+    }
+}
+
 fn operand(inout s: String, t: Types, m: Model, o: Operand) {
     match o {
         Copy(p) | Move(p) => match variable(m, p) {
@@ -118,7 +147,7 @@ fn operand(inout s: String, t: Types, m: Model, o: Operand) {
                 v.show(&s)
                 s.push(')')
             }
-            None => s.push_str("opaque")
+            None => opaque(&s, place_reason(m, p))
         }
         Const(c) => match c {
             Int(v, ty) => {
@@ -136,7 +165,7 @@ fn operand(inout s: String, t: Types, m: Model, o: Operand) {
                 s.push(')')
             }
             Bool(b) => s.push_str(if b { "(const 1)" } else { "(const 0)" })
-            _ => s.push_str("opaque")
+            _ => opaque(&s, "constant")
         }
     }
 }
@@ -174,15 +203,15 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
         }
         // Without overflow checks `+` wraps, which the model does not follow.
         Bin(op, x, y) => match op {
-            Add => if p.checked { binary(&s, t, m, "add", x, y) } else { s.push_str("opaque") }
-            Sub => if p.checked { binary(&s, t, m, "sub", x, y) } else { s.push_str("opaque") }
-            Mul => if p.checked { binary(&s, t, m, "mul", x, y) } else { s.push_str("opaque") }
+            Add => if p.checked { binary(&s, t, m, "add", x, y) } else { opaque(&s, "wrap") }
+            Sub => if p.checked { binary(&s, t, m, "sub", x, y) } else { opaque(&s, "wrap") }
+            Mul => if p.checked { binary(&s, t, m, "mul", x, y) } else { opaque(&s, "wrap") }
             And | LogAnd => {
-                if is_bool(t, b, x) { binary(&s, t, m, "and", x, y) } else { s.push_str("opaque") }
+                if is_bool(t, b, x) { binary(&s, t, m, "and", x, y) } else { opaque(&s, "bits") }
             }
             _ => match compare(op) {
                 Some(c) => if is_bool(t, b, x) {
-                    s.push_str("opaque")
+                    opaque(&s, "bool")
                 } else {
                     s.push_str("(cmp ")
                     s.push_str(c)
@@ -192,7 +221,14 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
                     operand(&s, t, m, y)
                     s.push(')')
                 }
-                None => s.push_str("opaque")
+                None => opaque(&s, match op {
+                    Div => "div"
+                    Rem => "rem"
+                    AddWrap | SubWrap | MulWrap => "wrap"
+                    Shl | Shr => "shift"
+                    LogOr => "bool"
+                    _ => "bits"
+                })
             }
         }
         Un(op, x) => match op {
@@ -200,8 +236,8 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
                 s.push_str("(not ")
                 operand(&s, t, m, x)
                 s.push(')')
-            } else { s.push_str("opaque") }
-            Neg => s.push_str("opaque")
+            } else { opaque(&s, "bits") }
+            Neg => opaque(&s, "neg")
         }
         Cast(x, _, kind) => match kind {
             Numeric => {
@@ -209,9 +245,10 @@ fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
                 operand(&s, t, m, x)
                 s.push(')')
             }
-            Ptr => s.push_str("opaque")
+            Ptr => opaque(&s, "pointer")
         }
-        _ => s.push_str("opaque")
+        Discriminant(_) => opaque(&s, "tag")
+        _ => opaque(&s, "aggregate")
     }
 }
 
@@ -284,7 +321,7 @@ fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
                             _ => {}
                         }
                     }
-                    if !known { s.push_str("opaque") }
+                    if !known { opaque(&s, "length") }
                     s.push(')')
                 }
                 None => {}
