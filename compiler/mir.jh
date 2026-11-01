@@ -315,6 +315,95 @@ pub struct Body {
     pub locals: Vec(LocalDecl)
     pub blocks: Vec(Block)
     pub arg_count: i64
+    pub contract: Contract
+}
+
+// What a contract's term names: a local's value, `*local` (an `inout`
+// parameter), or the length of a `str` or slice local; each as it is now,
+// or on entry to the function.
+pub enum SpecVar {
+    Local(u32)
+    Deref(u32)
+    Len(u32)
+}
+
+impl Clone for SpecVar {
+    fn clone(self) -> SpecVar {
+        match self {
+            Local(l) => SpecVar.Local(l)
+            Deref(l) => SpecVar.Deref(l)
+            Len(l) => SpecVar.Len(l)
+        }
+    }
+}
+
+pub struct SpecTerm {
+    pub coef: i128
+    pub name: SpecVar
+    pub old: bool
+}
+
+impl Clone for SpecTerm {
+    fn clone(self) -> SpecTerm {
+        SpecTerm { coef: self.coef, name: self.name.clone(), old: self.old }
+    }
+}
+
+// A term of a contract (docs/language/contracts.md): a constant plus
+// multiples of what it names, an integer computed exactly, without
+// overflow. Nothing runs it; `emit-obligations` prints it for the verifier.
+pub struct Spec {
+    pub constant: i128
+    pub terms: Vec(SpecTerm)
+}
+
+impl Clone for Spec {
+    fn clone(self) -> Spec {
+        Spec { constant: self.constant, terms: self.terms.clone() }
+    }
+}
+
+// `a op b`, a comparison; a clause written with `&&` is several.
+pub struct Clause {
+    pub op: Op
+    pub a: Spec
+    pub b: Spec
+    pub span: Span
+}
+
+impl Clone for Clause {
+    fn clone(self) -> Clause {
+        Clause { op: self.op, a: self.a.clone(), b: self.b.clone(), span: self.span }
+    }
+}
+
+pub struct Contract {
+    pub requires: Vec(Clause)
+    pub ensures: Vec(Clause)
+    // A loop's head block and what holds each time control reaches it.
+    pub invariants: Vec((u32, Clause))
+}
+
+impl Contract {
+    pub fn new() -> Contract {
+        Contract {
+            requires: Vec(Clause).new(),
+            ensures: Vec(Clause).new(),
+            invariants: Vec((u32, Clause)).new()
+        }
+    }
+}
+
+impl Clone for Contract {
+    fn clone(self) -> Contract {
+        var invariants = Vec((u32, Clause)).new()
+        for x in self.invariants { invariants.push((x.0, x.1.clone())) }
+        Contract {
+            requires: self.requires.clone(),
+            ensures: self.ensures.clone(),
+            invariants: invariants
+        }
+    }
 }
 
 pub enum Linkage {
@@ -960,6 +1049,7 @@ impl Clone for Body {
             locals: self.locals.clone()
             blocks: self.blocks.clone()
             arg_count: self.arg_count
+            contract: self.contract.clone()
         }
     }
 }

@@ -399,21 +399,42 @@ and `exit`, and 1 when its input ends or `exit` comes first.
 `emit-obligations` prints each function's MIR as the integer model that
 [verification](../internals/verification.md) proves things about, one
 S-expression per function: its name and symbol, its argument count, a kind
-per local (`(int lo hi)` with the type's range, `bool` or `other`), and its
-blocks, numbered as `emit-mir` numbers them, of `(set local value)`
-statements and one terminator. A `str` or slice local's length is a variable
-of its own after the locals, listed under `lengths`.
+per variable (`(int lo hi)` with the type's range, `bool` or `other`), its
+[contract](../language/contracts.md), and its blocks, numbered as `emit-mir`
+numbers them, of `(set variable value)` statements and one terminator.
+
+The variables are the locals, then extra ones: a `str` or slice local's
+length (`lengths`, pairs of local and variable), the integer an `inout`
+integer parameter points to (`derefs`), when the pointer is used only to
+read, write or lend it, and the value on entry of each parameter's
+variables (`entries`, pairs of variable and entry variable).
 
 ```text
 (function clamp main.clamp.1
   (args 3)
   (locals (int -9223372036854775808 9223372036854775807) ... bool bool ...)
   (lengths)
+  (derefs)
+  (entries (1 7) (2 8) (3 9))
+  (requires (le (lin 0 (2 1)) (lin 0 (3 1))) (at 55 63))
+  (ensures (le (lin 0 (8 1)) (lin 0 (0 1))) (at 76 88))
+  (ensures (le (lin 0 (0 1)) (lin 0 (9 1))) (at 92 104))
   (block 0
     (set 4 (cmp lt (local 1) (local 2)))
     (switch 4 2 1))
   ...
 ```
+
+Each clause is `(requires (op A B) (at lo hi))`, `(ensures ...)` or
+`(invariant BLOCK (op A B) (at lo hi))`, where `BLOCK` is the loop's head
+and `op` one of `lt le gt ge eq ne`. A side is `(lin c (v k)...)`, the
+constant `c` plus `k` times each variable `v`, computed exactly: `result`
+is variable 0, and a parameter in `ensures` or `old(x)` is its entry
+variable. A side over a variable the model does not have is
+`(opaque escaped)`. A call is `(call DST NEXT (fn SYMBOL) (args A...) (at lo hi))`,
+without `fn` through a pointer or closure. An argument is an operand,
+`(view n)` for a slice or `str` with length variable `n`, or `(lent v)` for
+a variable lent to an `inout` parameter, which the call may change.
 
 The model follows integer and bool locals, `+ - *` that check for overflow,
 comparisons, `!`, `&&`, integer casts, `switch` on a bool, `assert`, calls
@@ -421,7 +442,8 @@ and returns. Everything else is `(opaque why)`, a value known only to be in
 its type's range, with the reason it is not followed: `load` (through a
 pointer or borrow), `field`, `variant`, `element`, `aggregate` (a local that
 is not an integer), `escaped` (a local whose address is taken, `&x` for an
-`inout` parameter or `&raw`, since it may change through that pointer),
+`inout` parameter or `&raw`, since it may change through that pointer,
+except a borrow only passed to one call, as `bump(&x)` passes it),
 `wrap` (wrapping arithmetic, all of it with `--release`), `div`, `rem`,
 `shift`, `bits`, `neg`, `bool`, `pointer`, `tag`, `constant` and `length`. A `switch`
 the model does not follow is `(any blocks...)`. Each check ends with

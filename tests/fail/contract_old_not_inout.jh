@@ -1,0 +1,10 @@
+// `old` is for `inout` parameters: the others cannot change, and
+// `ensures` already reads them on entry.
+// error: `old` is for `inout` parameters
+fn f(x: i64) -> i64
+    ensures result == old(x) + 1
+{
+    x + 1
+}
+
+fn main() { println(f(1)) }

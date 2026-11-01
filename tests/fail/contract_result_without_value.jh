@@ -1,0 +1,9 @@
+// A function that returns nothing has no `result` to promise about.
+// error: `result` in a contract is an integer, and this function does not return one
+fn f(x: i64)
+    ensures result > 0
+{
+    println(x)
+}
+
+fn main() { f(1) }

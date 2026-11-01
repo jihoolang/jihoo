@@ -46,6 +46,7 @@ pub struct Parser {
     collect_layout: bool
     lists: Vec(u32)
     separators: Vec(u32)
+    clauses: Vec(u32)
 }
 
 pub fn parse_module(file: u32, sink toks: Vec(Token)) -> Result(Module, Diag) {
@@ -59,6 +60,8 @@ pub struct FormatModule {
     // Opening delimiters and separators in lists, not blocks or for indices.
     pub lists: Vec(u32)
     pub separators: Vec(u32)
+    // The words that start contract clauses (`requires`, `invariant`).
+    pub clauses: Vec(u32)
 }
 
 pub fn format_module(file: u32, sink toks: Vec(Token)) -> Result(FormatModule, Diag) {
@@ -71,7 +74,7 @@ fn parse_with_layout(
     collect: bool
 ) -> Result(FormatModule, Diag) {
     var p = Parser { toks: toks, i: 0, depth: 0, collect_layout: collect,
-        lists: Vec(u32).new(), separators: Vec(u32).new() }
+        lists: Vec(u32).new(), separators: Vec(u32).new(), clauses: Vec(u32).new() }
     var attrs = Vec(String).new()
     while p.at(Tok.HashBang) {
         p.bump()
@@ -87,7 +90,11 @@ fn parse_with_layout(
         items.push(p.item()?)
     }
     let module = Module { file: file, attrs: attrs, items: items }
-    match p { Parser { lists, separators, .. } => Ok(FormatModule { module, lists, separators }) }
+    match p {
+        Parser { lists, separators, clauses, .. } => Ok(FormatModule {
+            module, lists, separators, clauses
+        })
+    }
 }
 
 // A closure's parameter list may turn out to be a function type's: each
@@ -460,10 +467,22 @@ impl Parser {
             }
             ret = Some(self.ty()?)
         }
+        var requires = Vec(Expr).new()
+        var ensures = Vec(Expr).new()
+        loop {
+            if self.word("requires") {
+                requires.push(self.expr_ns()?)
+            } else if self.word("ensures") {
+                ensures.push(self.expr_ns()?)
+            } else { break }
+        }
         let body = if self.at(Tok.LBrace) { Some(self.block()?) } else { None }
         let is_extern = match kind { Extern => true, _ => false }
         if variadic && !is_extern {
             return Err(Diag.new(name_span, "only extern functions can have `...` parameters"))
+        }
+        if body.is_none() && (requires.len() > 0 || ensures.len() > 0) {
+            return Err(Diag.new(name_span, "a function without a body cannot have a contract"))
         }
         if is_extern && body.is_some() {
             return Err(Diag.new(
@@ -481,7 +500,27 @@ impl Parser {
             kind: kind
             variadic: variadic
             is_unsafe: is_unsafe
+            requires: requires
+            ensures: ensures
         })
+    }
+
+    // Moves past a word that is special only where it stands
+    // (`requires`, `ensures`, `invariant`), if it is the current token.
+    fn word(inout self, w: str) -> bool {
+        if self.at(Tok.Ident) && self.text() == w {
+            if self.collect_layout { self.clauses.push(self.span().lo) }
+            self.bump()
+            return true
+        }
+        false
+    }
+
+    // A loop's `invariant` clauses, before its body.
+    fn invariants(inout self) -> Result(Vec(Expr), Diag) {
+        var out = Vec(Expr).new()
+        while self.word("invariant") { out.push(self.expr_ns()?) }
+        Ok(out)
     }
 
     fn param_list(inout self) -> Result((Vec(Param), bool), Diag) {
@@ -1072,12 +1111,14 @@ impl Parser {
             While => {
                 self.bump()
                 let c = self.expr_ns()?
+                let inv = self.invariants()?
                 let b = self.block()?
-                ExprKind.While(Box.new(c), b)
+                ExprKind.While(Box.new(c), inv, b)
             }
             Loop => {
                 self.bump()
-                ExprKind.Loop(self.block()?)
+                let inv = self.invariants()?
+                ExprKind.Loop(inv, self.block()?)
             }
             For => {
                 self.bump()
@@ -1095,8 +1136,9 @@ impl Parser {
                 }
                 self.expect(Tok.In)?
                 let it = self.expr_ns()?
+                let inv = self.invariants()?
                 let b = self.block()?
-                ExprKind.For(index, pat, Box.new(it), b)
+                ExprKind.For(index, pat, Box.new(it), inv, b)
             }
             Fn => return self.lambda_or_type()
             Return => {

@@ -146,7 +146,10 @@ failures report resource use and the originating compile-time obligation.
 Proof checking at compile time (a Horn certificate kernel, general theorems
 by induction, and enum codecs bound to checked tables) is developed in the
 separate [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs)
-repository. General source-level contracts remain open.
+repository. [Contracts](docs/language/contracts.md) (`requires`,
+`ensures`, loop `invariant`s) are read and checked for form, and
+`emit-obligations` gives them to that verifier; the compiler does not
+prove them yet.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

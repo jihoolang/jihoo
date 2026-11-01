@@ -1,0 +1,13 @@
+// An invariant holds at the loop's head, where only the names declared
+// before the loop exist.
+// error: `j` is not a parameter or variable here
+fn main() {
+    var i = 0
+    while i < 10
+        invariant j >= 0
+    {
+        let j = i
+        i += j + 1
+    }
+    println(i)
+}

@@ -92,6 +92,17 @@ impl Dump {
         }
     }
 
+    // Contract clauses, `(requires e)` each; nothing when there are none.
+    fn clauses(inout self, word: str, es: [ast.Expr]) {
+        for e in es {
+            self.s(" (")
+            self.s(word)
+            self.s(" ")
+            self.expr(e)
+            self.s(")")
+        }
+    }
+
     fn opt_expr(inout self, e: Option(ast.Expr)) {
         match e {
             Some(e) => {
@@ -217,6 +228,8 @@ impl Dump {
                     Inout => " inout"
                 })
                 self.opt_ty(f.ret)
+                self.clauses("requires", f.requires)
+                self.clauses("ensures", f.ensures)
                 match f.body {
                     Some(b) => {
                         self.s(" ")
@@ -610,19 +623,21 @@ impl Dump {
                 }
                 self.s("]")
             }
-            While(c, b) => {
+            While(c, inv, b) => {
                 self.open("while", sp)
                 self.s(" ")
                 self.expr(c.deref())
+                self.clauses("invariant", inv)
                 self.s(" ")
                 self.block(b)
             }
-            Loop(b) => {
+            Loop(inv, b) => {
                 self.open("loop", sp)
+                self.clauses("invariant", inv)
                 self.s(" ")
                 self.block(b)
             }
-            For(index, pat, it, b) => {
+            For(index, pat, it, inv, b) => {
                 self.open("for", sp)
                 match index {
                     Some(ix) => {
@@ -636,6 +651,7 @@ impl Dump {
                 self.pat(pat)
                 self.s(" ")
                 self.expr(it.deref())
+                self.clauses("invariant", inv)
                 self.s(" ")
                 self.block(b)
             }

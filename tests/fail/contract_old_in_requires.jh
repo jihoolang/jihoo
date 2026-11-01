@@ -1,0 +1,13 @@
+// In `requires` every parameter is its value on entry.
+// error: `old` is for `ensures` and `invariant`
+fn bump(inout x: i64)
+    requires old(x) < 10
+{
+    x += 1
+}
+
+fn main() {
+    var y = 1
+    bump(&y)
+    println(y)
+}

@@ -1,0 +1,11 @@
+// A `for` over an iterator has no invariant yet; a range does.
+// error: an `invariant` is not supported yet on a `for` loop over an iterator
+fn main() {
+    var s = 0
+    for x in [1, 2, 3]
+        invariant s >= 0
+    {
+        s += x
+    }
+    println(s)
+}

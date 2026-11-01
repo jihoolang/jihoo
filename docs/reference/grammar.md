@@ -37,7 +37,9 @@ sep        a `,`, a `;`, or a newline before the next element
   `self`, `Self`, `null`, `fnptr`, `int`, `never`, `inline` (before `for`
   or `if`), `dyn` (before a name or `fn`) and the primitive types are
   ordinary names that the compiler gives a meaning to; `_` is a name too,
-  except in patterns.
+  except in patterns. So are `requires`, `ensures` and `invariant`, which
+  start [contract](../language/contracts.md) clauses only where a clause
+  can stand, and `result` and `old`, which are special only inside them.
 - Some tokens are made of others: `..=` is `..` then `=`, which is how range
   patterns take either spelling.
 
@@ -51,7 +53,8 @@ attr     = "#[" name [ "(" name { "," name } ")" ] "]"
 
 import   = "import" name { "." name } [ "as" name ]
 fn       = [ "unsafe" ] [ "extern" | "export" ] "fn" name params
-           [ "->" [ "ref" | "inout" ] type ] [ block ]
+           [ "->" [ "ref" | "inout" ] type ] { clause } [ block ]
+clause   = ( "requires" | "ensures" ) cond
 params   = "(" [ param { "," param } [ "," ] ] ")"
 param    = "..."                                   (last; `extern fn` only)
          | [ "inout" | "sink" | "comptime" ] name [ ":" type { "+" type } ]
@@ -148,9 +151,9 @@ primary  = literal | name | "(" ")" | "(" expr ")"
          | block | "unsafe" block | "comptime" unary
          | "if" cond block [ "else" ( if | block ) ]
          | "match" cond "{" { pattern [ "if" expr ] "=>" stmt sep } "}"
-         | "while" cond block
-         | "loop" block
-         | "for" [ name "," ] pattern "in" cond block
+         | "while" cond { invariant } block
+         | "loop" { invariant } block
+         | "for" [ name "," ] pattern "in" cond { invariant } block
          | "inline" "for" name "in" cond block         unrolled at compile time
          | "inline" "if" cond block [ "else" ( "if" cond block ... | block ) ]
          | "fn" "(" [ cparam { "," cparam } ] ")" [ "->" type ] block   closure
@@ -158,7 +161,12 @@ primary  = literal | name | "(" ")" | "(" expr ")"
          | "return" [ expr ] | "break" | "continue"
 cparam   = name [ ":" type ]
 cond     = expr, where a struct literal cannot start (write `(P { x: 1 })`)
+invariant = "invariant" cond
 ```
+
+A clause's expression is a `cond`, so the `{` of the body ends it; the
+[contracts](../language/contracts.md#what-a-clause-says) page says which
+expressions a clause may be.
 
 ### Precedence
 

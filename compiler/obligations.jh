@@ -15,14 +15,24 @@ type Program = mir.Program
 type Types = types.Types
 
 // What the model knows about each local, and the extra variables that stand
-// for slice lengths.
+// for slice lengths, `inout` parameters' values and parameters on entry.
 struct Model {
     // Per local: tracked as an integer or bool (not escaped).
     tracked: Vec(bool)
     // Per local: the variable of its length, for a `str` or slice local.
     lengths: Vec(Option(i64))
+    // Per local: the variable of `*local`, for an `inout` integer parameter
+    // used only to reach that integer.
+    derefs: Vec(Option(i64))
+    // Per local: a temporary holding `&mut x` for one call, and the place
+    // it lends; the call may change `x`, and nothing else can.
+    lent: Vec(Option(Place))
     // Per local: its address is taken.
     escaped: Vec(bool)
+    // The parameters' variables and the variables of their values on entry.
+    entries: Vec((i64, i64))
+    // The ranges of the variables after the locals, in order.
+    kinds: Vec(String)
     count: i64
 }
 
@@ -58,15 +68,160 @@ fn is_view(t: Types, ty: u32) -> bool {
     }
 }
 
+// How often each local appears, and how.
+struct Uses {
+    // As a whole operand, outside a call's arguments.
+    whole: Vec(i64)
+    // As a whole call argument.
+    args: Vec(i64)
+    // As `(*l)` exactly, read or written.
+    deref: Vec(i64)
+    // Assigned whole.
+    dest: Vec(i64)
+    // In any other way: a part, a borrow, an index.
+    other: Vec(i64)
+}
+
+fn use_place(inout u: Uses, p: Place, borrowed: bool) {
+    let l = p.local as i64
+    for pr in p.proj {
+        match pr {
+            Index(i) => u.whole[i as i64] += 1
+            _ => {}
+        }
+    }
+    if borrowed {
+        u.other[l] += 1
+    } else if p.proj.len() == 0 {
+        u.whole[l] += 1
+    } else if p.proj.len() == 1 && p.proj[0] == mir.Proj.Deref {
+        u.deref[l] += 1
+    } else { u.other[l] += 1 }
+}
+
+fn use_operand(inout u: Uses, o: Operand) {
+    match o {
+        Copy(p) | Move(p) => use_place(&u, p, false)
+        Const(_) => {}
+    }
+}
+
+fn use_dest(inout u: Uses, p: Place) {
+    if p.proj.len() == 0 { u.dest[p.local as i64] += 1 } else { use_place(&u, p, false) }
+}
+
+// The temporaries `t = &mut x` that are only passed to one call whose
+// result holds no borrow: the call may change `x`, and the borrow ends
+// with it.
+fn lendings(t: Types, b: Body) -> Vec(Option(Place)) {
+    var out = Vec(Option(Place)).filled(b.locals.len(), None)
+    var u = Uses {
+        whole: Vec(i64).filled(b.locals.len(), 0), args: Vec(i64).filled(b.locals.len(), 0),
+        deref: Vec(i64).filled(b.locals.len(), 0), dest: Vec(i64).filled(b.locals.len(), 0),
+        other: Vec(i64).filled(b.locals.len(), 0)
+    }
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(p, rv, _) => {
+                    use_dest(&u, p)
+                    rvalue_uses(&u, rv)
+                }
+                Drop(p, _) => use_place(&u, p, true)
+                _ => {}
+            }
+        }
+        term_uses(&u, bl.term)
+    }
+    var candidate = Vec(Option(Place)).filled(b.locals.len(), None)
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(p, rv, _) => match rv {
+                    RefMut(q) => if p.proj.len() == 0 { candidate[p.local as i64] = Some(q.clone()) }
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+    }
+    for bl in b.blocks {
+        match bl.term {
+            Call(_, args, dest, _, _) => {
+                let ty = b.locals[dest.local as i64].ty
+                let keeps = t.is_view(ty) || match t.kind(ty) {
+                    Ref(_) | RefMut(_) | Ptr(_) => true
+                    _ => false
+                }
+                for a in args {
+                    match a {
+                        Copy(p) | Move(p) => {
+                            let l = p.local as i64
+                            if p.proj.len() == 0 && !keeps && u.dest[l] == 1 && u.args[l] == 1 &&
+                                u.whole[l] == 0 && u.deref[l] == 0 && u.other[l] == 0 {
+                                out[l] = candidate[l].clone()
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn rvalue_uses(inout u: Uses, rv: mir.Rvalue) {
+    match rv {
+        Use(o) | Un(_, o) | Cast(o, _, _) | Repeat(o, _) => use_operand(&u, o)
+        Bin(_, x, y) | Offset(x, y) => {
+            use_operand(&u, x)
+            use_operand(&u, y)
+        }
+        Aggregate(_, os) => {
+            for o in os { use_operand(&u, o) }
+        }
+        Ref(p) | RefMut(p) | Addr(p) | Discriminant(p) => use_place(&u, p, true)
+    }
+}
+
+fn term_uses(inout u: Uses, term: mir.Term) {
+    match term {
+        Switch(o, _, _) | Assert(o, _, _, _) => use_operand(&u, o)
+        Call(callee, args, dest, _, _) => {
+            match callee {
+                Ptr(o) | Closure(o) => use_operand(&u, o)
+                _ => {}
+            }
+            for a in args {
+                match a {
+                    Copy(p) | Move(p) => if p.proj.len() == 0 {
+                        u.args[p.local as i64] += 1
+                    } else { use_place(&u, p, false) }
+                    _ => {}
+                }
+            }
+            use_dest(&u, dest)
+        }
+        _ => {}
+    }
+}
+
 // A local whose address is taken (`&x` for `inout`, `&raw`) may change
-// through that pointer; the model does not follow it.
-fn escapes(b: Body) -> Vec(bool) {
+// through that pointer; the model does not follow it, unless the borrow is
+// only lent to one call.
+fn escapes(b: Body, lent: [Option(Place)]) -> Vec(bool) {
     var out = Vec(bool).filled(b.locals.len(), false)
     for bl in b.blocks {
         for st in bl.stmts {
             match st {
-                Assign(_, rv, _) => match rv {
-                    RefMut(p) | Addr(p) => out[p.local as i64] = true
+                Assign(dst, rv, _) => match rv {
+                    RefMut(p) => {
+                        let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some()
+                        if !lending { out[p.local as i64] = true }
+                    }
+                    Addr(p) => out[p.local as i64] = true
                     _ => {}
                 }
                 _ => {}
@@ -76,10 +231,92 @@ fn escapes(b: Body) -> Vec(bool) {
     out
 }
 
+// Whether `l`, an `inout` parameter, is used only to read and write the
+// integer it points to: as `(*l)`, or lent whole to a call as `&mut (*l)`.
+fn only_deref(b: Body, lent: [Option(Place)], l: u32) -> bool {
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(dst, rv, _) => {
+                    if !place_derefs(dst, l) { return false }
+                    let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some()
+                    if !rvalue_derefs(rv, l, lending) { return false }
+                }
+                Drop(p, _) => if p.local == l { return false }
+                _ => {}
+            }
+        }
+        match bl.term {
+            Switch(o, _, _) | Assert(o, _, _, _) => if !operand_derefs(o, l) { return false }
+            Call(callee, args, dest, _, _) => {
+                match callee {
+                    Ptr(o) | Closure(o) => if !operand_derefs(o, l) { return false }
+                    _ => {}
+                }
+                for a in args {
+                    if !operand_derefs(a, l) { return false }
+                }
+                if !place_derefs(dest, l) { return false }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+fn plain_deref(p: Place, l: u32) -> bool {
+    p.local == l && p.proj.len() == 1 && p.proj[0] == mir.Proj.Deref
+}
+
+// The place does not use `l` other than as `(*l)`.
+fn place_derefs(p: Place, l: u32) -> bool {
+    for pr in p.proj {
+        match pr {
+            Index(i) => if i == l { return false }
+            _ => {}
+        }
+    }
+    p.local != l || plain_deref(p, l)
+}
+
+fn operand_derefs(o: Operand, l: u32) -> bool {
+    match o {
+        Copy(p) | Move(p) => place_derefs(p, l)
+        Const(_) => true
+    }
+}
+
+fn rvalue_derefs(rv: mir.Rvalue, l: u32, lending: bool) -> bool {
+    match rv {
+        Use(o) | Un(_, o) | Cast(o, _, _) | Repeat(o, _) => operand_derefs(o, l)
+        Bin(_, x, y) | Offset(x, y) => operand_derefs(x, l) && operand_derefs(y, l)
+        Aggregate(_, os) => {
+            for o in os {
+                if !operand_derefs(o, l) { return false }
+            }
+            true
+        }
+        RefMut(p) => p.local != l || (lending && plain_deref(p, l))
+        Ref(p) | Addr(p) | Discriminant(p) => p.local != l
+    }
+}
+
+fn kind_text(t: Types, ty: u32) -> String {
+    var s = String.new()
+    match t.int(ty) {
+        Some(n) => range(&s, n)
+        None => s.push_str("bool")
+    }
+    s
+}
+
 fn model(t: Types, b: Body) -> Model {
-    let escaped = escapes(b)
+    let lent = lendings(t, b)
+    let escaped = escapes(b, lent.as_slice())
     var m = Model {
-        tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(), escaped: escaped.clone(),
+        tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(),
+        derefs: Vec(Option(i64)).filled(b.locals.len(), None), lent: lent.clone(),
+        escaped: escaped.clone(), entries: Vec((i64, i64)).new(), kinds: Vec(String).new(),
         count: b.locals.len()
     }
     for i, l in b.locals {
@@ -91,7 +328,36 @@ fn model(t: Types, b: Body) -> Model {
         if is_view(t, l.ty) && !escaped[i] {
             m.lengths.push(Some(m.count))
             m.count += 1
+            m.kinds.push("(int 0 9223372036854775807)".to_string())
         } else { m.lengths.push(None) }
+    }
+    for i in 1..b.arg_count + 1 {
+        match t.kind(b.locals[i].ty) {
+            RefMut(inner) => if t.is_int(inner) && only_deref(b, lent.as_slice(), i as u32) {
+                m.derefs[i] = Some(m.count)
+                m.count += 1
+                m.kinds.push(kind_text(t, inner))
+            }
+            _ => {}
+        }
+    }
+    // Each parameter's variables, as they were on entry.
+    for i in 1..b.arg_count + 1 {
+        var vars = Vec((i64, String)).new()
+        if m.tracked[i] && t.is_int(b.locals[i].ty) { vars.push((i, kind_text(t, b.locals[i].ty))) }
+        match m.lengths[i] {
+            Some(n) => vars.push((n, "(int 0 9223372036854775807)".to_string()))
+            None => {}
+        }
+        match m.derefs[i] {
+            Some(d) => vars.push((d, m.kinds[d - b.locals.len()].clone()))
+            None => {}
+        }
+        for (v, k) in vars.into_iter() {
+            m.entries.push((v, m.count))
+            m.count += 1
+            m.kinds.push(k)
+        }
     }
     m
 }
@@ -107,6 +373,7 @@ fn variable(m: Model, p: Place) -> Option(i64) {
     if p.proj.len() == 1 {
         match p.proj[0] {
             Field(1) => return m.lengths[l]
+            Deref => return m.derefs[l]
             _ => {}
         }
     }
@@ -349,6 +616,100 @@ fn atom(inout s: String, text: str) {
     }
 }
 
+// A call's argument: an integer, a view by its length, a variable lent to
+// an `inout` parameter (`(lent v)`), or what the model does not follow.
+fn argument(inout s: String, t: Types, m: Model, a: Operand) {
+    match a {
+        Copy(q) | Move(q) => if q.proj.len() == 0 {
+            let l = q.local as i64
+            match m.lent[l] {
+                Some(x) => {
+                    match variable(m, x) {
+                        Some(v) => {
+                            s.push_str("(lent ")
+                            v.show(&s)
+                            s.push(')')
+                        }
+                        None => opaque(&s, "escaped")
+                    }
+                    return
+                }
+                None => {}
+            }
+            match m.lengths[l] {
+                Some(n) => {
+                    s.push_str("(view ")
+                    n.show(&s)
+                    s.push(')')
+                    return
+                }
+                None => {}
+            }
+        }
+        _ => {}
+    }
+    operand(&s, t, m, a)
+}
+
+// The variable a contract's term names, if the model has one.
+fn spec_variable(m: Model, x: mir.SpecTerm) -> Option(i64) {
+    let v = match x.name {
+        Local(l) => if m.tracked[l as i64] { Some(l as i64) } else { None }
+        Deref(l) => m.derefs[l as i64]
+        Len(l) => m.lengths[l as i64]
+    }
+    if !x.old { return v }
+    let Some(v) = v else { return None }
+    for e in m.entries {
+        if e.0 == v { return Some(e.1) }
+    }
+    None
+}
+
+// `(lin c (v k)...)`: `c` plus `k` times each variable `v`.
+fn spec(inout s: String, m: Model, x: mir.Spec) {
+    for term in x.terms {
+        if spec_variable(m, term).is_none() {
+            opaque(&s, "escaped")
+            return
+        }
+    }
+    s.push_str("(lin ")
+    x.constant.show(&s)
+    for term in x.terms {
+        if term.coef != 0 {
+            s.push_str(" (")
+            spec_variable(m, term).unwrap().show(&s)
+            s.push(' ')
+            term.coef.show(&s)
+            s.push(')')
+        }
+    }
+    s.push(')')
+}
+
+// `(requires (le A B) (at lo hi))`, and `(invariant BLOCK (le A B) (at lo hi))`.
+fn clause(inout s: String, m: Model, word: str, block: Option(u32), c: mir.Clause) {
+    s.push_str("\n  (")
+    s.push_str(word)
+    match block {
+        Some(b) => {
+            s.push(' ')
+            b.show(&s)
+        }
+        None => {}
+    }
+    s.push_str(" (")
+    s.push_str(compare(c.op).unwrap())
+    s.push(' ')
+    spec(&s, m, c.a)
+    s.push(' ')
+    spec(&s, m, c.b)
+    s.push(')')
+    at(&s, c.span)
+    s.push(')')
+}
+
 fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
     let t = p.types
     s.push_str("\n    ")
@@ -392,7 +753,7 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
         }
         Return => s.push_str("(return)")
         Unreachable | Pending => s.push_str("(unreachable)")
-        Call(callee, _, dest, next, _) => {
+        Call(callee, args, dest, next, span) => {
             match callee {
                 Intrinsic(i) => match i {
                     Trap => {
@@ -410,6 +771,23 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
             }
             s.push(' ')
             next.show(&s)
+            // The callee, whose contract the call proves and assumes, and
+            // the arguments as the contract sees them.
+            match callee {
+                Fn(f) => {
+                    s.push_str(" (fn ")
+                    atom(&s, p.fns[f as i64].symbol.as_str())
+                    s.push(')')
+                }
+                _ => {}
+            }
+            s.push_str(" (args")
+            for a in args {
+                s.push(' ')
+                argument(&s, t, m, a)
+            }
+            s.push(')')
+            at(&s, span)
             s.push(')')
         }
         Assert(o, msg, next, span) => {
@@ -448,12 +826,11 @@ pub fn show_function(p: Program, f: mir.Function) -> String {
             }
         }
     }
-    // The lengths, after the locals: never negative.
-    for i in 0..b.locals.len() {
-        match m.lengths[i] {
-            Some(_) => s.push_str(" (int 0 9223372036854775807)")
-            None => {}
-        }
+    // The lengths (never negative), the `inout` integers and the values on
+    // entry, after the locals.
+    for k in m.kinds {
+        s.push(' ')
+        s.push_str(k.as_str())
     }
     s.push_str(")\n  (lengths")
     for i in 0..b.locals.len() {
@@ -468,7 +845,31 @@ pub fn show_function(p: Program, f: mir.Function) -> String {
             None => {}
         }
     }
+    s.push_str(")\n  (derefs")
+    for i in 0..b.locals.len() {
+        match m.derefs[i] {
+            Some(d) => {
+                s.push_str(" (")
+                i.show(&s)
+                s.push(' ')
+                d.show(&s)
+                s.push(')')
+            }
+            None => {}
+        }
+    }
+    s.push_str(")\n  (entries")
+    for e in m.entries {
+        s.push_str(" (")
+        e.0.show(&s)
+        s.push(' ')
+        e.1.show(&s)
+        s.push(')')
+    }
     s.push(')')
+    for c in b.contract.requires { clause(&s, m, "requires", None, c) }
+    for c in b.contract.ensures { clause(&s, m, "ensures", None, c) }
+    for x in b.contract.invariants { clause(&s, m, "invariant", Some(x.0), x.1) }
     for i, bl in b.blocks {
         s.push_str("\n  (block ")
         i.show(&s)

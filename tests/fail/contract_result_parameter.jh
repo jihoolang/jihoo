@@ -1,0 +1,9 @@
+// A parameter named `result` would hide the result in `ensures`.
+// error: a parameter named `result` hides the result in `ensures`
+fn f(result: i64) -> i64
+    ensures result > 0
+{
+    1
+}
+
+fn main() { println(f(1)) }

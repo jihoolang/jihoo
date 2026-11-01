@@ -1,0 +1,9 @@
+// A clause compares integers; a bool parameter is not one.
+// error: a contract clause compares integers, or joins comparisons with `&&`
+fn f(b: bool) -> i64
+    requires b
+{
+    1
+}
+
+fn main() { println(f(true)) }

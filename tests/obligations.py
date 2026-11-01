@@ -9,7 +9,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
 PROGRAM = """
-fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
+fn clamp(x: i64, lo: i64, hi: i64) -> i64
+    requires lo <= hi
+    ensures lo <= result && result <= hi
+{
     if x < lo { return lo }
     if x > hi { return hi }
     x
@@ -18,21 +21,35 @@ fn clamp(x: i64, lo: i64, hi: i64) -> i64 {
 fn sum(xs: [i64]) -> i64 {
     var s = 0
     var i = 0
-    while i < xs.len {
+    while i < xs.len
+        invariant 0 <= i && i <= xs.len
+    {
         s += xs[i]
         i += 1
     }
     s
 }
 
-fn bump(inout x: i64) {
+fn bump(inout x: i64)
+    requires x < 100
+    ensures x == old(x) + 1
+{
     x += 1
 }
 
-fn escapes(n: i64) -> i64 {
+fn lends(n: i64) -> i64 {
     var x = n
     bump(&x)
     x
+}
+
+// `x` is lent on to `bump`; the pointer itself goes nowhere else.
+fn passes(inout x: i64) {
+    bump(&x)
+}
+
+fn escapes(inout x: i64) -> *i64 {
+    &x
 }
 
 fn widths(a: u8, b: i32) -> u64 {
@@ -45,7 +62,9 @@ fn wide(x: i128, y: u128) -> i128 {
 }
 
 fn main() {
-    println(clamp(5, 0, 3) + sum([1, 2]) + escapes(1))
+    var y = 1
+    passes(&y)
+    println(clamp(5, 0, 3) + sum([1, 2]) + lends(1) + y)
     println(wide(1, 2))
     println(widths(1, 2))
 }
@@ -71,31 +90,55 @@ def parse(text):
     return stack[0]
 
 
+CLAUSES = {"requires", "ensures", "invariant"}
+
+
 def functions(text):
     out = {}
     for f in parse(text):
-        assert f[0] == "function" and len(f) >= 7, f[:3]
-        name, symbol, args, locals_, lengths = f[1], f[2], f[3], f[4], f[5]
+        assert f[0] == "function" and len(f) >= 9, f[:3]
+        name, symbol, args, locals_, lengths, derefs, entries = f[1], f[2], f[3], f[4], f[5], f[6], f[7]
         assert isinstance(name, str) and isinstance(symbol, str)
         assert args[0] == "args" and locals_[0] == "locals" and lengths[0] == "lengths"
-        blocks = f[6:]
+        assert derefs[0] == "derefs" and entries[0] == "entries"
+        variables = len(locals_) - 1
+        clauses = [x for x in f[8:] if x[0] in CLAUSES]
+        blocks = f[8 + len(clauses):]
+        for c in clauses:
+            # (requires (op A B) (at lo hi)); (invariant BLOCK (op A B) (at lo hi))
+            body = c[2:] if c[0] == "invariant" else c[1:]
+            assert len(body) == 2 and body[1][0] == "at", (name, c)
+            assert body[0][0] in ["lt", "le", "gt", "ge", "eq", "ne"], (name, c)
+            for side in body[0][1:]:
+                assert side[0] in ["lin", "opaque"], (name, c)
+                if side[0] == "lin":
+                    int(side[1])
+                    for v, k in side[2:]:
+                        assert 0 <= int(v) < variables, (name, c)
+                        int(k)
         for i, b in enumerate(blocks):
             assert b[0] == "block" and b[1] == str(i), (name, b[:2])
             for s in b[2:-1]:
-                assert s[0] == "set" and int(s[1]) < len(locals_) - 1, (name, s)
+                assert s[0] == "set" and int(s[1]) < variables, (name, s)
                 assert len(s) == 3 or (len(s) == 4 and s[3][0] == "at"), (name, s)
             term = b[-1]
             targets = {"goto": term[1:], "switch": term[2:], "any": term[1:],
-                       "assert": term[3:4], "call": term[2:]}.get(term[0], [])
+                       "assert": term[3:4], "call": term[2:3]}.get(term[0], [])
             if term[0] == "assert":
                 assert len(term) == 5 and term[4][0] == "at", (name, term)
+            if term[0] == "call":
+                parts = [p[0] for p in term[3:]]
+                assert parts in [["fn", "args", "at"], ["args", "at"]], (name, term)
             assert term[0] in ["goto", "switch", "any", "assert", "call", "trap", "return",
                                "unreachable"], (name, term)
             for t in targets:
                 assert int(t) < len(blocks), (name, term)
         for pair in lengths[1:]:
             assert locals_[1 + int(pair[1])] == ["int", "0", "9223372036854775807"]
-        out[name] = {"locals": locals_[1:], "lengths": lengths[1:], "blocks": blocks}
+        for v, e in entries[1:]:
+            assert locals_[1 + int(v)] == locals_[1 + int(e)], (name, v, e)
+        out[name] = {"locals": locals_[1:], "lengths": lengths[1:], "derefs": derefs[1:],
+                     "entries": entries[1:], "clauses": clauses, "blocks": blocks}
     return out
 
 
@@ -150,11 +193,34 @@ def main():
                                          ["add", ["local", "3"], ["const", "1"]]], steps
         assert [text(x[3]) for x in steps] == ["s += xs[i]", "i += 1"], [text(x[3]) for x in steps]
 
-        # A local lent to `inout` is not followed: its reads are opaque.
-        e = debug["escapes"]
-        assert e["locals"][2] == "other", e["locals"]
-        assert ["set", "0", ["use", ["local", "5"]]] in e["blocks"][1]
-        assert ["set", "5", ["use", ["opaque", "escaped"]]] in e["blocks"][1], e["blocks"][1]
+        # A local lent to one call stays a variable, which the call changes.
+        e = debug["lends"]
+        assert e["locals"][2] == i64, e["locals"]
+        calls = list(forms(e["blocks"], "call"))
+        assert calls[0][3:5] == [["fn", "main.bump.3"], ["args", ["lent", "2"]]], calls
+        assert ["set", "5", ["use", ["local", "2"]]] in e["blocks"][1], e["blocks"][1]
+
+        # An `inout` integer is a variable when the pointer only reaches it,
+        # even lent on to another call; an address taken is not followed.
+        b = debug["bump"]
+        assert b["derefs"] == [["1", "3"]] and b["entries"] == [["3", "4"]], (b["derefs"], b["entries"])
+        assert ["set", "3", ["use", ["local", "2"]]] in b["blocks"][0], b["blocks"][0]
+        p = debug["passes"]
+        assert p["derefs"] == [["1", "4"]], p["derefs"]
+        assert list(forms(p["blocks"], "call"))[0][4] == ["args", ["lent", "4"]]
+        assert debug["escapes"]["derefs"] == [], debug["escapes"]["derefs"]
+
+        # Contracts: `ensures` reads the parameters on entry and `result` as
+        # local 0; `old(x)` is the entry value of `*x`; an invariant names
+        # its loop head.
+        c = clamp["clauses"]
+        assert clamp["entries"] == [["1", "7"], ["2", "8"], ["3", "9"]], clamp["entries"]
+        assert c[0][:2] == ["requires", ["le", ["lin", "0", ["2", "1"]], ["lin", "0", ["3", "1"]]]], c[0]
+        assert c[1][:2] == ["ensures", ["le", ["lin", "0", ["8", "1"]], ["lin", "0", ["0", "1"]]]], c[1]
+        assert text(c[1][2]) == "lo <= result", text(c[1][2])
+        assert b["clauses"][1][1] == ["eq", ["lin", "0", ["3", "1"]], ["lin", "1", ["4", "1"]]], b["clauses"]
+        assert [x[:2] for x in s["clauses"]] == [["invariant", "1"], ["invariant", "1"]], s["clauses"]
+        assert s["clauses"][1][2] == ["le", ["lin", "0", ["3", "1"]], ["lin", "0", ["14", "1"]]]
 
         # Every opaque value says why: a load through the slice's pointer.
         assert ["set", "10", ["use", ["opaque", "load"]]] in s["blocks"][6], s["blocks"][6]

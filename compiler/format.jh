@@ -43,7 +43,13 @@ pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
     let parsed = parse.format_module(file, tokens.clone())?
     let groups = list_groups(tokens, parsed.lists, parsed.separators)
     var breaks = Vec(bool).filled(tokens.len(), false)
-    var formatted = layout(file, text, tokens, breaks)
+    var clauses = Vec(bool).filled(tokens.len(), false)
+    for i, t in tokens {
+        for c in parsed.clauses {
+            if t.span.lo == c { clauses[i] = true }
+        }
+    }
+    var formatted = layout(file, text, tokens, breaks, clauses)
     loop {
         let current = lex.lex(file, formatted.as_str())?
         if !same_tokens(text, tokens, formatted.as_str(), current) {
@@ -60,7 +66,7 @@ pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
             for separator in g.separators { breaks[separator + 1] = true }
             breaks[g.close] = true
         }
-        formatted = layout(file, text, tokens, breaks)
+        formatted = layout(file, text, tokens, breaks, clauses)
     }
     let checked = lex.lex(file, formatted.as_str())?
     let after = match parse.parse_module(file, checked) {
@@ -76,7 +82,15 @@ pub fn source(file: u32, text: str, width: i64) -> Result(String, Diag) {
     Ok(formatted)
 }
 
-fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String {
+// `clauses` marks the words that start contract clauses: a line starting
+// with one is indented once more than the signature or loop head.
+fn layout(
+    file: u32,
+    text: str,
+    tokens: Vec(Token),
+    breaks: Vec(bool),
+    clauses: Vec(bool)
+) -> String {
     var f = Layout { out: String.with_capacity(text.len), depth: 0, line_start: true }
     var end = 0
     var previous = Tok.Eof
@@ -109,7 +123,7 @@ fn layout(file: u32, text: str, tokens: Vec(Token), breaks: Vec(bool)) -> String
             // it nests from the statement's level.
             line_indent = indent
             let hugged = !opens.is_empty() && opens[opens.len() - 1].hugging
-            if !is_close(kind) && (kind == Tok.Dot || continues(previous)) && !hugged {
+            if !is_close(kind) && (kind == Tok.Dot || continues(previous) || clauses[i]) && !hugged {
                 indent += 1
             }
         }

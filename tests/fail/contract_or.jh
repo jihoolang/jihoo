@@ -1,0 +1,9 @@
+// `||` is not part of contracts yet: each clause is a conjunction.
+// error: a contract clause compares integers, or joins comparisons with `&&`
+fn f(x: i64) -> i64
+    requires x < 0 || x > 10
+{
+    x
+}
+
+fn main() { println(f(11)) }

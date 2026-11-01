@@ -1,7 +1,8 @@
 # Design: verification (0.5) and mathematics (0.6)
 
-Status: research. Nothing on this page is in the compiler yet; the first
-experiment is [jihoo-proofs/obligations](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations).
+Status: research. The compiler reads [contracts](../language/contracts.md)
+and prints the verification model (`emit-obligations`); proving is still
+done outside it, in [jihoo-proofs/obligations](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations).
 
 ## Goal
 
@@ -134,6 +135,28 @@ that is where the proof rate comes from next, more than from a richer
 arithmetic. MIR's `unreachable` is trusted, as LLVM trusts it: a path that
 reaches it ends there.
 
+Contracts are now written in the source
+([syntax](../language/contracts.md)) instead of in a separate file naming
+MIR's local and block numbers. Sema lowers each clause to a linear form
+over MIR locals, never run and invisible to `elab` and `check`, and
+`emit-obligations` prints it next to the function's MIR. Clauses take
+`result` as local 0, and a parameter in `ensures` (or `old(x)`) as an
+entry variable, equal to the parameter on entry. Three things the model
+did not follow are now variables: the integer an `inout` parameter points
+to, when its pointer only reaches it; a local lent to one call
+(`bump(&x)`), which the call gives a new value; and at a loop head, a
+variable the function never assigns, which keeps its value on entry, so
+`requires` still holds of it there. A call proves the callee's
+`requires` with its arguments, and assumes its `ensures` of the new values.
+In jihoo-proofs, a sample of calls proves `bump`'s and `inc`'s contracts,
+a caller's `ensures` from them, a loop whose invariant carries what the
+calls promise, and a recursive function. A call that cannot meet its
+callee's `requires` stays unproved. The differential test now separates a
+failure under a contract that is not proved (a callee's unproved
+`ensures`, or a `requires` a call left unproved) from a bug, and forgetting
+to prove a callee's `requires` is caught as a bug. The corpus, which has no
+contracts, is unchanged: 69 of 317 checks proved, none failing.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
@@ -141,16 +164,17 @@ chosen by the program.
 
 ## Open questions
 
-- **Syntax.** `requires`/`ensures` on functions, `invariant` on loops,
-  `old(x)` for an `inout` parameter's value on entry, and where proofs
-  that need lemmas name them. v0 had contracts; their syntax is a starting
-  point, not a constraint.
+- **Syntax.** Settled for functions and loops
+  ([contracts](../language/contracts.md)); left are where proofs that need
+  lemmas name them, `||` and `!` in clauses (case splits), clauses over
+  fields and `Vec` lengths, and invariants on `for` loops over iterators.
 - **Places.** MIR reads `_1.1` (a slice's length) and loads through
   pointers; the model treats each place as a variable while nothing can
   change it, which the borrow kernel's loans can justify.
 - **Calls.** Modular: a call assumes the callee's `ensures` after proving
-  its `requires`. `std`'s `Vec.index`, `Vec.push` and `str` slicing need
-  contracts first, and those contracts are the first users of 0.6's lemmas.
+  its `requires` (done in the experiment). `std`'s `Vec.index`, `Vec.push`
+  and `str` slicing need contracts first, and those contracts are the first
+  users of 0.6's lemmas.
 - **Integers.** Fourier–Motzkin is complete over the rationals, not the
   integers: a goal that needs parity or rounding is lost (never wrongly
   proved). Cutting planes or a bounded integer search fix that later.

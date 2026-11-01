@@ -169,6 +169,90 @@ fn err(span: Span, msg: str) -> Diag {
     Diag.new(span, msg)
 }
 
+// Where a contract clause stands, which decides what its names mean.
+enum ClauseAt {
+    Requires
+    Ensures
+    Invariant
+}
+
+impl Eq for ClauseAt {
+    fn eq(self, other: ClauseAt) -> bool {
+        self as i64 == other as i64
+    }
+}
+
+fn spec_number(c: i128) -> mir.Spec {
+    mir.Spec { constant: c, terms: Vec(mir.SpecTerm).new() }
+}
+
+fn spec_var(v: mir.SpecVar, old: bool) -> mir.Spec {
+    var terms = Vec(mir.SpecTerm).new()
+    terms.push(mir.SpecTerm { coef: 1, name: v, old: old })
+    mir.Spec { constant: 0, terms: terms }
+}
+
+fn same_spec_var(a: mir.SpecTerm, b: mir.SpecTerm) -> bool {
+    if a.old != b.old { return false }
+    match a.name {
+        Local(x) => match b.name {
+            Local(y) => x == y
+            _ => false
+        }
+        Deref(x) => match b.name {
+            Deref(y) => x == y
+            _ => false
+        }
+        Len(x) => match b.name {
+            Len(y) => x == y
+            _ => false
+        }
+    }
+}
+
+// The verifier's numbers stay within 2^64 either way.
+fn spec_fits(v: i128) -> bool {
+    let limit: i128 = 1 << 64
+    v <= limit && v >= 0 - limit
+}
+
+// `a * ka + b * kb`, or None if a number grows too large.
+fn spec_combine(a: mir.Spec, ka: i128, b: mir.Spec, kb: i128) -> Option(mir.Spec) {
+    if !spec_fits(ka) || !spec_fits(kb) || !spec_fits(a.constant) || !spec_fits(b.constant) {
+        return None
+    }
+    var out = spec_number(a.constant * ka + b.constant * kb)
+    if !add_terms(&out, a, ka) || !add_terms(&out, b, kb) || !spec_fits(out.constant) {
+        return None
+    }
+    for t in out.terms {
+        if !spec_fits(t.coef) { return None }
+    }
+    Some(out)
+}
+
+fn add_terms(inout out: mir.Spec, x: mir.Spec, k: i128) -> bool {
+    for t in x.terms {
+        if !spec_fits(t.coef) { return false }
+        var found = false
+        for i in 0..out.terms.len() {
+            if same_spec_var(out.terms[i], t) {
+                out.terms[i].coef = out.terms[i].coef + t.coef * k
+                found = true
+            }
+        }
+        if !found && k != 0 {
+            out.terms.push(mir.SpecTerm { coef: t.coef * k, name: t.name.clone(), old: t.old })
+        }
+    }
+    true
+}
+
+// The local is one of the function's parameters.
+fn is_arg(fb: Fb, l: u32) -> bool {
+    l >= 1 && l as i64 <= fb.body.arg_count
+}
+
 fn is_ret_value(m: ast.RetMode) -> bool {
     match m {
         Value => true
@@ -183,7 +267,8 @@ impl Fb {
             body: mir.Body {
                 locals: Vec(mir.LocalDecl).new(),
                 blocks: Vec(mir.Block).new(),
-                arg_count: 0
+                arg_count: 0,
+                contract: mir.Contract.new()
             }
             cur: 0
             scopes: Vec(Scope).new()
@@ -613,6 +698,7 @@ impl sema.Sema {
         } else {
             self.types.pointee(sig.ret).unwrap()
         }
+        self.contract(&fb, d)?
         match d.body {
             Some(body) => self.lower_body(&fb, body, ret_val_ty)?
             None => {}
@@ -622,6 +708,197 @@ impl sema.Sema {
             Fb { body, .. } => self.out[id as i64].body = Some(body)
         }
         Ok(())
+    }
+
+    // ---- contracts ----
+
+    // A function's `requires` and `ensures`, over its parameters' locals
+    // (docs/language/contracts.md).
+    fn contract(inout self, inout fb: Fb, d: ast.FnDecl) -> Result((), Diag) {
+        if d.requires.len() == 0 && d.ensures.len() == 0 {
+            return Ok(())
+        }
+        if d.body.is_none() {
+            return Err(err(d.name_span, "a function without a body cannot have a contract"))
+        }
+        if d.ensures.len() > 0 {
+            for p in d.params {
+                if p.name == "result" {
+                    return Err(err(
+                        p.span,
+                        "a parameter named `result` hides the result in `ensures`"
+                    ))
+                }
+            }
+        }
+        var requires = Vec(mir.Clause).new()
+        for e in d.requires { self.clauses(fb, e, ClauseAt.Requires, &requires)? }
+        var ensures = Vec(mir.Clause).new()
+        for e in d.ensures { self.clauses(fb, e, ClauseAt.Ensures, &ensures)? }
+        fb.body.contract.requires = requires
+        fb.body.contract.ensures = ensures
+        Ok(())
+    }
+
+    // A loop's `invariant` clauses, at its head: the names they see are
+    // those declared before the loop.
+    fn invariants(inout self, inout fb: Fb, head: u32, es: [ast.Expr]) -> Result((), Diag) {
+        var out = Vec(mir.Clause).new()
+        for e in es { self.clauses(fb, e, ClauseAt.Invariant, &out)? }
+        for c in out.into_iter() { fb.body.contract.invariants.push((head, c)) }
+        Ok(())
+    }
+
+    // A clause: a comparison, or several joined by `&&`.
+    fn clauses(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        inout out: Vec(mir.Clause)
+    ) -> Result((), Diag) {
+        match e.kind {
+            Binary(op, a, b) => {
+                if op == Op.LogAnd {
+                    self.clauses(fb, a.deref(), at, &out)?
+                    return self.clauses(fb, b.deref(), at, &out)
+                }
+                if op == Op.Lt || op == Op.Le || op == Op.Gt || op == Op.Ge || op == Op.Eq ||
+                    op == Op.Ne {
+                    let x = self.spec(fb, a.deref(), at)?
+                    let y = self.spec(fb, b.deref(), at)?
+                    out.push(mir.Clause { op: op, a: x, b: y, span: e.span })
+                    return Ok(())
+                }
+            }
+            _ => {}
+        }
+        Err(err(e.span, "a contract clause compares integers, or joins comparisons with `&&`"))
+    }
+
+    // An integer term of a clause, as a constant plus multiples of what it
+    // names.
+    fn spec(inout self, fb: Fb, e: ast.Expr, at: ClauseAt) -> Result(mir.Spec, Diag) {
+        let r = match e.kind {
+            Int(v) => Some(Some(spec_number(v as i128)))
+            Unary(op, x) => match op {
+                Neg => Some(spec_combine(self.spec(fb, x.deref(), at)?, -1, spec_number(0), 0))
+                _ => None
+            }
+            Binary(op, a, b) => {
+                if op == Op.Add || op == Op.Sub {
+                    let x = self.spec(fb, a.deref(), at)?
+                    let y = self.spec(fb, b.deref(), at)?
+                    Some(spec_combine(x, 1, y, if op == Op.Add { 1 } else { -1 }))
+                } else if op == Op.Mul {
+                    let x = self.spec(fb, a.deref(), at)?
+                    let y = self.spec(fb, b.deref(), at)?
+                    if y.terms.len() == 0 {
+                        Some(spec_combine(x, y.constant, spec_number(0), 0))
+                    } else if x.terms.len() == 0 {
+                        Some(spec_combine(y, x.constant, spec_number(0), 0))
+                    } else {
+                        return Err(err(e.span, "a contract multiplies only by a constant"))
+                    }
+                } else { None }
+            }
+            Name(n) => return self.spec_name(fb, n.as_str(), e.span, at, false)
+            Call(f, args) => match f.kind {
+                Name(n) => if n == "old" && fb.lookup("old").is_none() {
+                    if at == ClauseAt.Requires {
+                        return Err(err(
+                            e.span,
+                            "`old` is for `ensures` and `invariant`; in `requires` a parameter is its value on entry"
+                        ))
+                    }
+                    if args.len() == 1 {
+                        match args[0].kind {
+                            Name(x) => return self.spec_name(fb, x.as_str(), args[0].span, at, true)
+                            _ => {}
+                        }
+                    }
+                    return Err(err(e.span, "`old` takes the name of an `inout` parameter"))
+                } else { None }
+                _ => None
+            }
+            Field(x, name) => if name == "len" {
+                match x.kind {
+                    Name(n) => {
+                        let l = self.spec_local(fb, n.as_str(), x.span)?
+                        match self.types.kind(fb.body.locals[l as i64].ty) {
+                            Slice(_) | Str => Some(Some(spec_var(
+                                mir.SpecVar.Len(l),
+                                at == ClauseAt.Ensures && is_arg(fb, l)
+                            )))
+                            _ => None
+                        }
+                    }
+                    _ => None
+                }
+            } else { None }
+            _ => None
+        }
+        match r {
+            Some(Some(s)) => Ok(s)
+            Some(None) => Err(err(e.span, "a number in this contract is too large to verify"))
+            None => Err(err(
+                e.span,
+                "a contract can only use integers, parameters, variables, `result`, `old(x)`, `.len` of a slice or `str`, and `+ - *`"
+            ))
+        }
+    }
+
+    // A name in a clause: `result`, or a parameter or variable.
+    fn spec_name(
+        inout self,
+        fb: Fb,
+        n: str,
+        span: Span,
+        at: ClauseAt,
+        old: bool
+    ) -> Result(mir.Spec, Diag) {
+        if n == "result" && !old && fb.lookup("result").is_none() {
+            if at != ClauseAt.Ensures {
+                return Err(err(span, "`result` is only known in `ensures`"))
+            }
+            if !is_ret_value(fb.ret_mode) || !self.types.is_int(fb.ty_of(mir.RET)) {
+                return Err(err(
+                    span,
+                    "`result` in a contract is an integer, and this function does not return one"
+                ))
+            }
+            return Ok(spec_var(mir.SpecVar.Local(mir.RET), false))
+        }
+        let l = self.spec_local(fb, n, span)?
+        let ty = fb.body.locals[l as i64].ty
+        if self.types.is_int(ty) {
+            if old {
+                return Err(err(
+                    span,
+                    "`old` is for `inout` parameters; in `ensures` the others are their values on entry"
+                ))
+            }
+            return Ok(spec_var(mir.SpecVar.Local(l), at == ClauseAt.Ensures && is_arg(fb, l)))
+        }
+        match self.types.kind(ty) {
+            RefMut(inner) => if self.types.is_int(inner) && is_arg(fb, l) {
+                return Ok(spec_var(mir.SpecVar.Deref(l), old))
+            }
+            _ => {}
+        }
+        Err(err(span, ("a contract reads integers, and `" + n + "` is a `" +
+            self.types.show(ty).as_str() + "`").as_str()))
+    }
+
+    fn spec_local(self, fb: Fb, n: str, span: Span) -> Result(u32, Diag) {
+        let Some(v) = fb.lookup(n) else {
+            return Err(err(span, ("`" + n + "` is not a parameter or variable here").as_str()))
+        }
+        match v.kind {
+            Capture(_) => return Err(err(span, "a contract cannot name a captured variable"))
+            _ => {}
+        }
+        Ok(v.local)
     }
 
     // The result type of a function declared `-> impl ...`: the type of
@@ -2200,10 +2477,11 @@ impl sema.Sema {
                 Ok(val_op(Operand.Const(r.c.clone()), r.ty))
             }
             If(c, then, els) => self.if_expr(&fb, c.deref(), then, els, exp, span)
-            While(c, body) => {
+            While(c, inv, body) => {
                 let head = fb.new_block()
                 let exit = fb.new_block()
                 fb.goto(head)
+                self.invariants(&fb, head, inv)?
                 let cv = self.expr(&fb, c.deref(), Some(types.BOOL))?
                 let cv = self.coerce(&fb, cv, types.BOOL, c.span)?
                 let co = self.operand(&fb, cv, c.span)?
@@ -2217,10 +2495,11 @@ impl sema.Sema {
                 fb.switch_to(exit)
                 Ok(val_unit())
             }
-            Loop(body) => {
+            Loop(inv, body) => {
                 let head = fb.new_block()
                 let exit = fb.new_block()
                 fb.goto(head)
+                self.invariants(&fb, head, inv)?
                 fb.loops.push(LoopCtx { brk: exit, cont: head, depth: fb.depth() })
                 self.block(&fb, body, Some(types.UNIT), false)?
                 fb.loops.pop()
@@ -2285,7 +2564,9 @@ impl sema.Sema {
             Try(inner) => self.try_expr(&fb, inner.deref(), span)
             StructLit(path, fields) => self.struct_lit(&fb, path.deref(), fields, exp, span)
             Match(scrut, arms) => self.match_expr(&fb, scrut.deref(), arms, exp, span)
-            For(index, pat, it, body) => self.for_expr(&fb, index, pat, it.deref(), body, span)
+            For(index, pat, it, inv, body) => {
+                self.for_expr(&fb, index, pat, it.deref(), inv, body, span)
+            }
             InlineFor(name, it, body) => self.inline_for(&fb, name.as_str(), it.deref(), body, span)
             InlineIf(c, then, els) => self.inline_if(&fb, c.deref(), then, els, exp, span)
             Lambda(params, ret, body) => self.lambda(&fb, params, ret, body, exp, None, span)
@@ -2517,6 +2798,12 @@ impl sema.Sema {
             return Err(err(
                 span,
                 "a generic function cannot be used as a value without its compile-time arguments"
+            ))
+        }
+        if d.requires.len() > 0 {
+            return Err(err(
+                span,
+                "a function with `requires` cannot be used as a value: its callers must prove it"
             ))
         }
         let id = self.instance(f, args, span)?
@@ -4039,6 +4326,7 @@ impl sema.Sema {
         index: Option(ast.ForIndex),
         pat: ast.Pat,
         it: ast.Expr,
+        inv: [ast.Expr],
         body: ast.Block,
         span: Span
     ) -> Result(Val, Diag) {
@@ -4054,6 +4342,7 @@ impl sema.Sema {
                         lo.deref(),
                         hi.deref(),
                         it.span,
+                        inv,
                         body,
                         span
                     )
@@ -4062,6 +4351,12 @@ impl sema.Sema {
                 None => return Err(err(it.span, "a `for` range needs both ends"))
             }
             _ => {}
+        }
+        if inv.len > 0 {
+            return Err(err(
+                inv[0].span,
+                "an `invariant` is not supported yet on a `for` loop over an iterator; use a range or `while`"
+            ))
         }
         self.for_iter(&fb, index, pat, it, body, span)
     }
@@ -4074,6 +4369,7 @@ impl sema.Sema {
         lo: ast.Expr,
         hi: ast.Expr,
         it_span: Span,
+        inv: [ast.Expr],
         body: ast.Block,
         span: Span
     ) -> Result(Val, Diag) {
@@ -4102,6 +4398,7 @@ impl sema.Sema {
         let step = fb.new_block()
         let exit = fb.new_block()
         fb.goto(head)
+        self.invariants(&fb, head, inv)?
         let c = fb.temp(types.BOOL, span)
         fb.assign(Place.local(c), Rvalue.Bin(Op.Lt, copy_of(i), copy_of(end)), span)
         let bb = fb.new_block()
@@ -6642,7 +6939,7 @@ pub fn collect_names(e: ast.Expr, inout out: Vec(String)) {
         }
         Block(b) => collect_names_block(b, &out)
         Unsafe(b) => collect_names_block(b, &out)
-        Loop(b) => collect_names_block(b, &out)
+        Loop(_, b) => collect_names_block(b, &out)
         If(c, t, e2) => {
             collect_names(c.deref(), &out)
             collect_names_block(t, &out)
@@ -6661,11 +6958,11 @@ pub fn collect_names(e: ast.Expr, inout out: Vec(String)) {
                 collect_names(a.body, &out)
             }
         }
-        While(c, b) => {
+        While(c, _, b) => {
             collect_names(c.deref(), &out)
             collect_names_block(b, &out)
         }
-        For(_, _, it, b) => {
+        For(_, _, it, _, b) => {
             collect_names(it.deref(), &out)
             collect_names_block(b, &out)
         }

@@ -956,7 +956,7 @@ fn expr_locals(e: ast.Expr, off: u32, inout out: Vec(Binding)) {
     match e.kind {
         Block(b) => block_locals(b, off, &out)
         Unsafe(b) => block_locals(b, off, &out)
-        Loop(b) => block_locals(b, off, &out)
+        Loop(_, b) => block_locals(b, off, &out)
         If(c, t, f) => {
             expr_locals(c, off, &out)
             block_locals(t, off, &out)
@@ -967,7 +967,7 @@ fn expr_locals(e: ast.Expr, off: u32, inout out: Vec(Binding)) {
             block_locals(t, off, &out)
             opt_locals(f, off, &out)
         }
-        While(c, b) => {
+        While(c, _, b) => {
             expr_locals(c, off, &out)
             block_locals(b, off, &out)
         }
@@ -984,7 +984,7 @@ fn expr_locals(e: ast.Expr, off: u32, inout out: Vec(Binding)) {
                 }
             }
         }
-        For(index, pat, iter, body) => {
+        For(index, pat, iter, _, body) => {
             expr_locals(iter, off, &out)
             if !contains(iter.span, off) {
                 match index {

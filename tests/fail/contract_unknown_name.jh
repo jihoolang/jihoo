@@ -1,0 +1,10 @@
+// A clause names parameters, `result` and, in an invariant, the variables
+// declared before the loop.
+// error: `n` is not a parameter or variable here
+fn f(x: i64) -> i64
+    requires x < n
+{
+    x
+}
+
+fn main() { println(f(1)) }

@@ -1,0 +1,6 @@
+// Nothing can prove what a C function does.
+// error: a function without a body cannot have a contract
+extern fn abs(x: i32) -> i32
+    ensures result >= 0
+
+fn main() { println(unsafe { abs(-1) }) }

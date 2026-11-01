@@ -1,0 +1,13 @@
+// Fields are not part of contracts yet; `.len` of a slice or `str` is.
+// error: a contract reads integers, and `p` is a
+struct P {
+    x: i64
+}
+
+fn f(p: P) -> i64
+    requires p > 0
+{
+    p.x
+}
+
+fn main() { println(f(P { x: 1 })) }

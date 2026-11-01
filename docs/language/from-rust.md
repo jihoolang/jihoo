@@ -48,6 +48,7 @@ if you know Rust, and check here when code that "should work" does not. The
 | `*m.lock().unwrap() += 1` | `m.lock(fn(n) { n += 1 })`: the value is lent to the closure |
 | `UnsafeCell<T>` | a `#[interior]` struct |
 | `loop { break 5 }` | not possible: `break` takes no value |
+| `debug_assert!(lo <= hi)` at the top, contract crates | `requires lo <= hi`, `ensures ...`, `invariant ...`: [contracts](contracts.md), for the verifier, never run |
 
 ## What does not exist
 

@@ -355,8 +355,8 @@ and moves into the compiler once its trust boundary is stated.
    failing; 69 proved with the untrusted invariant inference that step 4
    needs, started early). Each unproved check reports why: most depend on
    a value loaded from memory or a call's result, which contracts (steps 4
-   and 5) address. Left: contracts that do not name MIR's local and block
-   numbers.
+   and 5) address. Done: contracts in the source (step 4), which
+   `emit-obligations` prints over MIR's locals.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
    proved checks. `--verify-report` lists each check as proved or kept.
@@ -366,11 +366,22 @@ and moves into the compiler once its trust boundary is stated.
    `old(x)` for `inout` parameters. A call proves the callee's `requires`
    and assumes its `ensures`. An unproved contract is a compile error;
    untrusted inference proposes the invariants of loops over `0..n`.
+   Started ([contracts](../language/contracts.md)): the syntax, linear
+   clauses over integers and lengths, which sema checks and
+   `emit-obligations` prints; jihoo-proofs proves them from the source,
+   modularly at calls, with `inout` integers and locals lent to a call as
+   variables, and the differential test tells failures under an unproved
+   contract from bugs. `tests/fail` has a case for each malformed
+   contract. Left: unproved contracts as compile errors (with step 3),
+   and fields, `Vec` lengths and `||` in clauses.
 5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
    so that ordinary loops over vectors and slices have no bounds checks
    left.
-6. The release: 0.5.0 is tagged and the seed moves to it; the compiler may
-   then use contracts itself.
+6. The releases. A 0.4.x release that parses contracts lets `lib/std`
+   state its contracts (step 5) before 0.5.0, since the seed compiles
+   `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
+   jihoo can verify its own compiler, and the seed moving to it lets the
+   compiler state contracts itself.
 
 Completion: every `tests/run` program compiles with the same output, with
 or without verification; proved checks are absent from optimized IR and

@@ -1,0 +1,9 @@
+// The verifier's arithmetic is linear: a product needs a constant side.
+// error: a contract multiplies only by a constant
+fn square(x: i64) -> i64
+    requires x * x < 100
+{
+    x * x
+}
+
+fn main() { println(square(3)) }

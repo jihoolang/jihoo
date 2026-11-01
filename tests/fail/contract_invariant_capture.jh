@@ -1,0 +1,16 @@
+// A closure's loop cannot state facts about what it captured: the clause
+// sees only the closure's own names.
+// error: `n` is not a parameter or variable here
+fn main() {
+    let n = 3
+    let f = fn() {
+        var i = 0
+        while i < 3
+            invariant i <= n
+        {
+            i += 1
+        }
+    }
+    f()
+    println(n)
+}
