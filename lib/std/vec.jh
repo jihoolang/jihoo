@@ -9,17 +9,23 @@ pub struct Vec(T: type) {
 }
 
 impl(T: type) Vec(T) {
-    pub fn new() -> Vec(T) {
+    pub fn new() -> Vec(T)
+        ensures result.len == 0
+    {
         Vec(T) { ptr: null, len: 0, cap: 0 }
     }
 
-    pub fn with_capacity(n: i64) -> Vec(T) {
+    pub fn with_capacity(n: i64) -> Vec(T)
+        ensures result.len == 0
+    {
         var v = Vec(T).new()
         v.reserve(n)
         v
     }
 
-    pub fn len(self) -> i64 {
+    pub fn len(self) -> i64
+        ensures result == self.len
+    {
         self.len
     }
 
@@ -32,7 +38,9 @@ impl(T: type) Vec(T) {
     }
 
     // Room for at least n more values.
-    pub fn reserve(inout self, n: i64) {
+    pub fn reserve(inout self, n: i64)
+        ensures self.len == old(self.len)
+    {
         let need = self.len + n
         if need <= self.cap {
             return
@@ -54,7 +62,9 @@ impl(T: type) Vec(T) {
         self.cap = c
     }
 
-    pub fn push(inout self, sink x: T) {
+    pub fn push(inout self, sink x: T)
+        ensures self.len == old(self.len) + 1
+    {
         if self.len == self.cap {
             self.reserve(1)
         }
@@ -64,7 +74,9 @@ impl(T: type) Vec(T) {
         self.len += 1
     }
 
-    pub fn pop(inout self) -> Option(T) {
+    pub fn pop(inout self) -> Option(T)
+        ensures old(self.len) - 1 <= self.len && self.len <= old(self.len)
+    {
         if self.len == 0 {
             return None
         }
@@ -95,11 +107,15 @@ impl(T: type) Vec(T) {
         if self.len == 0 { None } else { Some(self.index(self.len - 1)) }
     }
 
-    pub fn as_slice(self) -> [T] {
+    pub fn as_slice(self) -> [T]
+        ensures result.len == self.len
+    {
         unsafe { make_slice(self.ptr, self.len) }
     }
 
-    pub fn insert(inout self, i: i64, sink x: T) {
+    pub fn insert(inout self, i: i64, sink x: T)
+        ensures self.len == old(self.len) + 1
+    {
         if i < 0 || i > self.len {
             panic("insert index out of bounds")
         }
@@ -113,7 +129,9 @@ impl(T: type) Vec(T) {
         self.len += 1
     }
 
-    pub fn remove(inout self, i: i64) -> T {
+    pub fn remove(inout self, i: i64) -> T
+        ensures self.len == old(self.len) - 1
+    {
         if i < 0 || i >= self.len {
             panic("remove index out of bounds")
         }

@@ -9,11 +9,15 @@ pub struct String {
 }
 
 impl String {
-    pub fn new() -> String {
+    pub fn new() -> String
+        ensures result.len() == 0
+    {
         String { bytes: Vec(u8).new() }
     }
 
-    pub fn with_capacity(n: i64) -> String {
+    pub fn with_capacity(n: i64) -> String
+        ensures result.len() == 0
+    {
         String { bytes: Vec(u8).with_capacity(n) }
     }
 
@@ -29,7 +33,9 @@ impl String {
         r
     }
 
-    pub fn len(self) -> i64 {
+    pub fn len(self) -> i64
+        ensures result == self.bytes.len
+    {
         self.bytes.len
     }
 
@@ -37,19 +43,27 @@ impl String {
         self.bytes.len == 0
     }
 
-    pub fn as_str(self) -> str {
+    pub fn as_str(self) -> str
+        ensures result.len == self.len()
+    {
         unsafe { make_str(self.bytes.ptr, self.bytes.len) }
     }
 
-    pub fn as_bytes(self) -> [u8] {
+    pub fn as_bytes(self) -> [u8]
+        ensures result.len == self.len()
+    {
         self.bytes.as_slice()
     }
 
-    pub fn push(inout self, b: u8) {
+    pub fn push(inout self, b: u8)
+        ensures self.len() == old(self.len()) + 1
+    {
         self.bytes.push(b)
     }
 
-    pub fn push_str(inout self, s: str) {
+    pub fn push_str(inout self, s: str)
+        ensures self.len() == old(self.len()) + s.len
+    {
         self.bytes.reserve(s.len)
         unsafe {
             mem_copy(self.bytes.ptr + self.bytes.len, s.ptr, s.len)
@@ -196,7 +210,9 @@ fn show_128(neg: bool, bits: u128, inout out: String) {
 
 impl str {
     // The bytes, as a slice.
-    pub fn as_bytes(self) -> [u8] {
+    pub fn as_bytes(self) -> [u8]
+        ensures result.len == self.len
+    {
         unsafe { make_slice(self.ptr, self.len) }
     }
 

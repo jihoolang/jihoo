@@ -278,10 +278,20 @@ variables raise the bounds and overflow checks proved from 378 of 2,489 to
 kinds add 260 calls that never return (none proved: the compiler's panics
 mark states it believes impossible for reasons the model cannot see) and
 1,769 calls that may reach a small function's panic, of which 4 are
-proved; with `std`'s `Vec.len` and `as_slice` contracts, most of the
-latter are calls to `Vec.index` in loops over the vector. The `verify`
-suite fails when `jihoo verify compiler/main.jh` proves fewer of any kind
-than `tests/verify/compiler.proved` records.
+proved. The `verify` suite fails when `jihoo verify compiler/main.jh`
+proves fewer of any kind than `tests/verify/compiler.proved` records.
+
+With 0.4.4 as the seed, `std` states its contracts: `Vec.new` and
+`with_capacity` return an empty vector, `len` returns `self.len`,
+`reserve` keeps it, `push` and `insert` add one, `remove` takes one away,
+`pop` takes at most one away, and `as_slice`'s length is `self.len`;
+`String`'s are the same over its bytes (`self.len()`), with `push_str`
+adding the `str`'s length. No `std` function has a `requires`. Every one
+of these `ensures` is proved. The compiler then proves 720 bounds and
+overflow checks and 120 of its calls that may panic, nearly all `v[i]` in
+loops over `v` or after a length test; most of the other `v[i]` index
+with a value loaded from memory (a token's position, a block's number),
+which no contract on `Vec` can bound.
 
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
