@@ -41,7 +41,10 @@ impl(T: type) Vec(T) {
     pub fn reserve(inout self, n: i64)
         ensures self.len == old(self.len) && self.len + n <= self.cap
     {
-        let need = self.len + n
+        // Less than nothing is nothing: borrowed bytes are still copied
+        // whole.
+        let more = if n < 0 { 0 } else { n }
+        let need = self.len + more
         if need <= self.cap {
             return
         }
@@ -158,9 +161,9 @@ impl(T: type) Vec(T) {
         }
     }
 
-    // Drops the values from n on.
+    // Drops the values from n on (all of them when n is negative).
     pub fn truncate(inout self, n: i64) {
-        while self.len > n {
+        while self.len > n && self.len > 0 {
             self.len -= 1
             unsafe { mem.drop_at(T, self.ptr + self.len) }
         }
@@ -255,7 +258,7 @@ impl(T: type) Drop for IntoIter(T) {
 }
 
 impl(T: Clone) Vec(T) {
-    // n copies of x.
+    // n copies of x (none when n is negative).
     pub fn filled(n: i64, x: T) -> Vec(T) {
         var v = Vec(T).with_capacity(n)
         var i = 0
@@ -263,7 +266,7 @@ impl(T: Clone) Vec(T) {
             unsafe { write(v.ptr + i, x.clone()) }
             i += 1
         }
-        v.len = n
+        v.len = i
         v
     }
 
