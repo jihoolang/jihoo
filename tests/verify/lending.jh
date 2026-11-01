@@ -1,0 +1,35 @@
+// A local lent to an `inout` parameter gets a new value from the call: an
+// integer's is a new variable, and a view escapes, since the call may
+// change its length. `s[0]` is not proved from the length before the call.
+
+fn clear(inout s: str) {
+    s = ""
+}
+
+fn bump(inout x: i64) {
+    x = 0
+}
+
+fn first(t: str) -> u8 {
+    var s = t
+    if s.len > 0 {
+        clear(&s)
+        return s[0]
+    }
+    0
+}
+
+fn after(n: i64) -> i64 {
+    var x = 5
+    bump(&x)
+    if n > 0 && n < 10 { return x + n }
+    0
+}
+
+fn main() {
+    println(first("abc"))
+    println(after(3))
+}
+
+//> 17:16: kept index out of bounds in first (unstated)
+//> 25:33: kept integer overflow in after (argument, call)

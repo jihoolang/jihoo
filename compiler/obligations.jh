@@ -214,15 +214,22 @@ fn term_uses(inout u: Uses, term: mir.Term) {
 
 // A local whose address is taken (`&x` for `inout`, `&raw`) may change
 // through that pointer; the model does not follow it, unless the borrow is
-// only lent to one call.
-fn escapes(b: Body, lent: [Option(Place)]) -> Vec(bool) {
+// only lent to one call and lends an integer or bool local, or the integer
+// an `inout` parameter points to: a call gives those a new value. A view
+// lent that way escapes, since the call may change its length.
+fn escapes(t: Types, b: Body, lent: [Option(Place)]) -> Vec(bool) {
     var out = Vec(bool).filled(b.locals.len(), false)
     for bl in b.blocks {
         for st in bl.stmts {
             match st {
                 Assign(dst, rv, _) => match rv {
                     RefMut(p) => {
-                        let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some()
+                        let scalar = p.proj.len() == 0 && match t.kind(b.locals[p.local as i64].ty) {
+                            Int(_) | Bool => true
+                            _ => false
+                        }
+                        let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some() &&
+                            (scalar || plain_deref(p, p.local))
                         if !lending { out[p.local as i64] = true }
                     }
                     Addr(p) => out[p.local as i64] = true
@@ -316,7 +323,7 @@ fn kind_text(t: Types, ty: u32) -> String {
 
 fn model(t: Types, b: Body) -> Model {
     let lent = lendings(t, b)
-    let escaped = escapes(b, lent.as_slice())
+    let escaped = escapes(t, b, lent.as_slice())
     var m = Model {
         tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(),
         derefs: Vec(Option(i64)).filled(b.locals.len(), None), lent: lent.clone(),

@@ -70,6 +70,8 @@ struct Outcome {
     // The cut points, of which the invariants the source states come first.
     cuts: i64
     written: i64
+    // The functions it calls directly, whether or not a path reached them.
+    callees: Vec(i64)
 }
 
 fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
@@ -101,7 +103,14 @@ fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
             used
         })
     }
-    Outcome { whole: obs.errors.len() == 0, results, cuts: f.invariants.len(), written: 0 }
+    var callees = Vec(i64).new()
+    for b in f.blocks {
+        match b.term {
+            Call(_, _, site) => if site.callee >= 0 { callees.push(site.callee) }
+            _ => {}
+        }
+    }
+    Outcome { whole: obs.errors.len() == 0, results, cuts: f.invariants.len(), written: 0, callees }
 }
 
 // What the program's assumptions came to: per function, its `requires`
@@ -339,6 +348,14 @@ pub fn verify(p: mir.Program) -> Report {
                 if !o.whole { a.ensures[i] = false }
             }
             None => a.cuts.push(Vec(bool).new())
+        }
+    }
+    // A function not followed everywhere may call one in a way no
+    // obligation states: none of its callees' `requires` holds.
+    for i in 0..n {
+        let Some(o) = outcomes[i] else { continue }
+        if !o.whole {
+            for g in o.callees { a.requires[g] = false }
         }
     }
     var changed = true
