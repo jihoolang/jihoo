@@ -27,6 +27,11 @@
 //   digits with Python's.
 // - format: source comments, syntax and emitted IR survive formatting;
 //   formatting is idempotent and fmt --check detects unformatted source.
+// - verify: the compiler's own #[test] functions (the verifier's checker
+//   and prover) pass, `jihoo verify --all` on each program in tests/verify says what
+//   its `//>` lines say of the checks in the file, and each program in
+//   tests/run does the same with `--verify` (which removes the checks it
+//   proves) as without.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, programs split into code generation units,
@@ -246,7 +251,10 @@ impl Tests {
         Ok(out)
     }
 
-    fn run_one(self, path: str) -> Result((), String) {
+    fn run_one(self, path: str) -> Result((), String) { self.run_with(path, []) }
+
+    // The program built with more options, which must not change what it does.
+    fn run_with(self, path: str, options: [str]) -> Result((), String) {
         let src = read_file(path)?
         let lines = directives(src.as_str(), "//>")
         var want = Vec(str).new()
@@ -266,6 +274,7 @@ impl Tests {
         var a = Vec(str).new()
         a.push("build")
         a.push(opt)
+        for o in options { a.push(o) }
         a.push(path)
         words(src.as_str(), "// link:", &a)
         a.push("-o")
@@ -545,6 +554,10 @@ impl Tests {
             }
             let r = if kind == "run" {
                 self.run_one(f.as_str())
+            } else if kind == "verified" {
+                self.run_with(f.as_str(), ["--verify"])
+            } else if kind == "verify" {
+                self.verify_one(f.as_str())
             } else if kind == "fail" {
                 self.fail_one(f.as_str())
             } else if kind == "test" {
@@ -556,6 +569,28 @@ impl Tests {
             }
             self.check(f.as_str(), r)
         }
+    }
+
+    // `jihoo verify --all` on the file: its `//>` lines are what it says
+    // of the checks in the file itself, without the file's path.
+    fn verify_one(self, path: str) -> Result((), String) {
+        let src = read_file(path)?
+        let lines = directives(src.as_str(), "//>")
+        var want = Vec(str).new()
+        for d in lines {
+            want.push(if d.starts_with(" ") { d[1..] } else { d })
+        }
+        let o = exec(self.compiler.as_str(), ["verify", "--all", path])
+        if !o.status.success() { return Err("verify failed:\n" + o.stderr.as_str()) }
+        let prefix = path.to_string() + ":"
+        var got = Vec(str).new()
+        for l in o.stdout.as_str().lines() {
+            if l.starts_with(prefix.as_str()) { got.push(l[prefix.len()..]) }
+        }
+        if !same(got, want) {
+            return Err("expected:\n" + join(want).as_str() + "\ngot:\n" + join(got).as_str())
+        }
+        Ok(())
     }
 
     // ---- backend ----
@@ -1282,7 +1317,7 @@ fn main() -> i32 {
         suites.push(args[i])
     }
     if suites.len() == 0 {
-        for s in ["format", "check", "run", "test", "fail", "examples", "backend", "selfhost", "uefi"] {
+        for s in ["format", "check", "run", "test", "fail", "verify", "examples", "backend", "selfhost", "uefi"] {
             suites.push(s)
         }
     }
@@ -1340,6 +1375,15 @@ fn main() -> i32 {
             t.std_tests()
         } else if s == "fail" {
             t.suite_files("tests/fail", "fail")
+        } else if s == "verify" {
+            // The checker's and the prover's own tests.
+            let o = exec(t.compiler.as_str(), ["test", "-O1", "compiler/main.jh"])
+            let r: Result((), String) = if o.status.success() {
+                Ok(())
+            } else { Err("tests failed:\n" + o.stdout.as_str() + o.stderr.as_str()) }
+            t.check("verify: the compiler's #[test] functions", r)
+            t.suite_files("tests/verify", "verify")
+            t.suite_files("tests/run", "verified")
         } else if s == "examples" {
             t.suite_files("examples", "examples")
         } else if s == "backend" {
@@ -1349,7 +1393,7 @@ fn main() -> i32 {
         } else if s == "uefi" {
             t.uefi()
         } else {
-            eprintln("unknown suite " + s + "; the suites are format, check, run, test, fail, examples, backend, selfhost and uefi")
+            eprintln("unknown suite " + s + "; the suites are format, check, run, test, fail, verify, examples, backend, selfhost and uefi")
             return 2
         }
     }

@@ -12,7 +12,7 @@ const SELF: i32 = 0
 const CHILDREN: i32 = -1
 
 // Nanoseconds since some fixed point.
-fn now() -> i64 {
+pub fn now() -> i64 {
     var ts = [0 as i64; 2]
     let _ = unsafe { clock_gettime(MONOTONIC, &ts[0]) }
     ts[0] * 1000000000 + ts[1]

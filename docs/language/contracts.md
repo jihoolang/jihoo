@@ -35,12 +35,11 @@ fn sum(xs: [i64]) -> i64 {
 
 Contracts are for [verification](../internals/verification.md): they are
 proved while compiling, never checked while the program runs, and a check
-the proof covers (the bounds check of `xs[i]` above) is removed. **For now
-the compiler only reads them**: it checks that each clause is well formed and
-gives the clauses to the verifier through
-[`emit-obligations`](../reference/command-line.md#verification-model), and
-[jihoo-proofs](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations)
-proves them. A build is the same with or without them.
+the proof covers (the bounds check of `xs[i]` above) is removed.
+[`jihoo verify`](../reference/command-line.md#verification) proves them
+and lists those that are not proved, and `--verify` removes the proved
+checks from a build. **For now an unproved contract is not an error**,
+and a build without `--verify` is the same with or without contracts.
 
 ## Clauses
 

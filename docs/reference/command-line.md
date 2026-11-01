@@ -9,6 +9,7 @@ jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions
 jihoo emit-mir <file.jh>                      print the compiler's MIR
 jihoo emit-obligations <file.jh>              print MIR as the verification model
+jihoo verify <file.jh> [--all]                list the checks verification cannot remove
 jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
 jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
 jihoo emit-tokens <file.jh>                   print the tokens of one file
@@ -36,6 +37,7 @@ once the program has none.
 |--------|---|
 | `-O0` … `-O3` | LLVM optimization (default `-O2`) |
 | `--release` | integer overflow wraps instead of trapping |
+| `--verify` | remove the checks [verification](#verification) proves (`build`, `run`, `test`, `emit-llvm`, `emit-obj`) |
 | `--target x86_64\|aarch64` | the machine to compile for (Linux, or UEFI for a `#![uefi]` program) |
 | `-I <dir>` | also look for modules in `<dir>` |
 | `-o <file>` | the output |
@@ -393,6 +395,41 @@ Documents are synchronized in full. Other requests return the protocol's
 document that takes long to check (the compiler itself takes seconds) delays
 replies until it finishes. The server exits with status 0 after `shutdown`
 and `exit`, and 1 when its input ends or `exit` comes first.
+
+## Verification
+
+```sh
+jihoo verify app.jh                  # the checks that stay, and why
+jihoo verify app.jh --all            # every check, proved or kept
+jihoo build --verify app.jh          # without the proved checks
+```
+
+[Verification](../internals/verification.md) proves that checks the
+compiler inserts cannot fail: bounds checks (`assert` in MIR) and, in debug
+builds, the overflow checks of `+ - *`. It also proves
+[contracts](../language/contracts.md). `verify` prints one line per check
+that stays, at the check's position, with what it is, the function, and
+where the values it depends on come from (the reasons of the
+[model](#verification-model), plus `argument`, `loop` and `call`):
+
+```text
+app.jh:9:9: kept integer overflow in sum (loop, load)
+app.jh:14:5: unproved `requires` of bump in unchecked
+app.jh:56:13: unproved `ensures` in wrong
+42 of 57 checks proved in 31 functions (0 not followed everywhere)
+```
+
+A contract clause that is not proved is listed too: an `ensures`, a
+written `invariant`, or a call whose callee's `requires` it does not meet.
+A proof counts only when everything it rests on is proved: a function's
+`requires` when every call to it meets it (a function that is exported,
+the entry, a destructor or used as a value is never assumed to be called
+that way), a callee's `ensures`, and the invariants of loops, inferred or
+written. `--machine` prints the verdicts of the root file's functions in
+the line format jihoo-proofs' differential test reads. `--verify` on a
+build runs the same verification and compiles without the proved checks;
+the program does the same, without their cost. `JIHOO_VERIFY_TRACE=1`
+prints the time each function took on standard error.
 
 ## Verification model
 
