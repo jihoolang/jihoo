@@ -62,8 +62,9 @@ function outsideCode(md, f) {
 /** Rewrites `[text](target)` links in `md`, a file at `file` shown as page `slug`. */
 function links(md, file, slug) {
   return outsideCode(md, (text) =>
-    // Inline code is left alone: `[x](y)` there is not a link.
-    text.replace(/(`[^`\n]*`)|\[([^\]\n]*)\]\(([^)\s]+)\)/g, (m, code, label, target) => {
+    // Inline code is left alone: `[x](y)` there is not a link. A link's
+    // text may hold code, `]` included: [`#[test]`](page.md).
+    text.replace(/\[((?:`[^`\n]*`|[^\]`\n])*)\]\(([^)\s]+)\)|(`[^`\n]*`)/g, (m, label, target, code) => {
       if (code || /^([a-z]+:|#)/.test(target)) return m;
       const [p, hash = ''] = target.split(/(?=#)/);
       const abs = path.resolve(path.dirname(file), p);
