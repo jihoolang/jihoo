@@ -1,0 +1,92 @@
+// Contracts: a call proves its callee's `requires` and assumes its
+// `ensures`. A function's checks are proved only when every call meets its
+// `requires`: `bump` has a caller that may not, so its own check is kept.
+
+fn bump(inout x: i64)
+    requires x < 100
+    ensures x == old(x) + 1
+{
+    x += 1
+}
+
+fn unchecked(n: i64) -> i64 {
+    var x = n
+    bump(&x)
+    x
+}
+
+fn inc(x: i64) -> i64
+    requires 0 <= x && x < 1000
+    ensures result == x + 1
+{
+    x + 1
+}
+
+// `inc`'s `ensures` bounds both sides of the `+`.
+fn twice(x: i64) -> i64
+    requires 0 <= x && x < 1000
+    ensures result == 2 * x + 2
+{
+    inc(x) + inc(x)
+}
+
+fn count(n: i64) -> i64
+    requires 0 <= n && n <= 900
+    ensures result == n
+{
+    var c = 0
+    var i = 0
+    while i < n
+        invariant 0 <= i && i <= n && c == i
+    {
+        c = inc(c)
+        i += 1
+    }
+    c
+}
+
+fn guarded(a: u64, b: u64) -> u64 {
+    if a >= b { return a - b }
+    0
+}
+
+// Wrong: the result is one more.
+fn wrong(x: i64) -> i64
+    requires 0 <= x && x < 10
+    ensures result == x
+{
+    x + 1
+}
+
+// Not preserved: `i` passes 5 when `n` does.
+fn drift(n: i64) -> i64
+    requires 0 <= n && n <= 10
+{
+    var i = 0
+    while i < n
+        invariant 0 <= i && i <= 5
+    {
+        i += 1
+    }
+    i
+}
+
+fn main() {
+    println(wrong(1))
+    println(drift(3))
+    println(unchecked(4))
+    println(twice(5))
+    println(count(6))
+    println(guarded(3, 2))
+}
+
+//> 9:5: kept integer overflow in bump (argument)
+//> 22:5: proved integer overflow in inc
+//> 30:5: proved integer overflow in twice
+//> 43:9: proved integer overflow in count
+//> 49:24: proved integer overflow in guarded
+//> 58:5: proved integer overflow in wrong
+//> 69:9: kept integer overflow in drift (loop)
+//> 14:5: unproved `requires` of bump in unchecked
+//> 56:13: unproved `ensures` in wrong
+//> 67:29: unproved invariant in drift

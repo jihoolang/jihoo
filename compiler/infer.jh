@@ -1,0 +1,331 @@
+// Untrusted loop invariant inference for verification (Houdini): propose
+// simple facts at every cut point that has no written invariant, then drop
+// each one that is not proved on entry or after an iteration, until the
+// rest are. Whatever it returns is checked again like written invariants,
+// so its bugs lose proofs only.
+
+import std.sort
+import fm
+import linear
+import vc
+
+pub fn successors(t: vc.Term) -> Vec(i64) {
+    var out = Vec(i64).new()
+    match t {
+        Goto(b) => out.push(b)
+        Switch(_, a, b) => {
+            out.push(a)
+            out.push(b)
+        }
+        Assert(_, _, b, _) => out.push(b)
+        Any(bs) => {
+            for b in bs { out.push(b) }
+        }
+        Call(_, b, _) => out.push(b)
+        _ => {}
+    }
+    out
+}
+
+// The targets of back edges in a depth-first walk from the entry: every
+// cycle has one, so with a cut point at each, no path runs a block twice.
+pub fn loop_heads(f: vc.Function) -> Vec(i64) {
+    let n = f.blocks.len()
+    // 0: not reached, 1: on the walk's stack, 2: done.
+    var color = Vec(i64).filled(n, 0)
+    var head = Vec(bool).filled(n, false)
+    var stack = Vec((i64, i64)).new()
+    if n == 0 { return Vec(i64).new() }
+    color[0] = 1
+    stack.push((0, 0))
+    loop {
+        let Some(top) = stack.pop() else { break }
+        let succ = successors(f.blocks[top.0].term)
+        if top.1 < succ.len() {
+            stack.push((top.0, top.1 + 1))
+            let s = succ[top.1]
+            if color[s] == 1 {
+                head[s] = true
+            } else if color[s] == 0 {
+                color[s] = 1
+                stack.push((s, 0))
+            }
+        } else { color[top.0] = 2 }
+    }
+    var out = Vec(i64).new()
+    for b in 0..n {
+        if head[b] { out.push(b) }
+    }
+    out
+}
+
+// The blocks that more than one edge reaches (or the entry, if any does).
+pub fn joins(f: vc.Function) -> Vec(i64) {
+    var preds = Vec(i64).filled(f.blocks.len(), 0)
+    preds[0] = 1
+    for b in f.blocks {
+        for s in successors(b.term) { preds[s] += 1 }
+    }
+    var out = Vec(i64).new()
+    for i, n in preds {
+        if n >= 2 { out.push(i) }
+    }
+    out
+}
+
+// Paths that may reach one block from the cut points before it.
+pub const MAX_PATHS_TO_BLOCK: i64 = 32
+
+// More cut points, so that at most `MAX_PATHS_TO_BLOCK` paths from cut
+// points reach each block: in an order where each block comes after the
+// blocks that reach it without passing a cut point, a block that too many
+// paths reach becomes a cut point, and one path leaves it. `cuts` (the
+// loop heads) leaves no cycle.
+pub fn bounded(f: vc.Function, cuts: [i64]) -> Vec(i64) {
+    let n = f.blocks.len()
+    var is_cut = Vec(bool).filled(n, false)
+    for c in cuts { is_cut[c] = true }
+    // Depth-first postorder over the edges that do not enter a cut point.
+    var order = Vec(i64).new()
+    var state = Vec(i64).filled(n, 0)
+    var stack = Vec((i64, i64)).new()
+    if n == 0 { return Vec(i64).new() }
+    state[0] = 1
+    stack.push((0, 0))
+    loop {
+        let Some(top) = stack.pop() else { break }
+        let succ = successors(f.blocks[top.0].term)
+        if top.1 < succ.len() {
+            stack.push((top.0, top.1 + 1))
+            let s = succ[top.1]
+            if !is_cut[s] && state[s] == 0 {
+                state[s] = 1
+                stack.push((s, 0))
+            }
+        } else { order.push(top.0) }
+    }
+    // The walks also start at every cut point.
+    for c in cuts {
+        if state[c] == 0 {
+            state[c] = 1
+            stack.push((c, 0))
+            loop {
+                let Some(top) = stack.pop() else { break }
+                let succ = successors(f.blocks[top.0].term)
+                if top.1 < succ.len() {
+                    stack.push((top.0, top.1 + 1))
+                    let s = succ[top.1]
+                    if !is_cut[s] && state[s] == 0 {
+                        state[s] = 1
+                        stack.push((s, 0))
+                    }
+                } else { order.push(top.0) }
+            }
+        }
+    }
+    var paths = Vec(i64).filled(n, 0)
+    var out = Vec(i64).new()
+    paths[0] = 1
+    for c in cuts { paths[c] = 1 }
+    // Reverse postorder: every block after those that reach it.
+    var k = order.len()
+    while k > 0 {
+        k -= 1
+        let b = order[k]
+        if paths[b] > MAX_PATHS_TO_BLOCK && !is_cut[b] {
+            is_cut[b] = true
+            out.push(b)
+            paths[b] = 1
+        }
+        for s in successors(f.blocks[b].term) {
+            if !is_cut[s] {
+                paths[s] += paths[b]
+                if paths[s] > MAX_PATHS_TO_BLOCK + 1 { paths[s] = MAX_PATHS_TO_BLOCK + 1 }
+            }
+        }
+    }
+    out
+}
+
+// Gives each block in `cuts` an invariant without facts, if it has none.
+pub fn cut(inout f: vc.Function, cuts: [i64]) {
+    for b in cuts {
+        var has = false
+        for inv in f.invariants {
+            if inv.0 == b { has = true }
+        }
+        if !has { f.invariants.push((b, Vec(vc.Fact).new())) }
+    }
+}
+
+fn operand_local(o: vc.Operand, inout out: Vec(bool)) {
+    match o {
+        Local(l) => out[l] = true
+        _ => {}
+    }
+}
+
+// The integers the function compares or computes with: the only ones an
+// invariant about them can help.
+fn interesting(f: vc.Function) -> Vec(bool) {
+    var out = Vec(bool).filled(f.kinds.len(), false)
+    for b in f.blocks {
+        for s in b.stmts {
+            match s {
+                Assign(dst, rv, _, _) => match rv {
+                    Add(x, y) | Sub(x, y) | Mul(x, y) | Compare(_, x, y) => {
+                        out[dst] = true
+                        operand_local(x, &out)
+                        operand_local(y, &out)
+                    }
+                    Cast(x) => {
+                        out[dst] = true
+                        operand_local(x, &out)
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
+// The number of blocks that assign each variable.
+fn assigned_in(f: vc.Function) -> Vec(i64) {
+    var count = Vec(i64).filled(f.kinds.len(), 0)
+    for b in f.blocks {
+        var here = Vec(i64).new()
+        for s in b.stmts {
+            match s {
+                Assign(dst, _, _, _) => here.push(dst)
+            }
+        }
+        match b.term {
+            Call(dst, _, site) => {
+                if dst >= 0 { here.push(dst) }
+                for a in site.args {
+                    match a {
+                        Lent(x) => here.push(x)
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        sort.sort(&here)
+        for i, l in here {
+            if i == 0 || here[i - 1] != l { count[l] += 1 }
+        }
+    }
+    count
+}
+
+fn is_int(f: vc.Function, l: i64) -> bool {
+    match f.kinds[l] {
+        Int(_, _) => true
+        Other => false
+    }
+}
+
+// Candidates per cut point, at most this many.
+pub const MAX_CANDIDATES: i64 = 96
+
+// Variables a loop counts with (assigned in two blocks or more: before the
+// loop and in it), and what they are compared with (never assigned:
+// arguments and lengths).
+fn candidates(f: vc.Function) -> Vec(vc.Fact) {
+    let count = assigned_in(f)
+    let useful = interesting(f)
+    var moving = Vec(i64).new()
+    var fixed = Vec(i64).new()
+    for l in 1..f.kinds.len() {
+        if is_int(f, l) && useful[l] {
+            if count[l] >= 2 { moving.push(l) }
+            if count[l] == 0 { fixed.push(l) }
+        }
+    }
+    // Lengths are never assigned by a statement of their own view's
+    // reading, but are what loops count to.
+    for p in f.callee.lengths {
+        if count[p.1] == 0 && !useful[p.1] { fixed.push(p.1) }
+    }
+    var out = Vec(vc.Fact).new()
+    for v in moving {
+        match f.kinds[v] {
+            Int(lo, _) => if lo < 0 { out.push(vc.fact(
+                vc.Cmp.Le,
+                vc.Operand.Const(0),
+                vc.Operand.Local(v)
+            )) }
+            Other => {}
+        }
+        for w in moving {
+            if w != v { out.push(vc.fact(vc.Cmp.Le, vc.Operand.Local(v), vc.Operand.Local(w))) }
+        }
+        for w in fixed {
+            out.push(vc.fact(vc.Cmp.Le, vc.Operand.Local(v), vc.Operand.Local(w)))
+            out.push(vc.fact(vc.Cmp.Le, vc.Operand.Local(w), vc.Operand.Local(v)))
+        }
+        if out.len() >= MAX_CANDIDATES { break }
+    }
+    out.truncate(MAX_CANDIDATES)
+    out
+}
+
+pub const MAX_ROUNDS: i64 = 20
+
+pub fn proved(g: linear.Goal) -> bool {
+    match fm.prove(g) {
+        Ok(c) => linear.check(g, c).is_ok()
+        Err(_) => false
+    }
+}
+
+// `f` with candidates proposed for its cut points in `heads` that have no
+// facts, kept while they check.
+pub fn infer(inout f: vc.Function, heads: [i64], contracts: [Option(vc.Callee)]) {
+    let proposed = candidates(f)
+    if proposed.len() == 0 { return }
+    // Which invariants this fills, by index into `f.invariants`.
+    var ours = Vec(bool).filled(f.invariants.len(), false)
+    for i in 0..f.invariants.len() {
+        var head = false
+        for h in heads {
+            if h == f.invariants[i].0 { head = true }
+        }
+        if head && f.invariants[i].1.len() == 0 {
+            f.invariants[i].1 = proposed.clone()
+            ours[i] = true
+        }
+    }
+    for _ in 0..MAX_ROUNDS {
+        let obs = vc.generate(f, contracts)
+        if obs.errors.len() > 0 { break }
+        var failed = Vec(Vec(bool)).new()
+        for inv in f.invariants { failed.push(Vec(bool).filled(inv.1.len(), false)) }
+        var any = false
+        for o in obs.list {
+            match o.source {
+                Invariant(i, j) => if ours[i] && !failed[i][j] && !proved(o.goal) {
+                    failed[i][j] = true
+                    any = true
+                }
+                _ => {}
+            }
+        }
+        if !any { return }
+        for i in 0..f.invariants.len() {
+            if ours[i] {
+                var kept = Vec(vc.Fact).new()
+                for j, x in f.invariants[i].1 {
+                    if !failed[i][j] { kept.push(x.clone()) }
+                }
+                f.invariants[i].1 = kept
+            }
+        }
+    }
+    // Not settled: drop what was proposed, which leaves the cut points.
+    for i in 0..f.invariants.len() {
+        if ours[i] { f.invariants[i].1 = Vec(vc.Fact).new() }
+    }
+}

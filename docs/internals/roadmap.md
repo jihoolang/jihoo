@@ -359,9 +359,19 @@ and moves into the compiler once its trust boundary is stated.
    `emit-obligations` prints over MIR's locals.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
-   proved checks. `--verify-report` lists each check as proved or kept.
-   Library proofs keep using compile-time evaluation, so its cost is
-   reduced alongside (the `Vec` operations that dominate the experiment).
+   proved checks. Library proofs keep using compile-time evaluation, so
+   its cost is reduced alongside (the `Vec` operations that dominate the
+   experiment). Started:
+   [`jihoo verify`](../reference/command-line.md#verification) lists each
+   check that stays and each unproved contract clause (`--all` the proved
+   ones too), and `--verify` builds without the proved checks. A proof
+   counts only when what it rests on (a `requires`, a callee's `ensures`,
+   a cut point) is proved, and cut points where paths meet keep the work
+   linear, so it runs on the compiler itself: 378 of 2,489 checks proved
+   in 22 seconds. The `verify` suite runs `tests/run` with `--verify`, and
+   jihoo-proofs' differential test checks the compiler's verdicts against
+   the interpreter. Left: `--verify` by default, and unproved contracts as
+   errors.
 4. Contracts: `requires`/`ensures` on functions, `invariant` on loops, and
    `old(x)` for `inout` parameters. A call proves the callee's `requires`
    and assumes its `ensures`. An unproved contract is a compile error;
@@ -377,7 +387,18 @@ and moves into the compiler once its trust boundary is stated.
 5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
    so that ordinary loops over vectors and slices have no bounds checks
    left.
-6. The releases. A 0.4.x release that parses contracts lets `lib/std`
+6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
+   checks Lean with a kernel written in Lean and proves that kernel's
+   properties in Lean. First, the compiler verifies its own source:
+   `jihoo verify compiler/main.jh` runs in CI and every check it keeps is
+   listed with its reason, while `std` and compiler contracts raise the
+   share proved. Then the trusted parts verify themselves: the checker
+   (`linear.jh`) and the generator (`vc.jh`) state contracts, proved by the
+   compiler they are part of, until no check is left in the checker.
+   Last, the checker's soundness (an accepted certificate means the facts
+   cannot all hold) is proved in jihoo, by induction over the weighted sum,
+   with the Horn kernel that 0.6 makes a library.
+7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
    jihoo can verify its own compiler, and the seed moving to it lets the

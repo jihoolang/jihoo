@@ -1,0 +1,598 @@
+// Verification (docs/internals/verification.md): each function's checks
+// and contracts as obligations (`vc.jh`, from `obligations.jh`'s model),
+// proved by an untrusted prover (`fm.jh`, invariants from `infer.jh`) and
+// accepted only when the trusted checker (`linear.jh`) accepts. A check
+// counts as proved only when everything its proof assumed is proved too:
+// the function's cut points, the `requires` it was proved under, and the
+// `ensures` of the functions it calls. Proved checks can then be removed.
+
+import std.env
+import std.io
+import std.mem
+import diag
+import fm
+import infer
+import lex
+import linear
+import mir
+import obligations
+import timing
+import vc
+
+// A check in MIR: an `assert` terminator (`stmt` -1) or an overflow check.
+pub struct Check {
+    pub function: u32
+    pub block: i64
+    pub stmt: i64
+    pub what: String
+    pub span: diag.Span
+    // Every obligation of the check was proved.
+    pub proved: bool
+    // Where the values of an unproved claim come from (`vc.why_code`s).
+    pub depends: Vec(i64)
+}
+
+pub struct Report {
+    pub checks: Vec(Check)
+    // Per function: its `ensures` is proved, and so is all it rests on.
+    pub ensures: Vec(bool)
+    // Per function, the contract clauses that are not proved, and why.
+    pub contract_errors: Vec(Vec((diag.Span, String)))
+    pub functions: i64
+    pub incomplete: i64
+}
+
+impl Report {
+    pub fn proved(self) -> i64 {
+        var n = 0
+        for c in self.checks {
+            if c.proved { n += 1 }
+        }
+        n
+    }
+}
+
+// One obligation, proved or not.
+struct Result1 {
+    proved: bool
+    source: vc.Source
+    // Where the claim's values come from (`vc.why_code`s).
+    depends: Vec(i64)
+    // What the facts its certificate uses rest on.
+    used: Vec(vc.Tag)
+}
+
+// What one function's obligations came to.
+struct Outcome {
+    // Generation followed every path.
+    whole: bool
+    results: Vec(Result1)
+    // The cut points, of which the invariants the source states come first.
+    cuts: i64
+    written: i64
+    // The functions it calls directly, whether or not a path reached them.
+    callees: Vec(i64)
+}
+
+fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
+    let obs = vc.generate(f, contracts)
+    var results = Vec(Result1).new()
+    for o in obs.list {
+        var used = Vec(vc.Tag).new()
+        let proved = match fm.prove(o.goal) {
+            Ok(c) => match linear.check(o.goal, c) {
+                Ok(_) => {
+                    for k, w in c.weights {
+                        if w > 0 && k < o.tags.len() {
+                            match o.tags[k] {
+                                Path => {}
+                                t => used.push(t)
+                            }
+                        }
+                    }
+                    true
+                }
+                Err(_) => false
+            }
+            Err(_) => false
+        }
+        results.push(Result1 {
+            proved,
+            source: copy_source(o.source),
+            depends: o.depends.clone(),
+            used
+        })
+    }
+    var callees = Vec(i64).new()
+    for b in f.blocks {
+        match b.term {
+            Call(_, _, site) => if site.callee >= 0 { callees.push(site.callee) }
+            _ => {}
+        }
+    }
+    Outcome { whole: obs.errors.len() == 0, results, cuts: f.invariants.len(), written: 0, callees }
+}
+
+// What the program's assumptions came to: per function, its `requires`
+// (proved by every call), its `ensures` and each cut point's facts.
+struct Assumptions {
+    requires: Vec(bool)
+    ensures: Vec(bool)
+    cuts: Vec(Vec(bool))
+}
+
+// The obligation is proved, and so is everything its proof rests on.
+fn valid(a: Assumptions, f: i64, o: Outcome, r: Result1) -> bool {
+    if !r.proved || !o.whole { return false }
+    for t in r.used {
+        let ok = match t {
+            Path => true
+            Requires => a.requires[f]
+            Cut(k) => a.cuts[f][k]
+            Ensures(g) => a.ensures[g]
+        }
+        if !ok { return false }
+    }
+    true
+}
+
+fn copy_source(s: vc.Source) -> vc.Source {
+    match s {
+        Check(x) => vc.Source.Check(x)
+        Requires(b, f) => vc.Source.Requires(b, f)
+        Invariant(i, j) => vc.Source.Invariant(i, j)
+        Ensures(j) => vc.Source.Ensures(j)
+    }
+}
+
+// Generates and proves, with inferred invariants at loop heads, and cut
+// points where too many paths would meet.
+fn outcome(sink f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
+    var g = f
+    let written = g.invariants.len()
+    let heads = infer.loop_heads(g)
+    infer.cut(&g, heads.as_slice())
+    let more = infer.bounded(g, heads.as_slice())
+    infer.cut(&g, more.as_slice())
+    infer.infer(&g, heads.as_slice(), contracts)
+    var o = prove_all(g, contracts)
+    o.written = written
+    o
+}
+
+// The functions that may be called other than by a direct call the
+// program verifies: exported ones, the entry, those whose address is
+// taken (`fnptr` values, `dyn` tables) and destructors.
+fn escaping(p: mir.Program) -> Vec(bool) {
+    var out = Vec(bool).filled(p.fns.len(), false)
+    for i, f in p.fns {
+        match f.linkage {
+            Internal => {}
+            _ => out[i] = true
+        }
+    }
+    match p.entry {
+        Some(e) => out[e as i64] = true
+        None => {}
+    }
+    match p.panic_handler {
+        Some(e) => out[e as i64] = true
+        None => {}
+    }
+    for st in p.statics { const_fns(st.value, &out) }
+    // Drop glue calls the `drop` of each type that has one.
+    for k in p.drop_impls.keys() { out[p.drop_impls[k] as i64] = true }
+    for f in p.fns {
+        let Some(b) = f.body else { continue }
+        for bl in b.blocks {
+            for st in bl.stmts {
+                match st {
+                    Assign(_, rv, _) => rvalue_fns(rv, &out)
+                    _ => {}
+                }
+            }
+            match bl.term {
+                Switch(o, _, _) | Assert(o, _, _, _) => operand_fns(o, &out)
+                Call(callee, args, _, _, _) => {
+                    match callee {
+                        Ptr(o) | Closure(o) => operand_fns(o, &out)
+                        _ => {}
+                    }
+                    for a in args { operand_fns(a, &out) }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn const_fns(c: mir.Const, inout out: Vec(bool)) {
+    match c {
+        Fn(f) => out[f as i64] = true
+        Vtable(fs) => {
+            for f in fs { out[f as i64] = true }
+        }
+        _ => {}
+    }
+}
+
+fn operand_fns(o: mir.Operand, inout out: Vec(bool)) {
+    match o {
+        Const(c) => const_fns(c, &out)
+        _ => {}
+    }
+}
+
+fn rvalue_fns(rv: mir.Rvalue, inout out: Vec(bool)) {
+    match rv {
+        Use(o) | Un(_, o) | Cast(o, _, _) | Repeat(o, _) => operand_fns(o, &out)
+        Bin(_, x, y) | Offset(x, y) => {
+            operand_fns(x, &out)
+            operand_fns(y, &out)
+        }
+        Aggregate(_, os) => {
+            for o in os { operand_fns(o, &out) }
+        }
+        _ => {}
+    }
+}
+
+fn site_span(b: mir.Body, block: i64, stmt: i64) -> diag.Span {
+    let bl = b.blocks[block]
+    if stmt < 0 {
+        return match bl.term {
+            Assert(_, _, _, span) | Call(_, _, _, _, span) => span
+            _ => diag.Span.nowhere()
+        }
+    }
+    match bl.stmts[stmt] {
+        Assign(_, _, span) => span
+        _ => diag.Span.nowhere()
+    }
+}
+
+fn site_what(b: mir.Body, block: i64, stmt: i64) -> String {
+    if stmt < 0 {
+        return match b.blocks[block].term {
+            Assert(_, msg, _, _) => msg.clone()
+            _ => "check".to_string()
+        }
+    }
+    "integer overflow".to_string()
+}
+
+// The checks in MIR that the model states: every `assert`, and every
+// checked `+ - *` whose result the model follows.
+fn sites(p: mir.Program, f: vc.Function) -> Vec((i64, i64)) {
+    var out = Vec((i64, i64)).new()
+    for i, b in f.blocks {
+        for s in b.stmts {
+            match s {
+                Assign(_, rv, at, site) => match rv {
+                    Add(_, _) | Sub(_, _) | Mul(_, _) => if at.0 >= 0 { out.push(site) }
+                    _ => {}
+                }
+            }
+        }
+        match b.term {
+            Assert(_, _, _, _) => out.push((i, -1))
+            _ => {}
+        }
+    }
+    out
+}
+
+pub fn verify(p: mir.Program) -> Report {
+    let n = p.fns.len()
+    let trace = env.get("JIHOO_VERIFY_TRACE").is_some()
+    var models = Vec(Option(vc.Function)).new()
+    var contracts = Vec(Option(vc.Callee)).new()
+    for f in p.fns {
+        let m = obligations.model_of(p, f)
+        match &m {
+            Some(x) => {
+                if x.callee.requires.len() > 0 || x.callee.ensures.len() > 0 {
+                    contracts.push(Some(x.callee.clone()))
+                } else { contracts.push(None) }
+            }
+            None => contracts.push(None)
+        }
+        models.push(m)
+    }
+    var outcomes = Vec(Option(Outcome)).new()
+    var report = Report {
+        checks: Vec(Check).new(), ensures: Vec(bool).filled(n, false),
+        contract_errors: Vec(Vec((diag.Span, String))).new(), functions: 0, incomplete: 0
+    }
+    for i in 0..n {
+        report.contract_errors.push(Vec((diag.Span, String)).new())
+        let m = mem.replace(&models[i], None)
+        match m {
+            Some(f) => {
+                report.functions += 1
+                let begin = timing.now()
+                let blocks = f.blocks.len()
+                let o = outcome(f, contracts.as_slice())
+                // `JIHOO_VERIFY_TRACE=1`: the time each function took.
+                if trace {
+                    io.eprintln(
+                        p.fns[i].name.as_str() + " " + blocks.to_string() + " blocks " +
+                            ((timing.now() - begin) / 1000000).to_string() + " ms"
+                    )
+                }
+                if !o.whole { report.incomplete += 1 }
+                outcomes.push(Some(o))
+            }
+            None => outcomes.push(None)
+        }
+    }
+    // The greatest set of assumptions that hold: a function's `requires`
+    // when every call proves it (and nothing else calls it), its `ensures`
+    // and its cut points' facts when every path proves them, each proof
+    // resting only on assumptions in the set. Recursion assumes a
+    // function's own contract, which is induction on the depth of calls.
+    let escapes = escaping(p)
+    var a = Assumptions {
+        requires: Vec(bool).filled(n, true), ensures: Vec(bool).filled(n, true),
+        cuts: Vec(Vec(bool)).new()
+    }
+    for i in 0..n {
+        match contracts[i] {
+            Some(c) => if c.requires.len() > 0 && escapes[i] { a.requires[i] = false }
+            None => {}
+        }
+        match outcomes[i] {
+            Some(o) => {
+                a.cuts.push(Vec(bool).filled(o.cuts, o.whole))
+                if !o.whole { a.ensures[i] = false }
+            }
+            None => a.cuts.push(Vec(bool).new())
+        }
+    }
+    // A function not followed everywhere may call one in a way no
+    // obligation states: none of its callees' `requires` holds.
+    for i in 0..n {
+        let Some(o) = outcomes[i] else { continue }
+        if !o.whole {
+            for g in o.callees { a.requires[g] = false }
+        }
+    }
+    var changed = true
+    while changed {
+        changed = false
+        for i in 0..n {
+            let Some(o) = outcomes[i] else { continue }
+            for r in o.results {
+                if valid(a, i, o, r) { continue }
+                match r.source {
+                    Invariant(k, _) => if a.cuts[i][k] {
+                        a.cuts[i][k] = false
+                        changed = true
+                    }
+                    Ensures(_) => if a.ensures[i] {
+                        a.ensures[i] = false
+                        changed = true
+                    }
+                    Requires(_, g) => if a.requires[g] {
+                        a.requires[g] = false
+                        changed = true
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for i in 0..n {
+        let Some(o) = outcomes[i] else { continue }
+        let f = p.fns[i]
+        let Some(b) = f.body else { continue }
+        report.ensures[i] = o.whole && a.ensures[i]
+        // Per check site: every obligation proved, and why one is not.
+        let model = obligations.model_of(p, f).unwrap()
+        for s in sites(p, model) {
+            var all = true
+            var any = false
+            var depends = Vec(i64).new()
+            for r in o.results {
+                match r.source {
+                    Check(x) => if x.0 == s.0 && x.1 == s.1 {
+                        any = true
+                        if !valid(a, i, o, r) {
+                            all = false
+                            for d in r.depends {
+                                var have = false
+                                for e in depends {
+                                    if e == d { have = true }
+                                }
+                                if !have { depends.push(d) }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            report.checks.push(Check {
+                function: i as u32,
+                block: s.0,
+                stmt: s.1,
+                what: site_what(b, s.0, s.1),
+                span: site_span(b, s.0, s.1),
+                proved: all && any,
+                depends
+            })
+        }
+        // The contract's own clauses: an `ensures` or a written invariant
+        // that is not proved, or a `requires` some call does not meet. The
+        // invariants are grouped by block as `model_of` groups them.
+        var groups = Vec((u32, Vec(diag.Span))).new()
+        for x in b.contract.invariants {
+            var found = false
+            for k in 0..groups.len() {
+                if groups[k].0 == x.0 {
+                    groups[k].1.push(x.1.span)
+                    found = true
+                }
+            }
+            if !found {
+                var spans = Vec(diag.Span).new()
+                spans.push(x.1.span)
+                groups.push((x.0, spans))
+            }
+        }
+        var reported = Vec(String).new()
+        for r in o.results {
+            if r.proved && o.whole { continue }
+            let error = match r.source {
+                Ensures(j) => Some((b.contract.ensures[j].span, "unproved `ensures`".to_string()))
+                Invariant(k, j) => if k < o.written {
+                    Some((groups[k].1[j], "unproved invariant".to_string()))
+                } else { None }
+                Requires(block, callee) => Some((
+                    site_span(b, block, -1),
+                    "unproved `requires` of " + p.fns[callee].name.as_str()
+                ))
+                _ => None
+            }
+            match error {
+                Some(e) => {
+                    // Once per clause and place, though several paths reach it.
+                    let key = e.0.lo.to_string() + " " + e.1.as_str()
+                    var seen = false
+                    for k in reported {
+                        if k == key { seen = true }
+                    }
+                    if !seen {
+                        reported.push(key)
+                        report.contract_errors[i].push(e)
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    report
+}
+
+// MIR without the checks the report proved: an `assert` becomes a jump,
+// and a checked `+ - *` its wrapping form, which cannot overflow there.
+pub fn erase(inout p: mir.Program, r: Report) {
+    var by_fn = Vec(Vec((i64, i64))).filled(p.fns.len(), Vec((i64, i64)).new())
+    for c in r.checks {
+        if c.proved { by_fn[c.function as i64].push((c.block, c.stmt)) }
+    }
+    for i in 0..p.fns.len() {
+        if by_fn[i].len() == 0 { continue }
+        let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
+        var body = b
+        for s in by_fn[i] { erase_one(&body, s.0, s.1) }
+        p.fns[i].body = Some(body)
+    }
+}
+
+fn erase_one(inout body: mir.Body, block: i64, stmt: i64) {
+    if stmt < 0 {
+        match body.blocks[block].term {
+            Assert(_, _, next, _) => body.blocks[block].term = mir.Term.Goto(next)
+            _ => {}
+        }
+        return
+    }
+    var replacement: Option(mir.Stmt) = None
+    match body.blocks[block].stmts[stmt] {
+        Assign(place, rv, span) => match rv {
+            Bin(op, x, y) => {
+                let wrap = match op {
+                    Add => Some(lex.Op.AddWrap)
+                    Sub => Some(lex.Op.SubWrap)
+                    Mul => Some(lex.Op.MulWrap)
+                    _ => None
+                }
+                match wrap {
+                    Some(w) => replacement = Some(mir.Stmt.Assign(
+                        place.clone(),
+                        mir.Rvalue.Bin(w, x.clone(), y.clone()),
+                        span
+                    ))
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+        _ => {}
+    }
+    match replacement {
+        Some(st) => body.blocks[block].stmts[stmt] = st
+        None => {}
+    }
+}
+
+// One line per check, then a summary.
+pub fn text(p: mir.Program, sources: diag.Sources, r: Report, all: bool) -> String {
+    var out = String.new()
+    for c in r.checks {
+        if !all && c.proved { continue }
+        out.push_str(sources.where_(c.span).as_str())
+        out.push_str(if c.proved { ": proved " } else { ": kept " })
+        out.push_str(c.what.as_str())
+        out.push_str(" in ")
+        out.push_str(p.fns[c.function as i64].name.as_str())
+        if !c.proved && c.depends.len() > 0 {
+            out.push_str(" (")
+            for i, d in c.depends {
+                if i > 0 { out.push_str(", ") }
+                out.push_str(vc.why_name(d))
+            }
+            out.push(')')
+        }
+        out.push('\n')
+    }
+    for i, es in r.contract_errors {
+        for e in es {
+            out.push_str(sources.where_(e.0).as_str())
+            out.push_str(": ")
+            out.push_str(e.1.as_str())
+            out.push_str(" in ")
+            out.push_str(p.fns[i].name.as_str())
+            out.push('\n')
+        }
+    }
+    out.push_str(r.proved().to_string().as_str())
+    out.push_str(" of ")
+    out.push_str(r.checks.len().to_string().as_str())
+    out.push_str(" checks proved in ")
+    out.push_str(r.functions.to_string().as_str())
+    out.push_str(" functions (")
+    out.push_str(r.incomplete.to_string().as_str())
+    out.push_str(" not followed everywhere)\n")
+    out
+}
+
+// The verdicts of the functions defined in file 0 (the program's root), as
+// jihoo-proofs' `emitted.jh --machine` prints them for its differential
+// test: `check NAME LO HI proved|unproved` per check, `requires NAME LO HI
+// CALLEE proved|unproved` per call to a function with a `requires`, and
+// `ensures NAME proved|unproved`. Proved means that nothing it rests on is
+// unproved.
+pub fn machine(p: mir.Program, r: Report) -> String {
+    var out = String.new()
+    for c in r.checks {
+        if c.span.file != 0 || c.span.lo == c.span.hi { continue }
+        out.push_str("check ")
+        obligations.atom(&out, p.fns[c.function as i64].name.as_str())
+        out.push(' ')
+        out.push_str(c.span.lo.to_string().as_str())
+        out.push(' ')
+        out.push_str(c.span.hi.to_string().as_str())
+        out.push_str(if c.proved { " proved\n" } else { " unproved\n" })
+    }
+    for i, f in p.fns {
+        if f.span.file != 0 || f.body.is_none() || i >= r.ensures.len() { continue }
+        let Some(b) = f.body else { continue }
+        if b.contract.ensures.len() == 0 { continue }
+        out.push_str("ensures ")
+        obligations.atom(&out, f.name.as_str())
+        out.push_str(if r.ensures[i] { " proved\n" } else { " unproved\n" })
+    }
+    out
+}

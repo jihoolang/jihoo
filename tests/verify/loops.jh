@@ -1,0 +1,45 @@
+// Loops over slices: inferred invariants prove the index and the counter,
+// a sum of unknown elements can overflow, and an off-by-one loop keeps its
+// bounds check.
+
+fn sum(xs: [i64]) -> i64 {
+    var s = 0
+    var i = 0
+    while i < xs.len {
+        s += xs[i]
+        i += 1
+    }
+    s
+}
+
+fn last(xs: [i64]) -> i64 {
+    var i = 0
+    var x = 0
+    while i <= xs.len {
+        x = xs[i]
+        i += 1
+    }
+    x
+}
+
+fn main() {
+    let xs = [1, 2, 3]
+    println(sum(xs[0..3]))
+    println(last(xs[0..2]))
+}
+
+//> 27:17: proved integer overflow in main
+//> 27:17: proved index out of bounds in main
+//> 27:17: proved integer overflow in main
+//> 27:17: proved index out of bounds in main
+//> 27:17: proved integer overflow in main
+//> 28:18: proved integer overflow in main
+//> 28:18: proved index out of bounds in main
+//> 28:18: proved integer overflow in main
+//> 28:18: proved index out of bounds in main
+//> 28:18: proved integer overflow in main
+//> 9:14: proved index out of bounds in sum
+//> 9:9: kept integer overflow in sum (loop, load)
+//> 10:9: proved integer overflow in sum
+//> 19:13: kept index out of bounds in last (loop)
+//> 20:9: proved integer overflow in last

@@ -5,8 +5,10 @@
 
 import diag
 import lex
+import linear
 import mir
 import types
+import vc
 
 type Body = mir.Body
 type Operand = mir.Operand
@@ -31,8 +33,10 @@ struct Model {
     escaped: Vec(bool)
     // The parameters' variables and the variables of their values on entry.
     entries: Vec((i64, i64))
-    // The ranges of the variables after the locals, in order.
+    // The ranges of the variables after the locals, in order, as text and
+    // for the verifier.
     kinds: Vec(String)
+    vkinds: Vec(vc.Kind)
     count: i64
 }
 
@@ -210,15 +214,22 @@ fn term_uses(inout u: Uses, term: mir.Term) {
 
 // A local whose address is taken (`&x` for `inout`, `&raw`) may change
 // through that pointer; the model does not follow it, unless the borrow is
-// only lent to one call.
-fn escapes(b: Body, lent: [Option(Place)]) -> Vec(bool) {
+// only lent to one call and lends an integer or bool local, or the integer
+// an `inout` parameter points to: a call gives those a new value. A view
+// lent that way escapes, since the call may change its length.
+fn escapes(t: Types, b: Body, lent: [Option(Place)]) -> Vec(bool) {
     var out = Vec(bool).filled(b.locals.len(), false)
     for bl in b.blocks {
         for st in bl.stmts {
             match st {
                 Assign(dst, rv, _) => match rv {
                     RefMut(p) => {
-                        let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some()
+                        let scalar = p.proj.len() == 0 && match t.kind(b.locals[p.local as i64].ty) {
+                            Int(_) | Bool => true
+                            _ => false
+                        }
+                        let lending = dst.proj.len() == 0 && lent[dst.local as i64].is_some() &&
+                            (scalar || plain_deref(p, p.local))
                         if !lending { out[p.local as i64] = true }
                     }
                     Addr(p) => out[p.local as i64] = true
@@ -312,12 +323,12 @@ fn kind_text(t: Types, ty: u32) -> String {
 
 fn model(t: Types, b: Body) -> Model {
     let lent = lendings(t, b)
-    let escaped = escapes(b, lent.as_slice())
+    let escaped = escapes(t, b, lent.as_slice())
     var m = Model {
         tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(),
         derefs: Vec(Option(i64)).filled(b.locals.len(), None), lent: lent.clone(),
         escaped: escaped.clone(), entries: Vec((i64, i64)).new(), kinds: Vec(String).new(),
-        count: b.locals.len()
+        vkinds: Vec(vc.Kind).new(), count: b.locals.len()
     }
     for i, l in b.locals {
         let scalar = match t.kind(l.ty) {
@@ -329,6 +340,7 @@ fn model(t: Types, b: Body) -> Model {
             m.lengths.push(Some(m.count))
             m.count += 1
             m.kinds.push("(int 0 9223372036854775807)".to_string())
+            m.vkinds.push(vc.len_range())
         } else { m.lengths.push(None) }
     }
     for i in 1..b.arg_count + 1 {
@@ -337,26 +349,34 @@ fn model(t: Types, b: Body) -> Model {
                 m.derefs[i] = Some(m.count)
                 m.count += 1
                 m.kinds.push(kind_text(t, inner))
+                m.vkinds.push(ty_kind(t, inner))
             }
             _ => {}
         }
     }
     // Each parameter's variables, as they were on entry.
     for i in 1..b.arg_count + 1 {
-        var vars = Vec((i64, String)).new()
-        if m.tracked[i] && t.is_int(b.locals[i].ty) { vars.push((i, kind_text(t, b.locals[i].ty))) }
+        var vars = Vec((i64, String, vc.Kind)).new()
+        if m.tracked[i] && t.is_int(b.locals[i].ty) {
+            vars.push((i, kind_text(t, b.locals[i].ty), ty_kind(t, b.locals[i].ty)))
+        }
         match m.lengths[i] {
-            Some(n) => vars.push((n, "(int 0 9223372036854775807)".to_string()))
+            Some(n) => vars.push((n, "(int 0 9223372036854775807)".to_string(), vc.len_range()))
             None => {}
         }
         match m.derefs[i] {
-            Some(d) => vars.push((d, m.kinds[d - b.locals.len()].clone()))
+            Some(d) => vars.push((
+                d,
+                m.kinds[d - b.locals.len()].clone(),
+                m.vkinds[d - b.locals.len()].clone()
+            ))
             None => {}
         }
-        for (v, k) in vars.into_iter() {
+        for (v, k, vk) in vars.into_iter() {
             m.entries.push((v, m.count))
             m.count += 1
             m.kinds.push(k)
+            m.vkinds.push(vk)
         }
     }
     m
@@ -608,7 +628,7 @@ fn at(inout s: String, span: diag.Span) {
 }
 
 // Text as one atom: what would end it or open a list becomes `-`.
-fn atom(inout s: String, text: str) {
+pub fn atom(inout s: String, text: str) {
     for c in text.as_bytes() {
         if c == ' ' || c == '(' || c == ')' || c == ';' || c == '\n' || c == '\t' {
             s.push('-')
@@ -879,4 +899,327 @@ pub fn show_function(p: Program, f: mir.Function) -> String {
     }
     s.push_str(")\n")
     s
+}
+
+// The same model as data, for the verifier (`vc.jh`): what `show_function`
+// prints, read as jihoo-proofs' `load.jh` reads it. Numbers beyond 64 bits
+// are not followed, since the checker keeps its numbers below 2^65.
+
+fn small(v: i128) -> bool {
+    let one: i128 = 1
+    v >= 0 - (one << 63) && v < (one << 64)
+}
+
+fn int_kind(i: types.IntTy) -> vc.Kind {
+    if i.bits >= 128 { return vc.Kind.Other }
+    let one: i128 = 1
+    if i.signed {
+        let limit = one << (i.bits - 1) as i128
+        vc.Kind.Int(0 - limit, limit - 1)
+    } else { vc.Kind.Int(0, (one << i.bits as i128) - 1) }
+}
+
+fn ty_kind(t: Types, ty: u32) -> vc.Kind {
+    match t.int(ty) {
+        Some(n) => int_kind(n)
+        None => vc.Kind.Other
+    }
+}
+
+fn model_operand(t: Types, m: Model, o: Operand) -> vc.Operand {
+    match o {
+        Copy(p) | Move(p) => match variable(m, p) {
+            Some(v) => vc.Operand.Local(v)
+            None => vc.Operand.Opaque(vc.why_code(place_reason(m, p)))
+        }
+        Const(c) => match c {
+            Int(v, ty) => {
+                var x = v
+                match t.int(ty) {
+                    Some(i) => if !i.signed && x < 0 && i.bits < 128 {
+                        let one: i128 = 1
+                        x = x + (one << i.bits as i128)
+                    }
+                    None => {}
+                }
+                if small(x) { vc.Operand.Const(x) } else { vc.Operand.Opaque(vc.why_code(
+                    "constant"
+                )) }
+            }
+            Bool(b) => vc.Operand.Const(if b { 1 } else { 0 })
+            _ => vc.Operand.Opaque(vc.why_code("constant"))
+        }
+    }
+}
+
+fn model_cmp(op: lex.Op) -> Option(vc.Cmp) {
+    match op {
+        Lt => Some(vc.Cmp.Lt)
+        Le => Some(vc.Cmp.Le)
+        Gt => Some(vc.Cmp.Gt)
+        Ge => Some(vc.Cmp.Ge)
+        Eq => Some(vc.Cmp.Eq)
+        Ne => Some(vc.Cmp.Ne)
+        _ => None
+    }
+}
+
+fn opaque_rv(why: str) -> vc.Rvalue { vc.Rvalue.Opaque(vc.why_code(why)) }
+
+fn model_rvalue(p: Program, b: Body, m: Model, rv: mir.Rvalue) -> vc.Rvalue {
+    let t = p.types
+    match rv {
+        Use(o) => vc.Rvalue.Use(model_operand(t, m, o))
+        Bin(op, x, y) => {
+            let a = model_operand(t, m, x)
+            let c = model_operand(t, m, y)
+            match op {
+                Add => if p.checked { vc.Rvalue.Add(a, c) } else { opaque_rv("wrap") }
+                Sub => if p.checked { vc.Rvalue.Sub(a, c) } else { opaque_rv("wrap") }
+                Mul => if p.checked { vc.Rvalue.Mul(a, c) } else { opaque_rv("wrap") }
+                And | LogAnd => if is_bool(t, b, x) { vc.Rvalue.And(a, c) } else { opaque_rv("bits") }
+                _ => match model_cmp(op) {
+                    Some(k) => if is_bool(t, b, x) { opaque_rv("bool") } else { vc.Rvalue.Compare(
+                        k,
+                        a,
+                        c
+                    ) }
+                    None => opaque_rv(match op {
+                        Div => "div"
+                        Rem => "rem"
+                        AddWrap | SubWrap | MulWrap => "wrap"
+                        Shl | Shr => "shift"
+                        LogOr => "bool"
+                        _ => "bits"
+                    })
+                }
+            }
+        }
+        Un(op, x) => match op {
+            Not => if is_bool(t, b, x) { vc.Rvalue.Not(model_operand(t, m, x)) } else { opaque_rv(
+                "bits"
+            ) }
+            Neg => opaque_rv("neg")
+        }
+        Cast(x, _, kind) => match kind {
+            Numeric => vc.Rvalue.Cast(model_operand(t, m, x))
+            Ptr => opaque_rv("pointer")
+        }
+        Discriminant(_) => opaque_rv("tag")
+        _ => opaque_rv("aggregate")
+    }
+}
+
+fn span_of(s: diag.Span) -> (i64, i64) { (s.lo as i64, s.hi as i64) }
+
+fn model_stmts(p: Program, b: Body, m: Model, block: i64, bl: mir.Block) -> Vec(vc.Stmt) {
+    let t = p.types
+    var out = Vec(vc.Stmt).new()
+    for i, st in bl.stmts {
+        match st {
+            Assign(place, rv, span) => {
+                let l = place.local as i64
+                match variable(m, place) {
+                    Some(v) => {
+                        let checked = match rv {
+                            Bin(op, _, _) => match op {
+                                Add | Sub | Mul => p.checked
+                                _ => false
+                            }
+                            _ => false
+                        }
+                        let at = if checked { span_of(span) } else { vc.nowhere() }
+                        out.push(vc.Stmt.Assign(v, model_rvalue(p, b, m, rv), at, (block, i)))
+                    }
+                    None => {}
+                }
+                match m.lengths[l] {
+                    Some(n) => {
+                        var value = opaque_rv("length")
+                        if place.proj.len() == 0 {
+                            match rv {
+                                Use(o) => match o {
+                                    Copy(q) | Move(q) => match m.lengths[q.local as i64] {
+                                        Some(k) => if q.proj.len() == 0 {
+                                            value = vc.Rvalue.Use(vc.Operand.Local(k))
+                                        }
+                                        None => {}
+                                    }
+                                    _ => {}
+                                }
+                                Aggregate(agg, os) => match agg {
+                                    View(_) => if os.len() == 2 {
+                                        value = vc.Rvalue.Use(model_operand(t, m, os[1]))
+                                    }
+                                    _ => {}
+                                }
+                                _ => {}
+                            }
+                        }
+                        out.push(vc.Stmt.Assign(n, value, vc.nowhere(), (block, i)))
+                    }
+                    None => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn model_argument(t: Types, m: Model, a: Operand) -> vc.Arg {
+    match a {
+        Copy(q) | Move(q) => if q.proj.len() == 0 {
+            let l = q.local as i64
+            match m.lent[l] {
+                Some(x) => return match variable(m, x) {
+                    Some(v) => vc.Arg.Lent(v)
+                    None => vc.Arg.Value(vc.Operand.Opaque(vc.why_code("escaped")))
+                }
+                None => {}
+            }
+            match m.lengths[l] {
+                Some(n) => return vc.Arg.View(n)
+                None => {}
+            }
+        }
+        _ => {}
+    }
+    vc.Arg.Value(model_operand(t, m, a))
+}
+
+fn model_term(p: Program, m: Model, term: mir.Term) -> vc.Term {
+    let t = p.types
+    match term {
+        Goto(x) => vc.Term.Goto(x as i64)
+        Switch(o, targets, other) => {
+            if targets.len() == 1 && targets[0].value == 0 {
+                match o {
+                    Copy(q) | Move(q) => match variable(m, q) {
+                        Some(v) => return vc.Term.Switch(v, targets[0].block as i64, other as i64)
+                        None => {}
+                    }
+                    _ => {}
+                }
+            }
+            var bs = Vec(i64).new()
+            for x in targets { bs.push(x.block as i64) }
+            bs.push(other as i64)
+            vc.Term.Any(bs)
+        }
+        Return => vc.Term.Return
+        Unreachable | Pending => vc.Term.Unreachable
+        Call(callee, args, dest, next, span) => {
+            match callee {
+                Intrinsic(i) => match i {
+                    Trap => return vc.Term.Trap
+                    _ => {}
+                }
+                _ => {}
+            }
+            let dst = match variable(m, dest) {
+                Some(v) => v
+                None => -1
+            }
+            var site = vc.CallSite {
+                callee: match callee {
+                    Fn(f) => f as i64
+                    _ => -1
+                },
+                args: Vec(vc.Arg).new(),
+                at: span_of(span)
+            }
+            for a in args { site.args.push(model_argument(t, m, a)) }
+            vc.Term.Call(dst, next as i64, site)
+        }
+        Assert(o, msg, next, span) => {
+            let c = match model_operand(t, m, o) {
+                Local(l) => l
+                _ => -1
+            }
+            vc.Term.Assert(c, msg.clone(), next as i64, span_of(span))
+        }
+    }
+}
+
+fn model_spec(m: Model, x: mir.Spec) -> Option(linear.Lin) {
+    if !small(x.constant) { return None }
+    var out = linear.Lin.num(x.constant)
+    for term in x.terms {
+        let Some(v) = spec_variable(m, term) else { return None }
+        if term.coef != 0 {
+            if !small(term.coef) { return None }
+            out = out.plus(linear.Lin.of(v).scale(term.coef))
+        }
+    }
+    Some(out)
+}
+
+fn model_clause(m: Model, c: mir.Clause) -> vc.Fact {
+    let op = model_cmp(c.op).unwrap()
+    match (model_spec(m, c.a), model_spec(m, c.b)) {
+        (Some(a), Some(b)) => vc.Fact { op, a, b, stated: true }
+        _ => vc.unstated(op)
+    }
+}
+
+// The model of a function with a body, as the verifier reads it.
+pub fn model_of(p: Program, f: mir.Function) -> Option(vc.Function) {
+    let t = p.types
+    let Some(b) = f.body else { return None }
+    let m = model(t, b)
+    var kinds = Vec(vc.Kind).new()
+    for i, l in b.locals {
+        kinds.push(if m.tracked[i] { ty_kind(t, l.ty) } else { vc.Kind.Other })
+    }
+    for k in m.vkinds { kinds.push(k.clone()) }
+    var lengths = Vec((i64, i64)).new()
+    var derefs = Vec((i64, i64)).new()
+    for i in 0..b.locals.len() {
+        match m.lengths[i] {
+            Some(n) => lengths.push((i, n))
+            None => {}
+        }
+        match m.derefs[i] {
+            Some(d) => derefs.push((i, d))
+            None => {}
+        }
+    }
+    var requires = Vec(vc.Fact).new()
+    for c in b.contract.requires { requires.push(model_clause(m, c)) }
+    var ensures = Vec(vc.Fact).new()
+    for c in b.contract.ensures { ensures.push(model_clause(m, c)) }
+    var invariants = Vec((i64, Vec(vc.Fact))).new()
+    for x in b.contract.invariants {
+        let c = model_clause(m, x.1)
+        var found = false
+        for i in 0..invariants.len() {
+            if invariants[i].0 == x.0 as i64 {
+                invariants[i].1.push(c.clone())
+                found = true
+            }
+        }
+        if !found {
+            var cs = Vec(vc.Fact).new()
+            cs.push(c)
+            invariants.push((x.0 as i64, cs))
+        }
+    }
+    var blocks = Vec(vc.Block).new()
+    for i, bl in b.blocks {
+        blocks.push(vc.Block {
+            stmts: model_stmts(p, b, m, i, bl),
+            term: model_term(p, m, bl.term)
+        })
+    }
+    Some(vc.Function {
+        name: f.name.clone(),
+        kinds: kinds.clone(),
+        blocks,
+        invariants,
+        callee: vc.Callee {
+            symbol: f.symbol.clone(), kinds, args: b.arg_count, lengths, derefs,
+            entries: m.entries.clone(), requires, ensures
+        }
+    })
 }
