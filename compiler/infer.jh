@@ -209,6 +209,7 @@ fn assigned_in(f: vc.Function) -> Vec(i64) {
                         _ => {}
                     }
                 }
+                for x in site.changes { here.push(x) }
             }
             _ => {}
         }
@@ -274,11 +275,15 @@ fn candidates(f: vc.Function) -> Vec(vc.Fact) {
 
 pub const MAX_ROUNDS: i64 = 20
 
-pub fn proved(g: linear.Goal) -> bool {
-    match fm.prove(g) {
-        Ok(c) => linear.check(g, c).is_ok()
-        Err(_) => false
+pub fn proved(goals: [linear.Goal]) -> bool {
+    for g in goals {
+        let ok = match fm.prove(g) {
+            Ok(c) => linear.check(g, c).is_ok()
+            Err(_) => false
+        }
+        if !ok { return false }
     }
+    true
 }
 
 // `f` with candidates proposed for its cut points in `heads` that have no
@@ -299,14 +304,14 @@ pub fn infer(inout f: vc.Function, heads: [i64], contracts: [Option(vc.Callee)])
         }
     }
     for _ in 0..MAX_ROUNDS {
-        let obs = vc.generate(f, contracts)
+        let obs = vc.generate(f, contracts, Vec(Option(vc.Lift)).new().as_slice())
         if obs.errors.len() > 0 { break }
         var failed = Vec(Vec(bool)).new()
         for inv in f.invariants { failed.push(Vec(bool).filled(inv.1.len(), false)) }
         var any = false
         for o in obs.list {
             match o.source {
-                Invariant(i, j) => if ours[i] && !failed[i][j] && !proved(o.goal) {
+                Invariant(i, j) => if ours[i] && !failed[i][j] && !proved(o.goals.as_slice()) {
                     failed[i][j] = true
                     any = true
                 }

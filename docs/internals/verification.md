@@ -63,8 +63,8 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 
 | Part | Trusted | Why |
 | --- | --- | --- |
-| The checker (`linear.jh`, 150 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 920 lines, and the model `obligations.jh` builds from MIR) | yes | it states what MIR means: a wrong rule proves a false thing |
+| The checker (`linear.jh`, 120 lines; later the Horn kernel) | yes | it accepts the proof |
+| The obligation generator (`vc.jh`, 1,360 lines, and the model `obligations.jh` builds from MIR, 1,780) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
@@ -211,6 +211,78 @@ bounds checks of `Vec` indexing are inside `std`'s `Vec.index`, where the
 length is a field; half the kept checks are in `std`. `std` contracts
 over lengths and fields (step 5) are the next source of proofs.
 
+### Fields, panics and calls
+
+Step 5 needed three things in the model before `std` could state useful
+contracts, and one decision.
+
+- **Fields are variables.** An integer field of a local (`x.f.g`), or of
+  what a borrowed local points to (`(*self).len`), is a variable while the
+  model sees everything that changes it: the local's address is never
+  taken, every mutable borrow of it or its parts is passed to a single
+  call, and no part of its type is `#[interior]`. An assignment to the
+  field or to a place containing it gives it a value (a copy of the
+  source's field when there is one), and so does an assignment to the
+  borrow it is reached through (`p = &v` makes `(*p).len` the variable of
+  `v.len`); a drop, a call lent a place that contains it, a call given a
+  mutable borrow that reaches it, and a call writing its result there give
+  it a new value. The borrow kernel guarantees that nothing else changes
+  it while a borrow lives; unsafe code that writes through a raw pointer
+  to a place held under a borrow breaks the promise that `noalias` on
+  borrowed parameters already relies on, and that is the assumption the
+  model adds. A field of a parameter has an entry value like the
+  parameter, so clauses name fields (`self.len`, `old(self.len)`) and
+  `x.len()` as the `len` method's `ensures result == ...` defines it, and
+  a call maps the callee's fields to the caller's variables: those of its
+  arguments, through the argument when the parameter is a borrow, and
+  those of the place its result goes to.
+- **Panics are checks.** A call to a function that never returns, and
+  `trap()`, is a check that the path cannot be taken; proved, it becomes
+  MIR's `unreachable` and its branch goes away. Proving it needs
+  conditions that are not conjunctions: `x != y`, and `i as u64 >= len as
+  u64`, which is `i < 0 || i >= len` when `len` is not negative and three
+  cases when the model does not know that. A bool now carries what holds
+  when it is true and what holds when it is false, each a disjunction of
+  conjunctions (at most 8); a branch adds the disjunction to the path, and
+  an obligation is proved when it is proved in every case (at most 16, the
+  latest disjunctions first; the others are dropped, which only loses
+  facts). An `assert` is proved by refuting each case of its negation.
+- **A small function's panics are its callers' checks.** `Vec.index`
+  panics when `i as u64 >= self.len as u64`; inside it, `i` is anything,
+  so the panic stays. For a function of at most 32 blocks with such a
+  call, the generator records each path from its entry to the panic, over
+  the function's variables on entry; a call proves the panic away when
+  every such path, with the arguments for the parameters (and the
+  caller's variables for their fields), contradicts what the caller knows.
+  The panic is then a check at the call, and `--verify` sends the call to a
+  copy of the function without the panics that call proved away. A site
+  that a path from a loop head reaches, or whose paths say nothing about
+  the entry values (`malloc` failed, an enum's tag), is not lifted.
+
+The decision: **`requires` stays the caller's duty.** Under the rule
+that a function's `requires` holds only when every call proves it,
+putting `requires 0 <= i && i < self.len` on `Vec.index` would remove its
+check only in an instance whose every call proves it, which in the
+compiler is almost none, and would make every other `v[i]` an unproved
+contract, which step 3 turns into an error. Lifting needs no `requires`:
+each call proves or keeps its own bounds check, and unproved calls run
+the original. `std`'s contracts are therefore `ensures` that describe
+what holds when the function returns (`Vec.len` returns `self.len`,
+`push` adds one, `as_slice`'s length is `self.len`), which callers use to
+prove the panics away, and no `requires` on functions that check their
+arguments.
+
+On the compiler's own source, before `std` states any contract, fields as
+variables raise the bounds and overflow checks proved from 378 of 2,489 to
+698 of 2,631 (the source grew), in about 15 seconds and 700 MB. The new
+kinds add 260 calls that never return (none proved: the compiler's panics
+mark states it believes impossible for reasons the model cannot see) and
+1,769 calls that may reach a small function's panic, of which 4 are
+proved; with `std`'s `Vec.len` and `as_slice` contracts, most of the
+latter are calls to `Vec.index` in loops over the vector. The `verify`
+suite fails when `jihoo verify compiler/main.jh` proves fewer of any kind
+than `tests/verify/compiler.proved` records.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
@@ -219,16 +291,19 @@ chosen by the program.
 ## Open questions
 
 - **Syntax.** Settled for functions and loops
-  ([contracts](../language/contracts.md)); left are where proofs that need
-  lemmas name them, `||` and `!` in clauses (case splits), clauses over
-  fields and `Vec` lengths, and invariants on `for` loops over iterators.
-- **Places.** MIR reads `_1.1` (a slice's length) and loads through
-  pointers; the model treats each place as a variable while nothing can
-  change it, which the borrow kernel's loans can justify.
+  ([contracts](../language/contracts.md)), with fields and `.len()`; left
+  are where proofs that need lemmas name them, `||` and `!` in clauses
+  (the generator already splits cases), and invariants on `for` loops
+  over iterators.
+- **Places.** Integer fields of locals and of borrowed parameters are
+  variables ([above](#fields-panics-and-calls)); a `Vec`'s elements, and
+  fields reached through a raw pointer or a field that is itself a borrow,
+  are not. A type invariant (`0 <= len <= cap` for `Vec`) would prove the
+  checks inside `std`'s own methods, which no caller's contract can.
 - **Calls.** Modular: a call assumes the callee's `ensures` after proving
-  its `requires` (done in the experiment). `std`'s `Vec.index`, `Vec.push`
-  and `str` slicing need contracts first, and those contracts are the first
-  users of 0.6's lemmas.
+  its `requires`, and proves a small callee's panics away by itself.
+  Functions too large to lift need `requires` the callers meet, or
+  contracts that are the first users of 0.6's lemmas.
 - **Integers.** Fourier–Motzkin is complete over the rationals, not the
   integers: a goal that needs parity or rounding is lost (never wrongly
   proved). Cutting planes or a bounded integer search fix that later.

@@ -147,11 +147,14 @@ Proof checking at compile time (a Horn certificate kernel, general theorems
 by induction, and enum codecs bound to checked tables) is developed in the
 separate [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs)
 repository. [Verification](docs/reference/command-line.md#verification)
-is in the compiler: `jihoo verify` proves bounds and overflow checks and
+is in the compiler: `jihoo verify` proves bounds and overflow checks,
+panics that cannot be reached (also at each call to a small function that
+may panic, such as `v[i]`), and
 [contracts](docs/language/contracts.md) (`requires`, `ensures`, loop
-`invariant`s) with linear certificates that a small trusted checker
-accepts, and `--verify` removes the proved checks from a build. It runs on
-the compiler's own source (`jihoo verify compiler/main.jh`).
+`invariant`s, over integers, fields and lengths) with linear certificates
+that a small trusted checker accepts, and `--verify` removes the proved
+checks from a build. It runs on the compiler's own source
+(`jihoo verify compiler/main.jh`), and CI fails if it proves fewer.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

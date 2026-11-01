@@ -406,14 +406,20 @@ jihoo build --verify app.jh          # without the proved checks
 
 [Verification](../internals/verification.md) proves that checks the
 compiler inserts cannot fail: bounds checks (`assert` in MIR) and, in debug
-builds, the overflow checks of `+ - *`. It also proves
-[contracts](../language/contracts.md). `verify` prints one line per check
-that stays, at the check's position, with what it is, the function, and
-where the values it depends on come from (the reasons of the
-[model](#verification-model), plus `argument`, `loop` and `call`):
+builds, the overflow checks of `+ - *`. A call to a function that never
+returns (`panic`, `abort`) and `trap()` are checks too: that the path
+cannot be taken. A call to a small function that may panic is a check at
+the call, named by the panic's message: that the callee does not reach its
+panic from there, as a call `v[i]` to `Vec.index` in a loop over `v`
+does not. It also proves [contracts](../language/contracts.md). `verify`
+prints one line per check that stays, at the check's position, with what
+it is, the function, and where the values it depends on come from (the
+reasons of the [model](#verification-model), plus `argument`, `loop` and
+`call`):
 
 ```text
 app.jh:9:9: kept integer overflow in sum (loop, load)
+app.jh:12:5: kept index out of bounds in first (argument, call)
 app.jh:14:5: unproved `requires` of bump in unchecked
 app.jh:56:13: unproved `ensures` in wrong
 42 of 57 checks proved in 31 functions (0 not followed everywhere)
@@ -427,8 +433,11 @@ the entry, a destructor or used as a value is never assumed to be called
 that way), a callee's `ensures`, and the invariants of loops, inferred or
 written. `--machine` prints the verdicts of the root file's functions in
 the line format jihoo-proofs' differential test reads. `--verify` on a
-build runs the same verification and compiles without the proved checks;
-the program does the same, without their cost. `JIHOO_VERIFY_TRACE=1`
+build runs the same verification and compiles without the proved checks:
+an `assert` becomes a jump, a checked `+ - *` wraps, a call that never
+returns becomes `unreachable` (so its branch goes away), and a call that
+proved its callee's panics away calls a copy of the callee without them.
+The program does the same, without their cost. `JIHOO_VERIFY_TRACE=1`
 prints the time each function took on standard error.
 
 ## Verification model
@@ -443,8 +452,23 @@ numbers them, of `(set variable value)` statements and one terminator.
 The variables are the locals, then extra ones: a `str` or slice local's
 length (`lengths`, pairs of local and variable), the integer an `inout`
 integer parameter points to (`derefs`), when the pointer is used only to
-read, write or lend it, and the value on entry of each parameter's
+read, write or lend it, integer fields (`fields`, each
+`(VAR LOCAL [*] FIELD...)`: the fields below the local, through it when
+`*` says it is a borrow), and the value on entry of each parameter's
 variables (`entries`, pairs of variable and entry variable).
+
+A field is a variable when the model sees everything that changes it: its
+local's address is never taken (`&raw`), every mutable borrow of the local
+or its parts is passed to one call, and no part of its type is
+`#[interior]`. An assignment to it, or to a place that contains it, gives
+it a value (`set`); so does an assignment to the borrow it is reached
+through. A call that is lent such a place, is given a mutable borrow it
+reaches, or writes its result there, gives it a new one. Nothing else can
+change it: the borrow kernel lets no other borrow change what a borrow
+reaches while it lives, a shared borrow promises that nothing changes,
+and unsafe code that writes through a raw pointer to a place held under a
+borrow, or to a local whose address it was not given, breaks the same
+promise that `noalias` on borrowed parameters already relies on.
 
 ```text
 (function clamp main.clamp.1
@@ -468,10 +492,19 @@ and `op` one of `lt le gt ge eq ne`. A side is `(lin c (v k)...)`, the
 constant `c` plus `k` times each variable `v`, computed exactly: `result`
 is variable 0, and a parameter in `ensures` or `old(x)` is its entry
 variable. A side over a variable the model does not have is
-`(opaque escaped)`. A call is `(call DST NEXT (fn SYMBOL) (args A...) (at lo hi))`,
+`(opaque escaped)`. A call is
+`(call DST NEXT (fn SYMBOL) (args A...) [(never)] [(changes V...)] [(fields (P V FIELD...)...)] (at lo hi))`,
 without `fn` through a pointer or closure. An argument is an operand,
 `(view n)` for a slice or `str` with length variable `n`, or `(lent v)` for
 a variable lent to an `inout` parameter, which the call may change.
+`(never)` marks a callee that never returns: the call is a check that it
+is not reached. `changes` lists the other variables the call gives new
+values: fields inside what it is lent or where its result goes, and a
+slice result's length. `fields` maps the callee's fields named by its
+contract, or read by a small function whose panics calls may prove away,
+to the caller's variables: field `FIELD...` of parameter `P` (through it
+if it is a borrow; `P` 0 is the result) is variable `V` here. `trap()` is
+`(trap (at lo hi))`.
 
 The model follows integer and bool locals, `+ - *` that check for overflow,
 comparisons, `!`, `&&`, integer casts, `switch` on a bool, `assert`, calls

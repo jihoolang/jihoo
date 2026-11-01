@@ -31,7 +31,8 @@
 //   and prover) pass, `jihoo verify --all` on each program in tests/verify says what
 //   its `//>` lines say of the checks in the file, and each program in
 //   tests/run does the same with `--verify` (which removes the checks it
-//   proves) as without.
+//   proves) as without. `jihoo verify compiler/main.jh` proves at least as
+//   many checks of each kind as tests/verify/compiler.proved says.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
 //   objects that C links, programs split into code generation units,
@@ -569,6 +570,49 @@ impl Tests {
             }
             self.check(f.as_str(), r)
         }
+    }
+
+    // `jihoo verify compiler/main.jh`: per kind of check (the summary's
+    // `  P of N KIND` lines), at least as many proved as
+    // tests/verify/compiler.proved says (`P KIND` lines), so that a change
+    // that loses proofs of the compiler's own checks fails. More is fine:
+    // raise the numbers there.
+    fn self_verify(self) -> Result((), String) {
+        let want = read_file("tests/verify/compiler.proved")?
+        let o = exec(self.compiler.as_str(), ["verify", "compiler/main.jh"])
+        if !o.status.success() { return Err("verify failed:\n" + o.stderr.as_str()) }
+        var errors = String.new()
+        for line in want.as_str().lines() {
+            let l = line.trim()
+            if l.len == 0 || l.starts_with("#") { continue }
+            let Some(sp) = l.find(" ") else { return Err("bad line: " + l) }
+            let Some(n) = l[..sp].parse_int() else { return Err("bad line: " + l) }
+            let kind = l[sp + 1..]
+            var found = false
+            for g in o.stdout.as_str().lines() {
+                let parts = g.trim().split(" of ")
+                if parts.len() != 2 { continue }
+                let Some(at) = parts[1].find(" ") else { continue }
+                if parts[1][at + 1..] != kind { continue }
+                let Some(p) = parts[0].parse_int() else { continue }
+                found = true
+                if p < n {
+                    errors.push_str(kind)
+                    errors.push_str(": ")
+                    errors.push_str(p.to_string().as_str())
+                    errors.push_str(" proved, fewer than ")
+                    errors.push_str(n.to_string().as_str())
+                    errors.push('\n')
+                }
+            }
+            if !found {
+                errors.push_str("no count of ")
+                errors.push_str(kind)
+                errors.push('\n')
+            }
+        }
+        if errors.len() > 0 { return Err(errors) }
+        Ok(())
     }
 
     // `jihoo verify --all` on the file: its `//>` lines are what it says
@@ -1382,6 +1426,8 @@ fn main() -> i32 {
                 Ok(())
             } else { Err("tests failed:\n" + o.stdout.as_str() + o.stderr.as_str()) }
             t.check("verify: the compiler's #[test] functions", r)
+            let sv = t.self_verify()
+            t.check("verify: the compiler verifies itself", sv)
             t.suite_files("tests/verify", "verify")
             t.suite_files("tests/run", "verified")
         } else if s == "examples" {

@@ -186,7 +186,7 @@ fn spec_number(c: i128) -> mir.Spec {
     mir.Spec { constant: c, terms: Vec(mir.SpecTerm).new() }
 }
 
-fn spec_var(v: mir.SpecVar, old: bool) -> mir.Spec {
+fn spec_var(sink v: mir.SpecVar, old: bool) -> mir.Spec {
     var terms = Vec(mir.SpecTerm).new()
     terms.push(mir.SpecTerm { coef: 1, name: v, old: old })
     mir.Spec { constant: 0, terms: terms }
@@ -207,8 +207,38 @@ fn same_spec_var(a: mir.SpecTerm, b: mir.SpecTerm) -> bool {
             Len(y) => x == y
             _ => false
         }
+        Field(x, px) => match b.name {
+            Field(y, py) => x == y && px == py
+            _ => false
+        }
     }
 }
+
+// A field a clause names: a local, then the fields below it, through the
+// local's borrow if it is one; `ty` is the last field's type. `module` is
+// where the fields are named, whose privacy applies: the clause's, or that
+// of a `len` method whose `ensures` the clause's `x.len()` expands, and
+// `depth` how many such expansions led here.
+struct SpecPlace {
+    local: u32
+    path: Vec(u32)
+    ty: u32
+    module: u32
+    depth: i64
+}
+
+impl Clone for SpecPlace {
+    fn clone(self) -> SpecPlace {
+        SpecPlace {
+            local: self.local, path: self.path.clone(), ty: self.ty, module: self.module,
+            depth: self.depth
+        }
+    }
+}
+
+// `x.len()` expansions inside one another, at most: a `len` whose
+// `ensures` calls `len()` again would never end.
+const MAX_LEN_DEPTH: i64 = 8
 
 // The verifier's numbers stay within 2^64 either way.
 fn spec_fits(v: i128) -> bool {
@@ -779,20 +809,37 @@ impl sema.Sema {
     // An integer term of a clause, as a constant plus multiples of what it
     // names.
     fn spec(inout self, fb: Fb, e: ast.Expr, at: ClauseAt) -> Result(mir.Spec, Diag) {
+        self.spec_in(fb, e, at, None)
+    }
+
+    // `this` is what `self` names in the `ensures` of a `len` method that a
+    // clause calls; nothing else can be named there.
+    fn spec_in(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        this: Option(SpecPlace)
+    ) -> Result(mir.Spec, Diag) {
         let r = match e.kind {
             Int(v) => Some(Some(spec_number(v as i128)))
             Unary(op, x) => match op {
-                Neg => Some(spec_combine(self.spec(fb, x.deref(), at)?, -1, spec_number(0), 0))
+                Neg => Some(spec_combine(
+                    self.spec_in(fb, x.deref(), at, this.clone())?,
+                    -1,
+                    spec_number(0),
+                    0
+                ))
                 _ => None
             }
             Binary(op, a, b) => {
                 if op == Op.Add || op == Op.Sub {
-                    let x = self.spec(fb, a.deref(), at)?
-                    let y = self.spec(fb, b.deref(), at)?
+                    let x = self.spec_in(fb, a.deref(), at, this.clone())?
+                    let y = self.spec_in(fb, b.deref(), at, this.clone())?
                     Some(spec_combine(x, 1, y, if op == Op.Add { 1 } else { -1 }))
                 } else if op == Op.Mul {
-                    let x = self.spec(fb, a.deref(), at)?
-                    let y = self.spec(fb, b.deref(), at)?
+                    let x = self.spec_in(fb, a.deref(), at, this.clone())?
+                    let y = self.spec_in(fb, b.deref(), at, this.clone())?
                     if y.terms.len() == 0 {
                         Some(spec_combine(x, y.constant, spec_number(0), 0))
                     } else if x.terms.len() == 0 {
@@ -802,9 +849,17 @@ impl sema.Sema {
                     }
                 } else { None }
             }
-            Name(n) => return self.spec_name(fb, n.as_str(), e.span, at, false)
+            Name(n) => {
+                if this.is_some() {
+                    return Err(err(
+                        e.span,
+                        "the `ensures` of a `len` that a contract calls can only name `self`"
+                    ))
+                }
+                return self.spec_name(fb, n.as_str(), e.span, at, false)
+            }
             Call(f, args) => match f.kind {
-                Name(n) => if n == "old" && fb.lookup("old").is_none() {
+                Name(n) => if n == "old" && fb.lookup("old").is_none() && this.is_none() {
                     if at == ClauseAt.Requires {
                         return Err(err(
                             e.span,
@@ -814,28 +869,20 @@ impl sema.Sema {
                     if args.len() == 1 {
                         match args[0].kind {
                             Name(x) => return self.spec_name(fb, x.as_str(), args[0].span, at, true)
+                            Field(_, _) => return self.spec_field_term(fb, args[0], at, None, true)
+                            Call(_, _) => return self.spec_len_call(fb, args[0], at, None, true)
                             _ => {}
                         }
                     }
-                    return Err(err(e.span, "`old` takes the name of an `inout` parameter"))
+                    return Err(err(
+                        e.span,
+                        "`old` takes the name of an `inout` parameter, or a field or length of one"
+                    ))
                 } else { None }
+                Field(_, _) => return self.spec_len_call(fb, e, at, this, false)
                 _ => None
             }
-            Field(x, name) => if name == "len" {
-                match x.kind {
-                    Name(n) => {
-                        let l = self.spec_local(fb, n.as_str(), x.span)?
-                        match self.types.kind(fb.body.locals[l as i64].ty) {
-                            Slice(_) | Str => Some(Some(spec_var(
-                                mir.SpecVar.Len(l),
-                                at == ClauseAt.Ensures && is_arg(fb, l)
-                            )))
-                            _ => None
-                        }
-                    }
-                    _ => None
-                }
-            } else { None }
+            Field(_, _) => return self.spec_field_term(fb, e, at, this, false)
             _ => None
         }
         match r {
@@ -843,7 +890,230 @@ impl sema.Sema {
             Some(None) => Err(err(e.span, "a number in this contract is too large to verify"))
             None => Err(err(
                 e.span,
-                "a contract can only use integers, parameters, variables, `result`, `old(x)`, `.len` of a slice or `str`, and `+ - *`"
+                "a contract can only use integers, parameters, variables, `result`, `old(x)`, fields, `.len` and `.len()`, and `+ - *`"
+            ))
+        }
+    }
+
+    // The local or field a place expression in a clause names, if it is one.
+    fn spec_path(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        this: Option(SpecPlace)
+    ) -> Result(Option(SpecPlace), Diag) {
+        match e.kind {
+            Name(n) => {
+                match this {
+                    Some(p) => {
+                        if n == "self" { return Ok(Some(p.clone())) }
+                        return Err(err(
+                            e.span,
+                            "the `ensures` of a `len` that a contract calls can only name `self`"
+                        ))
+                    }
+                    None => {}
+                }
+                var l = mir.RET
+                if n == "result" && fb.lookup("result").is_none() {
+                    if at != ClauseAt.Ensures {
+                        return Err(err(e.span, "`result` is only known in `ensures`"))
+                    }
+                    if !is_ret_value(fb.ret_mode) { return Ok(None) }
+                } else { l = self.spec_local(fb, n.as_str(), e.span)? }
+                let ty = fb.ty_of(l)
+                let inner = match self.types.kind(ty) {
+                    Ref(x) | RefMut(x) => x
+                    _ => ty
+                }
+                Ok(Some(SpecPlace {
+                    local: l, path: Vec(u32).new(), ty: inner, module: fb.env.module, depth: 0
+                }))
+            }
+            Field(x, name) => {
+                let Some(base) = self.spec_path(fb, x.deref(), at, this)? else { return Ok(None) }
+                self.spec_field(fb, base, name.as_str(), e.span)
+            }
+            _ => Ok(None)
+        }
+    }
+
+    // Field `name` below a place: a struct's field, or a view's `len`.
+    fn spec_field(
+        inout self,
+        fb: Fb,
+        sink base: SpecPlace,
+        name: str,
+        span: Span
+    ) -> Result(Option(SpecPlace), Diag) {
+        var p = base
+        match self.types.kind(p.ty) {
+            Slice(_) | Str => {
+                if name != "len" { return Ok(None) }
+                p.path.push(1)
+                p.ty = types.I64
+                return Ok(Some(p))
+            }
+            _ => {}
+        }
+        let Some(a) = self.types.adt_index(p.ty) else { return Ok(None) }
+        var found: Option((u32, u32, bool)) = None
+        match self.types.adts[a as i64].body {
+            Struct(fs) => {
+                for i, f in fs {
+                    if f.name == name { found = Some((i as u32, f.ty, f.public)) }
+                }
+            }
+            _ => {}
+        }
+        let Some(f) = found else { return Ok(None) }
+        let decl = self.types.adts[a as i64].decl
+        if !f.2 && !self.same_package(self.adts[decl as i64].module, p.module) {
+            return Err(err(span, ("the field `" + name + "` of `" +
+                self.types.adts[a as i64].name.as_str() + "` is private").as_str()))
+        }
+        p.path.push(f.0)
+        p.ty = f.1
+        Ok(Some(p))
+    }
+
+    // A field or `.len` in a clause: an integer field of a parameter or
+    // variable, or below it. A parameter's in `ensures` is its value on
+    // entry, except an `inout` parameter's, which `old` gives.
+    fn spec_field_term(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        this: Option(SpecPlace),
+        old: bool
+    ) -> Result(mir.Spec, Diag) {
+        let Some(p) = self.spec_path(fb, e, at, this)? else {
+            return Err(err(
+                e.span,
+                "a contract can only use fields of parameters, variables and `result`"
+            ))
+        }
+        self.spec_place_var(fb, p, at, old, e.span)
+    }
+
+    fn spec_place_var(
+        inout self,
+        fb: Fb,
+        p: SpecPlace,
+        at: ClauseAt,
+        old: bool,
+        span: Span
+    ) -> Result(mir.Spec, Diag) {
+        if !self.types.is_int(p.ty) || p.path.len() == 0 {
+            return Err(err(span, ("a contract reads integers, and this is a `" +
+                self.types.show(p.ty).as_str() + "`").as_str()))
+        }
+        let ty = fb.ty_of(p.local)
+        let inout_arg = match self.types.kind(ty) {
+            RefMut(_) => is_arg(fb, p.local)
+            _ => false
+        }
+        if old && (!is_arg(fb, p.local) || !inout_arg) {
+            return Err(err(
+                span,
+                "`old` is for `inout` parameters; in `ensures` the others are their values on entry"
+            ))
+        }
+        let entry = old || (at == ClauseAt.Ensures && is_arg(fb, p.local) && !inout_arg)
+        // A view's length keeps its own name.
+        let view = match self.types.kind(ty) {
+            Slice(_) | Str => true
+            _ => false
+        }
+        if view && p.path.len() == 1 { return Ok(spec_var(mir.SpecVar.Len(p.local), entry)) }
+        Ok(spec_var(mir.SpecVar.Field(p.local, p.path.clone()), entry))
+    }
+
+    // `x.len()` in a clause: of a view, its length; of another type, what
+    // its `len` method's `ensures result == ...` says, with `self` as `x`.
+    fn spec_len_call(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        this: Option(SpecPlace),
+        old: bool
+    ) -> Result(mir.Spec, Diag) {
+        let Call(f, args) = e.kind else {
+            return Err(err(e.span, "a contract can only call `len()`"))
+        }
+        let Field(x, name) = f.kind else {
+            return Err(err(e.span, "a contract can only call `len()`"))
+        }
+        if name != "len" || args.len() > 0 {
+            return Err(err(e.span, "a contract can only call `len()`"))
+        }
+        let Some(p) = self.spec_path(fb, x.deref(), at, this)? else {
+            return Err(err(
+                e.span,
+                "a contract calls `len()` of parameters, variables and their fields"
+            ))
+        }
+        match self.types.kind(p.ty) {
+            Slice(_) | Str => {
+                var q = p.clone()
+                q.path.push(1)
+                q.ty = types.I64
+                return self.spec_place_var(fb, q, at, old, e.span)
+            }
+            _ => {}
+        }
+        let what = "`len()` in a contract needs the `len` method to say `ensures result == ...`"
+        let Some(hit) = self.find_method(p.ty, "len")? else { return Err(err(e.span, what)) }
+        if p.depth >= MAX_LEN_DEPTH {
+            return Err(err(
+                e.span,
+                "this `len()` expands into itself: a `len` method's `ensures` calls `len()` again"
+            ))
+        }
+        // The method's term names fields as the method's module may.
+        var p = p
+        p.module = self.fns[hit.imp as i64].module
+        p.depth += 1
+        let d = sema.at(self.fns[hit.imp as i64].decl)
+        for c in d.ensures {
+            match c.kind {
+                Binary(op, a, b) => if op == Op.Eq {
+                    let rhs = match a.kind {
+                        Name(n) => if n == "result" { Some(b.deref().clone()) } else { None }
+                        _ => None
+                    }
+                    match rhs {
+                        Some(r) => {
+                            // `old(x.len())` is the method's term with `old` on its fields.
+                            if old { return self.spec_old_in(fb, r, at, p) }
+                            return self.spec_in(fb, r, at, Some(p))
+                        }
+                        None => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Err(err(e.span, what))
+    }
+
+    // A `len` method's term for `old(x.len())`: a field or `len()` of `self`.
+    fn spec_old_in(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        this: SpecPlace
+    ) -> Result(mir.Spec, Diag) {
+        match e.kind {
+            Field(_, _) => self.spec_field_term(fb, e, at, Some(this.clone()), true)
+            Call(_, _) => self.spec_len_call(fb, e, at, Some(this.clone()), true)
+            _ => Err(err(
+                e.span,
+                "`old(x.len())` needs `len` to say `ensures result == self.field`"
             ))
         }
     }

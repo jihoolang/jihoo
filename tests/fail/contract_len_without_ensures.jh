@@ -1,0 +1,20 @@
+// `x.len()` in a clause is what the `len` method's `ensures result == ...`
+// says; without one, nothing says what it computes.
+// error: `len()` in a contract needs the `len` method to say `ensures result == ...`
+struct Bag {
+    n: i64
+}
+
+impl Bag {
+    fn len(self) -> i64 {
+        self.n
+    }
+}
+
+fn f(b: Bag) -> i64
+    requires b.len() > 0
+{
+    b.n
+}
+
+fn main() { println(f(Bag { n: 1 })) }

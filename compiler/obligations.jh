@@ -31,6 +31,10 @@ struct Model {
     lent: Vec(Option(Place))
     // Per local: its address is taken.
     escaped: Vec(bool)
+    // Integer fields followed as variables, and per local the indices of
+    // its own in `fields`.
+    fields: Vec(FieldVar)
+    by_local: Vec(Vec(i64))
     // The parameters' variables and the variables of their values on entry.
     entries: Vec((i64, i64))
     // The ranges of the variables after the locals, in order, as text and
@@ -312,6 +316,624 @@ fn rvalue_derefs(rv: mir.Rvalue, l: u32, lending: bool) -> bool {
     }
 }
 
+// ---- Fields as variables ----
+//
+// An integer field of a local (`x.f.g`), or of what a borrowed local points
+// to (`(*p).f.g`), is a variable while the model can see everything that
+// changes it: an assignment to it or to a place that contains it, a drop
+// of such a place, a call that is lent such a place or writes its result
+// there, and for `(*p).f`, an assignment to `p`. That needs the local's
+// address never taken (`&raw`), and every mutable borrow of it or its parts
+// lent to one call (`lendings`). Nothing else changes such a field: the
+// borrow kernel lets no other borrow change what a borrow reaches while it
+// lives, a shared borrow promises no change (so no type with an
+// `#[interior]` part is followed), and a raw pointer write is assumed not to
+// reach a place held under a borrow or a local whose address it was not
+// given, as `noalias` on borrowed parameters already assumes.
+
+struct FieldVar {
+    local: u32
+    // Through `*local`: the local is a borrow.
+    deref: bool
+    path: Vec(u32)
+    v: i64
+}
+
+impl Clone for FieldVar {
+    fn clone(self) -> FieldVar {
+        FieldVar { local: self.local, deref: self.deref, path: self.path.clone(), v: self.v }
+    }
+}
+
+fn field_place(f: FieldVar) -> Place {
+    var p = Place.local(f.local)
+    if f.deref { p.proj.push(mir.Proj.Deref) }
+    for k in f.path { p.proj.push(mir.Proj.Field(k)) }
+    p
+}
+
+// Fields deeper than this are not followed.
+const MAX_FIELD_DEPTH: i64 = 6
+// Nor more field variables than this in one function.
+const MAX_FIELDS: i64 = 400
+
+fn has_fields(t: Types, ty: u32) -> bool {
+    match t.kind(ty) {
+        Tuple(ts) => ts.len() > 0
+        Adt(_) => t.field_tys(ty).len() > 0
+        _ => false
+    }
+}
+
+// How a local's fields can be variables: `Some(true)` those of what it
+// borrows, `Some(false)` its own, None when they cannot.
+fn field_base(t: Types, ty: u32) -> Option(bool) {
+    match t.kind(ty) {
+        Ref(inner) | RefMut(inner) => {
+            let view = match t.kind(inner) {
+                Slice(_) | Str => true
+                _ => false
+            }
+            if (view || has_fields(t, inner)) && !t.is_interior(inner) { Some(true) } else { None }
+        }
+        _ => if has_fields(t, ty) && !t.is_interior(ty) { Some(false) } else { None }
+    }
+}
+
+// The type of field `k` of a value of type `ty`, and whether it is a
+// view's length (never negative).
+fn field_step(t: Types, ty: u32, k: u32) -> Option((u32, bool)) {
+    match t.kind(ty) {
+        Slice(_) | Str => if k == 1 { Some((types.I64, true)) } else { None }
+        Tuple(_) | Adt(_) => {
+            let fs = t.field_tys(ty)
+            if (k as i64) < fs.len() { Some((fs[k as i64], false)) } else { None }
+        }
+        _ => None
+    }
+}
+
+// Per local: its fields may be variables. Its type has fields and no
+// `#[interior]` part, it is not itself a borrow lent to one call, no raw
+// address of it or its parts is taken, and each mutable borrow of it or
+// its parts is lent to one call.
+fn fields_ok(t: Types, b: Body, lent: [Option(Place)]) -> Vec(bool) {
+    var out = Vec(bool).new()
+    for i, l in b.locals { out.push(lent[i].is_none() && field_base(t, l.ty).is_some()) }
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(dst, rv, _) => match rv {
+                    RefMut(p) => if !(dst.proj.len() == 0 && lent[dst.local as i64].is_some()) {
+                        out[p.local as i64] = false
+                    }
+                    Addr(p) => out[p.local as i64] = false
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+// The field variable a place would be: through the local's borrow or not,
+// the fields, and the range.
+fn field_of(
+    t: Types,
+    b: Body,
+    ok: [bool],
+    p: Place
+) -> Option((bool, Vec(u32), types.IntTy, bool)) {
+    let l = p.local as i64
+    if !ok[l] { return None }
+    let Some(deref) = field_base(t, b.locals[l].ty) else { return None }
+    var ty = b.locals[l].ty
+    var i = 0
+    if deref {
+        if p.proj.len() == 0 || p.proj[0] != mir.Proj.Deref { return None }
+        ty = t.pointee(ty).unwrap()
+        i = 1
+    }
+    if p.proj.len() - i < 1 || p.proj.len() - i > MAX_FIELD_DEPTH { return None }
+    var path = Vec(u32).new()
+    var length = false
+    while i < p.proj.len() {
+        let Field(k) = p.proj[i] else { return None }
+        if length { return None }
+        let Some(step) = field_step(t, ty, k) else { return None }
+        ty = step.0
+        length = step.1
+        path.push(k)
+        i += 1
+    }
+    let Some(n) = t.int(ty) else { return None }
+    Some((deref, path, n, length))
+}
+
+// One place is a prefix of the other: writing one may change the other.
+// Places of different locals, or that part at different fields, are
+// disjoint.
+fn overlaps(a: Place, b: Place) -> bool {
+    if a.local != b.local { return false }
+    var i = 0
+    while i < a.proj.len() && i < b.proj.len() {
+        if a.proj[i] != b.proj[i] {
+            match a.proj[i] {
+                Field(_) => match b.proj[i] {
+                    Field(_) => return false
+                    _ => {}
+                }
+                _ => {}
+            }
+            return true
+        }
+        i += 1
+    }
+    true
+}
+
+// `a` is a prefix of `b`, or equal to it.
+fn prefix(a: Place, b: Place) -> bool {
+    if a.local != b.local || a.proj.len() > b.proj.len() { return false }
+    for i in 0..a.proj.len() {
+        if a.proj[i] != b.proj[i] { return false }
+    }
+    true
+}
+
+fn below(p: Place, rest: [mir.Proj]) -> Place {
+    var q = p.clone()
+    for x in rest { q.proj.push(x) }
+    q
+}
+
+// The place whose value is `rest` below what `rv` gives, if it is one.
+fn source_place(rv: mir.Rvalue, rest: [mir.Proj]) -> Option(Place) {
+    if rest.len == 0 { return None }
+    match rv {
+        Use(o) => match o {
+            Copy(q) | Move(q) => Some(below(q, rest))
+            Const(_) => None
+        }
+        Ref(q) | RefMut(q) => if rest[0] == mir.Proj.Deref { Some(below(q, rest[1..])) } else { None }
+        Aggregate(agg, os) => match agg {
+            Struct(_) => {
+                let Field(k) = rest[0] else { return None }
+                if rest.len < 2 || k as i64 >= os.len() { return None }
+                match os[k as i64] {
+                    Copy(q) | Move(q) => Some(below(q, rest[1..]))
+                    Const(_) => None
+                }
+            }
+            _ => None
+        }
+        _ => None
+    }
+}
+
+// Every place the function reads or writes.
+fn places(b: Body) -> Vec(Place) {
+    var out = Vec(Place).new()
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(p, rv, _) => {
+                    out.push(p.clone())
+                    rvalue_places(rv, &out)
+                }
+                _ => {}
+            }
+        }
+        match bl.term {
+            Switch(o, _, _) | Assert(o, _, _, _) => operand_place(o, &out)
+            Call(_, args, dest, _, _) => {
+                for a in args { operand_place(a, &out) }
+                out.push(dest.clone())
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn operand_place(o: Operand, inout out: Vec(Place)) {
+    match o {
+        Copy(p) | Move(p) => out.push(p.clone())
+        Const(_) => {}
+    }
+}
+
+fn rvalue_places(rv: mir.Rvalue, inout out: Vec(Place)) {
+    match rv {
+        Use(o) | Un(_, o) | Cast(o, _, _) | Repeat(o, _) => operand_place(o, &out)
+        Bin(_, x, y) | Offset(x, y) => {
+            operand_place(x, &out)
+            operand_place(y, &out)
+        }
+        Aggregate(_, os) => {
+            for o in os { operand_place(o, &out) }
+        }
+        _ => {}
+    }
+}
+
+// The fields that are variables: those the function reads or writes, then
+// those whose values the first ones are copied from, until no more are
+// needed. `wanted` are more places to follow (a callee's contract).
+fn find_fields(t: Types, b: Body, lent: [Option(Place)], wanted: [Place]) -> Vec(FieldVar) {
+    let ok = fields_ok(t, b, lent)
+    var out = Vec(FieldVar).new()
+    var work = places(b)
+    for p in wanted { work.push(p.clone()) }
+    // A view local copied from a field: its length is that field's.
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(dst, rv, _) => if dst.proj.len() == 0 && is_view(
+                    t,
+                    b.locals[dst.local as i64].ty
+                ) {
+                    match rv {
+                        Use(o) => match o {
+                            Copy(q) | Move(q) => if q.proj.len() > 0 { work.push(q.with(mir.Proj.Field(
+                                1
+                            ))) }
+                            Const(_) => {}
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    var k = 0
+    while k < work.len() && out.len() < MAX_FIELDS {
+        let p = work[k].clone()
+        k += 1
+        let Some(f) = field_of(t, b, ok.as_slice(), p) else { continue }
+        var seen = false
+        for x in out {
+            if x.local == p.local && x.path == f.1 { seen = true }
+        }
+        if seen { continue }
+        // Where an assignment to a place that contains this one copies it from.
+        for bl in b.blocks {
+            for st in bl.stmts {
+                match st {
+                    Assign(dst, rv, _) => if dst.proj.len() < p.proj.len() && prefix(dst, p) {
+                        match source_place(rv, p.proj[dst.proj.len()..]) {
+                            Some(q) => work.push(q)
+                            None => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.push(FieldVar { local: p.local, deref: f.0, path: f.1.clone(), v: -1 })
+    }
+    out
+}
+
+fn field_kind(t: Types, b: Body, f: FieldVar) -> (String, vc.Kind) {
+    let ok = Vec(bool).filled(b.locals.len(), true)
+    let (_, _, n, length) = field_of(t, b, ok.as_slice(), field_place(f)).unwrap()
+    if length { return ("(int 0 9223372036854775807)".to_string(), vc.len_range()) }
+    var s = String.new()
+    range(&s, n)
+    (s, int_kind(n))
+}
+
+// The variables of the fields inside a place, except the place's own.
+fn fields_in(m: Model, p: Place) -> Vec(i64) {
+    var out = Vec(i64).new()
+    for i in m.by_local[p.local as i64] {
+        let f = m.fields[i]
+        let q = field_place(f)
+        if overlaps(p, q) && q != p { out.push(f.v) }
+    }
+    out
+}
+
+// What an assignment of `rv` to `dst` gives each field variable inside
+// `dst` but not `dst` itself: the value it copies, or an opaque one.
+fn field_writes(t: Types, m: Model, dst: Place, rv: mir.Rvalue) -> Vec((i64, vc.Rvalue)) {
+    var out = Vec((i64, vc.Rvalue)).new()
+    for i in m.by_local[dst.local as i64] {
+        let f = m.fields[i]
+        let q = field_place(f)
+        if !overlaps(dst, q) || q == dst { continue }
+        var value = opaque_rv("field")
+        if prefix(dst, q) {
+            let rest = q.proj[dst.proj.len()..]
+            var done = false
+            if rest.len == 1 {
+                match rv {
+                    Aggregate(agg, os) => match agg {
+                        Struct(_) | View(_) => match rest[0] {
+                            Field(k) => if (k as i64) < os.len() {
+                                value = vc.Rvalue.Use(model_operand(t, m, os[k as i64]))
+                                done = true
+                            }
+                            _ => {}
+                        }
+                        _ => {}
+                    }
+                    _ => {}
+                }
+            }
+            if !done {
+                match source_place(rv, rest) {
+                    Some(s) => match variable(m, s) {
+                        Some(v) => value = vc.Rvalue.Use(vc.Operand.Local(v))
+                        None => value = opaque_rv(place_reason(m, s))
+                    }
+                    None => {}
+                }
+            }
+        }
+        out.push((f.v, value))
+    }
+    // Values read from variables this assignment also writes would be read
+    // after they change: such a value is not followed.
+    if out.len() > 1 {
+        for i in 0..out.len() {
+            let reads = match out[i].1 {
+                Use(o) => match o {
+                    Local(v) => {
+                        var hit = false
+                        for w in out {
+                            if w.0 == v { hit = true }
+                        }
+                        hit
+                    }
+                    _ => false
+                }
+                _ => false
+            }
+            if reads { out[i].1 = opaque_rv("field") }
+        }
+    }
+    out
+}
+
+// The variables a call may change besides its result's: the fields inside
+// what it is lent, behind a mutable borrow it is given, and inside the
+// place its result goes to.
+fn call_changes(t: Types, b: Body, m: Model, args: [Operand], dest: Place) -> Vec(i64) {
+    var out = Vec(i64).new()
+    for a in args {
+        match a {
+            Copy(q) | Move(q) => if q.proj.len() == 0 {
+                match m.lent[q.local as i64] {
+                    // The lent place's own variable, if any, is the call's `Lent`.
+                    Some(x) => {
+                        for v in fields_in(m, x) { out.push(v) }
+                    }
+                    None => match t.kind(b.locals[q.local as i64].ty) {
+                        RefMut(_) => {
+                            for v in fields_in(m, q.with(mir.Proj.Deref)) { out.push(v) }
+                            match variable(m, q.with(mir.Proj.Deref)) {
+                                Some(v) => out.push(v)
+                                None => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Const(_) => {}
+        }
+    }
+    for v in fields_in(m, dest) { out.push(v) }
+    // A view result's length.
+    if dest.proj.len() == 0 {
+        match m.lengths[dest.local as i64] {
+            Some(n) => out.push(n)
+            None => {}
+        }
+    }
+    out
+}
+
+// The variable of the call's result's length, when it is a view; -1 if not.
+fn result_length(m: Model, dest: Place) -> i64 {
+    if dest.proj.len() > 0 { return -1 }
+    match m.lengths[dest.local as i64] {
+        Some(n) => n
+        None => -1
+    }
+}
+
+// ---- What a call needs of its caller's fields ----
+
+// A function's interface: (parameter, fields) for each field of a
+// parameter (0 for the result) that its contract names, or, in a function
+// whose panics a call may prove away (`liftable`), that it reads.
+pub type Interface = Vec((i64, Vec(u32)))
+
+// Blocks in a function whose panics calls may prove away, at most.
+pub const MAX_LIFT_BLOCKS: i64 = 32
+
+// The function is small and has a call that never returns, or a trap.
+pub fn liftable(b: Body) -> bool {
+    if b.blocks.len() > MAX_LIFT_BLOCKS { return false }
+    for bl in b.blocks {
+        match bl.term {
+            Call(callee, _, dest, _, _) => {
+                match callee {
+                    Intrinsic(i) => match i {
+                        Trap => return true
+                        _ => {}
+                    }
+                    _ => {}
+                }
+                if b.locals[dest.local as i64].ty == types.NEVER { return true }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+// The places of the fields the function's own contract names.
+fn contract_places(t: Types, b: Body) -> Vec(Place) {
+    var out = Vec(Place).new()
+    var clauses = Vec(mir.Clause).new()
+    for c in b.contract.requires { clauses.push(c.clone()) }
+    for c in b.contract.ensures { clauses.push(c.clone()) }
+    for x in b.contract.invariants { clauses.push(x.1.clone()) }
+    for c in clauses {
+        for term in c.a.terms { spec_field_place(t, b, term, &out) }
+        for term in c.b.terms { spec_field_place(t, b, term, &out) }
+    }
+    out
+}
+
+fn spec_field_place(t: Types, b: Body, term: mir.SpecTerm, inout out: Vec(Place)) {
+    match term.name {
+        Field(l, path) => out.push(spec_place(t, b, l, path.as_slice()))
+        _ => {}
+    }
+}
+
+pub fn interfaces(p: Program) -> Vec(Interface) {
+    let t = p.types
+    var out = Vec(Interface).new()
+    for f in p.fns {
+        var iface = Vec((i64, Vec(u32))).new()
+        match f.body {
+            Some(b) => {
+                let places = contract_places(t, b)
+                let lent = lendings(t, b)
+                let fields = if liftable(b) {
+                    find_fields(t, b, lent.as_slice(), places.as_slice())
+                } else { find_fields_of(t, b, lent.as_slice(), places.as_slice()) }
+                for x in fields {
+                    if x.local as i64 <= b.arg_count { iface.push((x.local as i64, x.path.clone())) }
+                }
+            }
+            None => {}
+        }
+        out.push(iface)
+    }
+    out
+}
+
+// The field variables of the places alone, not of what the body reads.
+fn find_fields_of(t: Types, b: Body, lent: [Option(Place)], places: [Place]) -> Vec(FieldVar) {
+    let ok = fields_ok(t, b, lent)
+    var out = Vec(FieldVar).new()
+    for p in places {
+        let Some(f) = field_of(t, b, ok.as_slice(), p) else { continue }
+        var seen = false
+        for x in out {
+            if x.local == p.local && x.path == f.1 { seen = true }
+        }
+        if !seen { out.push(FieldVar { local: p.local, deref: f.0, path: f.1.clone(), v: -1 }) }
+    }
+    out
+}
+
+// The caller's place of a callee's field: below the argument (through it
+// when the parameter is a borrow; the place lent to it when the argument
+// lends one), or below where the result goes.
+fn caller_place(
+    p: Program,
+    lent: [Option(Place)],
+    g: u32,
+    args: [Operand],
+    dest: Place,
+    param: i64,
+    path: [u32]
+) -> Option(Place) {
+    if param == 0 { return Some(below_fields(dest.clone(), path)) }
+    if param - 1 >= args.len { return None }
+    let Some(gb) = p.fns[g as i64].body else { return None }
+    let borrowed = match p.types.kind(gb.locals[param].ty) {
+        Ref(_) | RefMut(_) => true
+        _ => false
+    }
+    match args[param - 1] {
+        Copy(q) | Move(q) => {
+            if borrowed {
+                if q.proj.len() == 0 {
+                    match lent[q.local as i64] {
+                        Some(x) => return Some(below_fields(x.clone(), path))
+                        None => {}
+                    }
+                }
+                return Some(below_fields(q.with(mir.Proj.Deref), path))
+            }
+            Some(below_fields(q.clone(), path))
+        }
+        Const(_) => None
+    }
+}
+
+fn below_fields(sink p: Place, path: [u32]) -> Place {
+    var q = p
+    for k in path { q.proj.push(mir.Proj.Field(k)) }
+    q
+}
+
+// The places the function's calls need as variables, for the callees'
+// interfaces.
+fn call_places(p: Program, b: Body, lent: [Option(Place)], ifaces: [Interface]) -> Vec(Place) {
+    var out = Vec(Place).new()
+    for bl in b.blocks {
+        match bl.term {
+            Call(callee, args, dest, _, _) => match callee {
+                Fn(g) => if (g as i64) < ifaces.len {
+                    for x in ifaces[g as i64] {
+                        match caller_place(p, lent, g, args.as_slice(), dest, x.0, x.1.as_slice()) {
+                            Some(q) => out.push(q)
+                            None => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+// The callee's fields at a call, as the caller's variables.
+fn call_fields(
+    p: Program,
+    m: Model,
+    callee: mir.Callee,
+    args: [Operand],
+    dest: Place,
+    ifaces: [Interface]
+) -> Vec(vc.FieldOf) {
+    var out = Vec(vc.FieldOf).new()
+    let Fn(g) = callee else { return out }
+    if g as i64 >= ifaces.len { return out }
+    for x in ifaces[g as i64] {
+        let Some(q) = caller_place(p, m.lent.as_slice(), g, args, dest, x.0, x.1.as_slice()) else {
+            continue
+        }
+        match variable(m, q) {
+            Some(v) => out.push(vc.FieldOf { param: x.0, path: x.1.clone(), v })
+            None => {}
+        }
+    }
+    out
+}
+
+fn wanted(p: Program, b: Body, ifaces: [Interface]) -> Vec(Place) {
+    let t = p.types
+    var out = contract_places(t, b)
+    let lent = lendings(t, b)
+    for q in call_places(p, b, lent.as_slice(), ifaces).into_iter() { out.push(q) }
+    out
+}
+
 fn kind_text(t: Types, ty: u32) -> String {
     var s = String.new()
     match t.int(ty) {
@@ -321,14 +943,16 @@ fn kind_text(t: Types, ty: u32) -> String {
     s
 }
 
-fn model(t: Types, b: Body) -> Model {
+fn model(t: Types, b: Body, wanted: [Place]) -> Model {
     let lent = lendings(t, b)
     let escaped = escapes(t, b, lent.as_slice())
     var m = Model {
         tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(),
         derefs: Vec(Option(i64)).filled(b.locals.len(), None), lent: lent.clone(),
-        escaped: escaped.clone(), entries: Vec((i64, i64)).new(), kinds: Vec(String).new(),
-        vkinds: Vec(vc.Kind).new(), count: b.locals.len()
+        escaped: escaped.clone(), fields: find_fields(t, b, lent.as_slice(), wanted),
+        by_local: Vec(Vec(i64)).filled(b.locals.len(), Vec(i64).new()),
+        entries: Vec((i64, i64)).new(), kinds: Vec(String).new(), vkinds: Vec(vc.Kind).new(),
+        count: b.locals.len()
     }
     for i, l in b.locals {
         let scalar = match t.kind(l.ty) {
@@ -354,6 +978,14 @@ fn model(t: Types, b: Body) -> Model {
             _ => {}
         }
     }
+    for i in 0..m.fields.len() {
+        let (k, vk) = field_kind(t, b, m.fields[i])
+        m.fields[i].v = m.count
+        m.count += 1
+        m.kinds.push(k)
+        m.vkinds.push(vk)
+        m.by_local[m.fields[i].local as i64].push(i)
+    }
     // Each parameter's variables, as they were on entry.
     for i in 1..b.arg_count + 1 {
         var vars = Vec((i64, String, vc.Kind)).new()
@@ -371,6 +1003,12 @@ fn model(t: Types, b: Body) -> Model {
                 m.vkinds[d - b.locals.len()].clone()
             ))
             None => {}
+        }
+        for f in m.fields {
+            if f.local as i64 == i {
+                let d = f.v - b.locals.len()
+                vars.push((f.v, m.kinds[d].clone(), m.vkinds[d].clone()))
+            }
         }
         for (v, k, vk) in vars.into_iter() {
             m.entries.push((v, m.count))
@@ -392,10 +1030,13 @@ fn variable(m: Model, p: Place) -> Option(i64) {
     }
     if p.proj.len() == 1 {
         match p.proj[0] {
-            Field(1) => return m.lengths[l]
+            Field(1) => if m.lengths[l].is_some() { return m.lengths[l] }
             Deref => return m.derefs[l]
             _ => {}
         }
+    }
+    for i in m.by_local[l] {
+        if field_place(m.fields[i]) == p { return Some(m.fields[i].v) }
     }
     None
 }
@@ -585,8 +1226,8 @@ fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
                     if place.proj.len() == 0 {
                         match rv {
                             Use(o) => match o {
-                                Copy(q) | Move(q) => match m.lengths[q.local as i64] {
-                                    Some(k) => if q.proj.len() == 0 {
+                                Copy(q) | Move(q) => match variable(m, q.with(mir.Proj.Field(1))) {
+                                    Some(k) => {
                                         s.push_str("(use (local ")
                                         k.show(&s)
                                         s.push_str("))")
@@ -613,8 +1254,53 @@ fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
                 }
                 None => {}
             }
+            for w in field_writes(t, m, place, rv) {
+                set(&s, w.0)
+                show_copy(&s, w.1)
+                s.push(')')
+            }
+        }
+        Drop(place, _) => {
+            for v in fields_in(m, place) {
+                set(&s, v)
+                opaque(&s, "field")
+                s.push(')')
+            }
+            match variable(m, place) {
+                Some(v) => {
+                    set(&s, v)
+                    opaque(&s, "field")
+                    s.push(')')
+                }
+                None => {}
+            }
         }
         _ => {}
+    }
+}
+
+// A value `field_writes` gives: a copy of an operand, or an opaque value.
+fn show_copy(inout s: String, rv: vc.Rvalue) {
+    match rv {
+        Use(o) => {
+            s.push_str("(use ")
+            match o {
+                Local(v) => {
+                    s.push_str("(local ")
+                    v.show(&s)
+                    s.push(')')
+                }
+                Const(c) => {
+                    s.push_str("(const ")
+                    c.show(&s)
+                    s.push(')')
+                }
+                Opaque(w) => opaque(&s, vc.why_name(w))
+            }
+            s.push(')')
+        }
+        Opaque(w) => opaque(&s, vc.why_name(w))
+        _ => opaque(&s, "other")
     }
 }
 
@@ -671,12 +1357,24 @@ fn argument(inout s: String, t: Types, m: Model, a: Operand) {
     operand(&s, t, m, a)
 }
 
+// The place of a contract's field term: through the local if it is a borrow.
+fn spec_place(t: Types, b: Body, l: u32, path: [u32]) -> Place {
+    var p = Place.local(l)
+    match t.kind(b.locals[l as i64].ty) {
+        Ref(_) | RefMut(_) => p.proj.push(mir.Proj.Deref)
+        _ => {}
+    }
+    for k in path { p.proj.push(mir.Proj.Field(k)) }
+    p
+}
+
 // The variable a contract's term names, if the model has one.
-fn spec_variable(m: Model, x: mir.SpecTerm) -> Option(i64) {
+fn spec_variable(t: Types, b: Body, m: Model, x: mir.SpecTerm) -> Option(i64) {
     let v = match x.name {
         Local(l) => if m.tracked[l as i64] { Some(l as i64) } else { None }
         Deref(l) => m.derefs[l as i64]
         Len(l) => m.lengths[l as i64]
+        Field(l, path) => variable(m, spec_place(t, b, l, path.as_slice()))
     }
     if !x.old { return v }
     let Some(v) = v else { return None }
@@ -687,9 +1385,9 @@ fn spec_variable(m: Model, x: mir.SpecTerm) -> Option(i64) {
 }
 
 // `(lin c (v k)...)`: `c` plus `k` times each variable `v`.
-fn spec(inout s: String, m: Model, x: mir.Spec) {
+fn spec(inout s: String, t: Types, b: Body, m: Model, x: mir.Spec) {
     for term in x.terms {
-        if spec_variable(m, term).is_none() {
+        if spec_variable(t, b, m, term).is_none() {
             opaque(&s, "escaped")
             return
         }
@@ -699,7 +1397,7 @@ fn spec(inout s: String, m: Model, x: mir.Spec) {
     for term in x.terms {
         if term.coef != 0 {
             s.push_str(" (")
-            spec_variable(m, term).unwrap().show(&s)
+            spec_variable(t, b, m, term).unwrap().show(&s)
             s.push(' ')
             term.coef.show(&s)
             s.push(')')
@@ -709,7 +1407,15 @@ fn spec(inout s: String, m: Model, x: mir.Spec) {
 }
 
 // `(requires (le A B) (at lo hi))`, and `(invariant BLOCK (le A B) (at lo hi))`.
-fn clause(inout s: String, m: Model, word: str, block: Option(u32), c: mir.Clause) {
+fn clause(
+    inout s: String,
+    t: Types,
+    b: Body,
+    m: Model,
+    word: str,
+    block: Option(u32),
+    c: mir.Clause
+) {
     s.push_str("\n  (")
     s.push_str(word)
     match block {
@@ -722,15 +1428,15 @@ fn clause(inout s: String, m: Model, word: str, block: Option(u32), c: mir.Claus
     s.push_str(" (")
     s.push_str(compare(c.op).unwrap())
     s.push(' ')
-    spec(&s, m, c.a)
+    spec(&s, t, b, m, c.a)
     s.push(' ')
-    spec(&s, m, c.b)
+    spec(&s, t, b, m, c.b)
     s.push(')')
     at(&s, c.span)
     s.push(')')
 }
 
-fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
+fn terminator(inout s: String, p: Program, b: Body, m: Model, term: mir.Term, ifaces: [Interface]) {
     let t = p.types
     s.push_str("\n    ")
     match term {
@@ -777,7 +1483,9 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
             match callee {
                 Intrinsic(i) => match i {
                     Trap => {
-                        s.push_str("(trap)")
+                        s.push_str("(trap")
+                        at(&s, span)
+                        s.push(')')
                         return
                     }
                     _ => {}
@@ -807,6 +1515,35 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
                 argument(&s, t, m, a)
             }
             s.push(')')
+            // A callee that never returns: the call must not be reached.
+            if b.locals[dest.local as i64].ty == types.NEVER { s.push_str(" (never)") }
+            // The fields the call may change, besides its result.
+            let changes = call_changes(t, b, m, args.as_slice(), dest)
+            if changes.len() > 0 {
+                s.push_str(" (changes")
+                for v in changes {
+                    s.push(' ')
+                    v.show(&s)
+                }
+                s.push(')')
+            }
+            // The callee's fields as variables here: `(PARAM VAR FIELD...)`.
+            let fields = call_fields(p, m, callee, args.as_slice(), dest, ifaces)
+            if fields.len() > 0 {
+                s.push_str(" (fields")
+                for x in fields {
+                    s.push_str(" (")
+                    x.param.show(&s)
+                    s.push(' ')
+                    x.v.show(&s)
+                    for k in x.path {
+                        s.push(' ')
+                        k.show(&s)
+                    }
+                    s.push(')')
+                }
+                s.push(')')
+            }
             at(&s, span)
             s.push(')')
         }
@@ -823,11 +1560,11 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
     }
 }
 
-pub fn show_function(p: Program, f: mir.Function) -> String {
+pub fn show_function(p: Program, f: mir.Function, ifaces: [Interface]) -> String {
     let t = p.types
     var s = String.new()
     let Some(b) = f.body else { return s }
-    let m = model(t, b)
+    let m = model(t, b, wanted(p, b, ifaces).as_slice())
     s.push_str("(function ")
     atom(&s, f.name.as_str())
     s.push(' ')
@@ -878,6 +1615,19 @@ pub fn show_function(p: Program, f: mir.Function) -> String {
             None => {}
         }
     }
+    s.push_str(")\n  (fields")
+    for f in m.fields {
+        s.push_str(" (")
+        f.v.show(&s)
+        s.push(' ')
+        f.local.show(&s)
+        if f.deref { s.push_str(" *") }
+        for k in f.path {
+            s.push(' ')
+            k.show(&s)
+        }
+        s.push(')')
+    }
     s.push_str(")\n  (entries")
     for e in m.entries {
         s.push_str(" (")
@@ -887,14 +1637,14 @@ pub fn show_function(p: Program, f: mir.Function) -> String {
         s.push(')')
     }
     s.push(')')
-    for c in b.contract.requires { clause(&s, m, "requires", None, c) }
-    for c in b.contract.ensures { clause(&s, m, "ensures", None, c) }
-    for x in b.contract.invariants { clause(&s, m, "invariant", Some(x.0), x.1) }
+    for c in b.contract.requires { clause(&s, t, b, m, "requires", None, c) }
+    for c in b.contract.ensures { clause(&s, t, b, m, "ensures", None, c) }
+    for x in b.contract.invariants { clause(&s, t, b, m, "invariant", Some(x.0), x.1) }
     for i, bl in b.blocks {
         s.push_str("\n  (block ")
         i.show(&s)
         for st in bl.stmts { statement(&s, p, b, m, st) }
-        terminator(&s, p, m, bl.term)
+        terminator(&s, p, b, m, bl.term, ifaces)
         s.push(')')
     }
     s.push_str(")\n")
@@ -1039,10 +1789,11 @@ fn model_stmts(p: Program, b: Body, m: Model, block: i64, bl: mir.Block) -> Vec(
                         if place.proj.len() == 0 {
                             match rv {
                                 Use(o) => match o {
-                                    Copy(q) | Move(q) => match m.lengths[q.local as i64] {
-                                        Some(k) => if q.proj.len() == 0 {
-                                            value = vc.Rvalue.Use(vc.Operand.Local(k))
-                                        }
+                                    Copy(q) | Move(q) => match variable(
+                                        m,
+                                        q.with(mir.Proj.Field(1))
+                                    ) {
+                                        Some(k) => value = vc.Rvalue.Use(vc.Operand.Local(k))
                                         None => {}
                                     }
                                     _ => {}
@@ -1058,6 +1809,24 @@ fn model_stmts(p: Program, b: Body, m: Model, block: i64, bl: mir.Block) -> Vec(
                         }
                         out.push(vc.Stmt.Assign(n, value, vc.nowhere(), (block, i)))
                     }
+                    None => {}
+                }
+                for w in field_writes(t, m, place, rv).into_iter() {
+                    out.push(vc.Stmt.Assign(w.0, w.1, vc.nowhere(), (block, i)))
+                }
+            }
+            // What a destructor leaves is not followed.
+            Drop(place, _) => {
+                for v in fields_in(m, place) {
+                    out.push(vc.Stmt.Assign(v, opaque_rv("field"), vc.nowhere(), (block, i)))
+                }
+                match variable(m, place) {
+                    Some(v) => out.push(vc.Stmt.Assign(
+                        v,
+                        opaque_rv("field"),
+                        vc.nowhere(),
+                        (block, i)
+                    ))
                     None => {}
                 }
             }
@@ -1088,7 +1857,7 @@ fn model_argument(t: Types, m: Model, a: Operand) -> vc.Arg {
     vc.Arg.Value(model_operand(t, m, a))
 }
 
-fn model_term(p: Program, m: Model, term: mir.Term) -> vc.Term {
+fn model_term(p: Program, b: Body, m: Model, term: mir.Term, ifaces: [Interface]) -> vc.Term {
     let t = p.types
     match term {
         Goto(x) => vc.Term.Goto(x as i64)
@@ -1112,7 +1881,7 @@ fn model_term(p: Program, m: Model, term: mir.Term) -> vc.Term {
         Call(callee, args, dest, next, span) => {
             match callee {
                 Intrinsic(i) => match i {
-                    Trap => return vc.Term.Trap
+                    Trap => return vc.Term.Trap(span_of(span))
                     _ => {}
                 }
                 _ => {}
@@ -1127,7 +1896,11 @@ fn model_term(p: Program, m: Model, term: mir.Term) -> vc.Term {
                     _ => -1
                 },
                 args: Vec(vc.Arg).new(),
-                at: span_of(span)
+                at: span_of(span),
+                changes: call_changes(t, b, m, args.as_slice(), dest),
+                never: b.locals[dest.local as i64].ty == types.NEVER,
+                result_len: result_length(m, dest),
+                fields: call_fields(p, m, callee, args.as_slice(), dest, ifaces)
             }
             for a in args { site.args.push(model_argument(t, m, a)) }
             vc.Term.Call(dst, next as i64, site)
@@ -1142,11 +1915,11 @@ fn model_term(p: Program, m: Model, term: mir.Term) -> vc.Term {
     }
 }
 
-fn model_spec(m: Model, x: mir.Spec) -> Option(linear.Lin) {
+fn model_spec(t: Types, b: Body, m: Model, x: mir.Spec) -> Option(linear.Lin) {
     if !small(x.constant) { return None }
     var out = linear.Lin.num(x.constant)
     for term in x.terms {
-        let Some(v) = spec_variable(m, term) else { return None }
+        let Some(v) = spec_variable(t, b, m, term) else { return None }
         if term.coef != 0 {
             if !small(term.coef) { return None }
             out = out.plus(linear.Lin.of(v).scale(term.coef))
@@ -1155,19 +1928,19 @@ fn model_spec(m: Model, x: mir.Spec) -> Option(linear.Lin) {
     Some(out)
 }
 
-fn model_clause(m: Model, c: mir.Clause) -> vc.Fact {
+fn model_clause(t: Types, b: Body, m: Model, c: mir.Clause) -> vc.Fact {
     let op = model_cmp(c.op).unwrap()
-    match (model_spec(m, c.a), model_spec(m, c.b)) {
+    match (model_spec(t, b, m, c.a), model_spec(t, b, m, c.b)) {
         (Some(a), Some(b)) => vc.Fact { op, a, b, stated: true }
         _ => vc.unstated(op)
     }
 }
 
 // The model of a function with a body, as the verifier reads it.
-pub fn model_of(p: Program, f: mir.Function) -> Option(vc.Function) {
+pub fn model_of(p: Program, f: mir.Function, ifaces: [Interface]) -> Option(vc.Function) {
     let t = p.types
     let Some(b) = f.body else { return None }
-    let m = model(t, b)
+    let m = model(t, b, wanted(p, b, ifaces).as_slice())
     var kinds = Vec(vc.Kind).new()
     for i, l in b.locals {
         kinds.push(if m.tracked[i] { ty_kind(t, l.ty) } else { vc.Kind.Other })
@@ -1185,13 +1958,20 @@ pub fn model_of(p: Program, f: mir.Function) -> Option(vc.Function) {
             None => {}
         }
     }
+    // The parameters' fields and the result's, for the callers.
+    var fields = Vec(vc.FieldOf).new()
+    for x in m.fields {
+        if x.local as i64 <= b.arg_count {
+            fields.push(vc.FieldOf { param: x.local as i64, path: x.path.clone(), v: x.v })
+        }
+    }
     var requires = Vec(vc.Fact).new()
-    for c in b.contract.requires { requires.push(model_clause(m, c)) }
+    for c in b.contract.requires { requires.push(model_clause(t, b, m, c)) }
     var ensures = Vec(vc.Fact).new()
-    for c in b.contract.ensures { ensures.push(model_clause(m, c)) }
+    for c in b.contract.ensures { ensures.push(model_clause(t, b, m, c)) }
     var invariants = Vec((i64, Vec(vc.Fact))).new()
     for x in b.contract.invariants {
-        let c = model_clause(m, x.1)
+        let c = model_clause(t, b, m, x.1)
         var found = false
         for i in 0..invariants.len() {
             if invariants[i].0 == x.0 as i64 {
@@ -1209,7 +1989,7 @@ pub fn model_of(p: Program, f: mir.Function) -> Option(vc.Function) {
     for i, bl in b.blocks {
         blocks.push(vc.Block {
             stmts: model_stmts(p, b, m, i, bl),
-            term: model_term(p, m, bl.term)
+            term: model_term(p, b, m, bl.term, ifaces)
         })
     }
     Some(vc.Function {
@@ -1218,8 +1998,9 @@ pub fn model_of(p: Program, f: mir.Function) -> Option(vc.Function) {
         blocks,
         invariants,
         callee: vc.Callee {
-            symbol: f.symbol.clone(), kinds, args: b.arg_count, lengths, derefs,
+            symbol: f.symbol.clone(), kinds, args: b.arg_count, lengths, derefs, fields,
             entries: m.entries.clone(), requires, ensures
-        }
+        },
+        liftable: liftable(b)
     })
 }

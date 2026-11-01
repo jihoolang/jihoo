@@ -106,6 +106,15 @@ fn renumber(x: Lin, ids: [i64]) -> Lin {
 fn relevant(facts: [Lin], claim: Lin, n: i64) -> Vec(bool) {
     var seen = Vec(bool).filled(n, false)
     for t in claim.terms { seen[t.0] = true }
+    // A claim without variables (the path cannot be taken): start from the
+    // latest facts, the conditions that led here.
+    if claim.is_constant() {
+        var k = facts.len
+        while k > 0 && facts.len - k < 8 {
+            k -= 1
+            for t in facts[k].terms { seen[t.0] = true }
+        }
+    }
     var used = Vec(bool).filled(facts.len, false)
     var changed = true
     while changed {

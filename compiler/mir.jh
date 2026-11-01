@@ -319,12 +319,14 @@ pub struct Body {
 }
 
 // What a contract's term names: a local's value, `*local` (an `inout`
-// parameter), or the length of a `str` or slice local; each as it is now,
-// or on entry to the function.
+// parameter), the length of a `str` or slice local, or an integer field of
+// a local, through it if it is a borrow (`self.len`, `(*_1).1`); each as
+// it is now, or on entry to the function.
 pub enum SpecVar {
     Local(u32)
     Deref(u32)
     Len(u32)
+    Field(u32, Vec(u32))
 }
 
 impl Clone for SpecVar {
@@ -333,6 +335,7 @@ impl Clone for SpecVar {
             Local(l) => SpecVar.Local(l)
             Deref(l) => SpecVar.Deref(l)
             Len(l) => SpecVar.Len(l)
+            Field(l, path) => SpecVar.Field(l, path.clone())
         }
     }
 }

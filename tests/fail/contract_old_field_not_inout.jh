@@ -1,0 +1,14 @@
+// `old` is for what an `inout` parameter reaches; another parameter's field
+// in `ensures` is already its value on entry.
+// error: `old` is for `inout` parameters
+struct P {
+    x: i64
+}
+
+fn f(p: P) -> i64
+    ensures result == old(p.x)
+{
+    p.x
+}
+
+fn main() { println(f(P { x: 1 })) }

@@ -382,17 +382,29 @@ and moves into the compiler once its trust boundary is stated.
    modularly at calls, with `inout` integers and locals lent to a call as
    variables, and the differential test tells failures under an unproved
    contract from bugs. `tests/fail` has a case for each malformed
-   contract. Left: unproved contracts as compile errors (with step 3),
-   and fields, `Vec` lengths and `||` in clauses.
+   contract. Fields, `Vec` lengths (`v.len()`) and `old` of them are
+   part of clauses (step 5). Left: unproved contracts as compile errors
+   (with step 3), and `||` in clauses.
 5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
    so that ordinary loops over vectors and slices have no bounds checks
-   left.
+   left. Started ([design](verification.md#fields-panics-and-calls)):
+   integer fields of locals and borrowed parameters are variables, so
+   clauses name them (`self.len`, `old(self.len)`, `x.len()`); a call to a
+   function that never returns is a check, removed when proved; and a call
+   to a small function that may panic proves the panic away itself, so
+   `Vec.index` states no `requires` and each `v[i]` keeps or loses its own
+   check. On the compiler, bounds and overflow checks proved went from 378
+   to 698. Left: the contracts in `std` (`Vec.len`, `push`, `pop`,
+   `as_slice`, `String`), which need a seed that reads fields in clauses
+   (step 7), and type invariants for the checks inside `std`'s own
+   methods.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:
    `jihoo verify compiler/main.jh` runs in CI and every check it keeps is
    listed with its reason, while `std` and compiler contracts raise the
-   share proved. Then the trusted parts verify themselves: the checker
+   share proved; the `verify` suite fails when it proves fewer of any kind
+   than `tests/verify/compiler.proved` records. Then the trusted parts verify themselves: the checker
    (`linear.jh`) and the generator (`vc.jh`) state contracts, proved by the
    compiler they are part of, until no check is left in the checker.
    Last, the checker's soundness (an accepted certificate means the facts

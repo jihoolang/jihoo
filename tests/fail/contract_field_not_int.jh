@@ -1,0 +1,17 @@
+// A field in a clause is an integer.
+// error: a contract reads integers, and this is a `Q`
+struct Q {
+    n: i64
+}
+
+struct P {
+    q: Q
+}
+
+fn f(p: P) -> i64
+    requires p.q > 0
+{
+    p.q.n
+}
+
+fn main() { println(f(P { q: Q { n: 1 } })) }

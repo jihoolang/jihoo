@@ -70,24 +70,33 @@ A clause compares integers, or joins comparisons with `&&`:
 ```text
 clause = term cmp term { "&&" term cmp term }
 cmp    = "<" | "<=" | ">" | ">=" | "==" | "!="
-term   = integer | name | "result" | "old" "(" name ")" | name ".len"
+term   = integer | place | place ".len" "(" ")" | "old" "(" place ")"
+       | "old" "(" place ".len" "(" ")" ")"
        | term ( "+" | "-" ) term | term "*" term | "-" term | "(" term ")"
+place  = ( name | "result" ) { "." field }
 ```
 
-- The names are integer parameters and variables, and `.len` of a slice or
-  `str`.
+- The names are integer parameters and variables, their integer fields
+  (`self.len`, `p.pos.line`, through a borrowed parameter too), and `.len`
+  of a slice or `str`, including one in a field. A field is named only
+  where the code could name it: `Vec`'s `len` field is private to `std`.
+- `x.len()` is what the `len` method of `x`'s type says it returns, with
+  an `ensures result == ...` over `self`: `v.len()` for a `Vec` is
+  `v.len`, and `s.len()` for a `String` is its bytes' length.
 - One side of `*` must be a constant: the verifier's arithmetic is linear.
 - **The arithmetic is exact.** `x + 1 <= hi` in a clause cannot overflow,
   and integers of different types compare by value: `i <= xs.len` holds
   for `i: u64`.
-- Calls, fields, `||` and `!` are not part of clauses yet.
+- Other calls, `||` and `!` are not part of clauses yet.
 
 ## How a call is proved
 
 Proofs are modular: a call proves the callee's `requires` with the
 arguments for its parameters, then assumes its `ensures`. A local lent to
 an `inout` parameter (`bump(&y)`) has a new value after the call, about
-which the callee's `ensures` says what it says, and nothing more:
+which the callee's `ensures` says what it says, and nothing more; so do the
+fields of a value lent that way (`v.push(x)` lends `v`), and the fields of
+a result:
 
 ```jihoo
 fn after_bump(n: i64) -> i64
@@ -100,7 +109,57 @@ fn after_bump(n: i64) -> i64
 }
 ```
 
+```jihoo
+struct Counter {
+    n: i64
+}
+
+impl Counter {
+    fn bump(inout self)
+        requires self.n < 100
+        ensures self.n == old(self.n) + 1
+    {
+        self.n += 1
+    }
+}
+
+fn twice(inout c: Counter)
+    requires 0 <= c.n && c.n < 50
+    ensures c.n == old(c.n) + 2
+{
+    c.bump()
+    c.bump()
+}
+```
+
 A recursive call assumes the `ensures` being proved, so a proof says what
 holds *if* the function returns.
+
+## Panics a call rules out
+
+`requires` is the caller's duty, so a function that checks its arguments
+itself and panics, as `Vec.index` does, states none: most of its calls
+could not prove one. Instead, a call to a small function that may panic
+is a check at the call: the callee's paths to its panic, over its
+parameters, must be impossible with what the caller knows. In
+
+```jihoo
+fn sum(v: Vec(i64)) -> i64 {
+    var s = 0
+    var i = 0
+    while i < v.len() {
+        s += v[i]
+        i += 1
+    }
+    s
+}
+```
+
+`v.len()`'s `ensures` relates its result to `v`'s length (`std` states
+its contracts once the compiler that builds it, the seed, reads fields in
+clauses), and `v[i]` cannot reach `Vec.index`'s panic: with `--verify` the call goes to a copy
+of `Vec.index` without the check, and a call that cannot rule it out keeps
+it. A panic that the function rules out itself, as after
+`if x == x + 1 { panic(...) }`, is removed from it.
 
 See [Grammar](../reference/grammar.md#files) for where clauses go.

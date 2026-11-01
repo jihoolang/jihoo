@@ -1,4 +1,5 @@
-// Fields are not part of contracts yet; `.len` of a slice or `str` is.
+// A clause compares integers: a struct is not one, though its integer
+// fields are.
 // error: a contract reads integers, and `p` is a
 struct P {
     x: i64
