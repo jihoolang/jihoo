@@ -403,8 +403,9 @@ and moves into the compiler once its trust boundary is stated.
    ([design](verification.md#type-invariants)), `invariant` clauses on a
    struct that every function assumes of the values it is given and every
    writer of the type proves; stating `Vec`'s found three ways to give it
-   a negative length. Left: `std` states them (after a release that parses
-   them), and slicing of `str`.
+   a negative length. `std` states `0 <= len && 0 <= cap` for `Vec`, and
+   the compiler proves 939 bounds and overflow checks. Left: slicing of
+   `str`.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:

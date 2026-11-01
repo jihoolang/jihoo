@@ -2,7 +2,12 @@
 
 import std.mem
 
-pub struct Vec(T: type) {
+// Never negative (docs/language/contracts.md#type-invariants). Bytes
+// borrowed from a literal (`String.from_static`) have `cap` 0 and `len`
+// above it.
+pub struct Vec(T: type)
+    invariant 0 <= self.len && 0 <= self.cap
+{
     ptr: *T
     len: i64
     cap: i64
@@ -16,7 +21,7 @@ impl(T: type) Vec(T) {
     }
 
     pub fn with_capacity(n: i64) -> Vec(T)
-        ensures result.len == 0
+        ensures result.len == 0 && n <= result.cap
     {
         var v = Vec(T).new()
         v.reserve(n)
@@ -163,7 +168,9 @@ impl(T: type) Vec(T) {
 
     // Drops the values from n on (all of them when n is negative).
     pub fn truncate(inout self, n: i64) {
-        while self.len > n && self.len > 0 {
+        while self.len > n && self.len > 0
+            invariant 0 <= self.len
+        {
             self.len -= 1
             unsafe { mem.drop_at(T, self.ptr + self.len) }
         }
@@ -262,7 +269,9 @@ impl(T: Clone) Vec(T) {
     pub fn filled(n: i64, x: T) -> Vec(T) {
         var v = Vec(T).with_capacity(n)
         var i = 0
-        while i < n {
+        while i < n
+            invariant 0 <= i && i <= v.cap && n <= v.cap
+        {
             unsafe { write(v.ptr + i, x.clone()) }
             i += 1
         }

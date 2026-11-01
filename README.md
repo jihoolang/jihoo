@@ -151,7 +151,8 @@ is in the compiler: `jihoo verify` proves bounds and overflow checks,
 panics that cannot be reached (also at each call to a small function that
 may panic, such as `v[i]`), and
 [contracts](docs/language/contracts.md) (`requires`, `ensures`, loop
-`invariant`s, over integers, fields and lengths) with linear certificates
+`invariant`s and structs' type invariants, over integers, fields and
+lengths, with `&&`, `||` and `!`) with linear certificates
 that a small trusted checker accepts, and `--verify` removes the proved
 checks from a build. It runs on the compiler's own source
 (`jihoo verify compiler/main.jh`), and CI fails if it proves fewer.

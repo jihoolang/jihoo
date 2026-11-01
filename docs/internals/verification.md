@@ -351,12 +351,15 @@ once, over `self`'s fields.
   those of the facts that do.
 
 On a local build with `invariant 0 <= self.len && 0 <= self.cap` on `Vec`,
-the compiler's checks proved went from 871 to 929, and the writers that
-failed to prove it were real bugs: `truncate` and `filled` with a negative
-count gave a negative length (`truncate` then dropped values before the
-buffer), and `reserve` with a negative count could copy borrowed bytes
-past what it allocated. `std` states the invariant once a release parses
-it.
+the writers that failed to prove it were real bugs: `truncate` and
+`filled` with a negative count gave a negative length (`truncate` then
+dropped values before the buffer), and `reserve` with a negative count
+could copy borrowed bytes past what it allocated. With 0.4.5 as the seed,
+`std` states it, with `with_capacity` ensuring room for `n` values and
+loop invariants in `filled` and `truncate`; every writer proves it, and
+the compiler's bounds and overflow checks proved go from 907 to 939, for
+about 21 seconds instead of 15. `len <= cap || cap == 0` holds too, but
+costs more than it proves yet.
 
 ## Open questions
 
