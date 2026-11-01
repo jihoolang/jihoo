@@ -1,0 +1,270 @@
+// Doubling a form 127 times: while a certificate's weights fit the
+// checker's bounds (2^50) each `+` is proved, since `n` is 0; past them
+// the check is kept, and past 2^65 the result is not followed, instead of
+// the verifier's own numbers overflowing.
+
+fn grow(n: i64) -> i64
+    requires n == 0
+{
+    var x = n
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x = x + x
+    x
+}
+
+fn main() {
+    println(grow(0))
+}
+
+//> 10:9: proved integer overflow in grow
+//> 11:9: proved integer overflow in grow
+//> 12:9: proved integer overflow in grow
+//> 13:9: proved integer overflow in grow
+//> 14:9: proved integer overflow in grow
+//> 15:9: proved integer overflow in grow
+//> 16:9: proved integer overflow in grow
+//> 17:9: proved integer overflow in grow
+//> 18:9: proved integer overflow in grow
+//> 19:9: proved integer overflow in grow
+//> 20:9: proved integer overflow in grow
+//> 21:9: proved integer overflow in grow
+//> 22:9: proved integer overflow in grow
+//> 23:9: proved integer overflow in grow
+//> 24:9: proved integer overflow in grow
+//> 25:9: proved integer overflow in grow
+//> 26:9: proved integer overflow in grow
+//> 27:9: proved integer overflow in grow
+//> 28:9: proved integer overflow in grow
+//> 29:9: proved integer overflow in grow
+//> 30:9: proved integer overflow in grow
+//> 31:9: proved integer overflow in grow
+//> 32:9: proved integer overflow in grow
+//> 33:9: proved integer overflow in grow
+//> 34:9: proved integer overflow in grow
+//> 35:9: proved integer overflow in grow
+//> 36:9: proved integer overflow in grow
+//> 37:9: proved integer overflow in grow
+//> 38:9: proved integer overflow in grow
+//> 39:9: proved integer overflow in grow
+//> 40:9: proved integer overflow in grow
+//> 41:9: proved integer overflow in grow
+//> 42:9: proved integer overflow in grow
+//> 43:9: proved integer overflow in grow
+//> 44:9: proved integer overflow in grow
+//> 45:9: proved integer overflow in grow
+//> 46:9: proved integer overflow in grow
+//> 47:9: proved integer overflow in grow
+//> 48:9: proved integer overflow in grow
+//> 49:9: proved integer overflow in grow
+//> 50:9: proved integer overflow in grow
+//> 51:9: proved integer overflow in grow
+//> 52:9: proved integer overflow in grow
+//> 53:9: proved integer overflow in grow
+//> 54:9: proved integer overflow in grow
+//> 55:9: proved integer overflow in grow
+//> 56:9: proved integer overflow in grow
+//> 57:9: proved integer overflow in grow
+//> 58:9: proved integer overflow in grow
+//> 59:9: proved integer overflow in grow
+//> 60:9: kept integer overflow in grow (argument)
+//> 61:9: kept integer overflow in grow (argument)
+//> 62:9: kept integer overflow in grow (argument)
+//> 63:9: kept integer overflow in grow (argument)
+//> 64:9: kept integer overflow in grow (argument)
+//> 65:9: kept integer overflow in grow (argument)
+//> 66:9: kept integer overflow in grow (argument)
+//> 67:9: kept integer overflow in grow (argument)
+//> 68:9: kept integer overflow in grow (argument)
+//> 69:9: kept integer overflow in grow (argument)
+//> 70:9: kept integer overflow in grow (argument)
+//> 71:9: kept integer overflow in grow (argument)
+//> 72:9: kept integer overflow in grow (argument)
+//> 73:9: kept integer overflow in grow (argument)
+//> 74:9: kept integer overflow in grow (argument)
+//> 75:9: kept integer overflow in grow (unstated)
+//> 76:9: kept integer overflow in grow (unstated)
+//> 77:9: kept integer overflow in grow (unstated)
+//> 78:9: kept integer overflow in grow (unstated)
+//> 79:9: kept integer overflow in grow (unstated)
+//> 80:9: kept integer overflow in grow (unstated)
+//> 81:9: kept integer overflow in grow (unstated)
+//> 82:9: kept integer overflow in grow (unstated)
+//> 83:9: kept integer overflow in grow (unstated)
+//> 84:9: kept integer overflow in grow (unstated)
+//> 85:9: kept integer overflow in grow (unstated)
+//> 86:9: kept integer overflow in grow (unstated)
+//> 87:9: kept integer overflow in grow (unstated)
+//> 88:9: kept integer overflow in grow (unstated)
+//> 89:9: kept integer overflow in grow (unstated)
+//> 90:9: kept integer overflow in grow (unstated)
+//> 91:9: kept integer overflow in grow (unstated)
+//> 92:9: kept integer overflow in grow (unstated)
+//> 93:9: kept integer overflow in grow (unstated)
+//> 94:9: kept integer overflow in grow (unstated)
+//> 95:9: kept integer overflow in grow (unstated)
+//> 96:9: kept integer overflow in grow (unstated)
+//> 97:9: kept integer overflow in grow (unstated)
+//> 98:9: kept integer overflow in grow (unstated)
+//> 99:9: kept integer overflow in grow (unstated)
+//> 100:9: kept integer overflow in grow (unstated)
+//> 101:9: kept integer overflow in grow (unstated)
+//> 102:9: kept integer overflow in grow (unstated)
+//> 103:9: kept integer overflow in grow (unstated)
+//> 104:9: kept integer overflow in grow (unstated)
+//> 105:9: kept integer overflow in grow (unstated)
+//> 106:9: kept integer overflow in grow (unstated)
+//> 107:9: kept integer overflow in grow (unstated)
+//> 108:9: kept integer overflow in grow (unstated)
+//> 109:9: kept integer overflow in grow (unstated)
+//> 110:9: kept integer overflow in grow (unstated)
+//> 111:9: kept integer overflow in grow (unstated)
+//> 112:9: kept integer overflow in grow (unstated)
+//> 113:9: kept integer overflow in grow (unstated)
+//> 114:9: kept integer overflow in grow (unstated)
+//> 115:9: kept integer overflow in grow (unstated)
+//> 116:9: kept integer overflow in grow (unstated)
+//> 117:9: kept integer overflow in grow (unstated)
+//> 118:9: kept integer overflow in grow (unstated)
+//> 119:9: kept integer overflow in grow (unstated)
+//> 120:9: kept integer overflow in grow (unstated)
+//> 121:9: kept integer overflow in grow (unstated)
+//> 122:9: kept integer overflow in grow (unstated)
+//> 123:9: kept integer overflow in grow (unstated)
+//> 124:9: kept integer overflow in grow (unstated)
+//> 125:9: kept integer overflow in grow (unstated)
+//> 126:9: kept integer overflow in grow (unstated)
+//> 127:9: kept integer overflow in grow (unstated)
+//> 128:9: kept integer overflow in grow (unstated)
+//> 129:9: kept integer overflow in grow (unstated)
+//> 130:9: kept integer overflow in grow (unstated)
+//> 131:9: kept integer overflow in grow (unstated)
+//> 132:9: kept integer overflow in grow (unstated)
+//> 133:9: kept integer overflow in grow (unstated)
+//> 134:9: kept integer overflow in grow (unstated)
+//> 135:9: kept integer overflow in grow (unstated)
+//> 136:9: kept integer overflow in grow (unstated)

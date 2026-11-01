@@ -482,6 +482,16 @@ fn scaled(x: Lin, k: i128) -> Option(Lin) {
     Some(x.scale(k))
 }
 
+// `x + k * y` (`k` is 1 or -1) while its numbers stay within the checker's
+// bounds: each side is at most 2^65, so the sum cannot overflow, and a
+// larger result is not followed.
+fn sum(x: Lin, y: Lin, k: i128) -> Option(Lin) {
+    if x.magnitude() > linear.MAX_VALUE || y.magnitude() > linear.MAX_VALUE { return None }
+    let r = x.combine(1, y, k)
+    if r.magnitude() > linear.MAX_VALUE { return None }
+    Some(r)
+}
+
 // The form with each variable replaced by its value on this path.
 fn value(p: Path, x: Lin) -> Option(Lin) {
     var out = Lin.num(x.constant)
@@ -740,14 +750,14 @@ fn assign(inout g: Gen, f: Function, inout p: Path, dst: i64, rv: Rvalue) {
         }
         Add(a, b) => {
             let r = match (term(&g, f, p, a, dst), term(&g, f, p, b, dst)) {
-                (Some(x), Some(y)) => Some(x.plus(y))
+                (Some(x), Some(y)) => sum(x, y, 1)
                 _ => None
             }
             arithmetic(&g, f, p, dst, r)
         }
         Sub(a, b) => {
             let r = match (term(&g, f, p, a, dst), term(&g, f, p, b, dst)) {
-                (Some(x), Some(y)) => Some(x.minus(y))
+                (Some(x), Some(y)) => sum(x, y, -1)
                 _ => None
             }
             arithmetic(&g, f, p, dst, r)
