@@ -3472,6 +3472,23 @@ fn compile_inner(
         }
         None => {}
     }
+    // The `invariant` of each struct instance, for verification.
+    var invariants = Map(u32, Vec(mir.Clause)).new()
+    for i in 0..s.types.adts.len() {
+        let decl = s.types.adts[i].decl as i64
+        let Struct(sd) = s.adts[decl].kind else { continue }
+        if at(sd).invariants.len() == 0 { continue }
+        let t = s.types.intern(TyKind.Adt(i as u32))
+        let module = s.adts[decl].module
+        let span = s.adts[decl].span
+        match s.type_invariant(t, module, at(sd).invariants.as_slice(), span) {
+            Ok(cs) => {
+                let _ = invariants.insert(t, cs)
+            }
+            Err(d) => s.errors.push(d)
+        }
+    }
+    s.run()?
     // Literal checks run last, so that the functions they need, and only
     // those, are the ones made from here on; the program leaves them out.
     let lowered = s.out.len()
@@ -3519,6 +3536,7 @@ fn compile_inner(
         checked: checked
         statics: statics
         drop_impls: drop_impls
+        invariants: invariants
         target: tgt
         codegen: codegen
     })

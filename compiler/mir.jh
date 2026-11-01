@@ -476,6 +476,9 @@ pub struct Program {
     pub statics: Vec(StaticDef)
     // The `drop` function of each type with a `Drop` impl.
     pub drop_impls: Map(u32, u32)
+    // The `invariant` of each struct type that has one, over `self` as
+    // local 0 (`SpecVar.Field(0, path)`).
+    pub invariants: Map(u32, Vec(Clause))
     pub target: target.Target
     // Kernel settings: no red zone, general registers only.
     pub codegen: target.Codegen

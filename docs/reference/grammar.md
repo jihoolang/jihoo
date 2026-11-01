@@ -58,7 +58,8 @@ clause   = ( "requires" | "ensures" ) cond
 params   = "(" [ param { "," param } [ "," ] ] ")"
 param    = "..."                                   (last; `extern fn` only)
          | [ "inout" | "sink" | "comptime" ] name [ ":" type { "+" type } ]
-struct   = "struct" name [ params ] "{" { [ "pub" ] name ":" type sep } "}"
+struct   = "struct" name [ params ] { invariant }
+           "{" { [ "pub" ] name ":" type sep } "}"
 enum     = "enum" name [ params ] "{" { name [ "(" type { "," type } ")" ] sep } "}"
 impl     = "impl" [ params ] type [ "for" type ] "{" { item | ";" } "}"
 trait    = "trait" name [ params ] [ ":" type { "+" type } ] "{" { item | ";" } "}"

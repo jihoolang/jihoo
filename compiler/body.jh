@@ -174,11 +174,22 @@ enum ClauseAt {
     Requires
     Ensures
     Invariant
+    // A struct's `invariant`, over `self`.
+    Type
 }
 
 impl Eq for ClauseAt {
     fn eq(self, other: ClauseAt) -> bool {
         self as i64 == other as i64
+    }
+}
+
+// What a clause that names `self` alone may not name.
+fn only_self(at: ClauseAt) -> str {
+    if at == ClauseAt.Type {
+        "a type's `invariant` can only name `self`, its fields and `len()`"
+    } else {
+        "the `ensures` of a `len` that a contract calls can only name `self`"
     }
 }
 
@@ -790,9 +801,9 @@ impl sema.Sema {
             }
         }
         var requires = Vec(mir.Clause).new()
-        for e in d.requires { self.clauses(fb, e, ClauseAt.Requires, &requires)? }
+        for e in d.requires { self.clauses(fb, e, ClauseAt.Requires, None, &requires)? }
         var ensures = Vec(mir.Clause).new()
-        for e in d.ensures { self.clauses(fb, e, ClauseAt.Ensures, &ensures)? }
+        for e in d.ensures { self.clauses(fb, e, ClauseAt.Ensures, None, &ensures)? }
         fb.body.contract.requires = requires
         fb.body.contract.ensures = ensures
         Ok(())
@@ -802,7 +813,7 @@ impl sema.Sema {
     // those declared before the loop.
     fn invariants(inout self, inout fb: Fb, head: u32, es: [ast.Expr]) -> Result((), Diag) {
         var out = Vec(mir.Clause).new()
-        for e in es { self.clauses(fb, e, ClauseAt.Invariant, &out)? }
+        for e in es { self.clauses(fb, e, ClauseAt.Invariant, None, &out)? }
         for c in out.into_iter() { fb.body.contract.invariants.push((head, c)) }
         Ok(())
     }
@@ -814,16 +825,17 @@ impl sema.Sema {
         fb: Fb,
         e: ast.Expr,
         at: ClauseAt,
+        this: Option(SpecPlace),
         inout out: Vec(mir.Clause)
     ) -> Result((), Diag) {
         match e.kind {
             Binary(op, a, b) => if op == Op.LogAnd {
-                self.clauses(fb, a.deref(), at, &out)?
-                return self.clauses(fb, b.deref(), at, &out)
+                self.clauses(fb, a.deref(), at, this.clone(), &out)?
+                return self.clauses(fb, b.deref(), at, this, &out)
             }
             _ => {}
         }
-        var d = self.clause_dnf(fb, e, at, false)?
+        var d = self.clause_dnf(fb, e, at, this, false)?
         // A conjunction, as from `!(a || b)`, is a clause per comparison.
         if d.len() == 1 {
             for c in d.pop().unwrap().into_iter() {
@@ -846,18 +858,19 @@ impl sema.Sema {
         fb: Fb,
         e: ast.Expr,
         at: ClauseAt,
+        this: Option(SpecPlace),
         negated: bool
     ) -> Result(Vec(Vec(mir.Compare)), Diag) {
         let what = "a contract clause compares integers, or joins comparisons with `&&`, `||` and `!`"
         match e.kind {
             Unary(op, x) => match op {
-                Not => return self.clause_dnf(fb, x.deref(), at, !negated)
+                Not => return self.clause_dnf(fb, x.deref(), at, this, !negated)
                 _ => {}
             }
             Binary(op, a, b) => {
                 if op == Op.LogAnd || op == Op.LogOr {
-                    let x = self.clause_dnf(fb, a.deref(), at, negated)?
-                    let y = self.clause_dnf(fb, b.deref(), at, negated)?
+                    let x = self.clause_dnf(fb, a.deref(), at, this.clone(), negated)?
+                    let y = self.clause_dnf(fb, b.deref(), at, this, negated)?
                     let d = if (op == Op.LogAnd) != negated {
                         clause_and(x.as_slice(), y.as_slice())
                     } else {
@@ -876,8 +889,8 @@ impl sema.Sema {
                 }
                 if op == Op.Lt || op == Op.Le || op == Op.Gt || op == Op.Ge || op == Op.Eq ||
                     op == Op.Ne {
-                    let x = self.spec(fb, a.deref(), at)?
-                    let y = self.spec(fb, b.deref(), at)?
+                    let x = self.spec_in(fb, a.deref(), at, this.clone())?
+                    let y = self.spec_in(fb, b.deref(), at, this)?
                     let o = if negated { negate_cmp(op) } else { op }
                     var one = Vec(mir.Compare).new()
                     one.push(mir.Compare { op: o, a: x, b: y, span: e.span })
@@ -893,8 +906,21 @@ impl sema.Sema {
 
     // An integer term of a clause, as a constant plus multiples of what it
     // names.
-    fn spec(inout self, fb: Fb, e: ast.Expr, at: ClauseAt) -> Result(mir.Spec, Diag) {
-        self.spec_in(fb, e, at, None)
+    // A struct's `invariant` clauses for its instance `t`, over `self` as
+    // local 0, naming fields as the struct's module may.
+    pub fn type_invariant(
+        inout self,
+        t: u32,
+        module: u32,
+        es: [ast.Expr],
+        span: Span
+    ) -> Result(Vec(mir.Clause), Diag) {
+        let env = Env { module, names: Vec(sema.EnvName).new(), self_ty: Some(t) }
+        let fb = Fb.new(0, env, t, ast.RetMode.Value, span)
+        let this = SpecPlace { local: mir.RET, path: Vec(u32).new(), ty: t, module, depth: 0 }
+        var out = Vec(mir.Clause).new()
+        for e in es { self.clauses(fb, e, ClauseAt.Type, Some(this.clone()), &out)? }
+        Ok(out)
     }
 
     // `this` is what `self` names in the `ensures` of a `len` method that a
@@ -938,7 +964,7 @@ impl sema.Sema {
                 if this.is_some() {
                     return Err(err(
                         e.span,
-                        "the `ensures` of a `len` that a contract calls can only name `self`"
+                        only_self(at)
                     ))
                 }
                 return self.spec_name(fb, n.as_str(), e.span, at, false)
@@ -995,7 +1021,7 @@ impl sema.Sema {
                         if n == "self" { return Ok(Some(p.clone())) }
                         return Err(err(
                             e.span,
-                            "the `ensures` of a `len` that a contract calls can only name `self`"
+                            only_self(at)
                         ))
                     }
                     None => {}

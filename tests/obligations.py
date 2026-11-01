@@ -58,6 +58,20 @@ fn apart(x: i64) -> i64
     x
 }
 
+struct Span2
+    invariant 0 <= self.lo && self.lo <= self.hi
+{
+    lo: i64
+    hi: i64
+}
+
+fn width(s: Span2) -> i64 { s.hi - s.lo }
+
+fn widen(inout s: Span2) {
+    if s.hi < 1000 { s.hi += 1 }
+    width(s)
+}
+
 fn widths(a: u8, b: i32) -> u64 {
     let big: u64 = 18446744073709551615
     big - a as u64 + b as u64
@@ -97,6 +111,39 @@ def parse(text):
 
 
 CLAUSES = {"requires", "ensures", "invariant"}
+HOLDS = {"holds-in", "holds-out"}
+
+
+def check_compare(x, variables, where):
+    assert x[0] in ["lt", "le", "gt", "ge", "eq", "ne"], where
+    for side in x[1:]:
+        assert side[0] in ["lin", "opaque"], where
+        if side[0] == "lin":
+            int(side[1])
+            for v, k in side[2:]:
+                assert 0 <= int(v) < variables, where
+                int(k)
+
+
+def check_fact(x, variables, where):
+    """(op A B), or (or (and (op A B)...)... [(opaque escaped)])."""
+    if x[0] != "or":
+        check_compare(x, variables, where)
+        return
+    assert len(x) >= 2, where
+    for alt in x[1:]:
+        if alt[0] == "opaque":
+            continue
+        assert alt[0] == "and" and len(alt) >= 2, where
+        for c in alt[1:]:
+            check_compare(c, variables, where)
+
+
+def check_holds(h, variables, where):
+    """(TYPE FACT): a type's invariant at a place."""
+    assert len(h) == 2, where
+    int(h[0])
+    check_fact(h[1], variables, where)
 
 
 def functions(text):
@@ -114,7 +161,13 @@ def functions(text):
             assert locals_[1 + int(x[0])][0] == "int", (name, x)
             [int(k) for k in x[2 + (x[2] == "*"):]]
         clauses = [x for x in f[9:] if x[0] in CLAUSES]
-        blocks = f[9 + len(clauses):]
+        holds = [x for x in f[9 + len(clauses):] if x[0] in HOLDS]
+        blocks = f[9 + len(clauses) + len(holds):]
+        # (holds-in (TYPE FACT)...), (holds-out ...): types' invariants.
+        for h in holds:
+            assert len(h) >= 2, (name, h)
+            for x in h[1:]:
+                check_holds(x, variables, (name, h))
         for c in clauses:
             # (requires (op A B) (at lo hi)); (invariant BLOCK (op A B) (at lo hi));
             # with `||`, (or (and (op A B)...)...) in place of (op A B).
@@ -122,24 +175,15 @@ def functions(text):
             assert len(body) == 2 and body[1][0] == "at", (name, c)
             if body[0][0] == "or":
                 assert len(body[0]) >= 3, (name, c)
-                compares = []
-                for alt in body[0][1:]:
-                    assert alt[0] == "and" and len(alt) >= 2, (name, c)
-                    compares += alt[1:]
-            else:
-                compares = [body[0]]
-            for x in compares:
-                assert x[0] in ["lt", "le", "gt", "ge", "eq", "ne"], (name, c)
-                for side in x[1:]:
-                    assert side[0] in ["lin", "opaque"], (name, c)
-                    if side[0] == "lin":
-                        int(side[1])
-                        for v, k in side[2:]:
-                            assert 0 <= int(v) < variables, (name, c)
-                            int(k)
+            check_fact(body[0], variables, (name, c))
         for i, b in enumerate(blocks):
             assert b[0] == "block" and b[1] == str(i), (name, b[:2])
             for s in b[2:-1]:
+                # (check (TYPE FACT) (at lo hi)): a destructor's invariant, in a writer.
+                if s[0] == "check":
+                    assert len(s) == 3 and s[2][0] == "at", (name, s)
+                    check_holds(s[1], variables, (name, s))
+                    continue
                 assert s[0] == "set" and int(s[1]) < variables, (name, s)
                 assert len(s) == 3 or (len(s) == 4 and s[3][0] == "at"), (name, s)
             term = b[-1]
@@ -148,11 +192,15 @@ def functions(text):
             if term[0] == "assert":
                 assert len(term) == 5 and term[4][0] == "at", (name, term)
             if term[0] == "call":
-                parts = [p[0] for p in term[3:] if p[0] not in ("changes", "never", "fields")]
+                optional = ("changes", "never", "fields", "before", "after")
+                parts = [p[0] for p in term[3:] if p[0] not in optional]
                 assert parts in [["fn", "args", "at"], ["args", "at"]], (name, term)
                 for p in term[3:]:
                     if p[0] == "changes":
                         assert all(int(v) < variables for v in p[1:]), (name, term)
+                    if p[0] in ("before", "after"):
+                        for x in p[1:]:
+                            check_holds(x, variables, (name, term))
             assert term[0] in ["goto", "switch", "any", "assert", "call", "trap", "return",
                                "unreachable"], (name, term)
             for t in targets:
@@ -162,7 +210,8 @@ def functions(text):
         for v, e in entries[1:]:
             assert locals_[1 + int(v)] == locals_[1 + int(e)], (name, v, e)
         out[name] = {"locals": locals_[1:], "lengths": lengths[1:], "derefs": derefs[1:],
-                     "fields": fields[1:], "entries": entries[1:], "clauses": clauses, "blocks": blocks}
+                     "fields": fields[1:], "entries": entries[1:], "clauses": clauses, "holds": holds,
+                     "blocks": blocks}
     return out
 
 
@@ -249,6 +298,15 @@ def main():
         x, zero, ten = ["lin", "0", ["1", "1"]], ["lin", "0"], ["lin", "10"]
         a = debug["apart"]["clauses"][0][:2]
         assert a == ["requires", ["or", ["and", ["lt", x, zero]], ["and", ["gt", x, ten]]]], a
+
+        # A type's invariant: assumed of a parameter's fields on entry, and
+        # in a writer, proved on return and of what a call is given.
+        w = debug["width"]
+        assert [h[0] for h in w["holds"]] == ["holds-in"] and len(w["holds"][0]) == 3, w["holds"]
+        widen = debug["widen"]
+        assert [h[0] for h in widen["holds"]] == ["holds-in", "holds-out"], widen["holds"]
+        calls = list(forms(widen["blocks"], "call"))
+        assert any(p[0] == "before" for c in calls for p in c[3:]), calls
 
         # Every opaque value says why: a load through the slice's pointer.
         assert ["set", "10", ["use", ["opaque", "load"]]] in s["blocks"][6], s["blocks"][6]

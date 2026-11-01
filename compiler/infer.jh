@@ -184,6 +184,7 @@ fn interesting(f: vc.Function) -> Vec(bool) {
                     }
                     _ => {}
                 }
+                Check(_, _) => {}
             }
         }
     }
@@ -198,6 +199,7 @@ fn assigned_in(f: vc.Function) -> Vec(i64) {
         for s in b.stmts {
             match s {
                 Assign(dst, _, _, _) => here.push(dst)
+                Check(_, _) => {}
             }
         }
         match b.term {

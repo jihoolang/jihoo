@@ -490,7 +490,14 @@ Each clause is `(requires (op A B) (at lo hi))`, `(ensures ...)` or
 `(invariant BLOCK (op A B) (at lo hi))`, where `BLOCK` is the loop's head
 and `op` one of `lt le gt ge eq ne`; a clause with `||` has
 `(or (and (op A B)...)...)` in place of `(op A B)`, one of whose
-conjunctions holds. A side is `(lin c (v k)...)`, the
+conjunctions holds. Types' [invariants](../language/contracts.md#type-invariants)
+are `(holds-in (TYPE FACT)...)`, assumed on entry, and in a writer
+`(holds-out ...)`, proved on return, after the clauses; a call has
+`(before ...)` (a writer's obligations) and `(after ...)` (what holds once
+it returns), and a writer's drop `(check (TYPE FACT) (at lo hi))`. `TYPE` is
+the type's number, and `FACT` a comparison or `(or ...)` as in a clause,
+over the variables themselves, with `(opaque escaped)` for a case the model
+cannot state. A side is `(lin c (v k)...)`, the
 constant `c` plus `k` times each variable `v`, computed exactly: `result`
 is variable 0, and a parameter in `ensures` or `old(x)` is its entry
 variable. A side over a variable the model does not have is

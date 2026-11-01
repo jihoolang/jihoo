@@ -243,6 +243,7 @@ impl Dump {
                 self.s("(struct ")
                 self.s(sd.name.as_str())
                 self.params(sd.params)
+                self.clauses("invariant", sd.invariants)
                 self.s(" [")
                 for i, f in sd.fields {
                     if i > 0 {
