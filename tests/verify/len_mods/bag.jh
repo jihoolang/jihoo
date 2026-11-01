@@ -1,0 +1,18 @@
+// A type whose length is a private field, read through a public `len`.
+pub struct Bag {
+    n: i64
+}
+
+impl Bag {
+    pub fn new(n: i64) -> Bag
+        ensures result.len() == n
+    {
+        Bag { n: n }
+    }
+
+    pub fn len(self) -> i64
+        ensures result == self.n
+    {
+        self.n
+    }
+}

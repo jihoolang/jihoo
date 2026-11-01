@@ -1,0 +1,17 @@
+// `b.len()` in a contract is what `Bag.len`'s `ensures` says, `self.n`,
+// though `n` is private to `Bag`'s module: the method's own module names
+// it, not the caller's.
+import len_mods.bag
+
+fn half(b: bag.Bag) -> i64
+    requires 0 <= b.len() && b.len() < 1000
+    ensures result == b.len() + 1
+{
+    b.len() + 1
+}
+
+fn main() {
+    println(half(bag.Bag.new(4)))
+}
+
+//> 10:5: proved integer overflow in half

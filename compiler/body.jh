@@ -215,18 +215,30 @@ fn same_spec_var(a: mir.SpecTerm, b: mir.SpecTerm) -> bool {
 }
 
 // A field a clause names: a local, then the fields below it, through the
-// local's borrow if it is one; `ty` is the last field's type.
+// local's borrow if it is one; `ty` is the last field's type. `module` is
+// where the fields are named, whose privacy applies: the clause's, or that
+// of a `len` method whose `ensures` the clause's `x.len()` expands, and
+// `depth` how many such expansions led here.
 struct SpecPlace {
     local: u32
     path: Vec(u32)
     ty: u32
+    module: u32
+    depth: i64
 }
 
 impl Clone for SpecPlace {
     fn clone(self) -> SpecPlace {
-        SpecPlace { local: self.local, path: self.path.clone(), ty: self.ty }
+        SpecPlace {
+            local: self.local, path: self.path.clone(), ty: self.ty, module: self.module,
+            depth: self.depth
+        }
     }
 }
+
+// `x.len()` expansions inside one another, at most: a `len` whose
+// `ensures` calls `len()` again would never end.
+const MAX_LEN_DEPTH: i64 = 8
 
 // The verifier's numbers stay within 2^64 either way.
 fn spec_fits(v: i128) -> bool {
@@ -915,7 +927,9 @@ impl sema.Sema {
                     Ref(x) | RefMut(x) => x
                     _ => ty
                 }
-                Ok(Some(SpecPlace { local: l, path: Vec(u32).new(), ty: inner }))
+                Ok(Some(SpecPlace {
+                    local: l, path: Vec(u32).new(), ty: inner, module: fb.env.module, depth: 0
+                }))
             }
             Field(x, name) => {
                 let Some(base) = self.spec_path(fb, x.deref(), at, this)? else { return Ok(None) }
@@ -955,7 +969,7 @@ impl sema.Sema {
         }
         let Some(f) = found else { return Ok(None) }
         let decl = self.types.adts[a as i64].decl
-        if !f.2 && !self.same_package(self.adts[decl as i64].module, fb.env.module) {
+        if !f.2 && !self.same_package(self.adts[decl as i64].module, p.module) {
             return Err(err(span, ("the field `" + name + "` of `" +
                 self.types.adts[a as i64].name.as_str() + "` is private").as_str()))
         }
@@ -1053,6 +1067,16 @@ impl sema.Sema {
         }
         let what = "`len()` in a contract needs the `len` method to say `ensures result == ...`"
         let Some(hit) = self.find_method(p.ty, "len")? else { return Err(err(e.span, what)) }
+        if p.depth >= MAX_LEN_DEPTH {
+            return Err(err(
+                e.span,
+                "this `len()` expands into itself: a `len` method's `ensures` calls `len()` again"
+            ))
+        }
+        // The method's term names fields as the method's module may.
+        var p = p
+        p.module = self.fns[hit.imp as i64].module
+        p.depth += 1
         let d = sema.at(self.fns[hit.imp as i64].decl)
         for c in d.ensures {
             match c.kind {

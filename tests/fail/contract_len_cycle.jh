@@ -1,0 +1,16 @@
+// A `len` whose `ensures` calls `len()` again expands forever: an error,
+// not a crash.
+// error: this `len()` expands into itself
+struct Loop {
+    n: i64
+}
+
+impl Loop {
+    fn len(self) -> i64
+        ensures result == self.len()
+    {
+        self.n
+    }
+}
+
+fn main() { println(Loop { n: 1 }.len()) }
