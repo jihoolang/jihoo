@@ -18,7 +18,8 @@ Use complementary applications to guide changes: the self-hosted
 compiler exercises large programs and generic data structures; Banana, the
 sibling `../banana` terminal, exercises C callbacks, graphics resources,
 streaming binary input and PTYs; jihoo-proofs exercises compile-time
-evaluation and its resource limits. A need found in an application starts as a
+evaluation and its resource limits, and is where verification (0.5) and
+proofs as a library (0.6) begin. A need found in an application starts as a
 small reproducer. Fix it in a library when possible, and change the language
 only when the existing model cannot express the required behavior safely.
 
@@ -320,6 +321,74 @@ compiling with a diagnostic, on both targets in both profiles; the
 fusion benchmark and the compile-time baseline show no regression;
 README's Status and the language pages describe 0.4.
 
+### 6. Verification (0.5)
+
+Research ([design](verification.md)): 0.5 proves, while compiling, that
+the checks MIR inserts cannot fail and that functions meet their contracts.
+Proofs are checked and erased; a proved check is removed. A small trusted
+checker accepts certificates that untrusted provers produce, and the
+obligations come from MIR after `elab` and `check`. The work starts in
+[jihoo-proofs/obligations](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations)
+and moves into the compiler once its trust boundary is stated.
+
+1. Started: obligations from a model of MIR's integer part, proved by
+   Fourier–Motzkin and checked as Farkas certificates. `clamp`'s
+   `ensures` and `sum`'s bounds and counter-overflow checks (from
+   `emit-mir`, by hand) are proved, `s + xs[i]` is not, and ten rejection
+   cases pass. The finding: the two functions take 1.35 and 3.96 million
+   interpreter steps, against 1 million per compile-time evaluation.
+2. The generator on real MIR: an `emit-obligations` dump, every
+   `assert` and checked `+ - *` of a function, in the debug and `--release`
+   overflow modes. Tested against the interpreter: on random inputs, a proved
+   check never fails.
+3. The checker in the compiler: a pass after `check` that runs the trusted
+   checker as compiled code, outside the interpreter's budget, and removes
+   proved checks. `--verify-report` lists each check as proved or kept.
+   Library proofs keep using compile-time evaluation, so its cost is
+   reduced alongside (the `Vec` operations that dominate the experiment).
+4. Contracts: `requires`/`ensures` on functions, `invariant` on loops, and
+   `old(x)` for `inout` parameters. A call proves the callee's `requires`
+   and assumes its `ensures`. An unproved contract is a compile error;
+   untrusted inference proposes the invariants of loops over `0..n`.
+5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
+   so that ordinary loops over vectors and slices have no bounds checks
+   left.
+6. The release: 0.5.0 is tagged and the seed moves to it; the compiler may
+   then use contracts itself.
+
+Completion: every `tests/run` program compiles with the same output, with
+or without verification; proved checks are absent from optimized IR and
+unproved ones remain. `tests/fail` has a case for every rejected contract
+(wrong `ensures`, missing `requires` at a call, an invariant that fails on
+entry or is not preserved, an off-by-one loop). The generator's
+interpreter tests run in CI on both targets, and the trusted parts and their
+sizes are listed in the design.
+
+### 7. Proofs as a library (0.6)
+
+0.6 makes jihoo-proofs' kernel and proof development an importable
+library, and uses it for the lemmas 0.5's contracts need: properties of
+integers, sequences and the program's own data, proved by induction
+(`sum(xs[0..i])` and the like). Mathematics beyond what programs need
+grows from there as a library on compile-time evaluation; jihoo's type
+system does not become a proof assistant's.
+
+1. The Horn kernel and the schematic checker as modules with a stable API,
+   without `-I` paths (jihoo-proofs roadmap, step 4), and the state-machine
+   consumer that binds a proof to the table a program runs (its step 3).
+2. Lemmas in contracts: an `ensures` that needs induction names a lemma
+   proved in the library; the checker accepts the call only with the lemma's
+   certificate.
+3. Compile-time evaluation fast enough for real developments, or a limit
+   the program chooses, measured with
+   [resource reports](../reference/command-line.md#compile-time-resource-reports).
+4. A theory library: natural numbers, integers, lists and slices, and the
+   facts `std`'s contracts use.
+
+Completion: a program proves a loop's `ensures` with a lemma by induction,
+from imported library code, and every rejection case of the kernel and the
+proof development runs in this repository's suites.
+
 ## 0.1: the rewrite
 
 Done ([design](redesign.md)):
@@ -493,11 +562,10 @@ pointer without `(*p)`.
 - **Proofs and checked generation**: jihoo-proofs checks general theorems
   by structural induction and ground certificates bound to generated codec
   tables, during compile-time evaluation and without language syntax or
-  runtime semantics. It does not verify arbitrary generated function bodies.
-- **Contracts** (which v0 had), checked by a kernel and the compile-time
-  interpreter where possible. Translating jihoo semantics and contracts into
-  trusted theories and caller-selected goals needs an explicit semantics;
-  jihoo-proofs plans a bounded executable model first.
+  runtime semantics. It does not verify arbitrary generated function bodies;
+  [0.6](#7-proofs-as-a-library-06) makes it a library.
+- **Contracts** (which v0 had) are [0.5](#6-verification-05): obligations
+  from MIR, whose semantics the generator states, checked by a small kernel.
 - **Generic derives**: inferred derived bounds on generic types and
   user-written derives, when concrete library users need them.
 - **Dynamic dispatch extensions**: traits with parameters, methods returning
