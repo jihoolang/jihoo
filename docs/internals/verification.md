@@ -64,7 +64,7 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 | Part | Trusted | Why |
 | --- | --- | --- |
 | The checker (`linear.jh`, 120 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 1,430 lines, and the model `obligations.jh` builds from MIR, 1,820) | yes | it states what MIR means: a wrong rule proves a false thing |
+| The obligation generator (`vc.jh`, 1,540 lines, and the model `obligations.jh` builds from MIR, 2,250) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
@@ -301,10 +301,62 @@ missed those; when that fails it now tries the latest facts (a case and
 the conditions before it) by themselves. That proves 746 bounds and
 overflow checks on the compiler and 125 calls, for about 7% more time.
 
+`reserve` then also promised room: `self.len + n <= self.cap` on return.
+That proves `push`'s `self.len += 1` in each of its instances (900 bounds
+and overflow checks on the compiler, with the prover's retry above). Working out what `Vec` can promise
+(its type invariant, next) found a bug: `push` and `insert` reserved only
+when `len == cap`, but a `String` from a literal borrows the literal's
+bytes with `cap` 0, so they wrote into the literal. They now reserve when `len >= cap`.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
 chosen by the program.
+
+### Type invariants
+
+The checks inside `std`'s own methods need facts no caller's contract
+gives: `Vec.pop`'s `self.len -= 1` after `self.len != 0` needs `len` not
+to be negative. A struct's `invariant`
+([contracts](../language/contracts.md#type-invariants)) states such facts
+once, over `self`'s fields.
+
+- **Where it is assumed.** On entry, of what each parameter holds: the
+  parameter, or what it borrows, and the structs inside them by fields (at
+  most 3 deep), not through other borrows or pointers. After a call, of the
+  place the result goes to and the places lent mutably to the call. A
+  function that code outside the program may call (`export`, `main`)
+  assumes nothing of its parameters. Each assumed fact rests on
+  `Tag.TypeInvariant(type)`.
+- **Who proves it.** Only a *writer* of the type can make a value that
+  breaks it: a function that assigns one of its fields, lends or takes the
+  address of one, or builds one with a struct literal (the fields are
+  private to the struct's module, so outside it, only code that module
+  exports). A writer proves the invariant, with `Source.TypeInvariant`,
+  wherever another function could see the value: of what each call is
+  given (by value, borrowed or lent), of what a drop destroys (a
+  destructor assumes it), and on return, of its result and of what its
+  `inout` parameters hold. A function that writes nothing passes on
+  values it was given, which already hold it, or gets them from calls.
+- **What counts.** A proof that assumes a type's invariant counts only
+  when every writer's obligations of that type are proved and the writer
+  was followed everywhere: one failure removes them all, which is the
+  induction on the order in which functions see values. As elsewhere,
+  unsafe code that stores a value breaking it where another function
+  reads it, or writes the fields through a pointer the model does not see
+  as a field, breaks the promise.
+- **Cost.** Every value of the type adds its facts after each call. Those
+  of a disjunctive invariant split proofs into cases, so an obligation
+  takes such a disjunction only when it names the claim's variables, or
+  those of the facts that do.
+
+On a local build with `invariant 0 <= self.len && 0 <= self.cap` on `Vec`,
+the compiler's checks proved went from 871 to 929, and the writers that
+failed to prove it were real bugs: `truncate` and `filled` with a negative
+count gave a negative length (`truncate` then dropped values before the
+buffer), and `reserve` with a negative count could copy borrowed bytes
+past what it allocated. `std` states the invariant once a release parses
+it.
 
 ## Open questions
 
@@ -318,8 +370,8 @@ chosen by the program.
 - **Places.** Integer fields of locals and of borrowed parameters are
   variables ([above](#fields-panics-and-calls)); a `Vec`'s elements, and
   fields reached through a raw pointer or a field that is itself a borrow,
-  are not. A type invariant (`0 <= len <= cap` for `Vec`) would prove the
-  checks inside `std`'s own methods, which no caller's contract can.
+  are not. Type invariants ([below](#type-invariants)) say what holds of
+  the fields of every value of a struct.
 - **Calls.** Modular: a call assumes the callee's `ensures` after proving
   its `requires`, and proves a small callee's panics away by itself.
   Functions too large to lift need `requires` the callers meet, or

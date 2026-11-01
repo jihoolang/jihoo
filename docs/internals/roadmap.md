@@ -399,9 +399,12 @@ and moves into the compiler once its trust boundary is stated.
    On the compiler, bounds and overflow checks proved went from 378 to
    720, and 120 calls prove `Vec.index`'s panic away (746 and 125 once the
    prover also looks for a case that contradicts the path, below the
-   claim). Left: type
-   invariants (`0 <= len <= cap`) for the checks inside `std`'s own
-   methods, and slicing of `str`.
+   claim). Started: type invariants
+   ([design](verification.md#type-invariants)), `invariant` clauses on a
+   struct that every function assumes of the values it is given and every
+   writer of the type proves; stating `Vec`'s found three ways to give it
+   a negative length. Left: `std` states them (after a release that parses
+   them), and slicing of `str`.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:

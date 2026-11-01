@@ -1,0 +1,20 @@
+// A struct's `invariant` is for the verifier: nothing runs it, and the
+// program is the same with or without it.
+
+struct Window
+    invariant 0 <= self.lo && self.lo <= self.hi
+{
+    lo: i64
+    hi: i64
+}
+
+impl Window {
+    fn width(self) -> i64 { self.hi - self.lo }
+}
+
+fn main() {
+    let w = Window { lo: 2, hi: 7 }
+    println(w.width())
+}
+
+//> 5

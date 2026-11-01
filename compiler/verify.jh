@@ -87,6 +87,8 @@ struct Result1 {
     depends: Vec(i64)
     // What the facts its certificate uses rest on.
     used: Vec(vc.Tag)
+    // The check's span, `vc.nowhere()` for a contract's clauses.
+    at: (i64, i64)
 }
 
 // What one function's obligations came to.
@@ -99,6 +101,8 @@ struct Outcome {
     written: i64
     // The functions it calls directly, whether or not a path reached them.
     callees: Vec(i64)
+    // The types with an invariant it is a writer of.
+    writes: Vec(i64)
 }
 
 fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)], lifts: [Option(vc.Lift)]) -> Outcome {
@@ -131,7 +135,8 @@ fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)], lifts: [Option(vc.L
             proved,
             source: copy_source(o.source),
             depends: o.depends.clone(),
-            used
+            used,
+            at: o.at
         })
     }
     var callees = Vec(i64).new()
@@ -141,7 +146,10 @@ fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)], lifts: [Option(vc.L
             _ => {}
         }
     }
-    Outcome { whole: obs.errors.len() == 0, results, cuts: f.invariants.len(), written: 0, callees }
+    Outcome {
+        whole: obs.errors.len() == 0, results, cuts: f.invariants.len(), written: 0, callees,
+        writes: f.writes.clone()
+    }
 }
 
 // What the program's assumptions came to: per function, its `requires`
@@ -150,6 +158,24 @@ struct Assumptions {
     requires: Vec(bool)
     ensures: Vec(bool)
     cuts: Vec(Vec(bool))
+    // The types whose invariant some writer does not prove.
+    broken: Vec(i64)
+}
+
+impl Assumptions {
+    fn holds(self, ty: i64) -> bool {
+        for t in self.broken {
+            if t == ty { return false }
+        }
+        true
+    }
+
+    // Whether the type's invariant was taken to hold until now.
+    fn break_type(inout self, ty: i64) -> bool {
+        if !self.holds(ty) { return false }
+        self.broken.push(ty)
+        true
+    }
 }
 
 // The obligation is proved, and so is everything its proof rests on.
@@ -161,6 +187,7 @@ fn valid(a: Assumptions, f: i64, o: Outcome, r: Result1) -> bool {
             Requires => a.requires[f]
             Cut(k) => a.cuts[f][k]
             Ensures(g) => a.ensures[g]
+            TypeInvariant(ty) => a.holds(ty)
         }
         if !ok { return false }
     }
@@ -174,6 +201,7 @@ fn copy_source(s: vc.Source) -> vc.Source {
         Invariant(i, j) => vc.Source.Invariant(i, j)
         Ensures(j) => vc.Source.Ensures(j)
         Lift(b, f, s) => vc.Source.Lift(b, f, s)
+        TypeInvariant(t) => vc.Source.TypeInvariant(t)
     }
 }
 
@@ -355,6 +383,7 @@ fn sites(p: mir.Program, f: vc.Function) -> Vec((i64, i64)) {
                     Add(_, _) | Sub(_, _) | Mul(_, _) => if at.0 >= 0 { out.push(site) }
                     _ => {}
                 }
+                Check(_, _) => {}
             }
         }
         match b.term {
@@ -441,7 +470,7 @@ pub fn verify(p: mir.Program) -> Report {
     let escapes = escaping(p)
     var a = Assumptions {
         requires: Vec(bool).filled(n, true), ensures: Vec(bool).filled(n, true),
-        cuts: Vec(Vec(bool)).new()
+        cuts: Vec(Vec(bool)).new(), broken: Vec(i64).new()
     }
     for i in 0..n {
         match contracts[i] {
@@ -462,6 +491,11 @@ pub fn verify(p: mir.Program) -> Report {
         let Some(o) = outcomes[i] else { continue }
         if !o.whole {
             for g in o.callees { a.requires[g] = false }
+            // Nor do the invariants of the types it writes: some
+            // obligation may be missing.
+            for ty in o.writes {
+                let _ = a.break_type(ty)
+            }
         }
     }
     var changed = true
@@ -484,6 +518,7 @@ pub fn verify(p: mir.Program) -> Report {
                         a.requires[g] = false
                         changed = true
                     }
+                    TypeInvariant(ty) => if a.break_type(ty) { changed = true }
                     _ => {}
                 }
             }
@@ -621,6 +656,12 @@ pub fn verify(p: mir.Program) -> Report {
                 Requires(block, callee) => Some((
                     site_span(b, block, -1),
                     "unproved `requires` of " + p.fns[callee].name.as_str()
+                ))
+                TypeInvariant(ty) => Some((
+                    if r.at.0 >= 0 {
+                        diag.Span.new(f.span.file, r.at.0, r.at.1)
+                    } else { f.span },
+                    "unproved invariant of `" + p.types.show(ty as u32).as_str() + "`"
                 ))
                 _ => None
             }

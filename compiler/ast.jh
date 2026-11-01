@@ -115,6 +115,8 @@ pub struct StructDecl {
     pub name: String
     pub params: Vec(Param)
     pub fields: Vec(Field)
+    // `invariant` clauses over `self` (docs/language/contracts.md).
+    pub invariants: Vec(Expr)
 }
 
 pub struct Variant {
@@ -357,7 +359,8 @@ impl Clone for ItemKind {
             Struct(s) => ItemKind.Struct(StructDecl {
                 name: s.name.clone(),
                 params: s.params.clone(),
-                fields: s.fields.clone()
+                fields: s.fields.clone(),
+                invariants: s.invariants.clone()
             })
             Enum(e) => ItemKind.Enum(EnumDecl {
                 name: e.name.clone(),

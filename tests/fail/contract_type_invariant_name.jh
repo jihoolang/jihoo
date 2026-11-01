@@ -1,0 +1,11 @@
+// A struct's `invariant` is about the value alone: it names `self`.
+// error: a type's `invariant` can only name `self`, its fields and `len()`
+const LIMIT: i64 = 10
+
+struct Small
+    invariant self.n < LIMIT
+{
+    n: i64
+}
+
+fn main() { println(Small { n: 1 }.n) }

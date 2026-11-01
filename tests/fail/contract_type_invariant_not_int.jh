@@ -1,0 +1,9 @@
+// An `invariant` reads integer fields; a `String` field is not one.
+// error: a contract reads integers, and this is a `String`
+struct Named
+    invariant self.name < 3
+{
+    name: String
+}
+
+fn main() { println(Named { name: "a" }.name) }
