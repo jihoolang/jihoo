@@ -902,13 +902,14 @@ fn call(
     }
     q.block = next
     q.steps += 1
-    // New values for what the call may change.
+    // New values for what the call may change: a fresh variable for an
+    // integer, and nothing known of anything else (a bool's condition).
     var lent = Vec((i64, Lin)).new()
     for a in site.args {
         match a {
             Lent(x) => match f.kinds[x] {
                 Int(_, _) => lent.push((x, g.fresh(f.kinds[x], WHY_CALL)))
-                Other => {}
+                Other => q.state[x] = Sym.Unknown
             }
             _ => {}
         }

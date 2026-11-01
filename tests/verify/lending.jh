@@ -1,6 +1,7 @@
 // A local lent to an `inout` parameter gets a new value from the call: an
-// integer's is a new variable, and a view escapes, since the call may
-// change its length. `s[0]` is not proved from the length before the call.
+// integer's is a new variable, a bool's condition is forgotten, and a view
+// escapes, since the call may change its length. `s[0]` is not proved from
+// the length before the call, nor `n + 1` from what `ok` was.
 
 fn clear(inout s: str) {
     s = ""
@@ -26,10 +27,23 @@ fn after(n: i64) -> i64 {
     0
 }
 
+fn set(inout b: bool) {
+    b = true
+}
+
+fn next(n: i64) -> i64 {
+    var ok = n < 9223372036854775807
+    set(&ok)
+    if ok { return n + 1 }
+    0
+}
+
 fn main() {
     println(first("abc"))
     println(after(3))
+    println(next(3))
 }
 
-//> 17:16: kept index out of bounds in first (unstated)
-//> 25:33: kept integer overflow in after (argument, call)
+//> 18:16: kept index out of bounds in first (unstated)
+//> 26:33: kept integer overflow in after (argument, call)
+//> 37:20: kept integer overflow in next (argument)
