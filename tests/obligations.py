@@ -74,9 +74,12 @@ def functions(text):
             assert b[0] == "block" and b[1] == str(i), (name, b[:2])
             for s in b[2:-1]:
                 assert s[0] == "set" and int(s[1]) < len(locals_) - 1, (name, s)
+                assert len(s) == 3 or (len(s) == 4 and s[3][0] == "at"), (name, s)
             term = b[-1]
             targets = {"goto": term[1:], "switch": term[2:], "any": term[1:],
-                       "assert": term[3:], "call": term[2:]}.get(term[0], [])
+                       "assert": term[3:4], "call": term[2:]}.get(term[0], [])
+            if term[0] == "assert":
+                assert len(term) == 5 and term[4][0] == "at", (name, term)
             assert term[0] in ["goto", "switch", "any", "assert", "call", "trap", "return",
                                "unreachable"], (name, term)
             for t in targets:
@@ -124,10 +127,19 @@ def main():
         assert s["lengths"] == [["1", "14"]], s["lengths"]
         assert s["locals"][1] == "other"
         checks = list(forms(s["blocks"], "assert"))
-        assert checks == [["assert", ["local", "6"], "index-out-of-bounds", "6"]], checks
+        assert len(checks) == 1 and checks[0][:4] == ["assert", ["local", "6"], "index-out-of-bounds", "6"], checks
         assert ["set", "7", ["cast", ["local", "5"]]] in s["blocks"][4]
         assert ["set", "8", ["cast", ["local", "14"]]] in s["blocks"][4]
-        assert ["set", "12", ["add", ["local", "3"], ["const", "1"]]] in s["blocks"][6]
+
+        # A check's span is where the interpreter reports it failing: the
+        # bytes of the index, and of the statement whose `+` overflows.
+        def text(at):
+            return PROGRAM.encode()[int(at[1]):int(at[2])].decode()
+        assert text(checks[0][4]) == "xs[i]", text(checks[0][4])
+        steps = [x for x in s["blocks"][6] if x[0] == "set" and x[2][0] == "add"]
+        assert [x[2] for x in steps] == [["add", ["local", "2"], ["local", "10"]],
+                                         ["add", ["local", "3"], ["const", "1"]]], steps
+        assert [text(x[3]) for x in steps] == ["s += xs[i]", "i += 1"], [text(x[3]) for x in steps]
 
         # A local lent to `inout` is not followed: its reads are opaque.
         e = debug["escapes"]
@@ -140,11 +152,13 @@ def main():
         assert w["locals"][1] == ["int", "0", "255"] and w["locals"][2] == ["int", "-2147483648", "2147483647"]
         assert ["const", "18446744073709551615"] in list(forms(w["blocks"], "const")), w["blocks"]
 
-        # Without overflow checks `+` and `-` wrap, which is opaque.
+        # Without overflow checks `+` and `-` wrap, which is opaque, and only
+        # the bounds check has a span.
         release = emit("--release")
         for name in ["sum", "widths"]:
             for head in ["add", "sub", "mul"]:
                 assert not list(forms(release[name]["blocks"], head)), (name, head)
+        assert len(list(forms(release["sum"]["blocks"], "at"))) == 1
     print("emit-obligations: structure, models and opaque values")
 
 

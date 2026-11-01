@@ -421,7 +421,9 @@ and returns. Everything else is `opaque`, a value known only to be in its
 type's range: loads, wrapping arithmetic (all of it with `--release`), and
 every read of a local whose address is taken (`&x` for an `inout`
 parameter, `&raw`), since it may change through that pointer. A `switch`
-the model does not follow is `(any blocks...)`. The format is research and
+the model does not follow is `(any blocks...)`. Each check ends with
+`(at lo hi)`, the byte range where compile-time evaluation reports it
+failing: an `assert`, and a `set` whose `+ - *` checks for overflow. The format is research and
 may change; [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations)
 reads it.
 

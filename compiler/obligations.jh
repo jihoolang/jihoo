@@ -3,6 +3,7 @@
 // What the model cannot follow becomes `opaque`, a value known only to be in
 // its type's range, so the output never claims more than MIR says.
 
+import diag
 import lex
 import mir
 import types
@@ -228,12 +229,20 @@ fn set(inout s: String, v: i64) {
 fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
     let t = p.types
     match st {
-        Assign(place, rv, _) => {
+        Assign(place, rv, span) => {
             let l = place.local as i64
             match variable(m, place) {
                 Some(v) => {
                     set(&s, v)
                     rvalue(&s, p, b, m, rv)
+                    // Where an overflow check fails, as the interpreter reports it.
+                    match rv {
+                        Bin(op, _, _) => match op {
+                            Add | Sub | Mul => if p.checked { at(&s, span) }
+                            _ => {}
+                        }
+                        _ => {}
+                    }
                     s.push(')')
                 }
                 None => {}
@@ -278,6 +287,15 @@ fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
         }
         _ => {}
     }
+}
+
+// A source span as byte offsets: ` (at lo hi)`.
+fn at(inout s: String, span: diag.Span) {
+    s.push_str(" (at ")
+    span.lo.show(&s)
+    s.push(' ')
+    span.hi.show(&s)
+    s.push(')')
 }
 
 // Text as one atom: what would end it or open a list becomes `-`.
@@ -352,13 +370,14 @@ fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
             next.show(&s)
             s.push(')')
         }
-        Assert(o, msg, next, _) => {
+        Assert(o, msg, next, span) => {
             s.push_str("(assert ")
             operand(&s, t, m, o)
             s.push(' ')
             atom(&s, msg.as_str())
             s.push(' ')
             next.show(&s)
+            at(&s, span)
             s.push(')')
         }
     }

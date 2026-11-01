@@ -345,9 +345,13 @@ and moves into the compiler once its trust boundary is stated.
    taken, is opaque. `tests/obligations.py` checks it with an independent
    reader, and jihoo-proofs verifies the compiler's output with the same
    verdicts as the hand-written models, plus an off-by-one loop and a local
-   changed through `inout` that must stay unproved. Left: testing the
-   generator against the interpreter (on random inputs, a proved check never
-   fails) and contracts that do not name MIR's local and block numbers.
+   changed through `inout` that must stay unproved. Started: the generator
+   against the interpreter. Each check carries its span; jihoo-proofs'
+   `differential.py` evaluates random inputs that meet a function's
+   `requires` at compile time and fails if a check it proved fails there,
+   or a proved `ensures` does not hold, in debug and `--release` builds. Two
+   deliberately wrong models are caught. Left: more of the language in the
+   samples, and contracts that do not name MIR's local and block numbers.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
    proved checks. `--verify-report` lists each check as proved or kept.

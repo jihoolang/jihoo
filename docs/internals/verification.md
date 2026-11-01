@@ -100,6 +100,16 @@ call, so an `ensures` that depends on its old value is not proved. Reading
 `x as u64 < len as u64` as `0 <= x < len` needs the length's range, which
 the model takes from the view: a length is never negative.
 
+The generator is now tested against the interpreter, as planned above:
+every check in the model carries the span at which compile-time evaluation
+reports it failing, and random inputs that meet a function's `requires`
+run as `const`s. No check the generator proved has failed, in debug or
+`--release` builds, over three samples (slices, unsigned and narrow
+integers, casts, a local changed through `inout`); the unproved ones do
+fail (`255 + 1` in a `u8`, `0 - 1` in a `u64`, the off-by-one loop). The
+test itself is tested: making the model read `i <= len` as `i < len`, or
+forget that `bump(&x)` changes `x`, is reported as a soundness bug.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
