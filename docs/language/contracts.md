@@ -117,6 +117,46 @@ fn either(x: i64, y: i64) -> i64
 A caller of `sign` knows that `sign(x) + 1` cannot overflow, and one of
 `either` must show that one of its arguments is positive.
 
+## Type invariants
+
+A struct can say what holds of every value of it, between the struct's
+name and its fields, with `self` for the value:
+
+```jihoo
+struct Gauge
+    invariant 0 <= self.n && self.n <= self.max && self.max <= 1000
+{
+    n: i64
+    max: i64
+}
+
+impl Gauge {
+    fn down(inout self) {
+        if self.n > 0 { self.n -= 1 }
+    }
+
+    fn room(self) -> i64 { self.max - self.n }
+}
+```
+
+A clause names `self`'s integer fields, their fields and `len()`, as the
+struct's module may; a generic struct's invariant is checked for each of
+its instances. A function assumes the invariant of every value of the type
+it is given: what its parameters hold (inside other structs too, and
+through a borrowed parameter) on entry, and after a call, the result and
+what the call is lent. So `room`'s `-` and `down`'s `- 1` cannot
+overflow.
+
+Only a function that writes one of the type's fields, or builds a value of
+it, can break the invariant: a *writer* of the type. A writer proves it
+wherever another function could see the value: of what each call is given
+(even while the writer is not done with it), of what it drops, and on
+return, of its result and what its `inout` parameters hold. If any writer
+fails to, nothing that assumes the type's invariant is proved, and
+[`jihoo verify`](../reference/command-line.md#verification) says where.
+Like other contracts, an invariant is never checked while the program
+runs.
+
 ## How a call is proved
 
 Proofs are modular: a call proves the callee's `requires` with the

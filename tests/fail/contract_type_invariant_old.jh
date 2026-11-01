@@ -1,0 +1,9 @@
+// A value has no earlier state in its type's `invariant`.
+// error: a contract can only use integers, parameters, variables, `result`, `old(x)`, fields, `.len` and `.len()`, and `+ - *`
+struct Up
+    invariant self.n >= old(self.n)
+{
+    n: i64
+}
+
+fn main() { println(Up { n: 1 }.n) }

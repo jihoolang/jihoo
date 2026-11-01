@@ -1,0 +1,78 @@
+// A struct's `invariant` holds of every value of the type a function is
+// given: on entry, and after a call. Only a writer of the type (it writes
+// a field or builds one) proves it, at its calls and drops and on return.
+
+struct Gauge
+    invariant 0 <= self.n && self.n <= self.max && self.max <= 1000
+{
+    n: i64
+    max: i64
+}
+
+impl Gauge {
+    fn new(max: i64) -> Gauge {
+        if max < 0 || max > 1000 { return Gauge { n: 0, max: 0 } }
+        Gauge { n: 0, max }
+    }
+
+    fn up(inout self) {
+        if self.n < self.max { self.n += 1 }
+    }
+
+    // `self.n - 1` cannot overflow: `n` is not negative.
+    fn down(inout self) {
+        if self.n > 0 { self.n -= 1 }
+    }
+
+    fn room(self) -> i64 { self.max - self.n }
+}
+
+// Not writers: the invariant bounds both sides of `+`, inside a struct too.
+fn total(g: Gauge) -> i64 { g.n + g.max }
+
+struct Pair {
+    a: Gauge
+    b: Gauge
+}
+
+fn both(p: Pair) -> i64 { p.a.n + p.b.n }
+
+// A writer that breaks the invariant: no proof that assumes `Leaky`'s
+// counts, so `twice` keeps its check.
+struct Leaky
+    invariant 0 <= self.n && self.n <= 100
+{
+    n: i64
+}
+
+fn bump(inout l: Leaky) { l.n = l.n + 1 }
+
+fn twice(l: Leaky) -> i64 { l.n + l.n }
+
+// Breaks `Gauge`'s invariant only while a call cannot see it.
+fn reset(inout g: Gauge) {
+    g.n = -1
+    g.n = 0
+}
+
+fn main() {
+    var g = Gauge.new(10)
+    g.up()
+    g.down()
+    reset(&g)
+    println(total(g) + g.room())
+    println(both(Pair { a: Gauge.new(3), b: Gauge.new(4) }))
+    var l = Leaky { n: 0 }
+    bump(&l)
+    println(twice(l))
+}
+
+//> 63:13: kept integer overflow in main (call)
+//> 19:32: proved integer overflow in Gauge.up
+//> 24:25: proved integer overflow in Gauge.down
+//> 27:28: proved integer overflow in Gauge.room
+//> 31:29: proved integer overflow in total
+//> 38:27: proved integer overflow in both
+//> 48:33: kept integer overflow in bump (argument)
+//> 50:29: kept integer overflow in twice (argument)
+//> 48:4: unproved invariant of `Leaky` in bump

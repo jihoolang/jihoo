@@ -747,6 +747,443 @@ fn result_length(m: Model, dest: Place) -> i64 {
     }
 }
 
+// ---- Type invariants ----
+//
+// A struct's `invariant` (docs/language/contracts.md) holds of every value
+// of the type a function is given: on entry, of what its parameters hold,
+// and after a call, of the result and of what the call is lent. Only a
+// function that writes the type's fields or builds one (a writer of the
+// type) can break it, so a writer proves it wherever another function
+// could see the value: at each call, of what the call is given; at a drop,
+// which runs destructors; and on return, of the result and what its
+// `inout` parameters hold. A proof that assumes the invariant counts only
+// when every writer's obligations of the type are proved.
+
+// Struct fields followed to find invariants, at most this deep.
+const MAX_INVARIANT_DEPTH: i64 = 3
+
+// The paths inside a value of type `ty`, through fields but not through
+// borrows or pointers, to the places whose types have an invariant, with
+// those types.
+fn invariant_paths(p: Program, ty: u32) -> Vec((Vec(u32), u32)) {
+    var out = Vec((Vec(u32), u32)).new()
+    if p.invariants.len() > 0 { invariant_paths_in(p, ty, Vec(u32).new(), &out) }
+    out
+}
+
+fn invariant_paths_in(p: Program, ty: u32, path: Vec(u32), inout out: Vec((Vec(u32), u32))) {
+    if p.invariants.contains(ty) { out.push((path.clone(), ty)) }
+    if path.len() >= MAX_INVARIANT_DEPTH { return }
+    match p.types.kind(ty) {
+        Tuple(_) | Adt(_) => {}
+        _ => return
+    }
+    for k, f in p.types.field_tys(ty) {
+        var q = path.clone()
+        q.push(k as u32)
+        invariant_paths_in(p, f, q, &out)
+    }
+}
+
+fn has(xs: [u32], x: u32) -> bool {
+    for y in xs {
+        if y == x { return true }
+    }
+    false
+}
+
+// The type of a place, through fields and borrows; None through a variant
+// or an index.
+fn place_type(t: Types, b: Body, pl: Place) -> Option(u32) {
+    var ty = b.locals[pl.local as i64].ty
+    for x in pl.proj {
+        match x {
+            Deref => match t.pointee(ty) {
+                Some(y) => ty = y
+                None => return None
+            }
+            Field(k) => {
+                let fs = t.field_tys(ty)
+                if (k as i64) >= fs.len() { return None }
+                ty = fs[k as i64]
+            }
+            _ => return None
+        }
+    }
+    Some(ty)
+}
+
+// A field of a place whose type has an invariant is written through it.
+fn writes_through(p: Program, b: Body, pl: Place, inout out: Vec(u32)) {
+    var q = Place.local(pl.local)
+    for x in pl.proj {
+        match x {
+            Field(_) => match place_type(p.types, b, q) {
+                Some(ty) => if p.invariants.contains(ty) && !has(out.as_slice(), ty) { out.push(ty) }
+                None => {}
+            }
+            _ => {}
+        }
+        q.proj.push(x)
+    }
+}
+
+// The types with an invariant of which the function is a writer: it
+// assigns, lends or takes the address of one of their fields, or builds
+// one.
+fn invariant_writes(p: Program, b: Body) -> Vec(u32) {
+    var out = Vec(u32).new()
+    if p.invariants.len() == 0 { return out }
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(dst, rv, _) => {
+                    writes_through(p, b, dst, &out)
+                    match rv {
+                        RefMut(q) | Addr(q) => writes_through(p, b, q, &out)
+                        Aggregate(agg, _) => match agg {
+                            Struct(ty) => if p.invariants.contains(ty) && !has(out.as_slice(), ty) {
+                                out.push(ty)
+                            }
+                            _ => {}
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+// What a parameter holds: the place it borrows, or itself.
+fn param_base(t: Types, b: Body, i: i64) -> Place {
+    match t.kind(b.locals[i].ty) {
+        Ref(_) | RefMut(_) => Place.local(i as u32).with(mir.Proj.Deref)
+        _ => Place.local(i as u32)
+    }
+}
+
+// What a call is given in an argument: the place a borrow lends, or the
+// argument itself.
+fn arg_base(t: Types, b: Body, lent: [Option(Place)], a: Operand) -> Option(Place) {
+    let Copy(q) | Move(q) = a else { return None }
+    if q.proj.len() == 0 {
+        match lent[q.local as i64] {
+            Some(x) => return Some(x.clone())
+            None => {}
+        }
+    }
+    let Some(ty) = place_type(t, b, q) else { return None }
+    match t.kind(ty) {
+        Ref(_) | RefMut(_) => Some(q.with(mir.Proj.Deref))
+        _ => Some(q.clone())
+    }
+}
+
+// What a call may change in an argument: the place it lends mutably.
+fn lent_base(t: Types, b: Body, lent: [Option(Place)], a: Operand) -> Option(Place) {
+    let Copy(q) | Move(q) = a else { return None }
+    if q.proj.len() == 0 {
+        match lent[q.local as i64] {
+            Some(x) => return Some(x.clone())
+            None => {}
+        }
+    }
+    let Some(ty) = place_type(t, b, q) else { return None }
+    match t.kind(ty) {
+        RefMut(_) => Some(q.with(mir.Proj.Deref))
+        _ => None
+    }
+}
+
+// The places inside `base` whose fields its invariants name.
+fn invariant_places(p: Program, b: Body, base: Place, inout out: Vec(Place)) {
+    let Some(ty) = place_type(p.types, b, base) else { return }
+    for (path, it) in invariant_paths(p, ty).into_iter() {
+        let at = below_fields(base.clone(), path.as_slice())
+        for c in p.invariants[it] {
+            for x in c.atoms() {
+                for term in x.a.terms { invariant_term_place(at, term, &out) }
+                for term in x.b.terms { invariant_term_place(at, term, &out) }
+            }
+        }
+    }
+}
+
+fn invariant_term_place(at: Place, term: mir.SpecTerm, inout out: Vec(Place)) {
+    match term.name {
+        Field(_, q) => out.push(below_fields(at.clone(), q.as_slice()))
+        _ => {}
+    }
+}
+
+// The invariants inside `base` as facts over the function's variables,
+// of the types in `only`, or of all.
+fn invariant_facts(
+    p: Program,
+    b: Body,
+    m: Model,
+    base: Place,
+    only: Option([u32])
+) -> Vec(vc.Holds) {
+    var out = Vec(vc.Holds).new()
+    let Some(ty) = place_type(p.types, b, base) else { return out }
+    for (path, it) in invariant_paths(p, ty).into_iter() {
+        match only {
+            Some(xs) => if !has(xs, it) { continue }
+            None => {}
+        }
+        let at = below_fields(base.clone(), path.as_slice())
+        for c in p.invariants[it] {
+            out.push(vc.Holds { ty: it as i64, fact: invariant_clause(m, at, c) })
+        }
+    }
+    out
+}
+
+fn invariant_spec(m: Model, at: Place, x: mir.Spec) -> Option(linear.Lin) {
+    if !small(x.constant) { return None }
+    var out = linear.Lin.num(x.constant)
+    for term in x.terms {
+        let Field(_, q) = term.name else { return None }
+        let Some(v) = variable(m, below_fields(at.clone(), q.as_slice())) else { return None }
+        if term.coef != 0 {
+            if !small(term.coef) { return None }
+            out = out.plus(linear.Lin.of(v).scale(term.coef))
+        }
+    }
+    Some(out)
+}
+
+fn invariant_clause(m: Model, at: Place, c: mir.Clause) -> vc.Fact {
+    if c.ors.len() == 1 && c.ors[0].len() == 1 {
+        let x = c.ors[0][0]
+        let op = model_cmp(x.op).unwrap()
+        return match (invariant_spec(m, at, x.a), invariant_spec(m, at, x.b)) {
+            (Some(a), Some(b)) => vc.Fact.compare(op, a, b)
+            _ => vc.unstated(op)
+        }
+    }
+    var ors = Vec(Vec(vc.Cond)).new()
+    var partial = false
+    for alt in c.ors {
+        var conj = Vec(vc.Cond).new()
+        var known = true
+        for x in alt {
+            match (invariant_spec(m, at, x.a), invariant_spec(m, at, x.b)) {
+                (Some(a), Some(b)) => conj.push(vc.Cond { op: model_cmp(x.op).unwrap(), a, b })
+                _ => known = false
+            }
+        }
+        if known { ors.push(conj) } else { partial = true }
+    }
+    vc.disjunction(ors, partial)
+}
+
+// The places the invariants need as variables: what the parameters hold,
+// what calls give back or are lent, and in a writer, what calls are given,
+// what is dropped, and the result.
+fn invariant_wanted(p: Program, b: Body, lent: [Option(Place)], writes: [u32]) -> Vec(Place) {
+    let t = p.types
+    var out = Vec(Place).new()
+    if p.invariants.len() == 0 { return out }
+    for i in 1..b.arg_count + 1 { invariant_places(p, b, param_base(t, b, i), &out) }
+    for bl in b.blocks {
+        match bl.term {
+            Call(_, args, dest, _, _) => {
+                invariant_places(p, b, dest, &out)
+                for a in args {
+                    let base = if writes.len > 0 {
+                        arg_base(t, b, lent, a)
+                    } else { lent_base(t, b, lent, a) }
+                    match base {
+                        Some(x) => invariant_places(p, b, x, &out)
+                        None => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        if writes.len > 0 {
+            for st in bl.stmts {
+                match st {
+                    Drop(pl, _) => invariant_places(p, b, pl, &out)
+                    _ => {}
+                }
+            }
+        }
+    }
+    if writes.len > 0 { invariant_places(p, b, Place.local(mir.RET), &out) }
+    out
+}
+
+// A function's invariants: assumed on entry, proved on return, and the
+// types it is a writer of.
+struct Invariants {
+    holds_in: Vec(vc.Holds)
+    holds_out: Vec(vc.Holds)
+    writes: Vec(u32)
+}
+
+fn function_invariants(p: Program, f: mir.Function, b: Body, m: Model) -> Invariants {
+    let t = p.types
+    let writes = invariant_writes(p, b)
+    var holds_in = Vec(vc.Holds).new()
+    // A function called from outside the program may be given anything.
+    let internal = match f.linkage {
+        Internal => true
+        _ => false
+    }
+    if internal {
+        for i in 1..b.arg_count + 1 {
+            for h in invariant_facts(p, b, m, param_base(t, b, i), None).into_iter() {
+                holds_in.push(h)
+            }
+        }
+    }
+    var holds_out = Vec(vc.Holds).new()
+    if writes.len() > 0 {
+        let only = Some(writes.as_slice())
+        for h in invariant_facts(p, b, m, Place.local(mir.RET), only).into_iter() {
+            holds_out.push(h)
+        }
+        for i in 1..b.arg_count + 1 {
+            match t.kind(b.locals[i].ty) {
+                RefMut(_) => {
+                    for h in invariant_facts(p, b, m, param_base(t, b, i), only).into_iter() {
+                        holds_out.push(h)
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Invariants { holds_in, holds_out, writes }
+}
+
+// At a call: a writer's obligations of what it is given, and what holds
+// after it of what it gives back and is lent.
+fn call_invariants(
+    p: Program,
+    b: Body,
+    m: Model,
+    writes: [u32],
+    args: [Operand],
+    dest: Place
+) -> (Vec(vc.Holds), Vec(vc.Holds)) {
+    let t = p.types
+    var before = Vec(vc.Holds).new()
+    var after = invariant_facts(p, b, m, dest, None)
+    for a in args {
+        if writes.len > 0 {
+            match arg_base(t, b, m.lent.as_slice(), a) {
+                Some(x) => {
+                    for h in invariant_facts(p, b, m, x, Some(writes)).into_iter() { before.push(h) }
+                }
+                None => {}
+            }
+        }
+        match lent_base(t, b, m.lent.as_slice(), a) {
+            Some(x) => {
+                for h in invariant_facts(p, b, m, x, None).into_iter() { after.push(h) }
+            }
+            None => {}
+        }
+    }
+    (before, after)
+}
+
+// At a drop in a writer: the destructors' invariants.
+fn drop_invariants(p: Program, b: Body, m: Model, writes: [u32], place: Place) -> Vec(vc.Holds) {
+    if writes.len == 0 { return Vec(vc.Holds).new() }
+    invariant_facts(p, b, m, place, Some(writes))
+}
+
+fn cmp_name(op: vc.Cmp) -> str {
+    match op {
+        Lt => "lt"
+        Le => "le"
+        Gt => "gt"
+        Ge => "ge"
+        Eq => "eq"
+        Ne => "ne"
+    }
+}
+
+// `(lin c (v k)...)`.
+fn show_lin(inout s: String, x: linear.Lin) {
+    s.push_str("(lin ")
+    x.constant.show(&s)
+    for t in x.terms {
+        s.push_str(" (")
+        t.0.show(&s)
+        s.push(' ')
+        t.1.show(&s)
+        s.push(')')
+    }
+    s.push(')')
+}
+
+fn show_cond(inout s: String, op: vc.Cmp, a: linear.Lin, b: linear.Lin) {
+    s.push('(')
+    s.push_str(cmp_name(op))
+    s.push(' ')
+    show_lin(&s, a)
+    s.push(' ')
+    show_lin(&s, b)
+    s.push(')')
+}
+
+// `(TYPE (op A B))`, or `(TYPE (or (and (op A B)...)...))`; a side over
+// what the model does not follow is `(opaque escaped)`, and so is a case.
+fn show_holds(inout s: String, h: vc.Holds) {
+    s.push('(')
+    h.ty.show(&s)
+    s.push(' ')
+    let x = h.fact
+    if x.stated {
+        show_cond(&s, x.op, x.a, x.b)
+    } else if x.is_or() {
+        s.push_str("(or")
+        for alt in x.ors {
+            s.push_str(" (and")
+            for c in alt {
+                s.push(' ')
+                show_cond(&s, c.op, c.a, c.b)
+            }
+            s.push(')')
+        }
+        if x.partial {
+            s.push(' ')
+            opaque(&s, "escaped")
+        }
+        s.push(')')
+    } else {
+        s.push('(')
+        s.push_str(cmp_name(x.op))
+        s.push(' ')
+        opaque(&s, "escaped")
+        s.push(' ')
+        opaque(&s, "escaped")
+        s.push(')')
+    }
+    s.push(')')
+}
+
+// ` (WORD (TYPE FACT)...)`, nothing when there are none.
+fn show_holds_list(inout s: String, word: str, hs: [vc.Holds]) {
+    if hs.len == 0 { return }
+    s.push_str(" (")
+    s.push_str(word)
+    for h in hs {
+        s.push(' ')
+        show_holds(&s, h)
+    }
+    s.push(')')
+}
+
 // ---- What a call needs of its caller's fields ----
 
 // A function's interface: (parameter, fields) for each field of a
@@ -933,6 +1370,8 @@ fn wanted(p: Program, b: Body, ifaces: [Interface]) -> Vec(Place) {
     var out = contract_places(t, b)
     let lent = lendings(t, b)
     for q in call_places(p, b, lent.as_slice(), ifaces).into_iter() { out.push(q) }
+    let writes = invariant_writes(p, b)
+    for q in invariant_wanted(p, b, lent.as_slice(), writes.as_slice()).into_iter() { out.push(q) }
     out
 }
 
@@ -1198,7 +1637,7 @@ fn set(inout s: String, v: i64) {
     s.push(' ')
 }
 
-fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
+fn statement(inout s: String, p: Program, b: Body, m: Model, writes: [u32], st: mir.Stmt) {
     let t = p.types
     match st {
         Assign(place, rv, span) => {
@@ -1262,7 +1701,14 @@ fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
                 s.push(')')
             }
         }
-        Drop(place, _) => {
+        Drop(place, span) => {
+            // `(check TYPE FACT (at lo hi))`: a destructor's invariant, in a writer.
+            for h in drop_invariants(p, b, m, writes, place).into_iter() {
+                s.push_str("\n    (check ")
+                show_holds(&s, h)
+                at(&s, span)
+                s.push(')')
+            }
             for v in fields_in(m, place) {
                 set(&s, v)
                 opaque(&s, "field")
@@ -1458,7 +1904,15 @@ fn comparison(inout s: String, t: Types, b: Body, m: Model, c: mir.Compare) {
     s.push(')')
 }
 
-fn terminator(inout s: String, p: Program, b: Body, m: Model, term: mir.Term, ifaces: [Interface]) {
+fn terminator(
+    inout s: String,
+    p: Program,
+    b: Body,
+    m: Model,
+    writes: [u32],
+    term: mir.Term,
+    ifaces: [Interface]
+) {
     let t = p.types
     s.push_str("\n    ")
     match term {
@@ -1566,6 +2020,10 @@ fn terminator(inout s: String, p: Program, b: Body, m: Model, term: mir.Term, if
                 }
                 s.push(')')
             }
+            // Types' invariants: a writer's obligations, and what holds after.
+            let (before, after) = call_invariants(p, b, m, writes, args.as_slice(), dest)
+            show_holds_list(&s, "before", before.as_slice())
+            show_holds_list(&s, "after", after.as_slice())
             at(&s, span)
             s.push(')')
         }
@@ -1662,11 +2120,22 @@ pub fn show_function(p: Program, f: mir.Function, ifaces: [Interface]) -> String
     for c in b.contract.requires { clause(&s, t, b, m, "requires", None, c) }
     for c in b.contract.ensures { clause(&s, t, b, m, "ensures", None, c) }
     for x in b.contract.invariants { clause(&s, t, b, m, "invariant", Some(x.0), x.1) }
+    // Types' invariants: of what the parameters hold, and in a writer, of
+    // what it gives back.
+    let inv = function_invariants(p, f, b, m)
+    if inv.holds_in.len() > 0 {
+        s.push_str("\n ")
+        show_holds_list(&s, "holds-in", inv.holds_in.as_slice())
+    }
+    if inv.holds_out.len() > 0 {
+        s.push_str("\n ")
+        show_holds_list(&s, "holds-out", inv.holds_out.as_slice())
+    }
     for i, bl in b.blocks {
         s.push_str("\n  (block ")
         i.show(&s)
-        for st in bl.stmts { statement(&s, p, b, m, st) }
-        terminator(&s, p, b, m, bl.term, ifaces)
+        for st in bl.stmts { statement(&s, p, b, m, inv.writes.as_slice(), st) }
+        terminator(&s, p, b, m, inv.writes.as_slice(), bl.term, ifaces)
         s.push(')')
     }
     s.push_str(")\n")
@@ -1784,7 +2253,14 @@ fn model_rvalue(p: Program, b: Body, m: Model, rv: mir.Rvalue) -> vc.Rvalue {
 
 fn span_of(s: diag.Span) -> (i64, i64) { (s.lo as i64, s.hi as i64) }
 
-fn model_stmts(p: Program, b: Body, m: Model, block: i64, bl: mir.Block) -> Vec(vc.Stmt) {
+fn model_stmts(
+    p: Program,
+    b: Body,
+    m: Model,
+    writes: [u32],
+    block: i64,
+    bl: mir.Block
+) -> Vec(vc.Stmt) {
     let t = p.types
     var out = Vec(vc.Stmt).new()
     for i, st in bl.stmts {
@@ -1837,8 +2313,12 @@ fn model_stmts(p: Program, b: Body, m: Model, block: i64, bl: mir.Block) -> Vec(
                     out.push(vc.Stmt.Assign(w.0, w.1, vc.nowhere(), (block, i)))
                 }
             }
-            // What a destructor leaves is not followed.
-            Drop(place, _) => {
+            // What a destructor leaves is not followed. In a writer, the
+            // destructors' invariants must hold.
+            Drop(place, span) => {
+                for h in drop_invariants(p, b, m, writes, place).into_iter() {
+                    out.push(vc.Stmt.Check(h, span_of(span)))
+                }
                 for v in fields_in(m, place) {
                     out.push(vc.Stmt.Assign(v, opaque_rv("field"), vc.nowhere(), (block, i)))
                 }
@@ -1879,7 +2359,14 @@ fn model_argument(t: Types, m: Model, a: Operand) -> vc.Arg {
     vc.Arg.Value(model_operand(t, m, a))
 }
 
-fn model_term(p: Program, b: Body, m: Model, term: mir.Term, ifaces: [Interface]) -> vc.Term {
+fn model_term(
+    p: Program,
+    b: Body,
+    m: Model,
+    writes: [u32],
+    term: mir.Term,
+    ifaces: [Interface]
+) -> vc.Term {
     let t = p.types
     match term {
         Goto(x) => vc.Term.Goto(x as i64)
@@ -1922,8 +2409,13 @@ fn model_term(p: Program, b: Body, m: Model, term: mir.Term, ifaces: [Interface]
                 changes: call_changes(t, b, m, args.as_slice(), dest),
                 never: b.locals[dest.local as i64].ty == types.NEVER,
                 result_len: result_length(m, dest),
-                fields: call_fields(p, m, callee, args.as_slice(), dest, ifaces)
+                fields: call_fields(p, m, callee, args.as_slice(), dest, ifaces),
+                before: Vec(vc.Holds).new(),
+                after: Vec(vc.Holds).new()
             }
+            let (before, after) = call_invariants(p, b, m, writes, args.as_slice(), dest)
+            site.before = before
+            site.after = after
             for a in args { site.args.push(model_argument(t, m, a)) }
             vc.Term.Call(dst, next as i64, site)
         }
@@ -2025,11 +2517,15 @@ pub fn model_of(p: Program, f: mir.Function, ifaces: [Interface]) -> Option(vc.F
             invariants.push((x.0 as i64, cs))
         }
     }
+    let inv = function_invariants(p, f, b, m)
+    let writes = inv.writes.clone()
+    var written = Vec(i64).new()
+    for ty in writes { written.push(ty as i64) }
     var blocks = Vec(vc.Block).new()
     for i, bl in b.blocks {
         blocks.push(vc.Block {
-            stmts: model_stmts(p, b, m, i, bl),
-            term: model_term(p, b, m, bl.term, ifaces)
+            stmts: model_stmts(p, b, m, writes.as_slice(), i, bl),
+            term: model_term(p, b, m, writes.as_slice(), bl.term, ifaces)
         })
     }
     Some(vc.Function {
@@ -2041,6 +2537,9 @@ pub fn model_of(p: Program, f: mir.Function, ifaces: [Interface]) -> Option(vc.F
             symbol: f.symbol.clone(), kinds, args: b.arg_count, lengths, derefs, fields,
             entries: m.entries.clone(), requires, ensures
         },
-        liftable: liftable(b)
+        liftable: liftable(b),
+        holds_in: inv.holds_in.clone(),
+        holds_out: inv.holds_out.clone(),
+        writes: written
     })
 }

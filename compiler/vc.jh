@@ -100,6 +100,8 @@ pub type Site = (i64, i64)
 pub enum Stmt {
     // The local, its value, the span and site of its overflow check.
     Assign(i64, Rvalue, (i64, i64), Site)
+    // A type's invariant must hold here (a writer's drop), at the span.
+    Check(Holds, (i64, i64))
 }
 
 pub enum Term {
@@ -142,6 +144,10 @@ pub enum Arg {
 }
 
 pub struct CallSite {
+    // A writer's obligations of the invariants of what the call is given,
+    // and the invariants of what it gives back or is lent, after it.
+    pub before: Vec(Holds)
+    pub after: Vec(Holds)
     // The callee's function, -1 for a call through a pointer or closure.
     pub callee: i64
     pub args: Vec(Arg)
@@ -256,6 +262,18 @@ pub fn disjunction(sink ors: Vec(Vec(Cond)), partial: bool) -> Fact {
     Fact { op: Cmp.Eq, a: Lin.num(0), b: Lin.num(0), stated: false, ors, partial }
 }
 
+// A struct's invariant at a place, as a fact over the function's
+// variables, and the type (docs/language/contracts.md): what assumes it
+// rests on every writer of the type proving it.
+pub struct Holds {
+    pub ty: i64
+    pub fact: Fact
+}
+
+impl Clone for Holds {
+    fn clone(self) -> Holds { Holds { ty: self.ty, fact: self.fact.clone() } }
+}
+
 // What a call needs of its callee: the contract, and how its parameters
 // map to the contract's variables.
 pub struct Callee {
@@ -304,6 +322,12 @@ pub struct Function {
     pub callee: Callee
     // Small, with a call that never returns: record the paths to it.
     pub liftable: bool
+    // The invariants of what the parameters hold, assumed on entry; in a
+    // writer, those of the result and of what `inout` parameters hold,
+    // proved on return; and the types it is a writer of.
+    pub holds_in: Vec(Holds)
+    pub holds_out: Vec(Holds)
+    pub writes: Vec(i64)
 }
 
 impl Function {
@@ -326,6 +350,8 @@ pub enum Source {
     // At the call in the block, the callee does not reach its call that
     // never returns at the site.
     Lift(i64, i64, Site)
+    // A writer's obligation of the type's invariant.
+    TypeInvariant(i64)
 }
 
 // What a fact on a path rests on, besides the path itself: an assumption
@@ -338,6 +364,8 @@ pub enum Tag {
     Cut(i64)
     // The `ensures` of the function called.
     Ensures(i64)
+    // The type's invariant, which every writer of it proves.
+    TypeInvariant(i64)
 }
 
 pub struct Obligation {
@@ -492,6 +520,7 @@ fn copy_source(s: Source) -> Source {
         Invariant(i, j) => Source.Invariant(i, j)
         Ensures(j) => Source.Ensures(j)
         Lift(b, f, s) => Source.Lift(b, f, s)
+        TypeInvariant(t) => Source.TypeInvariant(t)
     }
 }
 
@@ -530,16 +559,9 @@ impl Gen {
         // The range facts first: a prover looks at the latest facts first.
         var facts = Vec(Lin).new()
         var tags = Vec(Tag).new()
-        var chosen = Vec(i64).new()
+        let chosen = cases_for(p, claim, extra)
         var cases = 1
-        var k = p.ors.len()
-        while k > 0 {
-            k -= 1
-            let n = p.ors[k].len()
-            if cases * n > MAX_CASES { break }
-            cases *= n
-            chosen.push(k)
-        }
+        for c in chosen { cases *= p.ors[c].len() }
         self.stamp += 1
         for t in claim.terms { self.name(t.0, &facts, &tags) }
         for x in p.facts {
@@ -703,6 +725,94 @@ impl Gen {
         self.mark.push(0)
         x
     }
+}
+
+// The disjunctions an obligation splits into cases, latest first while
+// the cases stay few. Of those a type's invariant gives, which every value
+// of the type adds after each call, only those that name the claim's
+// variables, or those of facts that do, directly or through others:
+// another can help only to show that the path cannot be taken. Leaving
+// one out only loses facts. For a claim without variables (the path
+// cannot be taken), the latest facts on the path count as the claim's.
+fn cases_for(p: Path, claim: Lin, extra: [Lin]) -> Vec(i64) {
+    var chosen = Vec(i64).new()
+    var seen = Vec(bool).new()
+    var any = false
+    for t in claim.terms { any = mark(&seen, t.0) || any }
+    for x in extra {
+        for t in x.terms { any = mark(&seen, t.0) || any }
+    }
+    // That the path cannot be taken: the latest conditions on it.
+    if !any {
+        var j = p.facts.len()
+        while j > 0 && p.facts.len() - j < 8 {
+            j -= 1
+            for t in p.facts[j].terms { any = mark(&seen, t.0) || any }
+        }
+    }
+    if any {
+        var changed = true
+        var rounds = 0
+        while changed && rounds < 8 {
+            changed = false
+            rounds += 1
+            for x in p.facts {
+                if touches(seen.as_slice(), x) {
+                    for t in x.terms {
+                        if mark(&seen, t.0) { changed = true }
+                    }
+                }
+            }
+        }
+    }
+    var cases = 1
+    var k = p.ors.len()
+    while k > 0 {
+        k -= 1
+        let n = p.ors[k].len()
+        var relevant = true
+        let typed = match p.or_tags[k] {
+            TypeInvariant(_) => true
+            _ => false
+        }
+        if any && typed {
+            relevant = false
+            for alt in p.ors[k] {
+                for x in alt {
+                    if touches(seen.as_slice(), x) { relevant = true }
+                }
+            }
+        }
+        if !relevant { continue }
+        if cases * n > MAX_CASES { break }
+        cases *= n
+        chosen.push(k)
+        if any {
+            for alt in p.ors[k] {
+                for x in alt {
+                    for t in x.terms {
+                        let _ = mark(&seen, t.0)
+                    }
+                }
+            }
+        }
+    }
+    chosen
+}
+
+// Marks the variable; whether it was not marked yet.
+fn mark(inout seen: Vec(bool), v: i64) -> bool {
+    while seen.len() <= v { seen.push(false) }
+    if seen[v] { return false }
+    seen[v] = true
+    true
+}
+
+fn touches(seen: [bool], x: Lin) -> bool {
+    for t in x.terms {
+        if t.0 < seen.len && seen[t.0] { return true }
+    }
+    false
 }
 
 // The forms that are `>= 0` exactly when `a op b`; None for `!=`, which is
@@ -953,6 +1063,7 @@ pub fn unassigned(f: Function) -> Vec(bool) {
         for st in b.stmts {
             match st {
                 Assign(dst, _, _, _) => if dst >= 0 && dst < out.len() { out[dst] = false }
+                Check(_, _) => {}
             }
         }
         match b.term {
@@ -1015,11 +1126,32 @@ fn start(f: Function, fixed: [bool], block: i64, facts: [Fact], tag: Tag) -> Pat
             if all { assume_fact(&p, x, map.as_slice(), Tag.Requires) }
         }
     }
+    // The invariants of what the parameters hold, on entry, and at a cut
+    // point when nothing changes them.
+    for h in f.holds_in {
+        var all = true
+        if block != 0 {
+            for v in h.fact.names() {
+                if v >= fixed.len || !fixed[v] { all = false }
+            }
+        }
+        if all { assume_fact(&p, h.fact, map.as_slice(), Tag.TypeInvariant(h.ty)) }
+    }
     for x in facts { assume_fact(&p, x, map.as_slice(), tag) }
     p
 }
 
 // Each fact holds on this path; `inv` is the invariant they are, or -1.
+// Each invariant holds on this path: a writer's obligations.
+fn invariants_hold(inout g: Gen, p: Path, what: str, hs: [Holds]) {
+    if hs.len == 0 { return }
+    let map = state_map(p)
+    for h in hs {
+        g.source = Source.TypeInvariant(h.ty)
+        g.require_fact(p, what, h.fact, map.as_slice())
+    }
+}
+
 // A fact over what the model does not follow is never proved.
 fn holds(inout g: Gen, p: Path, what: str, facts: [Fact], inv: i64) {
     let map = state_map(p)
@@ -1350,6 +1482,7 @@ fn call(
     site: CallSite
 ) -> Path {
     var q = p
+    invariants_hold(&g, q, "invariant", site.before.as_slice())
     var pre = Vec(Option(Lin)).new()
     let has = site.callee >= 0 && site.callee < contracts.len && contracts[site.callee].is_some()
     if has {
@@ -1438,6 +1571,10 @@ fn call(
             Some(r) => q.state[dst] = Sym.Num(r)
             None => havoc_or(&g, f, &q, dst, Sym.Unknown, WHY_CALL)
         }
+    }
+    if site.after.len() > 0 {
+        let map = state_map(q)
+        for h in site.after { assume_fact(&q, h.fact, map.as_slice(), Tag.TypeInvariant(h.ty)) }
     }
     q
 }
@@ -1608,6 +1745,13 @@ fn walk(
                     assign(&g, f, &p, dst, rv)
                     g.at = nowhere()
                 }
+                Check(h, at) => {
+                    g.at = at
+                    var one = Vec(Holds).new()
+                    one.push(h.clone())
+                    invariants_hold(&g, p, "invariant", one.as_slice())
+                    g.at = nowhere()
+                }
             }
         }
         match b.term {
@@ -1675,7 +1819,10 @@ fn walk(
                 record(&g, f, p)
                 g.at = nowhere()
             }
-            Return => holds(&g, p, "ensures", f.ensures(), -1)
+            Return => {
+                invariants_hold(&g, p, "invariant", f.holds_out.as_slice())
+                holds(&g, p, "ensures", f.ensures(), -1)
+            }
             // MIR's `unreachable` is a promise the compiler makes (after a
             // call that does not return, an impossible `match` arm), and LLVM
             // relies on it too: a path that reaches it is not taken.

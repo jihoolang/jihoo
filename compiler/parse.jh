@@ -304,6 +304,7 @@ impl Parser {
                 self.bump()
                 let name = self.ident()?
                 let params = self.generic_params()?
+                let invariants = self.invariants()?
                 self.list_open(Tok.LBrace)?
                 var fields = Vec(ast.Field).new()
                 while !self.at(Tok.RBrace) {
@@ -323,7 +324,12 @@ impl Parser {
                     }
                 }
                 self.expect(Tok.RBrace)?
-                ItemKind.Struct(ast.StructDecl { name: name, params: params, fields: fields })
+                ItemKind.Struct(ast.StructDecl {
+                    name: name,
+                    params: params,
+                    fields: fields,
+                    invariants: invariants
+                })
             }
             Enum => {
                 self.bump()
@@ -516,7 +522,8 @@ impl Parser {
         false
     }
 
-    // A loop's `invariant` clauses, before its body.
+    // A loop's `invariant` clauses, before its body, or a struct's, before
+    // its fields.
     fn invariants(inout self) -> Result(Vec(Expr), Diag) {
         var out = Vec(Expr).new()
         while self.word("invariant") { out.push(self.expr_ns()?) }
