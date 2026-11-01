@@ -52,6 +52,12 @@ fn escapes(inout x: i64) -> *i64 {
     &x
 }
 
+fn apart(x: i64) -> i64
+    requires x < 0 || !(x <= 10)
+{
+    x
+}
+
 fn widths(a: u8, b: i32) -> u64 {
     let big: u64 = 18446744073709551615
     big - a as u64 + b as u64
@@ -110,17 +116,27 @@ def functions(text):
         clauses = [x for x in f[9:] if x[0] in CLAUSES]
         blocks = f[9 + len(clauses):]
         for c in clauses:
-            # (requires (op A B) (at lo hi)); (invariant BLOCK (op A B) (at lo hi))
+            # (requires (op A B) (at lo hi)); (invariant BLOCK (op A B) (at lo hi));
+            # with `||`, (or (and (op A B)...)...) in place of (op A B).
             body = c[2:] if c[0] == "invariant" else c[1:]
             assert len(body) == 2 and body[1][0] == "at", (name, c)
-            assert body[0][0] in ["lt", "le", "gt", "ge", "eq", "ne"], (name, c)
-            for side in body[0][1:]:
-                assert side[0] in ["lin", "opaque"], (name, c)
-                if side[0] == "lin":
-                    int(side[1])
-                    for v, k in side[2:]:
-                        assert 0 <= int(v) < variables, (name, c)
-                        int(k)
+            if body[0][0] == "or":
+                assert len(body[0]) >= 3, (name, c)
+                compares = []
+                for alt in body[0][1:]:
+                    assert alt[0] == "and" and len(alt) >= 2, (name, c)
+                    compares += alt[1:]
+            else:
+                compares = [body[0]]
+            for x in compares:
+                assert x[0] in ["lt", "le", "gt", "ge", "eq", "ne"], (name, c)
+                for side in x[1:]:
+                    assert side[0] in ["lin", "opaque"], (name, c)
+                    if side[0] == "lin":
+                        int(side[1])
+                        for v, k in side[2:]:
+                            assert 0 <= int(v) < variables, (name, c)
+                            int(k)
         for i, b in enumerate(blocks):
             assert b[0] == "block" and b[1] == str(i), (name, b[:2])
             for s in b[2:-1]:
@@ -229,6 +245,10 @@ def main():
         assert b["clauses"][1][1] == ["eq", ["lin", "0", ["3", "1"]], ["lin", "1", ["4", "1"]]], b["clauses"]
         assert [x[:2] for x in s["clauses"]] == [["invariant", "1"], ["invariant", "1"]], s["clauses"]
         assert s["clauses"][1][2] == ["le", ["lin", "0", ["3", "1"]], ["lin", "0", ["14", "1"]]]
+        # `||` gives a conjunction per case; `!` negates the comparison.
+        x, zero, ten = ["lin", "0", ["1", "1"]], ["lin", "0"], ["lin", "10"]
+        a = debug["apart"]["clauses"][0][:2]
+        assert a == ["requires", ["or", ["and", ["lt", x, zero]], ["and", ["gt", x, ten]]]], a
 
         # Every opaque value says why: a load through the slice's pointer.
         assert ["set", "10", ["use", ["opaque", "load"]]] in s["blocks"][6], s["blocks"][6]

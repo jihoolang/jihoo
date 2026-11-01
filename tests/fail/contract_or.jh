@@ -1,9 +1,11 @@
-// `||` is not part of contracts yet: each clause is a conjunction.
-// error: a contract clause compares integers, or joins comparisons with `&&`
-fn f(x: i64) -> i64
-    requires x < 0 || x > 10
+// A clause with `||` has a case per conjunction, at most 8: the verifier
+// splits a proof into one per case. Here three cases times three, and one
+// more. (`&&` at the top splits a clause in several, so it adds none.)
+// error: a contract clause has more than 8 cases; split it
+fn f(a: i64, b: i64, c: i64) -> i64
+    requires ((a < 0 || a > 10 || a == 5) && (b < 0 || b > 10 || b == 5)) || c == 0
 {
-    x
+    a
 }
 
-fn main() { println(f(11)) }
+fn main() { println(f(11, 11, 0)) }

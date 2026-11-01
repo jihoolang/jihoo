@@ -183,17 +183,49 @@ impl Clone for Kind {
 // A fact about the function's variables, `a op b`, over linear forms;
 // `_0` is the result in postconditions. A fact that names what the model
 // does not follow is not `stated`: it is never assumed, and never proved.
+// A disjunction (a clause with `||`) holds when one of the conjunctions in
+// `ors` does, or, when it is `partial`, one of the alternatives over what
+// the model does not follow, which are left out. It is not `stated`, so
+// that what reads only `a op b` never assumes or proves it; `alternatives`
+// reads it.
 pub struct Fact {
     pub op: Cmp
     pub a: Lin
     pub b: Lin
     pub stated: bool
+    pub ors: Vec(Vec(Cond))
+    pub partial: bool
 }
 
 impl Clone for Fact {
-    fn clone(
-        self
-    ) -> Fact { Fact { op: self.op, a: self.a.clone(), b: self.b.clone(), stated: self.stated } }
+    fn clone(self) -> Fact {
+        Fact {
+            op: self.op, a: self.a.clone(), b: self.b.clone(), stated: self.stated,
+            ors: self.ors.clone(), partial: self.partial
+        }
+    }
+}
+
+impl Fact {
+    pub fn compare(op: Cmp, sink a: Lin, sink b: Lin) -> Fact {
+        Fact { op, a, b, stated: true, ors: Vec(Vec(Cond)).new(), partial: false }
+    }
+
+    pub fn is_or(self) -> bool { self.ors.len() > 0 || self.partial }
+
+    // The variables it names.
+    pub fn names(self) -> Vec(i64) {
+        var out = Vec(i64).new()
+        for t in self.a.terms { out.push(t.0) }
+        for t in self.b.terms { out.push(t.0) }
+        for alt in self.ors {
+            for c in alt {
+                for t in c.a.terms { out.push(t.0) }
+                for t in c.b.terms { out.push(t.0) }
+            }
+        }
+        out
+    }
 }
 
 fn form(o: Operand) -> Option(Lin) {
@@ -206,12 +238,23 @@ fn form(o: Operand) -> Option(Lin) {
 
 pub fn fact(op: Cmp, a: Operand, b: Operand) -> Fact {
     match (form(a), form(b)) {
-        (Some(x), Some(y)) => Fact { op, a: x, b: y, stated: true }
+        (Some(x), Some(y)) => Fact.compare(op, x, y)
         _ => unstated(op)
     }
 }
 
-pub fn unstated(op: Cmp) -> Fact { Fact { op, a: Lin.num(0), b: Lin.num(0), stated: false } }
+pub fn unstated(op: Cmp) -> Fact {
+    Fact {
+        op, a: Lin.num(0), b: Lin.num(0), stated: false, ors: Vec(Vec(Cond)).new(),
+        partial: false
+    }
+}
+
+// One of the conjunctions holds, or with `partial`, one left out.
+pub fn disjunction(sink ors: Vec(Vec(Cond)), partial: bool) -> Fact {
+    if ors.len() == 0 { return unstated(Cmp.Eq) }
+    Fact { op: Cmp.Eq, a: Lin.num(0), b: Lin.num(0), stated: false, ors, partial }
+}
 
 // What a call needs of its callee: the contract, and how its parameters
 // map to the contract's variables.
@@ -378,10 +421,10 @@ impl Clone for Sym {
 }
 
 // A condition over linear forms, as `Rvalue.Compare` made it.
-struct Cond {
-    op: Cmp
-    a: Lin
-    b: Lin
+pub struct Cond {
+    pub op: Cmp
+    pub a: Lin
+    pub b: Lin
 }
 
 impl Clone for Cond {
@@ -619,6 +662,39 @@ impl Gen {
         for conj in no { self.refute(p, what, conj_lins(conj.as_slice()).as_slice()) }
     }
 
+    // The fact must hold on this path. A single conjunction gives a goal
+    // per comparison; a disjunction holds when the path and the negation
+    // of every alternative it can state cannot all hold (one it cannot
+    // state is left out, which only makes the claim stronger).
+    fn require_fact(inout self, p: Path, what: str, x: Fact, map: [Option(Lin)]) {
+        var known = Vec(Vec(Cond)).new()
+        for alt in alternatives(x, map).into_iter() {
+            match alt {
+                Some(conj) => known.push(conj)
+                None => {}
+            }
+        }
+        if known.len() == 0 {
+            self.unknown(p, what)
+            return
+        }
+        if known.len() == 1 {
+            for c in known[0] { self.require(p, what, c) }
+            return
+        }
+        // None of the alternatives: in each, one comparison fails.
+        var no = truth()
+        for conj in known {
+            var fails = Vec(Vec(Cond)).new()
+            for c in conj {
+                let n = Cond { op: negate(c.op), a: c.a.clone(), b: c.b.clone() }
+                fails = disj_dnf(fails.as_slice(), atom_dnf(n).as_slice())
+            }
+            no = conj_dnf(no.as_slice(), fails.as_slice())
+        }
+        self.require_bool(p, what, no.as_slice())
+    }
+
     // A new variable with a range, from a value the model does not follow.
     fn fresh(inout self, kind: Kind, why: i64) -> Lin {
         let x = Lin.of(self.ranges.len())
@@ -714,14 +790,65 @@ fn substitute(x: Lin, map: [Option(Lin)]) -> Option(Lin) {
     Some(out)
 }
 
-fn condition(p: Path, x: Fact) -> Option(Cond) {
+// Each variable's form on this path, as `substitute` reads a map.
+fn state_map(p: Path) -> Vec(Option(Lin)) {
+    var out = Vec(Option(Lin)).with_capacity(p.state.len())
+    for x in p.state { out.push(sym_form(x)) }
+    out
+}
+
+// The comparison over the map's forms; None if it is not stated or names
+// a variable the map does not give.
+fn mapped(x: Fact, map: [Option(Lin)]) -> Option(Cond) {
     if !x.stated { return None }
-    let Some(a) = value(p, x.a) else { return None }
-    let Some(b) = value(p, x.b) else { return None }
+    let Some(a) = substitute(x.a, map) else { return None }
+    let Some(b) = substitute(x.b, map) else { return None }
     Some(Cond { op: x.op, a, b })
 }
 
-fn assume(inout p: Path, c: Cond, tag: Tag) { assume_dnf(&p, atom_dnf(c.clone()).as_slice(), tag) }
+// The fact's alternatives over the map's forms, one of which holds: the
+// fact itself, or each conjunction of a disjunction. None stands for an
+// alternative the map cannot state.
+fn alternatives(x: Fact, map: [Option(Lin)]) -> Vec(Option(Vec(Cond))) {
+    var out = Vec(Option(Vec(Cond))).new()
+    if !x.is_or() {
+        out.push(match mapped(x, map) {
+            Some(c) => {
+                var one = Vec(Cond).new()
+                one.push(c)
+                Some(one)
+            }
+            None => None
+        })
+        return out
+    }
+    if x.partial { out.push(None) }
+    for alt in x.ors {
+        var conj = Vec(Cond).new()
+        var known = true
+        for y in alt {
+            match (substitute(y.a, map), substitute(y.b, map)) {
+                (Some(a), Some(b)) => conj.push(Cond { op: y.op, a, b })
+                _ => known = false
+            }
+        }
+        out.push(if known { Some(conj) } else { None })
+    }
+    out
+}
+
+// The fact holds on this path, resting on `tag`. An alternative the map
+// cannot state could be the one that holds, so then nothing is assumed.
+fn assume_fact(inout p: Path, x: Fact, map: [Option(Lin)], tag: Tag) {
+    var d = Vec(Vec(Cond)).new()
+    for alt in alternatives(x, map).into_iter() {
+        let Some(conj) = alt else { return }
+        var c = truth()
+        for y in conj { c = conj_dnf(c.as_slice(), atom_dnf(y.clone()).as_slice()) }
+        d = disj_dnf(d.as_slice(), c.as_slice())
+    }
+    assume_dnf(&p, d.as_slice(), tag)
+}
 
 // The linear facts of a conjunction; a `!=` in it, which is not one, is
 // left out.
@@ -878,41 +1005,27 @@ fn start(f: Function, fixed: [bool], block: i64, facts: [Fact], tag: Tag) -> Pat
             p.state[e.1] = Sym.Var(e.0)
         }
     }
+    let map = state_map(p)
     if block != 0 {
         for x in f.requires() {
-            var all = x.stated
-            for t in x.a.terms {
-                if t.0 >= fixed.len || !fixed[t.0] { all = false }
+            var all = x.stated || x.is_or()
+            for v in x.names() {
+                if v >= fixed.len || !fixed[v] { all = false }
             }
-            for t in x.b.terms {
-                if t.0 >= fixed.len || !fixed[t.0] { all = false }
-            }
-            if all {
-                match condition(p, x) {
-                    Some(c) => assume(&p, c, Tag.Requires)
-                    None => {}
-                }
-            }
+            if all { assume_fact(&p, x, map.as_slice(), Tag.Requires) }
         }
     }
-    for x in facts {
-        match condition(p, x) {
-            Some(c) => assume(&p, c, tag)
-            None => {}
-        }
-    }
+    for x in facts { assume_fact(&p, x, map.as_slice(), tag) }
     p
 }
 
 // Each fact holds on this path; `inv` is the invariant they are, or -1.
+// A fact over what the model does not follow is never proved.
 fn holds(inout g: Gen, p: Path, what: str, facts: [Fact], inv: i64) {
+    let map = state_map(p)
     for j, x in facts {
         g.source = if inv >= 0 { Source.Invariant(inv, j) } else { Source.Ensures(j) }
-        match condition(p, x) {
-            Some(c) => g.require(p, what, c)
-            // A fact over what the model does not follow is never proved.
-            None => g.unknown(p, what)
-        }
+        g.require_fact(p, what, x, map.as_slice())
     }
 }
 
@@ -1244,14 +1357,7 @@ fn call(
         pre = parameters(&g, q, c, site)
         let what = "requires of " + c.symbol.as_str()
         g.source = Source.Requires(q.block, site.callee)
-        for x in c.requires {
-            let a = if x.stated { substitute(x.a, pre.as_slice()) } else { None }
-            let b = if x.stated { substitute(x.b, pre.as_slice()) } else { None }
-            match (a, b) {
-                (Some(a), Some(b)) => g.require(q, what.as_str(), Cond { op: x.op, a, b })
-                _ => g.unknown(q, what.as_str())
-            }
-        }
+        for x in c.requires { g.require_fact(q, what.as_str(), x, pre.as_slice()) }
     }
     q.block = next
     q.steps += 1
@@ -1324,18 +1430,7 @@ fn call(
             }
             None => {}
         }
-        for x in c.ensures {
-            if x.stated {
-                match (substitute(x.a, post.as_slice()), substitute(x.b, post.as_slice())) {
-                    (Some(a), Some(b)) => assume(
-                        &q,
-                        Cond { op: x.op, a, b },
-                        Tag.Ensures(site.callee)
-                    )
-                    _ => {}
-                }
-            }
-        }
+        for x in c.ensures { assume_fact(&q, x, post.as_slice(), Tag.Ensures(site.callee)) }
     }
     for y in lent { q.state[y.0] = Sym.Num(y.1.clone()) }
     if dst >= 0 {

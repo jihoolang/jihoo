@@ -383,8 +383,9 @@ and moves into the compiler once its trust boundary is stated.
    variables, and the differential test tells failures under an unproved
    contract from bugs. `tests/fail` has a case for each malformed
    contract. Fields, `Vec` lengths (`v.len()`) and `old` of them are
-   part of clauses (step 5). Left: unproved contracts as compile errors
-   (with step 3), and `||` in clauses.
+   part of clauses (step 5), and so are `||` and `!`: a clause is then a
+   few cases, assumed one at a time and proved by refuting them all
+   failing. Left: unproved contracts as compile errors (with step 3).
 5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
    so that ordinary loops over vectors and slices have no bounds checks
    left. Started ([design](verification.md#fields-panics-and-calls)):
@@ -396,7 +397,9 @@ and moves into the compiler once its trust boundary is stated.
    check. `std` states `ensures` on `Vec` (`new`, `len`, `reserve`,
    `push`, `pop`, `insert`, `remove`, `as_slice`) and `String`, all proved.
    On the compiler, bounds and overflow checks proved went from 378 to
-   720, and 120 calls prove `Vec.index`'s panic away. Left: type
+   720, and 120 calls prove `Vec.index`'s panic away (746 and 125 once the
+   prover also looks for a case that contradicts the path, below the
+   claim). Left: type
    invariants (`0 <= len <= cap`) for the checks inside `std`'s own
    methods, and slicing of `str`.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean

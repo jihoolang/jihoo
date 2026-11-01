@@ -786,8 +786,10 @@ fn contract_places(t: Types, b: Body) -> Vec(Place) {
     for c in b.contract.ensures { clauses.push(c.clone()) }
     for x in b.contract.invariants { clauses.push(x.1.clone()) }
     for c in clauses {
-        for term in c.a.terms { spec_field_place(t, b, term, &out) }
-        for term in c.b.terms { spec_field_place(t, b, term, &out) }
+        for x in c.atoms() {
+            for term in x.a.terms { spec_field_place(t, b, term, &out) }
+            for term in x.b.terms { spec_field_place(t, b, term, &out) }
+        }
     }
     out
 }
@@ -1406,7 +1408,8 @@ fn spec(inout s: String, t: Types, b: Body, m: Model, x: mir.Spec) {
     s.push(')')
 }
 
-// `(requires (le A B) (at lo hi))`, and `(invariant BLOCK (le A B) (at lo hi))`.
+// `(requires (le A B) (at lo hi))`, and `(invariant BLOCK (le A B) (at lo hi))`;
+// a clause with `||` is `(or (and (le A B)...)...)` in place of `(le A B)`.
 fn clause(
     inout s: String,
     t: Types,
@@ -1425,14 +1428,33 @@ fn clause(
         }
         None => {}
     }
-    s.push_str(" (")
+    s.push(' ')
+    if c.ors.len() == 1 && c.ors[0].len() == 1 {
+        comparison(&s, t, b, m, c.ors[0][0])
+    } else {
+        s.push_str("(or")
+        for alt in c.ors {
+            s.push_str(" (and")
+            for x in alt {
+                s.push(' ')
+                comparison(&s, t, b, m, x)
+            }
+            s.push(')')
+        }
+        s.push(')')
+    }
+    at(&s, c.span)
+    s.push(')')
+}
+
+// `(le A B)`.
+fn comparison(inout s: String, t: Types, b: Body, m: Model, c: mir.Compare) {
+    s.push('(')
     s.push_str(compare(c.op).unwrap())
     s.push(' ')
     spec(&s, t, b, m, c.a)
     s.push(' ')
     spec(&s, t, b, m, c.b)
-    s.push(')')
-    at(&s, c.span)
     s.push(')')
 }
 
@@ -1929,11 +1951,29 @@ fn model_spec(t: Types, b: Body, m: Model, x: mir.Spec) -> Option(linear.Lin) {
 }
 
 fn model_clause(t: Types, b: Body, m: Model, c: mir.Clause) -> vc.Fact {
-    let op = model_cmp(c.op).unwrap()
-    match (model_spec(t, b, m, c.a), model_spec(t, b, m, c.b)) {
-        (Some(a), Some(b)) => vc.Fact { op, a, b, stated: true }
-        _ => vc.unstated(op)
+    if c.ors.len() == 1 && c.ors[0].len() == 1 {
+        let x = c.ors[0][0]
+        let op = model_cmp(x.op).unwrap()
+        return match (model_spec(t, b, m, x.a), model_spec(t, b, m, x.b)) {
+            (Some(a), Some(b)) => vc.Fact.compare(op, a, b)
+            _ => vc.unstated(op)
+        }
     }
+    // An alternative over what the model does not follow is left out.
+    var ors = Vec(Vec(vc.Cond)).new()
+    var partial = false
+    for alt in c.ors {
+        var conj = Vec(vc.Cond).new()
+        var known = true
+        for x in alt {
+            match (model_spec(t, b, m, x.a), model_spec(t, b, m, x.b)) {
+                (Some(a), Some(b)) => conj.push(vc.Cond { op: model_cmp(x.op).unwrap(), a, b })
+                _ => known = false
+            }
+        }
+        if known { ors.push(conj) } else { partial = true }
+    }
+    vc.disjunction(ors, partial)
 }
 
 // The model of a function with a body, as the verifier reads it.

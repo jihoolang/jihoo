@@ -366,17 +366,40 @@ impl Clone for Spec {
     }
 }
 
-// `a op b`, a comparison; a clause written with `&&` is several.
-pub struct Clause {
+// `a op b`, a comparison in a contract.
+pub struct Compare {
     pub op: Op
     pub a: Spec
     pub b: Spec
     pub span: Span
 }
 
+impl Clone for Compare {
+    fn clone(self) -> Compare {
+        Compare { op: self.op, a: self.a.clone(), b: self.b.clone(), span: self.span }
+    }
+}
+
+// A clause: one of the conjunctions in `ors` holds. Most are a single
+// comparison; a clause written with `&&` is several clauses, and one
+// written with `||` or `!` has several conjunctions.
+pub struct Clause {
+    pub ors: Vec(Vec(Compare))
+    pub span: Span
+}
+
 impl Clone for Clause {
-    fn clone(self) -> Clause {
-        Clause { op: self.op, a: self.a.clone(), b: self.b.clone(), span: self.span }
+    fn clone(self) -> Clause { Clause { ors: self.ors.clone(), span: self.span } }
+}
+
+impl Clause {
+    // The comparisons of every conjunction.
+    pub fn atoms(self) -> Vec(Compare) {
+        var out = Vec(Compare).new()
+        for alt in self.ors {
+            for c in alt { out.push(c.clone()) }
+        }
+        out
     }
 }
 

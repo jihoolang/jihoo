@@ -1,5 +1,5 @@
 // A clause compares integers; a bool parameter is not one.
-// error: a contract clause compares integers, or joins comparisons with `&&`
+// error: a contract clause compares integers, or joins comparisons with `&&`, `||` and `!`
 fn f(b: bool) -> i64
     requires b
 {

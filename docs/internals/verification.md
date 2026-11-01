@@ -64,7 +64,7 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 | Part | Trusted | Why |
 | --- | --- | --- |
 | The checker (`linear.jh`, 120 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 1,360 lines, and the model `obligations.jh` builds from MIR, 1,780) | yes | it states what MIR means: a wrong rule proves a false thing |
+| The obligation generator (`vc.jh`, 1,430 lines, and the model `obligations.jh` builds from MIR, 1,820) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
@@ -293,6 +293,14 @@ loops over `v` or after a length test; most of the other `v[i]` index
 with a value loaded from memory (a token's position, a block's number),
 which no contract on `Vec` can bound.
 
+A case of a disjunction is often refuted by the path alone, without the
+claim: in `if x > 0 { return x }; y` under `requires x > 0 || y > 0`, the
+case `x > 0` contradicts the branch taken, and says nothing about `y`.
+The prover kept only the facts connected to the claim's variables, so it
+missed those; when that fails it now tries the latest facts (a case and
+the conditions before it) by themselves. That proves 746 bounds and
+overflow checks on the compiler and 125 calls, for about 7% more time.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
@@ -302,9 +310,11 @@ chosen by the program.
 
 - **Syntax.** Settled for functions and loops
   ([contracts](../language/contracts.md)), with fields and `.len()`; left
-  are where proofs that need lemmas name them, `||` and `!` in clauses
-  (the generator already splits cases), and invariants on `for` loops
-  over iterators.
+  are where proofs that need lemmas name them, and invariants on `for`
+  loops over iterators. `||` and `!` make a clause a disjunction of
+  conjunctions, at most 8: assumed, it is a disjunction on the path like a
+  bool's; to be proved, the path and every alternative failing must be
+  impossible.
 - **Places.** Integer fields of locals and of borrowed parameters are
   variables ([above](#fields-panics-and-calls)); a `Vec`'s elements, and
   fields reached through a raw pointer or a field that is itself a borrow,
