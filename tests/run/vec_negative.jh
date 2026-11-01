@@ -1,0 +1,20 @@
+// Negative lengths mean none: `truncate` drops every value, `filled`
+// makes none, and neither reaches before the start of the buffer.
+
+fn main() {
+    var v = Vec(String).new()
+    v.push(String.from("a"))
+    v.push(String.from("b"))
+    v.truncate(-1)
+    println(v.len())
+    let w = Vec(String).filled(-3, String.from("x"))
+    println(w.len())
+    var u = Vec(i64).new()
+    u.reserve(-5)
+    u.push(7)
+    println(u[0])
+}
+
+//> 0
+//> 0
+//> 7

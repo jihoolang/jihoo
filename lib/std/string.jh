@@ -2,6 +2,7 @@
 // borrows the literal's bytes; the first change copies them.
 
 import std.float
+import std.mem
 import std.vec
 
 pub struct String {

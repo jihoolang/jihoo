@@ -247,7 +247,7 @@ impl File {
         if max <= 0 { return Ok(0) }
         buf.reserve(max)
         let n = check(unsafe { sys.read_raw(self.fd, buf.ptr + buf.len, max) })?
-        buf.len += n
+        if n > 0 { buf.len += n }
         Ok(n)
     }
 

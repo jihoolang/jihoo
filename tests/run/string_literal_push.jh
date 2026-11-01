@@ -1,0 +1,21 @@
+// A `String` from a literal borrows the literal's bytes (no capacity): the
+// first change copies them, by `push` and `insert` too, never writing into
+// the literal.
+
+fn main() {
+    var s: String = "abc"
+    s.push('d')
+    println(s)
+    var t = String.from_static("xyz")
+    for _ in 0..100 { t.push('!') }
+    println(t.len())
+    var v = String.from_static("ac").into_bytes()
+    v.insert(1, 'b')
+    println(String.from_static("ac"))
+    println(v.len())
+}
+
+//> abcd
+//> 103
+//> ac
+//> 3
