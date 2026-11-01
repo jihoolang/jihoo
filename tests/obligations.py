@@ -96,14 +96,19 @@ CLAUSES = {"requires", "ensures", "invariant"}
 def functions(text):
     out = {}
     for f in parse(text):
-        assert f[0] == "function" and len(f) >= 9, f[:3]
-        name, symbol, args, locals_, lengths, derefs, entries = f[1], f[2], f[3], f[4], f[5], f[6], f[7]
+        assert f[0] == "function" and len(f) >= 10, f[:3]
+        name, symbol, args, locals_, lengths, derefs, fields, entries = f[1:9]
         assert isinstance(name, str) and isinstance(symbol, str)
         assert args[0] == "args" and locals_[0] == "locals" and lengths[0] == "lengths"
-        assert derefs[0] == "derefs" and entries[0] == "entries"
+        assert derefs[0] == "derefs" and fields[0] == "fields" and entries[0] == "entries"
         variables = len(locals_) - 1
-        clauses = [x for x in f[8:] if x[0] in CLAUSES]
-        blocks = f[8 + len(clauses):]
+        # (VAR LOCAL [*] FIELD...): an integer field, through the local's borrow with `*`.
+        for x in fields[1:]:
+            assert int(x[1]) < variables and len(x) >= 3, (name, x)
+            assert locals_[1 + int(x[0])][0] == "int", (name, x)
+            [int(k) for k in x[2 + (x[2] == "*"):]]
+        clauses = [x for x in f[9:] if x[0] in CLAUSES]
+        blocks = f[9 + len(clauses):]
         for c in clauses:
             # (requires (op A B) (at lo hi)); (invariant BLOCK (op A B) (at lo hi))
             body = c[2:] if c[0] == "invariant" else c[1:]
@@ -127,8 +132,11 @@ def functions(text):
             if term[0] == "assert":
                 assert len(term) == 5 and term[4][0] == "at", (name, term)
             if term[0] == "call":
-                parts = [p[0] for p in term[3:]]
+                parts = [p[0] for p in term[3:] if p[0] not in ("changes", "never", "fields")]
                 assert parts in [["fn", "args", "at"], ["args", "at"]], (name, term)
+                for p in term[3:]:
+                    if p[0] == "changes":
+                        assert all(int(v) < variables for v in p[1:]), (name, term)
             assert term[0] in ["goto", "switch", "any", "assert", "call", "trap", "return",
                                "unreachable"], (name, term)
             for t in targets:
@@ -138,7 +146,7 @@ def functions(text):
         for v, e in entries[1:]:
             assert locals_[1 + int(v)] == locals_[1 + int(e)], (name, v, e)
         out[name] = {"locals": locals_[1:], "lengths": lengths[1:], "derefs": derefs[1:],
-                     "entries": entries[1:], "clauses": clauses, "blocks": blocks}
+                     "fields": fields[1:], "entries": entries[1:], "clauses": clauses, "blocks": blocks}
     return out
 
 

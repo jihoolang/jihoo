@@ -325,8 +325,9 @@ fn drive() {
         print(text)
     } else if cmd == "emit-obligations" {
         var text = String.new()
+        let ifaces = obligations.interfaces(prog)
         for f in prog.fns {
-            text.push_str(obligations.show_function(prog, f).as_str())
+            text.push_str(obligations.show_function(prog, f, ifaces.as_slice()).as_str())
         }
         report_times(timer, time_passes)
         print(text)

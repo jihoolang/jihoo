@@ -30,10 +30,24 @@ pub struct Check {
     pub proved: bool
     // Where the values of an unproved claim come from (`vc.why_code`s).
     pub depends: Vec(i64)
+    // For a call that proves a callee's panics away, the callee: once
+    // proved, the call goes to a copy without them. -1 otherwise.
+    pub retarget: i64
+    // CHECK, PANIC or CALL.
+    pub kind: i64
 }
+
+// What a check is: a bounds or overflow check, a call that never returns
+// (or a trap), or a call that may reach a callee's panic.
+pub const CHECK: i64 = 0
+pub const PANIC: i64 = 1
+pub const CALL: i64 = 2
 
 pub struct Report {
     pub checks: Vec(Check)
+    // Per function, the sites of its calls that never return which calls
+    // may prove away, and that it does not prove itself.
+    pub lifted: Vec(Vec(vc.Site))
     // Per function: its `ensures` is proved, and so is all it rests on.
     pub ensures: Vec(bool)
     // Per function, the contract clauses that are not proved, and why.
@@ -49,6 +63,19 @@ impl Report {
             if c.proved { n += 1 }
         }
         n
+    }
+
+    // The checks of a kind, and how many are proved.
+    pub fn count(self, kind: i64) -> (i64, i64) {
+        var all = 0
+        var proved = 0
+        for c in self.checks {
+            if c.kind == kind {
+                all += 1
+                if c.proved { proved += 1 }
+            }
+        }
+        (proved, all)
     }
 }
 
@@ -74,27 +101,31 @@ struct Outcome {
     callees: Vec(i64)
 }
 
-fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
-    let obs = vc.generate(f, contracts)
+fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)], lifts: [Option(vc.Lift)]) -> Outcome {
+    let obs = vc.generate(f, contracts, lifts)
     var results = Vec(Result1).new()
     for o in obs.list {
         var used = Vec(vc.Tag).new()
-        let proved = match fm.prove(o.goal) {
-            Ok(c) => match linear.check(o.goal, c) {
-                Ok(_) => {
-                    for k, w in c.weights {
-                        if w > 0 && k < o.tags.len() {
-                            match o.tags[k] {
-                                Path => {}
-                                t => used.push(t)
+        var proved = true
+        for i, goal in o.goals {
+            if !proved { break }
+            proved = match fm.prove(goal) {
+                Ok(c) => match linear.check(goal, c) {
+                    Ok(_) => {
+                        for k, w in c.weights {
+                            if w > 0 && k < o.tags[i].len() {
+                                match o.tags[i][k] {
+                                    Path => {}
+                                    t => used.push(t)
+                                }
                             }
                         }
+                        true
                     }
-                    true
+                    Err(_) => false
                 }
                 Err(_) => false
             }
-            Err(_) => false
         }
         results.push(Result1 {
             proved,
@@ -142,12 +173,17 @@ fn copy_source(s: vc.Source) -> vc.Source {
         Requires(b, f) => vc.Source.Requires(b, f)
         Invariant(i, j) => vc.Source.Invariant(i, j)
         Ensures(j) => vc.Source.Ensures(j)
+        Lift(b, f, s) => vc.Source.Lift(b, f, s)
     }
 }
 
 // Generates and proves, with inferred invariants at loop heads, and cut
 // points where too many paths would meet.
-fn outcome(sink f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
+fn outcome(
+    sink f: vc.Function,
+    contracts: [Option(vc.Callee)],
+    lifts: [Option(vc.Lift)]
+) -> Outcome {
     var g = f
     let written = g.invariants.len()
     let heads = infer.loop_heads(g)
@@ -155,7 +191,7 @@ fn outcome(sink f: vc.Function, contracts: [Option(vc.Callee)]) -> Outcome {
     let more = infer.bounded(g, heads.as_slice())
     infer.cut(&g, more.as_slice())
     infer.infer(&g, heads.as_slice(), contracts)
-    var o = prove_all(g, contracts)
+    var o = prove_all(g, contracts, lifts)
     o.written = written
     o
 }
@@ -238,6 +274,46 @@ fn rvalue_fns(rv: mir.Rvalue, inout out: Vec(bool)) {
     }
 }
 
+// Every obligation of the check at the site is proved, and there is one.
+fn site_valid(a: Assumptions, f: i64, o: Outcome, s: vc.Site) -> bool {
+    var any = false
+    for r in o.results {
+        match r.source {
+            Check(x) => if x.0 == s.0 && x.1 == s.1 {
+                any = true
+                if !valid(a, f, o, r) { return false }
+            }
+            _ => {}
+        }
+    }
+    any
+}
+
+// What a lifted panic is: the message the callee panics with, `trap`, or
+// the function it calls.
+fn panic_what(p: mir.Program, g: i64, s: vc.Site) -> String {
+    let Some(b) = p.fns[g].body else { return "panic".to_string() }
+    match b.blocks[s.0].term {
+        Call(callee, args, _, _, _) => {
+            if args.len() > 0 {
+                match args[0] {
+                    Const(c) => match c {
+                        Str(m) => return m.clone()
+                        _ => {}
+                    }
+                    _ => {}
+                }
+            }
+            match callee {
+                Fn(h) => p.fns[h as i64].name.clone()
+                Intrinsic(_) => "trap".to_string()
+                _ => "panic".to_string()
+            }
+        }
+        _ => "panic".to_string()
+    }
+}
+
 fn site_span(b: mir.Body, block: i64, stmt: i64) -> diag.Span {
     let bl = b.blocks[block]
     if stmt < 0 {
@@ -252,10 +328,16 @@ fn site_span(b: mir.Body, block: i64, stmt: i64) -> diag.Span {
     }
 }
 
-fn site_what(b: mir.Body, block: i64, stmt: i64) -> String {
+fn site_what(p: mir.Program, b: mir.Body, block: i64, stmt: i64) -> String {
     if stmt < 0 {
         return match b.blocks[block].term {
             Assert(_, msg, _, _) => msg.clone()
+            // A call that never returns, which must be unreachable.
+            Call(callee, _, _, _, _) => match callee {
+                Fn(f) => p.fns[f as i64].name.clone()
+                Intrinsic(_) => "trap".to_string()
+                _ => "call".to_string()
+            }
             _ => "check".to_string()
         }
     }
@@ -276,7 +358,8 @@ fn sites(p: mir.Program, f: vc.Function) -> Vec((i64, i64)) {
             }
         }
         match b.term {
-            Assert(_, _, _, _) => out.push((i, -1))
+            Assert(_, _, _, _) | Trap(_) => out.push((i, -1))
+            Call(_, _, site) => if site.never { out.push((i, -1)) }
             _ => {}
         }
     }
@@ -288,8 +371,9 @@ pub fn verify(p: mir.Program) -> Report {
     let trace = env.get("JIHOO_VERIFY_TRACE").is_some()
     var models = Vec(Option(vc.Function)).new()
     var contracts = Vec(Option(vc.Callee)).new()
+    let ifaces = obligations.interfaces(p)
     for f in p.fns {
-        let m = obligations.model_of(p, f)
+        let m = obligations.model_of(p, f, ifaces.as_slice())
         match &m {
             Some(x) => {
                 if x.callee.requires.len() > 0 || x.callee.ensures.len() > 0 {
@@ -300,10 +384,32 @@ pub fn verify(p: mir.Program) -> Report {
         }
         models.push(m)
     }
+    // What calls need to prove a small function's panics away: its paths
+    // to them from its entry, with cut points at its loops.
+    var lifts = Vec(Option(vc.Lift)).new()
+    for i in 0..n {
+        var lift: Option(vc.Lift) = None
+        match models[i] {
+            Some(f) => if f.liftable {
+                var g = obligations.model_of(p, p.fns[i], ifaces.as_slice()).unwrap()
+                let heads = infer.loop_heads(g)
+                infer.cut(&g, heads.as_slice())
+                let more = infer.bounded(g, heads.as_slice())
+                infer.cut(&g, more.as_slice())
+                lift = vc.generate(g, contracts.as_slice(), Vec(Option(vc.Lift)).new().as_slice()).lift
+            }
+            None => {}
+        }
+        lifts.push(lift)
+    }
     var outcomes = Vec(Option(Outcome)).new()
     var report = Report {
-        checks: Vec(Check).new(), ensures: Vec(bool).filled(n, false),
-        contract_errors: Vec(Vec((diag.Span, String))).new(), functions: 0, incomplete: 0
+        checks: Vec(Check).new(),
+        lifted: Vec(Vec(vc.Site)).new(),
+        ensures: Vec(bool).filled(n, false),
+        contract_errors: Vec(Vec((diag.Span, String))).new(),
+        functions: 0,
+        incomplete: 0
     }
     for i in 0..n {
         report.contract_errors.push(Vec((diag.Span, String)).new())
@@ -313,7 +419,7 @@ pub fn verify(p: mir.Program) -> Report {
                 report.functions += 1
                 let begin = timing.now()
                 let blocks = f.blocks.len()
-                let o = outcome(f, contracts.as_slice())
+                let o = outcome(f, contracts.as_slice(), lifts.as_slice())
                 // `JIHOO_VERIFY_TRACE=1`: the time each function took.
                 if trace {
                     io.eprintln(
@@ -383,13 +489,30 @@ pub fn verify(p: mir.Program) -> Report {
             }
         }
     }
+    // The panics of each liftable function that it does not prove away
+    // itself: calls may.
+    for g in 0..n {
+        var left = Vec(vc.Site).new()
+        match lifts[g] {
+            Some(l) => match outcomes[g] {
+                Some(o) => {
+                    for s in l.sites {
+                        if !site_valid(a, g, o, s) { left.push(s) }
+                    }
+                }
+                None => {}
+            }
+            None => {}
+        }
+        report.lifted.push(left)
+    }
     for i in 0..n {
         let Some(o) = outcomes[i] else { continue }
         let f = p.fns[i]
         let Some(b) = f.body else { continue }
         report.ensures[i] = o.whole && a.ensures[i]
         // Per check site: every obligation proved, and why one is not.
-        let model = obligations.model_of(p, f).unwrap()
+        let model = obligations.model_of(p, f, ifaces.as_slice()).unwrap()
         for s in sites(p, model) {
             var all = true
             var any = false
@@ -416,10 +539,57 @@ pub fn verify(p: mir.Program) -> Report {
                 function: i as u32,
                 block: s.0,
                 stmt: s.1,
-                what: site_what(b, s.0, s.1),
+                what: site_what(p, b, s.0, s.1),
                 span: site_span(b, s.0, s.1),
                 proved: all && any,
-                depends
+                depends,
+                retarget: -1,
+                kind: if s.1 >= 0 { CHECK } else { match b.blocks[s.0].term {
+                    Call(_, _, _, _, _) => PANIC
+                    _ => CHECK
+                } }
+            })
+        }
+        // Each call to a function with panics left for its callers: the
+        // call proves them away when no path to them is possible from it.
+        for c, bl in model.blocks {
+            let Call(_, _, site) = bl.term else { continue }
+            let g = site.callee
+            if g < 0 || site.never || report.lifted[g].len() == 0 { continue }
+            var proved = o.whole
+            var depends = Vec(i64).new()
+            for s in report.lifted[g] {
+                var any = false
+                for r in o.results {
+                    match r.source {
+                        Lift(x, h, t) => if x == c && h == g && t.0 == s.0 && t.1 == s.1 {
+                            any = true
+                            if !valid(a, i, o, r) {
+                                proved = false
+                                for d in r.depends {
+                                    var have = false
+                                    for e in depends {
+                                        if e == d { have = true }
+                                    }
+                                    if !have { depends.push(d) }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if !any { proved = false }
+            }
+            report.checks.push(Check {
+                function: i as u32,
+                block: c,
+                stmt: -1,
+                what: panic_what(p, g, report.lifted[g][0]),
+                span: site_span(b, c, -1),
+                proved,
+                depends,
+                retarget: g,
+                kind: CALL
             })
         }
         // The contract's own clauses: an `ensures` or a written invariant
@@ -476,17 +646,72 @@ pub fn verify(p: mir.Program) -> Report {
 
 // MIR without the checks the report proved: an `assert` becomes a jump,
 // and a checked `+ - *` its wrapping form, which cannot overflow there.
+//
+// A call that proved a callee's panics away goes to a copy of the callee
+// without them (the panics it does not prove itself, `r.lifted`).
 pub fn erase(inout p: mir.Program, r: Report) {
-    var by_fn = Vec(Vec((i64, i64))).filled(p.fns.len(), Vec((i64, i64)).new())
+    let n = p.fns.len()
+    var by_fn = Vec(Vec((i64, i64))).filled(n, Vec((i64, i64)).new())
+    var calls = Vec(Vec((i64, i64))).filled(n, Vec((i64, i64)).new())
     for c in r.checks {
-        if c.proved { by_fn[c.function as i64].push((c.block, c.stmt)) }
+        if !c.proved { continue }
+        if c.retarget >= 0 {
+            calls[c.function as i64].push((c.block, c.retarget))
+        } else { by_fn[c.function as i64].push((c.block, c.stmt)) }
     }
-    for i in 0..p.fns.len() {
+    for i in 0..n {
         if by_fn[i].len() == 0 { continue }
         let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
         var body = b
         for s in by_fn[i] { erase_one(&body, s.0, s.1) }
         p.fns[i].body = Some(body)
+    }
+    // The copies' functions, after the program's.
+    var copies = Vec(i64).filled(n, -1)
+    var order = Vec(i64).new()
+    for i in 0..n {
+        for x in calls[i] {
+            if copies[x.1] < 0 {
+                copies[x.1] = n + order.len()
+                order.push(x.1)
+            }
+        }
+    }
+    for i in 0..n {
+        if calls[i].len() == 0 { continue }
+        let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
+        var body = b
+        for x in calls[i] {
+            match body.blocks[x.0].term {
+                Call(callee, args, dest, next, span) => {
+                    let to = mir.Callee.Fn(copies[x.1] as u32)
+                    body.blocks[x.0].term = mir.Term.Call(
+                        to,
+                        args.clone(),
+                        dest.clone(),
+                        next,
+                        span
+                    )
+                }
+                _ => {}
+            }
+        }
+        p.fns[i].body = Some(body)
+    }
+    for g in order {
+        var f = p.fns[g].clone()
+        f.symbol.push_str(".proved")
+        f.linkage = mir.Linkage.Internal
+        let Some(b) = mem.replace(&f.body, None) else { continue }
+        var body = b
+        for s in r.lifted[g] {
+            match body.blocks[s.0].term {
+                Call(_, _, _, _, _) => body.blocks[s.0].term = mir.Term.Unreachable
+                _ => {}
+            }
+        }
+        f.body = Some(body)
+        p.fns.push(f)
     }
 }
 
@@ -494,6 +719,8 @@ fn erase_one(inout body: mir.Body, block: i64, stmt: i64) {
     if stmt < 0 {
         match body.blocks[block].term {
             Assert(_, _, next, _) => body.blocks[block].term = mir.Term.Goto(next)
+            // A call that never returns, proved not to be reached.
+            Call(_, _, _, _, _) => body.blocks[block].term = mir.Term.Unreachable
             _ => {}
         }
         return
@@ -565,6 +792,19 @@ pub fn text(p: mir.Program, sources: diag.Sources, r: Report, all: bool) -> Stri
     out.push_str(" functions (")
     out.push_str(r.incomplete.to_string().as_str())
     out.push_str(" not followed everywhere)\n")
+    // By kind: bounds and overflow checks, calls that never return, and
+    // calls that may reach a callee's panic.
+    let names = ["bounds and overflow checks", "panics", "calls that may panic"]
+    for k in 0..3 {
+        let (proved, all) = r.count(k)
+        out.push_str("  ")
+        out.push_str(proved.to_string().as_str())
+        out.push_str(" of ")
+        out.push_str(all.to_string().as_str())
+        out.push(' ')
+        out.push_str(names[k])
+        out.push('\n')
+    }
     out
 }
 

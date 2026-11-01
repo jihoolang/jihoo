@@ -1,0 +1,97 @@
+// Fields as variables. A field of a borrowed parameter, or of a local, is a
+// variable while the borrow kernel lets nothing else change it, so it can
+// appear in contracts: a call lent `&c` gives its fields new values, which
+// the callee's `ensures` describes. A small function's panic is a check at
+// each call: `sum` proves `at`'s away and calls a copy without it, `off`
+// does not, and `at`'s own panic stays for such calls.
+
+struct Buf {
+    data: [i64]
+    len: i64
+}
+
+impl Buf {
+    fn len(self) -> i64
+        ensures result == self.len
+    {
+        self.len
+    }
+
+    fn bump(inout self)
+        requires self.len < 100
+        ensures self.len == old(self.len) + 1
+    {
+        self.len += 1
+    }
+
+    fn at(self, i: i64) -> i64 {
+        if (i as u64) >= (self.len as u64) {
+            panic("index out of bounds")
+        }
+        self.data[i]
+    }
+}
+
+// `len()` in a clause is what `len`'s `ensures` says it is.
+fn twice(inout b: Buf) -> i64
+    requires 0 <= b.len && b.len < 50
+    ensures result == old(b.len()) + 2 && b.len == result
+{
+    b.bump()
+    b.bump()
+    b.len()
+}
+
+// Wrong by one: not proved.
+fn wrong(inout b: Buf) -> i64
+    requires 0 <= b.len && b.len < 50
+    ensures result == old(b.len) + 1
+{
+    b.bump()
+    b.bump()
+    b.len()
+}
+
+fn sum(b: Buf) -> i64 {
+    var s = 0
+    var i = 0
+    while i < b.len() {
+        s += b.at(i)
+        i += 1
+    }
+    s
+}
+
+fn off(b: Buf) -> i64 {
+    b.at(b.len())
+}
+
+// Two different values cannot be equal: the panic is proved unreachable.
+fn differ(x: i64) -> i64 {
+    let y = x + 1
+    if x == y {
+        panic("equal")
+    }
+    y
+}
+
+fn main() {
+    var b = Buf { data: [1, 2, 3], len: 0 }
+    println(twice(&b) + wrong(&b))
+    b.len = 3
+    println(sum(b) + differ(1))
+    println(off(b))
+}
+
+//> 80:13: kept integer overflow in main (call)
+//> 82:13: kept integer overflow in main (call)
+//> 24:9: proved integer overflow in Buf.bump
+//> 29:13: kept panic in Buf.at (argument)
+//> 31:9: kept index out of bounds in Buf.at (argument)
+//> 59:9: kept integer overflow in sum (loop, call)
+//> 60:9: proved integer overflow in sum
+//> 59:14: proved index out of bounds in sum
+//> 66:5: kept index out of bounds in off (argument, call)
+//> 71:13: kept integer overflow in differ (argument)
+//> 73:9: proved panic in differ
+//> 48:13: unproved `ensures` in wrong
