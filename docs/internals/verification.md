@@ -90,7 +90,17 @@ functions transcribed from `emit-mir`:
   million per evaluation; about 60% of them are `std` code (a `Vec(i128)`
   push is about 46 steps).
 
-The last finding decides where the checker runs. A compiler pass can run the
+The model now comes from the compiler:
+[`emit-obligations`](../reference/command-line.md#verification-model)
+prints it, and the same functions verified from its output get the same
+verdicts as the hand-written ones. Two more programs check the
+boundaries with real MIR: a loop `while i <= xs.len` leaves `xs[i]`
+unproved, and a local lent to an `inout` parameter is opaque after the
+call, so an `ensures` that depends on its old value is not proved. Reading
+`x as u64 < len as u64` as `0 <= x < len` needs the length's range, which
+the model takes from the view: a length is never negative.
+
+The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
 chosen by the program.

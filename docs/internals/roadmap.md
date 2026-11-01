@@ -337,10 +337,17 @@ and moves into the compiler once its trust boundary is stated.
    `emit-mir`, by hand) are proved, `s + xs[i]` is not, and ten rejection
    cases pass. The finding: the two functions take 1.35 and 3.96 million
    interpreter steps, against 1 million per compile-time evaluation.
-2. The generator on real MIR: an `emit-obligations` dump, every
-   `assert` and checked `+ - *` of a function, in the debug and `--release`
-   overflow modes. Tested against the interpreter: on random inputs, a proved
-   check never fails.
+2. The generator on real MIR. Started:
+   [`emit-obligations`](../reference/command-line.md#verification-model)
+   prints each function's MIR as the model (`compiler/obligations.jh`),
+   with every `assert` and checked `+ - *`, in the debug and `--release`
+   overflow modes; what it cannot follow, including locals whose address is
+   taken, is opaque. `tests/obligations.py` checks it with an independent
+   reader, and jihoo-proofs verifies the compiler's output with the same
+   verdicts as the hand-written models, plus an off-by-one loop and a local
+   changed through `inout` that must stay unproved. Left: testing the
+   generator against the interpreter (on random inputs, a proved check never
+   fails) and contracts that do not name MIR's local and block numbers.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
    proved checks. `--verify-report` lists each check as proved or kept.

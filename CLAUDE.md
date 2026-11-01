@@ -111,7 +111,7 @@ The compiler, in jihoo, `compiler/`:
 Data is index-based (`TyId`-like `u32`s, `Local`, `FnId`), with references
 only as parameters and enums/match/Vec/Map. Each pass has a dump command
 (`emit-tokens`, `emit-ast`, `emit-program`, `emit-mir` with and without
-`JIHOO_NO_ELAB`, `emit-llvm`).
+`JIHOO_NO_ELAB`, `emit-obligations`, `emit-llvm`).
 
 ## Self-hosting and releases
 

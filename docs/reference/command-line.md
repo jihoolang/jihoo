@@ -8,6 +8,7 @@ jihoo run <file.jh> [link inputs] [-- args]   compile and run a program
 jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions
 jihoo emit-mir <file.jh>                      print the compiler's MIR
+jihoo emit-obligations <file.jh>              print MIR as the verification model
 jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
 jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
 jihoo emit-tokens <file.jh>                   print the tokens of one file
@@ -392,6 +393,37 @@ Documents are synchronized in full. Other requests return the protocol's
 document that takes long to check (the compiler itself takes seconds) delays
 replies until it finishes. The server exits with status 0 after `shutdown`
 and `exit`, and 1 when its input ends or `exit` comes first.
+
+## Verification model
+
+`emit-obligations` prints each function's MIR as the integer model that
+[verification](../internals/verification.md) proves things about, one
+S-expression per function: its name and symbol, its argument count, a kind
+per local (`(int lo hi)` with the type's range, `bool` or `other`), and its
+blocks, numbered as `emit-mir` numbers them, of `(set local value)`
+statements and one terminator. A `str` or slice local's length is a variable
+of its own after the locals, listed under `lengths`.
+
+```text
+(function clamp main.clamp.1
+  (args 3)
+  (locals (int -9223372036854775808 9223372036854775807) ... bool bool ...)
+  (lengths)
+  (block 0
+    (set 4 (cmp lt (local 1) (local 2)))
+    (switch 4 2 1))
+  ...
+```
+
+The model follows integer and bool locals, `+ - *` that check for overflow,
+comparisons, `!`, `&&`, integer casts, `switch` on a bool, `assert`, calls
+and returns. Everything else is `opaque`, a value known only to be in its
+type's range: loads, wrapping arithmetic (all of it with `--release`), and
+every read of a local whose address is taken (`&x` for an `inout`
+parameter, `&raw`), since it may change through that pointer. A `switch`
+the model does not follow is `(any blocks...)`. The format is research and
+may change; [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations)
+reads it.
 
 ## Environment
 

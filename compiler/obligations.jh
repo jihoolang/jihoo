@@ -1,0 +1,420 @@
+// `emit-obligations`: each function's MIR as the integer model that
+// jihoo-proofs/obligations proves things about (docs/internals/verification.md).
+// What the model cannot follow becomes `opaque`, a value known only to be in
+// its type's range, so the output never claims more than MIR says.
+
+import lex
+import mir
+import types
+
+type Body = mir.Body
+type Operand = mir.Operand
+type Place = mir.Place
+type Program = mir.Program
+type Types = types.Types
+
+// What the model knows about each local, and the extra variables that stand
+// for slice lengths.
+struct Model {
+    // Per local: tracked as an integer or bool (not escaped).
+    tracked: Vec(bool)
+    // Per local: the variable of its length, for a `str` or slice local.
+    lengths: Vec(Option(i64))
+    count: i64
+}
+
+fn range(inout s: String, i: types.IntTy) {
+    s.push_str("(int ")
+    if i.signed {
+        let one: i128 = 1
+        let limit = one << (i.bits - 1) as i128
+        (0 - limit).show(&s)
+        s.push(' ')
+        (limit - 1).show(&s)
+    } else {
+        s.push_str("0 ")
+        if i.bits == 128 {
+            s.push_str("340282366920938463463374607431768211455")
+        } else {
+            let one: u128 = 1
+            ((one << i.bits as u128) - 1).show(&s)
+        }
+    }
+    s.push(')')
+}
+
+fn is_view(t: Types, ty: u32) -> bool {
+    match t.kind(ty) {
+        Slice(_) | Str => true
+        _ => false
+    }
+}
+
+// A local whose address is taken (`&x` for `inout`, `&raw`) may change
+// through that pointer; the model does not follow it.
+fn escapes(b: Body) -> Vec(bool) {
+    var out = Vec(bool).filled(b.locals.len(), false)
+    for bl in b.blocks {
+        for st in bl.stmts {
+            match st {
+                Assign(_, rv, _) => match rv {
+                    RefMut(p) | Addr(p) => out[p.local as i64] = true
+                    _ => {}
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn model(t: Types, b: Body) -> Model {
+    let escaped = escapes(b)
+    var m = Model {
+        tracked: Vec(bool).new(), lengths: Vec(Option(i64)).new(), count: b.locals.len()
+    }
+    for i, l in b.locals {
+        let scalar = match t.kind(l.ty) {
+            Int(_) | Bool => true
+            _ => false
+        }
+        m.tracked.push(scalar && !escaped[i])
+        if is_view(t, l.ty) && !escaped[i] {
+            m.lengths.push(Some(m.count))
+            m.count += 1
+        } else { m.lengths.push(None) }
+    }
+    m
+}
+
+// The model variable a place is, if it is one: a tracked local, or the
+// length (field 1) of a view local.
+fn variable(m: Model, p: Place) -> Option(i64) {
+    let l = p.local as i64
+    if p.proj.len() == 0 {
+        if m.tracked[l] { return Some(l) }
+        return None
+    }
+    if p.proj.len() == 1 {
+        match p.proj[0] {
+            Field(1) => return m.lengths[l]
+            _ => {}
+        }
+    }
+    None
+}
+
+fn operand(inout s: String, t: Types, m: Model, o: Operand) {
+    match o {
+        Copy(p) | Move(p) => match variable(m, p) {
+            Some(v) => {
+                s.push_str("(local ")
+                v.show(&s)
+                s.push(')')
+            }
+            None => s.push_str("opaque")
+        }
+        Const(c) => match c {
+            Int(v, ty) => {
+                // The constant's value, not its sign-extended bits.
+                var x = v
+                match t.int(ty) {
+                    Some(i) => if !i.signed && x < 0 && i.bits < 128 {
+                        let one: i128 = 1
+                        x = x + (one << i.bits as i128)
+                    }
+                    None => {}
+                }
+                s.push_str("(const ")
+                x.show(&s)
+                s.push(')')
+            }
+            Bool(b) => s.push_str(if b { "(const 1)" } else { "(const 0)" })
+            _ => s.push_str("opaque")
+        }
+    }
+}
+
+fn compare(op: lex.Op) -> Option(str) {
+    match op {
+        Lt => Some("lt")
+        Le => Some("le")
+        Gt => Some("gt")
+        Ge => Some("ge")
+        Eq => Some("eq")
+        Ne => Some("ne")
+        _ => None
+    }
+}
+
+fn binary(inout s: String, t: Types, m: Model, name: str, a: Operand, b: Operand) {
+    s.push('(')
+    s.push_str(name)
+    s.push(' ')
+    operand(&s, t, m, a)
+    s.push(' ')
+    operand(&s, t, m, b)
+    s.push(')')
+}
+
+// The value of an rvalue assigned to an integer or bool variable.
+fn rvalue(inout s: String, p: Program, b: Body, m: Model, rv: mir.Rvalue) {
+    let t = p.types
+    match rv {
+        Use(o) => {
+            s.push_str("(use ")
+            operand(&s, t, m, o)
+            s.push(')')
+        }
+        // Without overflow checks `+` wraps, which the model does not follow.
+        Bin(op, x, y) => match op {
+            Add => if p.checked { binary(&s, t, m, "add", x, y) } else { s.push_str("opaque") }
+            Sub => if p.checked { binary(&s, t, m, "sub", x, y) } else { s.push_str("opaque") }
+            Mul => if p.checked { binary(&s, t, m, "mul", x, y) } else { s.push_str("opaque") }
+            And | LogAnd => {
+                if is_bool(t, b, x) { binary(&s, t, m, "and", x, y) } else { s.push_str("opaque") }
+            }
+            _ => match compare(op) {
+                Some(c) => if is_bool(t, b, x) {
+                    s.push_str("opaque")
+                } else {
+                    s.push_str("(cmp ")
+                    s.push_str(c)
+                    s.push(' ')
+                    operand(&s, t, m, x)
+                    s.push(' ')
+                    operand(&s, t, m, y)
+                    s.push(')')
+                }
+                None => s.push_str("opaque")
+            }
+        }
+        Un(op, x) => match op {
+            Not => if is_bool(t, b, x) {
+                s.push_str("(not ")
+                operand(&s, t, m, x)
+                s.push(')')
+            } else { s.push_str("opaque") }
+            Neg => s.push_str("opaque")
+        }
+        Cast(x, _, kind) => match kind {
+            Numeric => {
+                s.push_str("(cast ")
+                operand(&s, t, m, x)
+                s.push(')')
+            }
+            Ptr => s.push_str("opaque")
+        }
+        _ => s.push_str("opaque")
+    }
+}
+
+fn is_bool(t: Types, b: Body, o: Operand) -> bool {
+    match o {
+        Copy(p) | Move(p) => p.proj.len() == 0 && b.locals[p.local as i64].ty == types.BOOL
+        Const(c) => match c {
+            Bool(_) => true
+            _ => false
+        }
+    }
+}
+
+fn set(inout s: String, v: i64) {
+    s.push_str("\n    (set ")
+    v.show(&s)
+    s.push(' ')
+}
+
+fn statement(inout s: String, p: Program, b: Body, m: Model, st: mir.Stmt) {
+    let t = p.types
+    match st {
+        Assign(place, rv, _) => {
+            let l = place.local as i64
+            match variable(m, place) {
+                Some(v) => {
+                    set(&s, v)
+                    rvalue(&s, p, b, m, rv)
+                    s.push(')')
+                }
+                None => {}
+            }
+            // A view assigned whole has a new length; a part written
+            // through the view's local leaves the length unknown.
+            match m.lengths[l] {
+                Some(n) => {
+                    set(&s, n)
+                    var known = false
+                    if place.proj.len() == 0 {
+                        match rv {
+                            Use(o) => match o {
+                                Copy(q) | Move(q) => match m.lengths[q.local as i64] {
+                                    Some(k) => if q.proj.len() == 0 {
+                                        s.push_str("(use (local ")
+                                        k.show(&s)
+                                        s.push_str("))")
+                                        known = true
+                                    }
+                                    None => {}
+                                }
+                                _ => {}
+                            }
+                            Aggregate(agg, os) => match agg {
+                                View(_) => if os.len() == 2 {
+                                    s.push_str("(use ")
+                                    operand(&s, t, m, os[1])
+                                    s.push(')')
+                                    known = true
+                                }
+                                _ => {}
+                            }
+                            _ => {}
+                        }
+                    }
+                    if !known { s.push_str("opaque") }
+                    s.push(')')
+                }
+                None => {}
+            }
+        }
+        _ => {}
+    }
+}
+
+// Text as one atom: what would end it or open a list becomes `-`.
+fn atom(inout s: String, text: str) {
+    for c in text.as_bytes() {
+        if c == ' ' || c == '(' || c == ')' || c == ';' || c == '\n' || c == '\t' {
+            s.push('-')
+        } else { s.push(c) }
+    }
+}
+
+fn terminator(inout s: String, p: Program, m: Model, term: mir.Term) {
+    let t = p.types
+    s.push_str("\n    ")
+    match term {
+        Goto(x) => {
+            s.push_str("(goto ")
+            x.show(&s)
+            s.push(')')
+        }
+        Switch(o, targets, other) => {
+            var done = false
+            if targets.len() == 1 && targets[0].value == 0 {
+                match o {
+                    Copy(q) | Move(q) => match variable(m, q) {
+                        Some(v) => {
+                            s.push_str("(switch ")
+                            v.show(&s)
+                            s.push(' ')
+                            targets[0].block.show(&s)
+                            s.push(' ')
+                            other.show(&s)
+                            s.push(')')
+                            done = true
+                        }
+                        None => {}
+                    }
+                    _ => {}
+                }
+            }
+            // Any of the targets, without knowing which.
+            if !done {
+                s.push_str("(any")
+                for x in targets {
+                    s.push(' ')
+                    x.block.show(&s)
+                }
+                s.push(' ')
+                other.show(&s)
+                s.push(')')
+            }
+        }
+        Return => s.push_str("(return)")
+        Unreachable | Pending => s.push_str("(unreachable)")
+        Call(callee, _, dest, next, _) => {
+            match callee {
+                Intrinsic(i) => match i {
+                    Trap => {
+                        s.push_str("(trap)")
+                        return
+                    }
+                    _ => {}
+                }
+                _ => {}
+            }
+            s.push_str("(call ")
+            match variable(m, dest) {
+                Some(v) => v.show(&s)
+                None => s.push('_')
+            }
+            s.push(' ')
+            next.show(&s)
+            s.push(')')
+        }
+        Assert(o, msg, next, _) => {
+            s.push_str("(assert ")
+            operand(&s, t, m, o)
+            s.push(' ')
+            atom(&s, msg.as_str())
+            s.push(' ')
+            next.show(&s)
+            s.push(')')
+        }
+    }
+}
+
+pub fn show_function(p: Program, f: mir.Function) -> String {
+    let t = p.types
+    var s = String.new()
+    let Some(b) = f.body else { return s }
+    let m = model(t, b)
+    s.push_str("(function ")
+    atom(&s, f.name.as_str())
+    s.push(' ')
+    atom(&s, f.symbol.as_str())
+    s.push_str("\n  (args ")
+    b.arg_count.show(&s)
+    s.push_str(")\n  (locals")
+    for i, l in b.locals {
+        s.push(' ')
+        if !m.tracked[i] {
+            s.push_str("other")
+        } else {
+            match t.int(l.ty) {
+                Some(n) => range(&s, n)
+                None => s.push_str("bool")
+            }
+        }
+    }
+    // The lengths, after the locals: never negative.
+    for i in 0..b.locals.len() {
+        match m.lengths[i] {
+            Some(_) => s.push_str(" (int 0 9223372036854775807)")
+            None => {}
+        }
+    }
+    s.push_str(")\n  (lengths")
+    for i in 0..b.locals.len() {
+        match m.lengths[i] {
+            Some(n) => {
+                s.push_str(" (")
+                i.show(&s)
+                s.push(' ')
+                n.show(&s)
+                s.push(')')
+            }
+            None => {}
+        }
+    }
+    s.push(')')
+    for i, bl in b.blocks {
+        s.push_str("\n  (block ")
+        i.show(&s)
+        for st in bl.stmts { statement(&s, p, b, m, st) }
+        terminator(&s, p, m, bl.term)
+        s.push(')')
+    }
+    s.push_str(")\n")
+    s
+}

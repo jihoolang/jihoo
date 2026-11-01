@@ -484,6 +484,10 @@ impl Tests {
                 "phase timing validation failed:\n" + times.stdout.as_str() + times.stderr.as_str()
             )
         }
+        let model = exec("python3", ["tests/obligations.py", "--compiler", self.compiler.as_str()])
+        if !model.status.success() {
+            return Err("emit-obligations validation failed:\n" + model.stdout.as_str() + model.stderr.as_str())
+        }
         Ok(())
     }
 
@@ -1323,7 +1327,7 @@ fn main() -> i32 {
             t.check("check: --version and --help", r)
             let r = t.json_diagnostics()
             t.check(
-                "check: JSON diagnostics, float digits, the language server and phase timings",
+                "check: JSON diagnostics, float digits, the language server, phase timings and obligations",
                 r
             )
             t.suite_files("tests/run", "check")
