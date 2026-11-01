@@ -102,17 +102,28 @@ fn renumber(x: Lin, ids: [i64]) -> Lin {
 }
 
 // The facts that share a variable with the claim, directly or through other
-// such facts. The others cannot help, so their weight stays zero.
-fn relevant(facts: [Lin], claim: Lin, n: i64) -> Vec(bool) {
+// such facts. The others cannot help unless they contradict each other, so
+// their weight stays zero. With `latest`, instead those that share one with
+// the latest facts that do not name the claim's (the conditions that led
+// here, a case of a disjunction), which may; so do they for a claim without
+// variables (the path cannot be taken).
+fn relevant(facts: [Lin], claim: Lin, n: i64, latest: bool) -> Vec(bool) {
     var seen = Vec(bool).filled(n, false)
-    for t in claim.terms { seen[t.0] = true }
-    // A claim without variables (the path cannot be taken): start from the
-    // latest facts, the conditions that led here.
-    if claim.is_constant() {
+    if !latest {
+        for t in claim.terms { seen[t.0] = true }
+    }
+    if latest || claim.is_constant() {
         var k = facts.len
         while k > 0 && facts.len - k < 8 {
             k -= 1
-            for t in facts[k].terms { seen[t.0] = true }
+            // With `latest`, not the range facts of the claim's variables.
+            var mine = false
+            for t in facts[k].terms {
+                if latest && claim.coef(t.0) != 0 { mine = true }
+            }
+            if !mine {
+                for t in facts[k].terms { seen[t.0] = true }
+            }
         }
     }
     var used = Vec(bool).filled(facts.len, false)
@@ -167,6 +178,14 @@ fn certificate(r: Row, m: i64) -> linear.Certificate {
 }
 
 pub fn prove(g: linear.Goal) -> Result(linear.Certificate, str) {
+    match prove_with(g, false) {
+        Ok(c) => Ok(c)
+        // The latest facts may contradict the others without the claim.
+        Err(e) => if g.claim.is_constant() { Err(e) } else { prove_with(g, true) }
+    }
+}
+
+fn prove_with(g: linear.Goal, latest: bool) -> Result(linear.Certificate, str) {
     let m = g.facts.len() + 1
     // The variables the goal names, sorted, so rows use small numbers.
     var ids = Vec(i64).new()
@@ -179,10 +198,18 @@ pub fn prove(g: linear.Goal) -> Result(linear.Certificate, str) {
     var facts = Vec(Lin).with_capacity(g.facts.len())
     for f in g.facts { facts.push(renumber(f, ids.as_slice())) }
     let claim = renumber(g.claim, ids.as_slice())
-    let used = relevant(facts.as_slice(), claim, n)
+    let used = relevant(facts.as_slice(), claim, n, latest)
+    // With `latest`, the claim is left out; facts that reach it were in
+    // the first try.
+    if latest {
+        let first = relevant(facts.as_slice(), claim, n, false)
+        for i in 0..facts.len() {
+            if used[i] && first[i] { return Err("no linear proof") }
+        }
+    }
     var rows = Vec(Row).new()
     for i in 0..m {
-        if i == g.facts.len() || used[i] {
+        if (i == g.facts.len() && !latest) || (i < g.facts.len() && used[i]) {
             var weights = Vec((i64, i128)).new()
             weights.push((i, 1))
             let lin = if i < g.facts.len() { facts[i].clone() } else { claim.scale(-1).shift(-1) }

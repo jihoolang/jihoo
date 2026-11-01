@@ -65,10 +65,12 @@ could prove it.
 
 ## What a clause says
 
-A clause compares integers, or joins comparisons with `&&`:
+A clause compares integers, or joins comparisons with `&&`, `||` and `!`:
 
 ```text
-clause = term cmp term { "&&" term cmp term }
+clause = compare | clause "&&" clause | clause "||" clause | "!" clause
+       | "(" clause ")"
+compare = term cmp term
 cmp    = "<" | "<=" | ">" | ">=" | "==" | "!="
 term   = integer | place | place ".len" "(" ")" | "old" "(" place ")"
        | "old" "(" place ".len" "(" ")" ")"
@@ -87,7 +89,33 @@ place  = ( name | "result" ) { "." field }
 - **The arithmetic is exact.** `x + 1 <= hi` in a clause cannot overflow,
   and integers of different types compare by value: `i <= xs.len` holds
   for `i: u64`.
-- Other calls, `||` and `!` are not part of clauses yet.
+- `&&` at the top of a clause makes it several clauses. Below `||`, a
+  clause is a few cases, each a conjunction of comparisons (`!` turns
+  `!(a < b)` into `a >= b` and `!(p && q)` into `!p || !q`); one with more
+  than 8 cases is an error, since a proof that assumes it takes each case
+  in turn.
+- Other calls are not part of clauses yet.
+
+```jihoo
+fn sign(x: i64) -> i64
+    ensures result == -1 || result == 0 || result == 1
+{
+    if x < 0 { return -1 }
+    if x > 0 { return 1 }
+    0
+}
+
+fn either(x: i64, y: i64) -> i64
+    requires x > 0 || y > 0
+    ensures result > 0
+{
+    if x > 0 { return x }
+    y
+}
+```
+
+A caller of `sign` knows that `sign(x) + 1` cannot overflow, and one of
+`either` must show that one of its arguments is positive.
 
 ## How a call is proved
 

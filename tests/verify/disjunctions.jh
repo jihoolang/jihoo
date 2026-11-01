@@ -1,0 +1,71 @@
+// `||` and `!` in contracts: a disjunction that is assumed splits the
+// proof into a case per alternative, and one that must hold is proved by
+// refuting every alternative failing at once.
+
+// Assumed in the body: `x` is not zero, in either case.
+fn outside(x: i64) -> i64
+    requires x < -10 || x > 10
+    ensures result != 0
+{
+    x
+}
+
+// Proved at each `return`.
+fn sign(x: i64) -> i64
+    ensures result == -1 || result == 0 || result == 1
+{
+    if x < 0 { return -1 }
+    if x > 0 { return 1 }
+    0
+}
+
+// Not proved: zero is neither.
+fn wrong(x: i64) -> i64
+    ensures result < 0 || result > 0
+{
+    x
+}
+
+// `!(x < 0)` is `x >= 0`, a comparison of its own.
+fn next(x: i64) -> i64
+    requires !(x < 0) && x < 100
+    ensures result >= 1
+{
+    x + 1
+}
+
+// `!(a && b)` is `!a || !b`: when `x` is not positive, `y` is.
+fn either(x: i64, y: i64) -> i64
+    requires !(x <= 0 && y <= 0)
+    ensures result > 0
+{
+    if x > 0 { return x }
+    y
+}
+
+// A caller assumes `sign`'s `ensures`, so `s + 1` cannot overflow, and
+// proves `outside`'s `requires` on each path.
+fn calls(y: i64) -> i64 {
+    let s = sign(y)
+    if y > 20 { return outside(y) }
+    if y < -20 { return outside(y) }
+    s + 1
+}
+
+// Not proved: `y` may be 0.
+fn unchecked(y: i64) -> i64 { outside(y) }
+
+fn main() {
+    println(outside(11) + sign(-5) + wrong(3) + next(4) + either(0, 2))
+    println(calls(30) + unchecked(30))
+}
+
+//> 59:13: kept integer overflow in main (call)
+//> 59:13: kept integer overflow in main (call)
+//> 59:13: kept integer overflow in main (call)
+//> 59:13: kept integer overflow in main (call)
+//> 60:13: kept integer overflow in main (call)
+//> 34:5: proved integer overflow in next
+//> 52:5: proved integer overflow in calls
+//> 24:13: unproved `ensures` in wrong
+//> 56:31: unproved `requires` of outside in unchecked

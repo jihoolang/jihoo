@@ -182,6 +182,34 @@ impl Eq for ClauseAt {
     }
 }
 
+// Conjunctions a clause with `||` may have, at most: the verifier splits
+// a proof into a case per conjunction.
+const MAX_CLAUSE_CASES: i64 = 8
+
+fn negate_cmp(op: Op) -> Op {
+    match op {
+        Lt => Op.Ge
+        Le => Op.Gt
+        Gt => Op.Le
+        Ge => Op.Lt
+        Eq => Op.Ne
+        _ => Op.Eq
+    }
+}
+
+// Both hold: each conjunction of one with each of the other.
+fn clause_and(x: [Vec(mir.Compare)], y: [Vec(mir.Compare)]) -> Vec(Vec(mir.Compare)) {
+    var out = Vec(Vec(mir.Compare)).new()
+    for a in x {
+        for b in y {
+            var c = a.clone()
+            for z in b { c.push(z.clone()) }
+            out.push(c)
+        }
+    }
+    out
+}
+
 fn spec_number(c: i128) -> mir.Spec {
     mir.Spec { constant: c, terms: Vec(mir.SpecTerm).new() }
 }
@@ -779,7 +807,8 @@ impl sema.Sema {
         Ok(())
     }
 
-    // A clause: a comparison, or several joined by `&&`.
+    // A clause: a comparison, or several joined by `&&`, or with `||` and
+    // `!` one of a few conjunctions of comparisons.
     fn clauses(
         inout self,
         fb: Fb,
@@ -788,22 +817,78 @@ impl sema.Sema {
         inout out: Vec(mir.Clause)
     ) -> Result((), Diag) {
         match e.kind {
+            Binary(op, a, b) => if op == Op.LogAnd {
+                self.clauses(fb, a.deref(), at, &out)?
+                return self.clauses(fb, b.deref(), at, &out)
+            }
+            _ => {}
+        }
+        var d = self.clause_dnf(fb, e, at, false)?
+        // A conjunction, as from `!(a || b)`, is a clause per comparison.
+        if d.len() == 1 {
+            for c in d.pop().unwrap().into_iter() {
+                var one = Vec(Vec(mir.Compare)).new()
+                one.push(Vec(mir.Compare).new())
+                let span = c.span
+                one[0].push(c)
+                out.push(mir.Clause { ors: one, span })
+            }
+            return Ok(())
+        }
+        out.push(mir.Clause { ors: d, span: e.span })
+        Ok(())
+    }
+
+    // A clause as conjunctions of comparisons, one of which holds (of
+    // which none holds, when `negated`).
+    fn clause_dnf(
+        inout self,
+        fb: Fb,
+        e: ast.Expr,
+        at: ClauseAt,
+        negated: bool
+    ) -> Result(Vec(Vec(mir.Compare)), Diag) {
+        let what = "a contract clause compares integers, or joins comparisons with `&&`, `||` and `!`"
+        match e.kind {
+            Unary(op, x) => match op {
+                Not => return self.clause_dnf(fb, x.deref(), at, !negated)
+                _ => {}
+            }
             Binary(op, a, b) => {
-                if op == Op.LogAnd {
-                    self.clauses(fb, a.deref(), at, &out)?
-                    return self.clauses(fb, b.deref(), at, &out)
+                if op == Op.LogAnd || op == Op.LogOr {
+                    let x = self.clause_dnf(fb, a.deref(), at, negated)?
+                    let y = self.clause_dnf(fb, b.deref(), at, negated)?
+                    let d = if (op == Op.LogAnd) != negated {
+                        clause_and(x.as_slice(), y.as_slice())
+                    } else {
+                        var both = x
+                        for c in y.into_iter() { both.push(c) }
+                        both
+                    }
+                    if d.len() > MAX_CLAUSE_CASES {
+                        return Err(err(
+                            e.span,
+                            "a contract clause has more than " + MAX_CLAUSE_CASES.to_string() +
+                                " cases; split it"
+                        ))
+                    }
+                    return Ok(d)
                 }
                 if op == Op.Lt || op == Op.Le || op == Op.Gt || op == Op.Ge || op == Op.Eq ||
                     op == Op.Ne {
                     let x = self.spec(fb, a.deref(), at)?
                     let y = self.spec(fb, b.deref(), at)?
-                    out.push(mir.Clause { op: op, a: x, b: y, span: e.span })
-                    return Ok(())
+                    let o = if negated { negate_cmp(op) } else { op }
+                    var one = Vec(mir.Compare).new()
+                    one.push(mir.Compare { op: o, a: x, b: y, span: e.span })
+                    var d = Vec(Vec(mir.Compare)).new()
+                    d.push(one)
+                    return Ok(d)
                 }
             }
             _ => {}
         }
-        Err(err(e.span, "a contract clause compares integers, or joins comparisons with `&&`"))
+        Err(err(e.span, what))
     }
 
     // An integer term of a clause, as a constant plus multiples of what it
