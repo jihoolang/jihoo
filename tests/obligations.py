@@ -40,8 +40,13 @@ fn widths(a: u8, b: i32) -> u64 {
     big - a as u64 + b as u64
 }
 
+fn wide(x: i128, y: u128) -> i128 {
+    x + y as i128
+}
+
 fn main() {
     println(clamp(5, 0, 3) + sum([1, 2]) + escapes(1))
+    println(wide(1, 2))
     println(widths(1, 2))
 }
 """
@@ -151,6 +156,10 @@ def main():
         w = debug["widths"]
         assert w["locals"][1] == ["int", "0", "255"] and w["locals"][2] == ["int", "-2147483648", "2147483647"]
         assert ["const", "18446744073709551615"] in list(forms(w["blocks"], "const")), w["blocks"]
+
+        # 128-bit ranges: 2^127 does not fit an i128, so they are not computed.
+        assert debug["wide"]["locals"][1] == ["int", str(-(1 << 127)), str((1 << 127) - 1)], debug["wide"]["locals"]
+        assert debug["wide"]["locals"][2] == ["int", "0", str((1 << 128) - 1)]
 
         # Without overflow checks `+` and `-` wrap, which is opaque, and only
         # the bounds check has a span.

@@ -350,8 +350,10 @@ and moves into the compiler once its trust boundary is stated.
    `differential.py` evaluates random inputs that meet a function's
    `requires` at compile time and fails if a check it proved fails there,
    or a proved `ensures` does not hold, in debug and `--release` builds. Two
-   deliberately wrong models are caught. Left: more of the language in the
-   samples, and contracts that do not name MIR's local and block numbers.
+   deliberately wrong models are caught. The test runs over all 98 programs
+   of `tests/run` and `examples` (317 checks, 25 proved, no proved check
+   failing). Left: contracts that do not name MIR's local and block
+   numbers.
 3. The checker in the compiler: a pass after `check` that runs the trusted
    checker as compiled code, outside the interpreter's budget, and removes
    proved checks. `--verify-report` lists each check as proved or kept.

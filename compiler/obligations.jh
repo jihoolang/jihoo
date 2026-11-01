@@ -26,7 +26,12 @@ struct Model {
 
 fn range(inout s: String, i: types.IntTy) {
     s.push_str("(int ")
-    if i.signed {
+    if i.signed && i.bits == 128 {
+        // 2^127 itself does not fit an i128.
+        s.push_str(
+            "-170141183460469231731687303715884105728 170141183460469231731687303715884105727"
+        )
+    } else if i.signed {
         let one: i128 = 1
         let limit = one << (i.bits - 1) as i128
         (0 - limit).show(&s)

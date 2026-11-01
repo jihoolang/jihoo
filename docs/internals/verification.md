@@ -110,6 +110,16 @@ fail (`255 + 1` in a `u8`, `0 - 1` in a `u64`, the off-by-one loop). The
 test itself is tested: making the model read `i <= len` as `i < len`, or
 forget that `bump(&x)` changes `x`, is reported as a soundness bug.
 
+The same test runs over every program in `tests/run` and `examples`: 98
+files, 364 functions, 317 checks, 25 of them proved, and no proved check
+failed on 270 random inputs. Most checks are in loops, and a loop without
+an invariant proves nothing, which is what invariant inference (step 4 of
+the plan) is for. The runs found bugs only in the tools: the checker and
+the generator now keep every number within bounds where i128 arithmetic
+cannot overflow, give up on a function after 2,000 paths, and stop a path
+that comes back to a block instead of unrolling the loop; a function they
+gave up on proves none of its checks.
+
 The finding about cost decides where the checker runs. A compiler pass can run the
 checker as compiled code, outside the interpreter's budget; library proofs
 (0.6) run in the interpreter and need it to be faster or their limit to be
