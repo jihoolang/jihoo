@@ -436,12 +436,20 @@ and moves into the compiler once its trust boundary is stated.
    Done: no check is left in the checker. Its sums are exact, with
    arithmetic that reports overflow, and a certificate whose sum does not
    fit an i128 is rejected; the `verify` suite fails if a check in
-   `linear.jh` is kept.
+   `linear.jh` is kept. The compiler proves 1,145 of its bounds and
+   overflow checks, and its contracts and `std`'s hold in both overflow
+   modes. Left: the checker's soundness proved in jihoo. It is a
+   statement about every integer point (an implication), which the
+   schematic checker in jihoo-proofs cannot state yet: it has no
+   implication goals or induction under hypotheses, and no integers. It
+   needs that kernel as a library (0.6, step 1) or a stronger one.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
    jihoo can verify its own compiler, and the seed moving to it lets the
-   compiler state contracts itself.
+   compiler state contracts itself. 0.4.6 verifies every build and makes
+   an unproved contract an error, so with it as the seed, stage 1 is
+   verified too.
 
 Status of the completion criteria: the `verify` suite runs `tests/run`
 with and without verification, and checks that the proved checks of
