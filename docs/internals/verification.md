@@ -426,6 +426,70 @@ generator's arithmetic on forms, which traps on overflow, moved to
 `linear.jh`, and `tests/verify/compiler.proved` says so with a `clean`
 line, which the `verify` suite checks.
 
+### The checker's soundness
+
+The last part of 6.6 is to prove, in jihoo, that the checker is sound:
+when `check` accepts a certificate, no integer point satisfies the facts
+and the negated claim. It is stated and proved in Horn rules, and
+[`lib/proof`](../../lib/proof/schematic.jh) checks the proof: Horn's
+schematic checker in jihoo, with implication goals, rule hypotheses,
+application, induction under hypotheses and inversion, whose algorithm
+Horn's Agda development proves sound.
+
+The theory ([`lib/proof/farkas.jh`](../../lib/proof/farkas.jh)) has two
+parts.
+
+- **The integers**, as the axioms of an ordered commutative ring
+  ([`lib/proof/ring.jh`](../../lib/proof/ring.jh)): `eq` with congruence,
+  the ring laws, `le` with addition, products of non-negatives and
+  `0 <= 1`, and `1 <= 0` gives `false`. A sort `Z` of expressions, never
+  inducted on or inverted, so the value of a form at a point
+  (`val l x`, `ev t x`, `look x v`) is an expression with defining
+  equations, and needs no proof that it exists. Defining the integers by
+  rules instead, as functions on numerals, makes every ring law an
+  induction, and Horn's proof search does not find them: an intermediate
+  result has to exist, which a relational encoding cannot state.
+- **The checker**: `ms n a b w r` merges two term lists as
+  `Lin.add_scaled` does, one rule per branch of its loop, with `n`
+  counting the iterations; `push` keeps a coefficient or drops one that
+  is zero; `as` is `add_scaled` on forms; `sums` is the loop over the
+  facts, skipping zero weights; and `accepts` is what `check` tests before
+  it returns `Ok`: non-negative weights, the negated claim
+  `-1 - claim`, the weighted sum, a constant `c` with `c + 1 <= 0`. The
+  model admits more than the code (any order of variables, sums with a
+  zero weight), which only makes the theorem stronger.
+
+The theorem: `accepts fs cl ws wc`, `sat fs x` (every fact is
+non-negative at `x`) and `val cl x + 1 <= 0` give `false`. The proof
+(1,687 steps, checked in under a second) shows that a merge evaluates to
+`a + w * b` by induction on its iterations, and that a weighted sum of
+non-negative facts stays non-negative by induction on the facts. Its
+ring identities come from a prover that normalizes both sides to sorted
+sums of monomials and writes each rewrite as a step; like the rest of the
+certificate's construction (`lib/proof/cert.jh`), it is not trusted. A
+checker without the test of the sum's sign, or of any weight's, is not
+proved by the same certificate, and neither is a merge that adds the
+coefficients of two different variables.
+
+What is left before the theorem is about the code itself:
+
+1. **Adequacy.** Every axiom holds in ℤ (each is a ring or order law).
+   What the schematic checker establishes is derivability: for every
+   ground instance, if the hypotheses are derivable, so is `false`. Read
+   about ℤ, that needs either that true ground hypotheses are derivable
+   (the ring axioms prove every true equation between ground terms, and
+   order facts follow from `0 <= 1`), or that the calculus is sound in
+   every model of the rules whose inverted predicates and inducted sorts
+   are the least ones (here `ms`, `push`, `as`, `sums`, `nnw`, `sat`,
+   `accepts`, and lists). Either is a statement about Horn's calculus for
+   the Agda development, not about this theory alone.
+2. **The code.** That `linear.jh` computes what the relations say: a
+   `Lin` denotes a `lin` term, `add_scaled` returning `Some` gives an
+   `ms` derivation, and `check` returning `Ok` gives `accepts`. That is
+   step 6.6.3: contracts that name the theory, proved by the verifier.
+3. **Compile time.** The check runs as compiled code in the test; at
+   compile time it exceeds the interpreter's million steps (0.6, step 3).
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,

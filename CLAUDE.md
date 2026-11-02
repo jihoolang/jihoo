@@ -133,8 +133,10 @@ see each other's private items.
 
 `lib/proof/` is the proof library (0.6, pulled ahead of 0.5.0):
 `schematic.jh` ports Horn's schematic checker (`../horn/src/schematic.rs`,
-proved sound in `../horn/agda`), `import proof.schematic`. Its tests are
-Horn's.
+proved sound in `../horn/agda`), `import proof.schematic`; its tests are
+Horn's. `cert.jh` builds certificates (untrusted), `ring.jh` has the
+ordered-ring axioms and a ring-identity prover, and `farkas.jh` proves
+`compiler/linear.jh`'s algorithm sound (`jihoo test lib/proof/farkas.jh`).
 
 ## Docs and website
 

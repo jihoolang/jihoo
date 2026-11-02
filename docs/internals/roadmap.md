@@ -448,12 +448,14 @@ and moves into the compiler once its trust boundary is stated.
       rule hypotheses, `apply`, induction under hypotheses and `invert`,
       whose algorithm Horn's Agda development proves sound. Horn's
       acceptance and rejection tests pass on it.
-   2. The algorithm: a Horn theory of the integers and of `linear.jh`'s
-      forms, weighted sums and acceptance, and a certificate, checked by
-      `lib/proof` in a test, that an accepted certificate's facts have no
-      common integer point. The integers' rules are first-order, so that
-      they hold in ℤ is a small Agda proof, unlike the adequacy of Horn's
-      cubical rules.
+   2. Done ([design](verification.md#the-checkers-soundness)): the
+      algorithm. A Horn theory of the integers (ordered commutative ring
+      axioms) and of `linear.jh`'s merge, weighted sum and acceptance,
+      and a certificate, checked by `lib/proof` in a test, that an
+      accepted certificate's facts and negated claim have no common
+      point. Left with it: the adequacy of the theory for ℤ (its axioms
+      hold in ℤ; reading derivability as truth is a statement about
+      Horn's calculus, for Agda).
    3. The code: contracts that name that theory, so the verifier proves
       that `linear.jh`'s own functions compute what its relations say,
       with lemmas from step 2 where a proof needs induction (0.6, step 2).

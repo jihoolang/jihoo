@@ -1,0 +1,594 @@
+import proof.sexp
+
+// Building schematic certificates (proof.schematic's input) from jihoo.
+// Nothing here is trusted: a mistake gives a certificate the checker
+// rejects. The builder tracks the judgment each step concludes, so that
+// proofs can be composed from earlier steps.
+
+// A term or judgment: a variable, or a constructor or predicate applied
+// to arguments (none for a constant).
+#[derive(Clone, Eq)]
+pub enum Tm { Var(String), App(String, Vec(Tm)) }
+
+pub fn v(name: str) -> Tm { Tm.Var(name.to_string()) }
+
+pub fn c(name: str) -> Tm { Tm.App(name.to_string(), Vec(Tm).new()) }
+
+pub fn app1(f: str, a: Tm) -> Tm {
+    var xs = Vec(Tm).new()
+    xs.push(a.clone())
+    Tm.App(f.to_string(), xs)
+}
+
+pub fn app2(f: str, a: Tm, b: Tm) -> Tm {
+    var xs = Vec(Tm).new()
+    xs.push(a.clone())
+    xs.push(b.clone())
+    Tm.App(f.to_string(), xs)
+}
+
+pub fn app3(f: str, a: Tm, b: Tm, d: Tm) -> Tm {
+    var xs = Vec(Tm).new()
+    xs.push(a.clone())
+    xs.push(b.clone())
+    xs.push(d.clone())
+    Tm.App(f.to_string(), xs)
+}
+
+pub fn app(f: str, sink xs: Vec(Tm)) -> Tm { Tm.App(f.to_string(), xs) }
+
+impl Tm {
+    pub fn show(self) -> String {
+        var out = String.new()
+        self.write(&out)
+        out
+    }
+
+    fn write(self, inout out: String) {
+        match self {
+            Var(n) => out.push_str(n.as_str())
+            App(f, xs) => {
+                if xs.len() == 0 {
+                    out.push_str(f.as_str())
+                    return
+                }
+                out.push_str("(")
+                out.push_str(f.as_str())
+                for x in xs {
+                    out.push_str(" ")
+                    x.write(&out)
+                }
+                out.push_str(")")
+            }
+        }
+    }
+
+    // As a judgment: one without arguments is still a list.
+    pub fn judgment_text(self) -> String {
+        if self.arity() == 0 && !is_var(self) { return "(" + self.head() + ")" }
+        self.show()
+    }
+
+    pub fn head(self) -> str {
+        match self {
+            Var(n) => n.as_str()
+            App(f, _) => f.as_str()
+        }
+    }
+
+    pub fn is(self, f: str) -> bool {
+        match self {
+            App(g, _) => g == f
+            Var(_) => false
+        }
+    }
+
+    // The i-th argument.
+    pub fn arg(self, i: i64) -> ref Tm {
+        match self {
+            App(_, xs) => xs.index(i)
+            Var(_) => panic("a variable has no arguments")
+        }
+    }
+
+    pub fn arity(self) -> i64 {
+        match self {
+            App(_, xs) => xs.len()
+            Var(_) => 0
+        }
+    }
+
+    // The term with each variable named in `from` replaced.
+    pub fn subst(self, from: [String], to: [Tm]) -> Tm {
+        match self {
+            Var(n) => {
+                for i in 0..from.len {
+                    if from[i] == n { return to[i].clone() }
+                }
+                self.clone()
+            }
+            App(f, xs) => {
+                var ys = Vec(Tm).new()
+                for x in xs { ys.push(x.subst(from, to)) }
+                Tm.App(f.clone(), ys)
+            }
+        }
+    }
+}
+
+// A certificate under construction. Every step's index is the number of
+// steps before it, as the checker requires.
+pub struct Cert {
+    text: String
+    judgments: Vec(Tm)
+    // For a rule hypothesis: its premises and the variables it generalizes.
+    premises: Vec(Vec(Tm))
+    general: Vec(Vec(String))
+    fresh: i64
+}
+
+impl Cert {
+    pub fn new() -> Cert {
+        Cert {
+            text: String.new(),
+            judgments: Vec(Tm).new(),
+            premises: Vec(Vec(Tm)).new(),
+            general: Vec(Vec(String)).new()
+            fresh: 0
+        }
+    }
+
+    pub fn premises(self, n: i64) -> [Tm] { self.premises[n].as_slice() }
+
+    pub fn general(self, n: i64) -> [String] { self.general[n].as_slice() }
+
+    pub fn text(self) -> str { self.text.as_str() }
+
+    pub fn steps(self) -> i64 { self.judgments.len() }
+
+    // What step `n` concludes.
+    pub fn judgment(self, n: i64) -> ref Tm { self.judgments.index(n) }
+
+    fn begin(inout self, form: str) -> i64 {
+        let n = self.judgments.len()
+        self.text.push_str("(")
+        self.text.push_str(form)
+        self.text.push_str(" ")
+        self.text.push_str(n.to_string().as_str())
+        n
+    }
+
+    fn end(inout self, sink j: Tm) -> i64 {
+        self.text.push_str(")\n")
+        self.judgments.push(j)
+        self.premises.push(Vec(Tm).new())
+        self.general.push(Vec(String).new())
+        self.judgments.len() - 1
+    }
+
+    pub fn declare(inout self, name: str, sort: str) {
+        self.text.push_str("(var " + name + " " + sort + ")\n")
+    }
+
+    // A new variable of `sort`, named after `prefix`.
+    pub fn fresh(inout self, prefix: str, sort: str) -> Tm {
+        self.fresh += 1
+        let name = prefix + "_" + self.fresh.to_string().as_str()
+        self.declare(name.as_str(), sort)
+        Tm.Var(name)
+    }
+
+    // `j` by `rule` from the steps `refs`.
+    pub fn step(inout self, rule: str, refs: [i64], sink j: Tm) -> i64 {
+        self.begin("step")
+        self.text.push_str(" " + rule + " (")
+        for i in 0..refs.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(refs[i].to_string().as_str())
+        }
+        self.text.push_str(") ")
+        self.text.push_str(j.judgment_text().as_str())
+        self.end(j)
+    }
+
+    // An instance of the hypothesis-free step `n`: its variables `from`
+    // replaced by `to`. The checker computes the instance; a step that
+    // refers to it is `use_instance`'s result.
+    pub fn instance(inout self, n: i64, from: [str], to: [Tm]) -> Ref {
+        var names = Vec(String).new()
+        for f in from { names.push(f.to_string()) }
+        let j = self.judgments[n].subst(names.as_slice(), to)
+        var text = "(" + n.to_string().as_str()
+        for i in 0..from.len {
+            text.push_str(" (" + from[i] + " " + to[i].show().as_str() + ")")
+        }
+        text.push_str(")")
+        Ref { text, judgment: j }
+    }
+
+    // `j` by `rule` from references, plain steps or instances.
+    pub fn step_refs(inout self, rule: str, refs: [Ref], sink j: Tm) -> i64 {
+        self.begin("step")
+        self.text.push_str(" " + rule + " (")
+        for i in 0..refs.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(refs[i].text.as_str())
+        }
+        self.text.push_str(") ")
+        self.text.push_str(j.judgment_text().as_str())
+        self.end(j)
+    }
+
+    pub fn hyp(inout self, sink j: Tm) -> i64 {
+        self.begin("hyp")
+        self.text.push_str(" " + j.judgment_text().as_str())
+        self.end(j)
+    }
+
+    // The rule hypothesis `premises ⊢ j`, general in `general`.
+    pub fn rule_hyp(inout self, premises: [Tm], sink j: Tm, general: [str]) -> i64 {
+        self.begin("hyp")
+        self.text.push_str(" (")
+        for i in 0..premises.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(premises[i].judgment_text().as_str())
+        }
+        self.text.push_str(") " + j.judgment_text().as_str() + " (")
+        for i in 0..general.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(general[i])
+        }
+        self.text.push_str(")")
+        let n = self.end(j)
+        for p in premises { self.premises[n].push(p.clone()) }
+        for g in general { self.general[n].push(g.to_string()) }
+        n
+    }
+
+    // Step `m` used as a rule with `binds`, its premises proved by `refs`;
+    // it concludes `j`, which the caller states.
+    pub fn apply(inout self, m: i64, from: [str], to: [Tm], refs: [Ref], sink j: Tm) -> i64 {
+        self.begin("apply")
+        self.text.push_str(" " + m.to_string().as_str() + " (")
+        for i in 0..from.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str("(" + from[i] + " " + to[i].show().as_str() + ")")
+        }
+        self.text.push_str(") (")
+        for i in 0..refs.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(refs[i].text.as_str())
+        }
+        self.text.push_str(")")
+        self.end(j)
+    }
+
+    // `j` for every `x`: one case per constructor of x's sort, in theory
+    // order, each a step and the variables of the constructor's arguments.
+    pub fn induct(
+        inout self,
+        x: str,
+        hyps: [i64],
+        with_hyps: bool,
+        sink j: Tm,
+        cases: [Case]
+    ) -> i64 {
+        self.begin("induct")
+        self.text.push_str(" " + x + " ")
+        if with_hyps {
+            self.text.push_str("(" + indices(hyps).as_str() + ") ")
+        }
+        self.text.push_str(j.judgment_text().as_str() + " (")
+        for i in 0..cases.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str("(" + cases[i].step.to_string().as_str())
+            for n in cases[i].vars {
+                self.text.push_str(" " + n.as_str())
+            }
+            self.text.push_str(")")
+        }
+        self.text.push_str(")")
+        self.end(j)
+    }
+
+    // Case analysis on how the plain hypothesis `k` was derived; `context`
+    // are hypotheses the cases may use too.
+    pub fn invert(inout self, k: i64, context: [i64], sink j: Tm, cases: [InvCase]) -> i64 {
+        self.begin("invert")
+        self.text.push_str(" " + k.to_string().as_str() + " (" + indices(context).as_str() + ") ")
+        self.text.push_str(j.judgment_text().as_str() + " (")
+        for i in 0..cases.len {
+            if i > 0 { self.text.push_str(" ") }
+            self.text.push_str(
+                "(" + cases[i].rule.as_str() + " " + cases[i].step.to_string().as_str() + " ("
+            )
+            for k in 0..cases[i].vars.len() {
+                if k > 0 { self.text.push_str(" ") }
+                self.text.push_str(cases[i].vars[k].as_str())
+            }
+            self.text.push_str("))")
+        }
+        self.text.push_str(")")
+        self.end(j)
+    }
+
+    // `apply`, with the conclusion the checker computes.
+    pub fn apply_at(inout self, m: i64, from: [str], to: [Tm], refs: [Ref]) -> Ref {
+        var names = Vec(String).new()
+        for f in from { names.push(f.to_string()) }
+        let j = self.judgments[m].subst(names.as_slice(), to)
+        let n = self.apply(m, from, to, refs, j)
+        self.plain(n)
+    }
+
+    pub fn result(inout self, name: str, n: i64) {
+        self.text.push_str("(result " + name + " " + n.to_string().as_str() + ")\n")
+    }
+}
+
+// A reference to a step or an instance of one.
+#[derive(Clone)]
+pub struct Ref {
+    text: String
+    pub judgment: Tm
+}
+
+impl Ref {
+    // The step a plain reference names.
+    pub fn index(self) -> i64 {
+        let Some(n) = self.text.as_str().parse_int() else { panic("an instance is not a step") }
+        n
+    }
+}
+
+impl Cert {
+    pub fn plain(
+        self,
+        n: i64
+    ) -> Ref { Ref { text: n.to_string(), judgment: self.judgments[n].clone() } }
+}
+
+pub struct Case {
+    pub step: i64
+    pub vars: Vec(String)
+}
+
+pub struct InvCase {
+    pub rule: String
+    pub step: i64
+    pub vars: Vec(String)
+}
+
+fn indices(xs: [i64]) -> String {
+    var out = String.new()
+    for i in 0..xs.len {
+        if i > 0 { out.push_str(" ") }
+        out.push_str(xs[i].to_string().as_str())
+    }
+    out
+}
+
+// The rules of a theory, as the builder needs them to state what an
+// inversion's cases conclude.
+struct RuleInfo {
+    name: String
+    // In order of first occurrence: premises, then the conclusion.
+    vars: Vec(String)
+    sorts: Vec(String)
+    premises: Vec(Tm)
+    conclusion: Tm
+}
+
+pub struct Rules {
+    symbols: Vec(String)
+    inputs: Vec(Vec(String))
+    rules: Vec(RuleInfo)
+}
+
+fn symbol(rs: Rules, name: str) -> i64 {
+    for i in 0..rs.symbols.len() {
+        if rs.symbols[i] == name { return i }
+    }
+    panic("unknown symbol " + name)
+}
+
+impl Rules {
+    pub fn parse(theory: str) -> Rules {
+        var rs = Rules {
+            symbols: Vec(String).new(),
+            inputs: Vec(Vec(String)).new(),
+            rules: Vec(RuleInfo).new()
+        }
+        let forms = match sexp.parse(theory) {
+            Ok(f) => f
+            Err(e) => panic("theory: " + e.as_str())
+        }
+        for form in forms {
+            let Ok(xs) = form.list() else { panic("theory: expected a list") }
+            let Ok(tag) = xs[0].atom() else { panic("theory: expected an atom") }
+            if tag == "ctor" || tag == "pred" {
+                rs.symbols.push(unwrap(xs[1].atom()).to_string())
+                var ins = Vec(String).new()
+                for s in unwrap(xs[2].list()) { ins.push(unwrap(s.atom()).to_string()) }
+                rs.inputs.push(ins)
+            } else if tag == "rule" {
+                var r = RuleInfo {
+                    name: unwrap(xs[1].atom()).to_string(),
+                    vars: Vec(String).new(),
+                    sorts: Vec(String).new()
+                    premises: Vec(Tm).new(),
+                    conclusion: c("false")
+                }
+                for p in unwrap(xs[2].list()) {
+                    let t = rs.pattern(p, "", &r)
+                    r.premises.push(t)
+                }
+                r.conclusion = rs.pattern(xs[3], "", &r)
+                rs.rules.push(r)
+            }
+        }
+        rs
+    }
+
+    // A pattern whose variables are `Var("?x")`; `sort` is "" for a judgment.
+    fn pattern(self, x: sexp.Sexp, sort: str, inout r: RuleInfo) -> Tm {
+        if !x.is_list() {
+            let Ok(a) = x.atom() else { panic("theory: expected an atom") }
+            if a.starts_with("?") {
+                var known = false
+                for v in r.vars {
+                    if v == a { known = true }
+                }
+                if !known {
+                    r.vars.push(a.to_string())
+                    r.sorts.push(sort.to_string())
+                }
+                return v(a)
+            }
+            return c(a)
+        }
+        let Ok(xs) = x.list() else { panic("theory: expected a list") }
+        let Ok(h) = xs[0].atom() else { panic("theory: expected an atom") }
+        let s = symbol(self, h)
+        var args = Vec(Tm).new()
+        for i in 1..xs.len { args.push(self.pattern(xs[i], self.inputs[s][i - 1].as_str(), &r)) }
+        app(h, args)
+    }
+
+    fn rule(self, name: str) -> ref RuleInfo {
+        for i in 0..self.rules.len() {
+            if self.rules[i].name == name { return self.rules.index(i) }
+        }
+        panic("unknown rule " + name)
+    }
+
+    // A case of inverting `h` by `rule`: the rule's variables renamed to
+    // new ones, and the most general unifier that the checker computes.
+    pub fn branch(self, inout k: Cert, h: Tm, rule: str, prefix: str) -> Option(Branch) {
+        let r = self.rule(rule)
+        var names = Vec(String).new()
+        var renamed = Vec(Tm).new()
+        for i in 0..r.vars.len() {
+            let t = k.fresh(prefix, r.sorts[i].as_str())
+            names.push(t.head().to_string())
+            renamed.push(t)
+        }
+        let concl = r.conclusion.subst(r.vars.as_slice(), renamed.as_slice())
+        let Some(theta) = unify(h, concl) else { return None }
+        var premises = Vec(Tm).new()
+        for p in r.premises {
+            let q = p.subst(r.vars.as_slice(), renamed.as_slice())
+            premises.push(theta.apply(q))
+        }
+        Some(Branch { rule: rule.to_string(), vars: names, theta, premises })
+    }
+}
+
+fn unwrap(comptime T: type, r: Result(T, String)) -> T {
+    match r {
+        Ok(x) => x
+        Err(e) => panic(e.as_str())
+    }
+}
+
+pub struct Branch {
+    pub rule: String
+    pub vars: Vec(String)
+    pub theta: Subst
+    // The rule's premises under the unifier: what the case may assume.
+    pub premises: Vec(Tm)
+}
+
+impl Branch {
+    pub fn case(
+        self,
+        step: i64
+    ) -> InvCase { InvCase { rule: self.rule.clone(), step, vars: self.vars.clone() } }
+}
+
+// A substitution of terms for variables, by name.
+#[derive(Clone)]
+pub struct Subst {
+    from: Vec(String)
+    to: Vec(Tm)
+}
+
+impl Subst {
+    pub fn new() -> Subst { Subst { from: Vec(String).new(), to: Vec(Tm).new() } }
+
+    pub fn apply(self, t: Tm) -> Tm { t.subst(self.from.as_slice(), self.to.as_slice()) }
+
+    // Without the variables in `keep`, as an inversion applies it to a rule
+    // hypothesis that generalizes them.
+    pub fn without(self, keep: [str]) -> Subst {
+        var s = Subst.new()
+        for i in 0..self.from.len() {
+            var kept = false
+            for x in keep {
+                if self.from[i] == x { kept = true }
+            }
+            if !kept {
+                s.from.push(self.from[i].clone())
+                s.to.push(self.to[i].clone())
+            }
+        }
+        s
+    }
+}
+
+fn is_var(t: Tm) -> bool {
+    match t {
+        Var(_) => true
+        App(_, _) => false
+    }
+}
+
+fn occurs(x: str, t: Tm) -> bool {
+    match t {
+        Var(n) => n == x
+        App(_, xs) => {
+            for y in xs {
+                if occurs(x, y) { return true }
+            }
+            false
+        }
+    }
+}
+
+// The checker's unification algorithm (schematic.jh's `unify`), on trees,
+// so that the builder states the same cases.
+pub fn unify(a: Tm, b: Tm) -> Option(Subst) {
+    var theta = Subst.new()
+    var work = Vec((Tm, Tm)).new()
+    work.push((a.clone(), b.clone()))
+    loop {
+        let Some(pair) = work.pop() else { break }
+        let s = theta.apply(pair.0)
+        let t = theta.apply(pair.1)
+        if s == t { continue }
+        var x = String.new()
+        var u = c("z0")
+        if is_var(s) {
+            x = s.head().to_string()
+            u = t.clone()
+        } else if is_var(t) {
+            x = t.head().to_string()
+            u = s.clone()
+        } else {
+            if s.head() != t.head() || s.arity() != t.arity() { return None }
+            for i in 0..s.arity() { work.push((s.arg(i).clone(), t.arg(i).clone())) }
+            continue
+        }
+        if occurs(x.as_str(), u) { return None }
+        var one = Subst.new()
+        one.from.push(x.clone())
+        one.to.push(u.clone())
+        for i in 0..theta.to.len() {
+            let w = one.apply(theta.to[i])
+            theta.to[i] = w
+        }
+        theta.from.push(x)
+        theta.to.push(u)
+    }
+    Some(theta)
+}
