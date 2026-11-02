@@ -46,31 +46,26 @@ impl(T: type) Vec(T) {
     pub fn reserve(inout self, n: i64)
         ensures self.len == old(self.len) && self.len + n <= self.cap
     {
-        // Less than nothing is nothing: borrowed bytes are still copied
-        // whole.
+        // Both are not negative, so the difference cannot overflow.
+        if n <= self.cap - self.len {
+            return
+        }
+        // Less than nothing is nothing: borrowed bytes (`cap` below `len`)
+        // are still copied whole.
         let more = if n < 0 { 0 } else { n }
         // Checked here, not by `+`, which wraps in `--release` builds: a sum
         // of two numbers that are not negative wraps below the first.
         let need = self.len +% more
         if need < self.len { panic("capacity overflow") }
-        if need <= self.cap {
-            return
-        }
         var c = if self.cap == 0 { 4 } else { self.cap * 2 }
         if c < need {
             c = need
         }
-        self.grow(c)
-    }
-
-    // Moves the values to a buffer of `c` values, at least as many.
-    fn grow(inout self, c: i64)
-        requires self.len <= c
-        ensures self.len == old(self.len) && self.cap == c
-    {
+        // Borrowed bytes (a `String` from a literal, `cap` 0 under `len`)
+        // are copied; the others move. Not a test of `cap == 0 && len > 0`,
+        // whose failing branch would be a disjunction for the verifier.
         unsafe {
-            if self.cap == 0 && self.len > 0 {
-                // Borrowed bytes (a `String` from a literal): copy them.
+            if self.cap < self.len {
                 let p = mem.alloc(T, c)
                 mem_copy(p, self.ptr, self.len)
                 self.ptr = p
