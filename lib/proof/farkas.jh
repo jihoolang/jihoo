@@ -55,11 +55,14 @@ pub fn data() -> String {
 
 // The model of `check`, over the program's data. Sorts come first, one
 // per line, so that proof.code.theory can put them before every
-// declaration.
+// declaration. A point (`X`) is built by `pt` from the values of finitely
+// many variables: a sort without ground terms would make every statement
+// about its points hold vacuously, and `agda/Adequacy.agda` reads `look`
+// at `pt` as the value the list gives.
 pub fn model() -> String {
     let t = T
     String.from("(sort N)\n(sort X)\n") + "(ctor n0 () N) (ctor ns (N) N)\n" +
-        "(ctor look (X Z) Z) (ctor ev (" + t + " X) Z) (ctor val (Lin X) Z)\n" +
+        "(ctor pt (" + t + ") X) (ctor look (X Z) Z) (ctor ev (" + t + " X) Z) (ctor val (Lin X) Z)\n" +
         "(pred push (Z Z " + t + " " + t + ")) (pred ms (N " + t + " " + t + " Z " + t + "))\n" +
         "(pred as (Lin Lin Z Lin)) (pred sums (Vec<Lin> Vec<i128> Lin Lin)) (pred good (Vec<Lin> Vec<i128> Lin))\n" +
         "(pred nnw (Vec<i128>)) (pred sat (Vec<Lin> X)) (pred accepts (Vec<Lin> Lin Vec<i128>))\n" +

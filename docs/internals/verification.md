@@ -471,18 +471,36 @@ checker without the test of the sum's sign, or of any weight's, is not
 proved by the same certificate, and neither is a merge that adds the
 coefficients of two different variables.
 
-What is left before the theorem is about the code itself:
+What was left before the theorem is about the code itself:
 
-1. **Adequacy.** Every axiom holds in ℤ (each is a ring or order law).
-   What the schematic checker establishes is derivability: for every
-   ground instance, if the hypotheses are derivable, so is `false`. Read
-   about ℤ, that needs either that true ground hypotheses are derivable
-   (the ring axioms prove every true equation between ground terms, and
-   order facts follow from `0 <= 1`), or that the calculus is sound in
-   every model of the rules whose inverted predicates and inducted sorts
-   are the least ones (here `ms`, `push`, `as`, `sums`, `nnw`, `sat`,
-   `accepts`, and lists). Either is a statement about Horn's calculus for
-   the Agda development, not about this theory alone.
+1. **Adequacy.** Done ([`agda/`](../../agda/Adequacy.agda)). What the
+   schematic checker establishes is that the goal holds in every model
+   of the rules: Horn's Agda development proves each form of a
+   certificate sound in any set of ground judgments closed under the
+   rules and supported by them (each member is the conclusion of a rule
+   instance whose premises are members), not only for derivability, the
+   least such set. Induction is on sorts, whose ground terms do not
+   depend on the model, and inversion needs only the support.
+   `Adequacy.agda` gives a model in an ordered commutative ring: `eq`,
+   `le` and `false` are equality, order and falsity of values, and every
+   other judgment holds when the rules derive it from true comparisons,
+   which is what `emit-horn`'s rules say of a run of the code. The rules
+   that conclude a comparison are the ring's axioms, the defining
+   equations of `look`, `ev` and `val`, and `efq` rules, and each holds
+   in the ring; Agda checks by evaluation that no other rule of the
+   theory concludes one, and rejects the theory with a rule `le z1 z0`
+   added. The theory reaches Agda as the checker parses it:
+   `proof.schematic.agda` writes it, numbered as the checker numbers it,
+   and `agda/theory.jh` builds it from `emit-horn`'s rules as
+   `refine.check` does. `Integers.agda` shows the integers (differences
+   of naturals) are such a ring, with a small normalizer to Horn form for
+   the identities. The theorem: when `check` returns `Ok` for facts `fs`,
+   claim `cl` and weights `ws`, no integer point makes every fact
+   non-negative and the claim negative. A point (sort `X`) is built by
+   `pt` from the values of finitely many variables; `X` had no
+   constructor before, and a sort without ground terms makes every
+   statement about its values hold vacuously. `nix flake check` runs it
+   (`agda/check.sh`, a minute).
 2. **The code.** Done ([below](#the-proof-of-the-code)): the rules
    `jihoo emit-horn` writes for `linear.jh` give `accepts` when `check`
    returns `Ok`.
@@ -564,8 +582,10 @@ go through. `check` now reads the next fact on every pass of the sum
 loop, so that the proof knows it when its weight is zero.
 
 What this rests on: the translation (`horn.jh`, trusted as `vc.jh` is),
-`std`'s `Vec` being a list as `len`, `nth` and `snoc` say, and the
-adequacy of reading the theory in ℤ (above).
+`std`'s `Vec` being a list as `len`, `nth` and `snoc` say, `lib/proof`'s
+checker accepting only what Horn's Agda development proves sound (Horn's
+own checker accepts the same certificate), and the export of the theory
+to Agda. Reading the theory in ℤ is proved ([above](#the-checkers-soundness)).
 
 ### Slices
 

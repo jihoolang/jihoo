@@ -2,8 +2,13 @@
   description = "jihoo: a systems language as fast as C, memory-safe without lifetimes";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # Horn's Agda development (agda/), which agda/Adequacy.agda builds on.
+  inputs.horn = {
+    url = "github:jihoo12/horn";
+    flake = false;
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, horn }:
     let
       lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" ];
@@ -181,6 +186,19 @@
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);
+
+          # agda/check.sh: the theory in which lib/proof/refine.jh proves
+          # the linear checker sound, read in the integers, checked by Agda
+          # against Horn's agda/.
+          adequacy = pkgs.runCommand "jihoo-adequacy" { nativeBuildInputs = [ jihoo pkgs.agda ]; } ''
+            cp -R ${src}/. src
+            chmod -R u+w src
+            cp -R ${./agda} src/agda
+            cd src
+            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR
+            HORN=${horn} JIHOO=jihoo bash agda/check.sh
+            touch $out
+          '';
 
           toolchain = pkgs.runCommand "jihoo-toolchain-check" { nativeBuildInputs = [ jihoo ]; } ''
             cp ${./examples}/*.jh .

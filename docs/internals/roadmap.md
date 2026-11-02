@@ -453,9 +453,7 @@ and moves into the compiler once its trust boundary is stated.
       axioms) and of `linear.jh`'s merge, weighted sum and acceptance,
       and a certificate, checked by `lib/proof` in a test, that an
       accepted certificate's facts and negated claim have no common
-      point. Left with it: the adequacy of the theory for ℤ (its axioms
-      hold in ℤ; reading derivability as truth is a statement about
-      Horn's calculus, for Agda).
+      point. Done with it: the adequacy of the theory for ℤ (step 3).
    3. The code: a trusted translation of MIR (a fragment: integers,
       `Vec` reads and pushes, `Option`, loops) into Horn rules, which
       says what the code computes the way `vc.jh` says what it checks,
@@ -467,8 +465,17 @@ and moves into the compiler once its trust boundary is stated.
       emit-horn` translates `check` and what it calls, and
       `lib/proof/refine.jh` proves that `check` returning `Ok` means the
       certificate's facts and negated claim have no common point (36,631
-      steps, also accepted by Horn's checker). Left for 0.5.0: the
-      adequacy of reading the theory in ℤ, for Agda.
+      steps, also accepted by Horn's checker). Done
+      ([design](verification.md#the-checkers-soundness)): the adequacy
+      of reading the theory in ℤ. Horn's Agda development proves its
+      certificates sound in every model of the rules, and
+      [`agda/`](../../agda/Adequacy.agda) gives the theory's model in
+      the integers, so the theorem says of integers what the code
+      computes: when `check` returns `Ok`, no integer point satisfies
+      the facts and the negated claim. `nix flake check` checks it.
+      What it rests on is trusted as `vc.jh` is: the translation
+      (`horn.jh`), `std`'s `Vec` as the rules' lists, and `lib/proof`'s
+      port of Horn's checker.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when

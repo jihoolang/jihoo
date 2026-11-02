@@ -157,7 +157,12 @@ that a small trusted checker accepts. Every build verifies: it removes
 the proved checks, and an unproved contract is a compile error
 (`--no-verify` keeps every check). It runs on the compiler's own source
 (`jihoo verify compiler/main.jh`), and CI fails if it proves fewer; no
-check is left in the trusted checker itself.
+check is left in the trusted checker itself, and the checker is proved
+sound: [`lib/proof`](lib/proof/refine.jh) checks a Horn proof, from the
+rules `jihoo emit-horn` writes for its code, that when it accepts a
+certificate no integer point satisfies the facts and the negated claim,
+and [`agda/`](agda/Adequacy.agda) proves in Agda that the proof's theory
+means this of the integers.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
