@@ -505,6 +505,18 @@ with `--no-verify` and compares with the ordinary, verified run. The
 compiler built by itself this way, without its proved checks, passes the
 whole test suite.
 
+Making them errors found that `std`'s contracts did not all hold in
+`--release` builds, where `+` wraps: `Vec.reserve` computed `len + n`
+with it, so a huge `n` made the sum negative and `reserve` returned
+without room, against its `ensures`; and `File.read` added the count the
+system returned to the length unchecked. `reserve` now returns at once
+when `n <= cap - len` (which cannot overflow), adds with `+%` and panics
+when the sum wraps below `len`, and `read` panics if the system read
+more than it was asked. Both modes prove every instance, and the `verify`
+suite checks that `jihoo verify --release compiler/main.jh` reports no
+unproved contract. With `reserve`'s shorter fast path the compiler proves
+1,145 of its 2,681 bounds and overflow checks.
+
 ## Open questions
 
 - **Syntax.** Settled for functions and loops
