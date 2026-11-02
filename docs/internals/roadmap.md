@@ -463,6 +463,9 @@ and moves into the compiler once its trust boundary is stated.
       `linear.jh`'s `add` and `mul` compute with bit tricks the
       translation would have to model; 0.4.7's `overflowing_add` and
       `overflowing_mul` builtins replace them with exact semantics.
+      Started ([design](verification.md#the-code-as-horn-rules)):
+      `jihoo emit-horn` translates `check` and what it calls, and the
+      `verify` suite reads the rules as a theory. Left: the proof.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when

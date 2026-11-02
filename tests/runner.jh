@@ -591,6 +591,21 @@ impl Tests {
     // that loses proofs of the compiler's own checks fails. More is fine:
     // raise the numbers there. A `clean FILE` line says that no check in
     // FILE is kept.
+    // `jihoo emit-horn` translates the linear checker, and lib/proof
+    // reads the result as a theory.
+    fn horn(self) -> Result((), String) {
+        let o = exec(self.compiler.as_str(), ["emit-horn", "--lib", "compiler/linear.jh", "--fn", "check"])
+        if !o.status.success() { return Err("emit-horn failed:\n" + o.stderr.as_str()) }
+        let path = self.temp("check.horn")
+        match fs.write_file(path.as_str(), o.stdout.as_str()) {
+            Ok(_) => {}
+            Err(e) => return Err("cannot write " + path.as_str() + ": " + e.to_string().as_str())
+        }
+        let r = exec(self.compiler.as_str(), ["run", "tests/horn/theory.jh", "--", path.as_str()])
+        if !r.status.success() { return Err(r.stdout + r.stderr.as_str()) }
+        Ok(())
+    }
+
     fn self_verify(self) -> Result((), String) {
         let want = read_file("tests/verify/compiler.proved")?
         let o = exec(self.compiler.as_str(), ["verify", "compiler/main.jh"])
@@ -1506,6 +1521,8 @@ fn main() -> i32 {
             t.check("verify: the compiler verifies itself", sv)
             let e = t.erased()
             t.check("verify: proved checks are absent from the IR", e)
+            let h = t.horn()
+            t.check("verify: the linear checker as Horn rules", h)
             // `+ - *` wrap in `--release` builds, and std's and the
             // compiler's contracts must hold there too.
             let o = exec(t.compiler.as_str(), ["verify", "--release", "compiler/main.jh"])

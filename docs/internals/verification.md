@@ -490,6 +490,39 @@ What is left before the theorem is about the code itself:
 3. **Compile time.** The check runs as compiled code in the test; at
    compile time it exceeds the interpreter's million steps (0.6, step 3).
 
+### The code as Horn rules
+
+The soundness proof is about a model of `check`, and step 6.6.3 ties it to
+the code: `jihoo emit-horn` ([`horn.jh`](../../compiler/horn.jh)) states
+in Horn rules what a function's MIR computes, and a proof in Horn then
+shows that `check` returning `Ok` gives `accepts`. Like `vc.jh`, the
+translation is trusted: it says what MIR means.
+
+It runs each path of a function symbolically, from the entry or a loop
+head (a target of a back edge) to a return or a loop head, and writes one
+rule per path. A function `f` is the predicate `fn.f(args, result)`; a
+loop head `K` is `fn.f@K(n, live locals, result)`, which holds when the
+function, from `K` with those values, returns that result after passing
+loop heads at most `n` times (the fuel the proof inducts on). Values are
+terms: integers are exact ring expressions (a checked `+` that overflows
+traps, and a path that traps, panics or reaches `unreachable` has no
+rule), comparisons become `le` and `eq` premises, a bool that leaves a
+path becomes `B.tt` or `B.ff` case by case, structs and enums are
+constructors (a variable is replaced by its constructor where a field is
+read, and a `switch` on a discriminant takes one rule per variant), a
+shared borrow is the value it borrows (nothing changes it while it
+lives), and a mutable one is the place, which `push` updates. `Vec` is a
+list, with `len`, `nth` and `snoc` relations that say what `std`'s `Vec`
+does; that `std` does it is assumed, as the verifier assumes `std`'s
+`ensures`. `overflowing_mul(a, b)` is `(a * b, false)` or `(anything,
+true)`, so `linear.jh` uses it rather than the bit tricks it had.
+
+What is outside the fragment is an error, never an approximation. The
+`verify` suite translates `check` (1,281 rules over its six functions)
+and reads the result as a theory with `lib/proof`. Left: the proof that
+those rules give `accepts`, and tests that compare the rules with
+running code.
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,

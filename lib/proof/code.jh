@@ -1,0 +1,20 @@
+// Theories of code: the rules `jihoo emit-horn` writes for a function,
+// which say what its MIR computes, with the ring axioms they use.
+import proof.ring
+
+// One theory from rules that `emit-horn` wrote: every sort first, then
+// the ring's declarations and axioms, then the rest.
+pub fn theory(rules: str) -> String {
+    var sorts = String.from("(sort Z)\n")
+    var rest = String.new()
+    for line in rules.lines() {
+        if line.starts_with("(sort ") {
+            sorts.push_str(line)
+            sorts.push('\n')
+        } else {
+            rest.push_str(line)
+            rest.push('\n')
+        }
+    }
+    sorts + ring.theory().as_str() + rest.as_str()
+}
