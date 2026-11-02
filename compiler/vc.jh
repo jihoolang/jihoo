@@ -1503,10 +1503,30 @@ fn wrapping(
 // Gives the local the value, or a fresh variable in its range when the
 // value is unknown.
 fn havoc_or(inout g: Gen, f: Function, inout p: Path, dst: i64, sink value: Sym, why: i64) {
-    match value {
+    match &value {
         Unknown => match f.kinds[dst] {
             Int(_, _) => p.state[dst] = Sym.Num(g.fresh(f.kinds[dst], why))
             Other => p.state[dst] = Sym.Unknown
+        }
+        Num(x) => {
+            let x = x.clone()
+            // A length given a form (`hi - lo` of a slice): a new variable
+            // equal to it, whose range says what the form's terms do not,
+            // that a length is never negative.
+            let max: i128 = (1 << 63) - 1
+            match f.kinds[dst] {
+                Int(lo, hi) => if lo == 0 && hi == max && !within(g, x, max) {
+                    let v = g.fresh(f.kinds[dst], WHY_OTHER)
+                    p.facts.push(v.minus(x))
+                    p.tags.push(Tag.Path)
+                    p.facts.push(x.minus(v))
+                    p.tags.push(Tag.Path)
+                    p.state[dst] = Sym.Num(v)
+                    return
+                }
+                Other => {}
+            }
+            p.state[dst] = Sym.Num(x)
         }
         _ => p.state[dst] = value
     }

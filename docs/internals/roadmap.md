@@ -407,8 +407,10 @@ and moves into the compiler once its trust boundary is stated.
    struct that every function assumes of the values it is given and every
    writer of the type proves; stating `Vec`'s found three ways to give it
    a negative length. `std` states `0 <= len && 0 <= cap` for `Vec`, and
-   the compiler proves 939 bounds and overflow checks. Left: slicing of
-   `str`.
+   the compiler proves 939 bounds and overflow checks. Done: slicing
+   ([design](verification.md#slices)): its checks compare `hi <= len` and
+   `lo <= hi` without a `+ 1` that could overflow, and a slice's length
+   keeps a length's range, so slicing after a length test keeps no check.
 6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:

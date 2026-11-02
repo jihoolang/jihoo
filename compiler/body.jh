@@ -3847,13 +3847,25 @@ impl sema.Sema {
     }
 
     pub fn bounds_check(inout self, inout fb: Fb, sink i: Operand, sink len: Operand, span: Span) {
-        // An unsigned comparison checks `0 <= i < len` at once.
+        self.bound_check(&fb, i, len, Op.Lt, span)
+    }
+
+    // An unsigned comparison checks `0 <= i < len` (`op` `Lt`) or
+    // `0 <= i <= len` (`Le`) at once, for a `len` that is not negative.
+    fn bound_check(
+        inout self,
+        inout fb: Fb,
+        sink i: Operand,
+        sink len: Operand,
+        op: Op,
+        span: Span
+    ) {
         let c = fb.temp(types.BOOL, span)
         let ui = fb.temp(types.U64, span)
         let ul = fb.temp(types.U64, span)
         fb.assign(Place.local(ui), Rvalue.Cast(i, types.U64, mir.CastKind.Numeric), span)
         fb.assign(Place.local(ul), Rvalue.Cast(len, types.U64, mir.CastKind.Numeric), span)
-        fb.assign(Place.local(c), Rvalue.Bin(Op.Lt, copy_of(ui), copy_of(ul)), span)
+        fb.assign(Place.local(c), Rvalue.Bin(op, copy_of(ui), copy_of(ul)), span)
         let next = fb.new_block()
         fb.term(Term.Assert(copy_of(c), String.from("index out of bounds"), next, span))
         fb.switch_to(next)
@@ -3922,21 +3934,10 @@ impl sema.Sema {
         }
         let lo_l = self.operand_local(&fb, lo_o, types.I64, span)
         let hi_l = self.operand_local(&fb, hi_o, types.I64, span)
-        // 0 <= lo <= hi <= len
-        let lenp1 = fb.temp(types.I64, span)
-        fb.assign(
-            Place.local(lenp1),
-            Rvalue.Bin(Op.Add, len.clone(), int_const(1, types.I64)),
-            span
-        )
-        self.bounds_check(&fb, copy_of(hi_l), copy_of(lenp1), span)
-        let hip1 = fb.temp(types.I64, span)
-        fb.assign(
-            Place.local(hip1),
-            Rvalue.Bin(Op.Add, copy_of(hi_l), int_const(1, types.I64)),
-            span
-        )
-        self.bounds_check(&fb, copy_of(lo_l), copy_of(hip1), span)
+        // 0 <= lo <= hi <= len, as `hi <= len` and `lo <= hi` unsigned,
+        // which need no `+ 1` that could overflow.
+        self.bound_check(&fb, copy_of(hi_l), len.clone(), Op.Le, span)
+        self.bound_check(&fb, copy_of(lo_l), copy_of(hi_l), Op.Le, span)
         let pt = self.types.ptr(elem)
         let data = self.rvalue(
             &fb,

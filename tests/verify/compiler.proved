@@ -1,7 +1,7 @@
 # What `jihoo verify compiler/main.jh` proves at least, per kind of check:
 # the runner's verify suite fails when a change proves fewer. Raise the
 # numbers when a change proves more. `clean FILE`: no check in FILE is kept.
-972 bounds and overflow checks
+975 bounds and overflow checks
 0 panics
 165 calls that may panic
 clean compiler/linear.jh

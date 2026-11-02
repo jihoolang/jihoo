@@ -28,14 +28,10 @@ fn main() {
     println(last(xs[0..2]))
 }
 
-//> 27:17: proved integer overflow in main
+//> 27:17: proved index out of bounds in main
 //> 27:17: proved index out of bounds in main
 //> 27:17: proved integer overflow in main
-//> 27:17: proved index out of bounds in main
-//> 27:17: proved integer overflow in main
-//> 28:18: proved integer overflow in main
 //> 28:18: proved index out of bounds in main
-//> 28:18: proved integer overflow in main
 //> 28:18: proved index out of bounds in main
 //> 28:18: proved integer overflow in main
 //> 9:14: proved index out of bounds in sum

@@ -425,6 +425,32 @@ generator's arithmetic on forms, which traps on overflow, moved to
 `linear.jh`, and `tests/verify/compiler.proved` says so with a `clean`
 line, which the `verify` suite checks.
 
+### Slices
+
+The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,
+`String` or `Vec`. It is built into the compiler rather than `std`, so
+there was no contract to state; two things kept its checks:
+
+- **The lowering.** Slicing checked `0 <= hi <= len` and `0 <= lo <= hi`
+  as `hi < len + 1` and `lo < hi + 1` unsigned, and the two `+ 1` could
+  overflow: nothing bounds a `str`'s length below 2^63 - 1. It now
+  compares `hi <= len` and `lo <= hi` as `u64`s, which is the same test
+  (a negative bound is above every length once cast) with nothing to
+  overflow, and fewer instructions.
+- **The length's range.** The slice's length is `hi - lo`, a form over
+  other variables, so the length variable took that form and lost its
+  range: the model did not know that `s[1..]` of a `str` of at least two
+  bytes is not empty, since `s.len - 1` may be -1 as far as its terms say.
+  A length given a form whose terms do not bound it now becomes a new
+  variable equal to the form, whose range says it is not negative, as for
+  every length the model takes from a view.
+
+`tests/verify/slices.jh` slices after a length test, indexes into a
+slice, and slices in a loop; every check is proved but a bound that may
+be past the end. On the compiler, the lowering removes 109 checks, and of
+the 2,675 bounds and overflow checks left, 975 are proved: 1,700 are kept
+instead of 1,799.
+
 ### Verification in parallel
 
 Before verification can run in every build, it has to cost about as much
