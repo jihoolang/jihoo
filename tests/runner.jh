@@ -17,7 +17,7 @@
 //   `// link: f.c` more inputs.
 // - test: `jihoo test` runs each file in tests/test, with the directives
 //   of tests/run: its output is the list of tests and results. The tests
-//   of each file of lib/std that has them must pass.
+//   of each file of lib that has them must pass.
 // - fail: each program in tests/fail must not compile, and the error must
 //   contain every `// error: text`, with the same diagnostics from check.
 // - check: valid programs pass without LLVM or linkers, produce no files
@@ -331,10 +331,10 @@ impl Tests {
         Ok(())
     }
 
-    // `jihoo test` passes for each file of the standard library with tests.
+    // `jihoo test` passes for each file of the libraries with tests.
     fn std_tests(inout self) {
         var files = Vec(String).new()
-        jh_files("lib/std", true, &files)
+        jh_files("lib", true, &files)
         for f in files {
             if !self.selected(f.as_str()) { continue }
             let src = match read_file(f.as_str()) {
@@ -522,11 +522,11 @@ impl Tests {
         Ok(())
     }
 
-    // The compiler and the standard library are formatted.
+    // The compiler and the libraries are formatted.
     fn formatted_sources(self) -> Result((), String) {
-        let o = exec(self.compiler.as_str(), ["fmt", "compiler", "lib/std", "--check"])
+        let o = exec(self.compiler.as_str(), ["fmt", "compiler", "lib", "--check"])
         if !o.status.success() {
-            return Err("run `jihoo fmt compiler lib/std --write`:\n" + o.stderr.as_str())
+            return Err("run `jihoo fmt compiler lib --write`:\n" + o.stderr.as_str())
         }
         Ok(())
     }

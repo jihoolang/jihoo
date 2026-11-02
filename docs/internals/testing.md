@@ -30,7 +30,7 @@ the runner. Its suites:
   `--external ../banana` additionally checks that
   project's source files and compares its entry point's IR. Source files in
   the checkout and external project are read without modification.
-  The files of `compiler/` and `lib/std` must already be formatted
+  The files of `compiler/` and `lib/` must already be formatted
   (`fmt --check`); replace a file the suite names with the output of
   `out/jihoo fmt`.
   Wrapping cases cover narrow widths, nested lists, comments, tuple and enum
@@ -55,7 +55,7 @@ the runner. Its suites:
 - **test**: `jihoo test` runs every file in `tests/test/`, with the
   directives of `tests/run`: the expected output is the list of tests,
   failures and the summary, and `// args:` holds `--` and names. Modules
-  they import are in `tests/test/lib`. Every file of `lib/std` with
+  they import are in `tests/test/lib`. Every file of `lib/` with
   `#[test]` functions must then pass `jihoo test`.
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message and no `// no-error: text`

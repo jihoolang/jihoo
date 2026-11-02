@@ -440,16 +440,31 @@ and moves into the compiler once its trust boundary is stated.
    overflow checks, and its contracts and `std`'s hold in both overflow
    modes. Left: the checker's soundness proved in jihoo. It is a
    statement about every integer point (an implication), which the
-   schematic checker in jihoo-proofs cannot state yet: it has no
-   implication goals or induction under hypotheses, and no integers. It
-   needs that kernel as a library (0.6, step 1) or a stronger one.
+   schematic checker in jihoo-proofs cannot state: it has no implication
+   goals or induction under hypotheses, and no integers. So 0.6's first
+   steps come before 0.5.0, in this order:
+   1. Done: Horn's whole schematic checker as a library,
+      [`lib/proof`](../../lib/proof/schematic.jh): implication goals,
+      rule hypotheses, `apply`, induction under hypotheses and `invert`,
+      whose algorithm Horn's Agda development proves sound. Horn's
+      acceptance and rejection tests pass on it.
+   2. The algorithm: a Horn theory of the integers and of `linear.jh`'s
+      forms, weighted sums and acceptance, and a certificate, checked by
+      `lib/proof` in a test, that an accepted certificate's facts have no
+      common integer point. The integers' rules are first-order, so that
+      they hold in ℤ is a small Agda proof, unlike the adequacy of Horn's
+      cubical rules.
+   3. The code: contracts that name that theory, so the verifier proves
+      that `linear.jh`'s own functions compute what its relations say,
+      with lemmas from step 2 where a proof needs induction (0.6, step 2).
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
    jihoo can verify its own compiler, and the seed moving to it lets the
    compiler state contracts itself. 0.4.6 verifies every build and makes
    an unproved contract an error, so with it as the seed, stage 1 is
-   verified too.
+   verified too. 0.5.0 waits for step 6's soundness proof, even though
+   that pulls 0.6's library ahead of it.
 
 Status of the completion criteria: the `verify` suite runs `tests/run`
 with and without verification, and checks that the proved checks of
@@ -479,6 +494,7 @@ system does not become a proof assistant's.
 1. The Horn kernel and the schematic checker as modules with a stable API,
    without `-I` paths (jihoo-proofs roadmap, step 4), and the state-machine
    consumer that binds a proof to the table a program runs (its step 3).
+   Started: the schematic checker is `lib/proof` (0.5's step 6).
 2. Lemmas in contracts: an `ensures` that needs induction names a lemma
    proved in the library; the checker accepts the call only with the lemma's
    certificate.

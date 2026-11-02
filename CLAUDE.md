@@ -39,7 +39,7 @@ out/jihoo check examples/hello.jh --error-format=json  # source diagnostics for 
 out/jihoo fmt examples/hello.jh                  # formatted source on stdout
 out/jihoo fmt examples/hello.jh --check          # check layout without rewriting
 out/jihoo fmt examples/hello.jh --width 80       # change the soft byte width
-out/jihoo fmt compiler lib/std --write           # rewrite every file that needs it
+out/jihoo fmt compiler lib --write               # rewrite every file that needs it
 out/jihoo lsp                                    # language server on stdio
 out/jihoo run examples/calc.jh -- a b            # args after --
 out/jihoo test f.jh -- name                      # f.jh's #[test] functions (with `name`)
@@ -68,13 +68,13 @@ nix flake check                                    # everything CI runs
 
 - `tests/run/*.jh`: `//> text` lines are expected stdout in order, `// exit: N`
   the exit status (a trap is 132), `// args: a b` the arguments.
-- `compiler/` and `lib/std` are formatted: the `format` suite runs
+- `compiler/` and `lib/` are formatted: the `format` suite runs
   `fmt --check` on them, so after editing run
-  `out/jihoo fmt compiler lib/std --write`. Break long expressions
+  `out/jihoo fmt compiler lib --write`. Break long expressions
   without a list after an operator such as `+` or `&&`.
 - `tests/test/*.jh`: run with `jihoo test`, with the same directives; the
-  output is the list of tests and results. `lib/std` files keep `#[test]`
-  functions at their end, run by `jihoo test lib/std/<file>.jh`.
+  output is the list of tests and results. `lib/` files keep `#[test]`
+  functions at their end, run by `jihoo test lib/<dir>/<file>.jh`.
 - `tests/fail/*.jh`: each `// error: text` must appear in the compile error
   (with `// verify`, the error of verification, from `emit-llvm`),
   and no `// no-error: text` may.
@@ -130,6 +130,11 @@ IR for `compiler/main.jh`. See `docs/internals/self-hosting.md`.
 `pub import`s. Files per profile/target: `sys.jh` (libc) vs
 `sys.freestanding.jh` (syscalls + allocator), `sysno.<target>.jh`. Std modules
 see each other's private items.
+
+`lib/proof/` is the proof library (0.6, pulled ahead of 0.5.0):
+`schematic.jh` ports Horn's schematic checker (`../horn/src/schematic.rs`,
+proved sound in `../horn/agda`), `import proof.schematic`. Its tests are
+Horn's.
 
 ## Docs and website
 
