@@ -4,6 +4,7 @@
 // the semantics. Each check gives goals for `linear.check`: *these facts
 // imply that claim*.
 
+import fm
 import forms
 import linear
 
@@ -380,10 +381,46 @@ pub struct Obligation {
     // Where the claim's variables come from (`why_code`s), for reports.
     pub depends: Vec(i64)
     // The obligation holds when every goal does: one per case of the
-    // disjunctions on the path.
+    // disjunctions on the path. Empty once proved: `generate` keeps only
+    // the verdict.
     pub goals: Vec(linear.Goal)
     // What each goal's facts rest on.
     pub tags: Vec(Vec(Tag))
+    // The checker accepted a certificate for every goal, and what the
+    // facts their certificates give a weight rest on.
+    pub proved: bool
+    pub used: Vec(Tag)
+    // The facts of all its goals.
+    pub size: i64
+}
+
+// What `generate` does with each obligation: proves it at once and keeps
+// only the verdict, so that a function's goals are never all held at once;
+// with `INVARIANTS`, only for the cut points' facts that `wanted` names,
+// and once one fails, no more of its obligations (what inference needs);
+// with `LIFT`, none (what a call needs to lift panics is recorded apart).
+pub const PROVE: i64 = 1
+pub const INVARIANTS: i64 = 2
+pub const LIFT: i64 = 3
+
+// Every goal is proved by the untrusted prover, with a certificate the
+// trusted checker accepts; and what the facts that certificates weigh
+// rest on (the path itself left out).
+pub fn settle(goals: [linear.Goal], tags: [Vec(Tag)]) -> (bool, Vec(Tag)) {
+    var used = Vec(Tag).new()
+    for i, goal in goals {
+        let Ok(c) = fm.prove(goal) else { return (false, used) }
+        if linear.check(goal, c).is_err() { return (false, used) }
+        for k, w in c.weights {
+            if w > 0 && i < tags.len && k < tags[i].len() {
+                match tags[i][k] {
+                    Path => {}
+                    t => used.push(t)
+                }
+            }
+        }
+    }
+    (true, used)
 }
 
 // A path on which a function reaches a call that never returns: what
@@ -501,6 +538,10 @@ pub const MAX_DISJUNCTS: i64 = 8
 
 struct Gen {
     out: Vec(Obligation)
+    mode: i64
+    // With `INVARIANTS`, per cut point and fact, whether to prove it; a
+    // fact one of whose obligations fails is no longer wanted.
+    wanted: Vec(Vec(bool))
     errors: Vec(String)
     // The range and origin of every variable: the function's, then fresh.
     ranges: Vec(Kind)
@@ -560,6 +601,19 @@ impl Gen {
     // `reach`: the claim is that the path cannot be taken, and why it may
     // be is what its latest conditions name.
     fn obligation_with(inout self, p: Path, what: str, extra: [Lin], sink claim: Lin, reach: bool) {
+        if self.mode == LIFT { return }
+        var cut = (-1, -1)
+        if self.mode == INVARIANTS {
+            match self.source {
+                Invariant(i, j) => {
+                    if i >= self.wanted.len() || j >= self.wanted[i].len() || !self.wanted[i][j] {
+                        return
+                    }
+                    cut = (i, j)
+                }
+                _ => return
+            }
+        }
         // The range facts first: a prover looks at the latest facts first.
         var facts = Vec(Lin).new()
         var tags = Vec(Tag).new()
@@ -636,13 +690,20 @@ impl Gen {
             goals.push(linear.Goal { facts: gf, claim: claim.clone() })
             goal_tags.push(gt)
         }
+        var size = 0
+        for x in goals { size += x.facts.len() }
+        let (proved, used) = settle(goals.as_slice(), goal_tags.as_slice())
+        if !proved && cut.0 >= 0 { self.wanted[cut.0][cut.1] = false }
         self.out.push(Obligation {
             what: "bb" + p.block.to_string() + ": " + what
             at: self.at
             source: copy_source(self.source)
             depends
-            goals
-            tags: goal_tags
+            goals: Vec(linear.Goal).new()
+            tags: Vec(Vec(Tag)).new()
+            proved
+            used
+            size
         })
     }
 
@@ -1903,12 +1964,19 @@ pub struct Obligations {
 }
 
 // The obligations of a function: from its entry under `requires`, and from
-// each cut point under its invariant. A call to a function with an entry
+// each cut point under its invariant, kept as `mode` says. A call to a function with an entry
 // in `contracts` (by function) proves its `requires` and assumes its
 // `ensures`.
-pub fn generate(f: Function, contracts: [Option(Callee)], lifts: [Option(Lift)]) -> Obligations {
+pub fn generate(
+    f: Function,
+    contracts: [Option(Callee)],
+    lifts: [Option(Lift)],
+    mode: i64,
+    sink wanted: Vec(Vec(bool))
+) -> Obligations {
     var g = Gen {
-        out: Vec(Obligation).new(), errors: Vec(String).new(), ranges: f.kinds.clone(),
+        out: Vec(Obligation).new(), mode, wanted, errors: Vec(String).new(),
+        ranges: f.kinds.clone(),
         origins: Vec(i64).filled(f.kinds.len(), WHY_OTHER), mark: Vec(i64).filled(f.kinds.len(), 0),
         stamp: 0, at: nowhere(), source: Source.Ensures(0), panics: Vec(Panic).new(),
         blocked: Vec(Site).new()

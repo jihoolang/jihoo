@@ -17,6 +17,9 @@ struct Row {
 }
 
 const MAX_ROWS: i64 = 4096
+// The terms and weights of the rows derived in one step, at most: rows of
+// many weights cost memory faster than their number says.
+const MAX_ENTRIES: i64 = 1 << 20
 
 fn gcd(a: i128, b: i128) -> i128 {
     var x = forms.abs(a)
@@ -281,6 +284,7 @@ fn prove_with(
         let v = pick(rows.as_slice(), n)
         if v < 0 { return Err("no linear proof") }
         var next = Vec(Row).new()
+        var entries = 0
         for r in rows {
             // A row with no variables left and a non-negative constant says nothing.
             if r.lin.coef(v) == 0 && !r.lin.is_constant() {
@@ -294,10 +298,15 @@ fn prove_with(
                     let b = q.lin.coef(v)
                     if b < 0 {
                         match combine(p, 0 - b, q, a) {
-                            Some(r) => next.push(r)
+                            Some(r) => {
+                                entries += r.lin.terms.len() + r.weights.len()
+                                next.push(r)
+                            }
                             None => {}
                         }
-                        if next.len() > MAX_ROWS { return Err("too many derived facts") }
+                        if next.len() > MAX_ROWS || entries > MAX_ENTRIES {
+                            return Err("too many derived facts")
+                        }
                     }
                 }
             }

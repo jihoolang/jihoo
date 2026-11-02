@@ -9,6 +9,8 @@
 import std.env
 import std.io
 import std.mem
+import std.sort
+import std.thread
 import diag
 import fm
 import forms
@@ -107,36 +109,14 @@ struct Outcome {
 }
 
 fn prove_all(f: vc.Function, contracts: [Option(vc.Callee)], lifts: [Option(vc.Lift)]) -> Outcome {
-    let obs = vc.generate(f, contracts, lifts)
+    let obs = vc.generate(f, contracts, lifts, vc.PROVE, Vec(Vec(bool)).new())
     var results = Vec(Result1).new()
     for o in obs.list {
-        var used = Vec(vc.Tag).new()
-        var proved = true
-        for i, goal in o.goals {
-            if !proved { break }
-            proved = match fm.prove(goal) {
-                Ok(c) => match linear.check(goal, c) {
-                    Ok(_) => {
-                        for k, w in c.weights {
-                            if w > 0 && k < o.tags[i].len() {
-                                match o.tags[i][k] {
-                                    Path => {}
-                                    t => used.push(t)
-                                }
-                            }
-                        }
-                        true
-                    }
-                    Err(_) => false
-                }
-                Err(_) => false
-            }
-        }
         results.push(Result1 {
-            proved,
+            proved: o.proved,
             source: copy_source(o.source),
             depends: o.depends.clone(),
-            used,
+            used: o.used.clone(),
             at: o.at
         })
     }
@@ -396,6 +376,23 @@ fn sites(p: mir.Program, f: vc.Function) -> Vec((i64, i64)) {
     out
 }
 
+// One function to prove, on whichever thread takes it.
+struct Job {
+    index: i64
+    cost: i64
+    model: Option(vc.Function)
+    outcome: Option(Outcome)
+    ms: i64
+}
+
+// About how long a function's proofs take: its statements times its
+// variables, enough to start the largest first.
+fn job_cost(f: vc.Function) -> i64 {
+    var stmts = 0
+    for b in f.blocks { stmts +%= b.stmts.len() + 1 }
+    stmts *% f.kinds.len()
+}
+
 pub fn verify(p: mir.Program) -> Report {
     let n = p.fns.len()
     let trace = env.get("JIHOO_VERIFY_TRACE").is_some()
@@ -426,13 +423,18 @@ pub fn verify(p: mir.Program) -> Report {
                 infer.cut(&g, heads.as_slice())
                 let more = infer.bounded(g, heads.as_slice())
                 infer.cut(&g, more.as_slice())
-                lift = vc.generate(g, contracts.as_slice(), Vec(Option(vc.Lift)).new().as_slice()).lift
+                lift = vc.generate(
+                    g,
+                    contracts.as_slice(),
+                    Vec(Option(vc.Lift)).new().as_slice(),
+                    vc.LIFT,
+                    Vec(Vec(bool)).new()
+                ).lift
             }
             None => {}
         }
         lifts.push(lift)
     }
-    var outcomes = Vec(Option(Outcome)).new()
     var report = Report {
         checks: Vec(Check).new(),
         lifted: Vec(Vec(vc.Site)).new(),
@@ -441,26 +443,43 @@ pub fn verify(p: mir.Program) -> Report {
         functions: 0,
         incomplete: 0
     }
+    // Each function's obligations are proved independently of the others'
+    // (what they rest on is decided below), on several threads, the
+    // costliest first: a few large functions take most of the time.
+    var jobs = Vec(Job).new()
     for i in 0..n {
         report.contract_errors.push(Vec((diag.Span, String)).new())
         let m = mem.replace(&models[i], None)
         match m {
             Some(f) => {
                 report.functions += 1
-                let begin = timing.now()
-                let blocks = f.blocks.len()
-                let o = outcome(f, contracts.as_slice(), lifts.as_slice())
-                // `JIHOO_VERIFY_TRACE=1`: the time each function took.
-                if trace {
-                    io.eprintln(
-                        p.fns[i].name.as_str() + " " + blocks.to_string() + " blocks " +
-                            ((timing.now() - begin) / 1000000).to_string() + " ms"
-                    )
-                }
-                if !o.whole { report.incomplete += 1 }
-                outcomes.push(Some(o))
+                let cost = job_cost(f)
+                jobs.push(Job { index: i, cost, model: Some(f), outcome: None, ms: 0 })
             }
-            None => outcomes.push(None)
+            None => {}
+        }
+    }
+    sort.sort_by(&jobs, fn(a, b) { a.cost > b.cost })
+    let cs = contracts.as_slice()
+    let ls = lifts.as_slice()
+    thread.each_mut_uneven(&jobs, fn(j) {
+        let begin = timing.now()
+        let Some(f) = mem.replace(&j.model, None) else { return }
+        j.outcome = Some(outcome(f, cs, ls))
+        j.ms = (timing.now() - begin) / 1000000
+    })
+    sort.sort_by(&jobs, fn(a, b) { a.index < b.index })
+    var outcomes = Vec(Option(Outcome)).new()
+    for _ in 0..n { outcomes.push(None) }
+    for Job { index, cost: _, model: _, outcome, ms } in jobs.into_iter() {
+        // `JIHOO_VERIFY_TRACE=1`: the time each function took.
+        if trace { io.eprintln(p.fns[index].name.as_str() + " " + ms.to_string() + " ms") }
+        match outcome {
+            Some(o) => {
+                if !o.whole { report.incomplete += 1 }
+                outcomes[index] = Some(o)
+            }
+            None => {}
         }
     }
     // The greatest set of assumptions that hold: a function's `requires`

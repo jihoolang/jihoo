@@ -369,17 +369,6 @@ pub const MAX_ROUNDS: i64 = 20
 // large function that does not settle soon gives up.
 pub const MAX_WORK: i64 = 500000
 
-pub fn proved(goals: [linear.Goal]) -> bool {
-    for g in goals {
-        let ok = match fm.prove(g) {
-            Ok(c) => linear.check(g, c).is_ok()
-            Err(_) => false
-        }
-        if !ok { return false }
-    }
-    true
-}
-
 // `f` with candidates proposed for its cut points in `heads`, after the
 // facts written there, kept while they check; a written fact is never
 // dropped. The cut points in `joins`, where many paths meet, get the facts
@@ -412,16 +401,30 @@ pub fn infer(inout f: vc.Function, heads: [i64], joins: [i64], contracts: [Optio
     }
     var work = 0
     for _ in 0..MAX_ROUNDS {
-        let obs = vc.generate(f, contracts, Vec(Option(vc.Lift)).new().as_slice())
+        // The facts this added, each proved until one of its obligations
+        // fails.
+        var wanted = Vec(Vec(bool)).new()
+        for i, inv in f.invariants {
+            var w = Vec(bool).new()
+            for j in 0..inv.1.len() { w.push(j >= first[i]) }
+            wanted.push(w)
+        }
+        let obs = vc.generate(
+            f,
+            contracts,
+            Vec(Option(vc.Lift)).new().as_slice(),
+            vc.INVARIANTS,
+            wanted
+        )
         if obs.errors.len() > 0 { break }
         var failed = Vec(Vec(bool)).new()
         for inv in f.invariants { failed.push(Vec(bool).filled(inv.1.len(), false)) }
         var any = false
         for o in obs.list {
             match o.source {
-                Invariant(i, j) => if j >= first[i] && !failed[i][j] {
-                    for g in o.goals { work += g.facts.len() }
-                    if !proved(o.goals.as_slice()) {
+                Invariant(i, j) => {
+                    work += o.size
+                    if !o.proved {
                         failed[i][j] = true
                         any = true
                     }

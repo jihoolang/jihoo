@@ -370,8 +370,11 @@ and moves into the compiler once its trust boundary is stated.
    linear, so it runs on the compiler itself: 378 of 2,489 checks proved
    in 22 seconds. The `verify` suite runs `tests/run` with `--verify`, and
    jihoo-proofs' differential test checks the compiler's verdicts against
-   the interpreter. Left: `--verify` by default, and unproved contracts as
-   errors.
+   the interpreter. Done: verification in parallel, proving each
+   obligation as it is generated, which takes it on the compiler from 25
+   to 3.5 seconds and 1.6 GB to 530 MB
+   ([design](verification.md#verification-in-parallel)). Left: `--verify`
+   by default, and unproved contracts as errors.
 4. Contracts: `requires`/`ensures` on functions, `invariant` on loops, and
    `old(x)` for `inout` parameters. A call proves the callee's `requires`
    and assumes its `ensures`. An unproved contract is a compile error;

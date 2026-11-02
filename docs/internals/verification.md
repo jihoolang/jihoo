@@ -425,6 +425,25 @@ generator's arithmetic on forms, which traps on overflow, moved to
 `linear.jh`, and `tests/verify/compiler.proved` says so with a `clean`
 line, which the `verify` suite checks.
 
+### Verification in parallel
+
+Before verification can run in every build, it has to cost about as much
+as the borrow checks. Each function's obligations are proved
+independently of the others' (what a proof rests on is decided afterwards,
+for the whole program), so they are proved on several threads, the
+costliest functions first, as the borrow checks are. That alone took
+`jihoo verify compiler/main.jh` from 25 to 4.7 seconds on 20 threads, but
+its peak memory from 1.6 GB to 8.8 GB: each obligation copied its path's
+facts, and inference held every goal of a round until the round ended, so
+the few largest functions, proved at once, each held hundreds of
+megabytes. The generator now proves each obligation as it makes it and
+keeps only the verdict and what the proof rests on (`vc.PROVE`);
+inference's rounds build only the goals of the facts they test, and stop
+building a fact's once one of them fails (`vc.INVARIANTS`); the
+generation that records a small function's paths to its panics builds
+none (`vc.LIFT`). The verdicts are the same, check for check, on the same
+source; verification takes 3.5 seconds and 530 MB.
+
 ## Open questions
 
 - **Syntax.** Settled for functions and loops
