@@ -39,10 +39,10 @@ fn sum(xs: [i64]) -> i64 {
         i += 1
     }
     var k = 0
-    for j in 0..3
-        invariant 0 <= k && -k <= 3 * 2 - -1 - 7
+    for _ in 0..3
+        invariant 0 <= k && k <= 3 * 4 - -1 - 3
     {
-        k += j
+        if k < 10 { k += 1 }
     }
     loop
         invariant k >= 0

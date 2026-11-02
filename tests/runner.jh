@@ -1506,6 +1506,13 @@ fn main() -> i32 {
             t.check("verify: the compiler verifies itself", sv)
             let e = t.erased()
             t.check("verify: proved checks are absent from the IR", e)
+            // `+ - *` wrap in `--release` builds, and std's and the
+            // compiler's contracts must hold there too.
+            let o = exec(t.compiler.as_str(), ["verify", "--release", "compiler/main.jh"])
+            let rel: Result((), String) = if o.status.success() {
+                Ok(())
+            } else { Err("verify --release failed:\n" + o.stdout.as_str() + o.stderr.as_str()) }
+            t.check("verify: the compiler's contracts hold in --release builds", rel)
             t.suite_files("tests/verify", "verify")
             t.suite_files("tests/run", "unverified")
         } else if s == "examples" {

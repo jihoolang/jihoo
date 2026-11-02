@@ -247,6 +247,10 @@ impl File {
         if max <= 0 { return Ok(0) }
         buf.reserve(max)
         let n = check(unsafe { sys.read_raw(self.fd, buf.ptr + buf.len, max) })?
+        // The system never reads more than it was asked, so the length
+        // stays within what `reserve` made room for, in `--release` builds
+        // too.
+        if n > max { panic("read more than asked") }
         if n > 0 { buf.len += n }
         Ok(n)
     }
