@@ -475,7 +475,10 @@ and moves into the compiler once its trust boundary is stated.
       the facts and the negated claim. `nix flake check` checks it.
       What it rests on is trusted as `vc.jh` is: the translation
       (`horn.jh`), `std`'s `Vec` as the rules' lists, and `lib/proof`'s
-      port of Horn's checker.
+      port of Horn's checker. Done: the translation and `Vec` tested
+      against the code ([design](verification.md#the-proof-of-the-code)):
+      on random inputs, the rules derive what the compiled checker
+      returns, and nothing else but overflow results.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when

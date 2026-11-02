@@ -587,6 +587,30 @@ checker accepting only what Horn's Agda development proves sound (Horn's
 own checker accepts the same certificate), and the export of the theory
 to Agda. Reading the theory in ℤ is proved ([above](#the-checkers-soundness)).
 
+The translation and `Vec` are tested against the code they describe
+([`tests/horn/differential`](../../tests/horn/differential/check.py)):
+`cases.jh` runs the compiled `check`, `Lin.add_scaled`, `add` and `mul` on
+random inputs (certificates built to be accepted, then often broken: a
+weight changed or negative, a form unsorted, numbers near the ends of
+i128), and `check.py`, a Horn solver of its own in Python, enumerates what
+the rules derive for the same inputs. What the code returns must be among
+them, and the only value besides overflow results (`None`, an error,
+which the rules' exact `add` and `mul` may always give); a result only the
+rules give must be one exact arithmetic allows where an i128 overflowed,
+which an exact model of `add_scaled` checks. The `verify` suite runs 321
+cases. Of the 108 rules `emit-horn` writes for the code, their
+derivations use all 62 that a run can reach; each of the other 46 has a
+premise the run cannot meet (an index past its list's length, which the
+loop's invariant excludes, a negative weight after the weights are
+checked, a negative length). Of 64 random mutants of the rules, as a
+translation bug would make them, the test catches every one that changes
+a reachable rule so that it loses what the code returns; those it misses
+only add derivations (a
+weaker comparison, a premise dropped where a later `nth` still bounds
+the index), are equivalent (a swapped comparison next to an equality),
+or change a rule no run reaches. A search that does not end (a rule that
+leaves a list unbound) fails after 10 seconds.
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,

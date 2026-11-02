@@ -593,7 +593,9 @@ impl Tests {
     // FILE is kept.
     // `jihoo emit-horn` translates the linear checker, and lib/proof
     // proves what it computes sound; copies of it without the test of the
-    // sum's sign, or of the weights', are not proved.
+    // sum's sign, or of the weights', are not proved. The rules derive what
+    // the compiled checker returns on random inputs
+    // (tests/horn/differential).
     fn horn(self) -> Result((), String) {
         let src = read_file("compiler/linear.jh")?
         let broken = [
@@ -601,11 +603,34 @@ impl Tests {
             ("        if c.weights[i] < 0 { return Err(\"negative weight\") }\n", "weights")
         ]
         self.horn_one(src.as_str(), "", "")?
+        self.differential()?
         for b in broken {
             let Some(at) = src.as_str().find(b.0) else { return Err("linear.jh has no line " + b.0) }
             let text = src.as_str()[0..at] + src.as_str()[at + b.0.len..src.len()]
             self.horn_one(text.as_str(), b.1, "--reject")?
         }
+        Ok(())
+    }
+
+    // Inputs to linear.jh's functions with what the code returns, and
+    // what the rules of `horn_one` (check.horn) derive for them.
+    fn differential(self) -> Result((), String) {
+        let o = exec(
+            self.compiler.as_str(),
+            ["run", "-I", "compiler", "tests/horn/differential/cases.jh", "--", "1", "80"]
+        )
+        if !o.status.success() { return Err("cases.jh failed:\n" + o.stderr.as_str()) }
+        let cases = self.temp("cases.txt")
+        match fs.write_file(cases.as_str(), o.stdout.as_str()) {
+            Ok(_) => {}
+            Err(e) => return Err("cannot write " + cases.as_str() + ": " + e.to_string().as_str())
+        }
+        let rules = self.temp("check.horn")
+        let r = exec(
+            "python3",
+            ["-I", "tests/horn/differential/check.py", rules.as_str(), cases.as_str()]
+        )
+        if !r.status.success() { return Err(r.stdout + r.stderr.as_str()) }
         Ok(())
     }
 
