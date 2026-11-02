@@ -18,44 +18,103 @@ import proof.cert
 import proof.ring
 import proof.schematic
 
-pub fn theory() -> String {
-    String.from("(sort Z) (sort N) (sort P) (sort T) (sort X) (sort L) (sort F) (sort W)\n") + ring.theory().as_str() +
-        "(ctor n0 () N) (ctor ns (N) N)\n" +
-        "(ctor pair (Z Z) P) (ctor tnil () T) (ctor tcons (P T) T)\n" +
-        "(ctor lin (T Z) L)\n" +
-        "(ctor fnil () F) (ctor fcons (L F) F)\n" +
-        "(ctor wnil () W) (ctor wcons (Z W) W)\n" +
-        "(ctor look (X Z) Z) (ctor ev (T X) Z) (ctor val (L X) Z)\n" +
-        "(pred push (Z Z T T)) (pred ms (N T T Z T)) (pred as (L L Z L)) (pred sums (F W L L))\n" +
-        "(pred nnw (W)) (pred sat (F X)) (pred accepts (F L W Z))\n" +
+// The program's sorts, as `jihoo emit-horn` names them for linear.jh.
+pub const P: str = "Tup<Z,Z>"
+pub const T: str = "Vec<<i64,i128>>"
+pub const L: str = "Lin"
+pub const F: str = "Vec<Lin>"
+pub const W: str = "Vec<i128>"
+
+// A list sort as `jihoo emit-horn` declares a `Vec`: constructors, then
+// len, nth and snoc with their rules, in its words.
+fn list(n: str, e: str) -> String {
+    String.from(
+        "(ctor " + n + ".nil () " + n + ") (ctor " + n + ".cons (" + e + " " + n + ") " + n + ")\n"
+    ) +
+        "(pred " + n + ".len (" + n + " Z)) (pred " + n + ".nth (" + n + " Z " + e + ")) (pred " + n + ".snoc (" + n +
+        " " + e + " " + n + "))\n" +
+        "(rule " + n + ".len.nil () (" + n + ".len " + n + ".nil z0))\n" +
+        "(rule " + n + ".len.cons ((" + n + ".len ?l ?n)) (" + n + ".len (" + n + ".cons ?e ?l) (add ?n z1)))\n" +
+        "(rule " + n + ".nth.zero ((eq ?i z0)) (" + n + ".nth (" + n + ".cons ?e ?l) ?i ?e))\n" +
+        "(rule " + n + ".nth.succ ((" + n + ".nth ?l ?j ?e) (eq ?i (add ?j z1))) (" + n + ".nth (" + n + ".cons ?x ?l) ?i ?e))\n" +
+        "(rule " + n + ".snoc.nil () (" + n + ".snoc " + n + ".nil ?e (" + n + ".cons ?e " + n + ".nil)))\n" +
+        "(rule " + n + ".snoc.cons ((" + n + ".snoc ?l ?e ?m)) (" + n + ".snoc (" + n + ".cons ?x ?l) ?e (" + n + ".cons ?x ?m)))\n"
+}
+
+// The program's data, declared as `jihoo emit-horn` declares it; the
+// model alone (for its own tests) needs it, the model with the code's
+// rules takes theirs.
+pub fn data() -> String {
+    String.from(
+        "(sort Tup<Z,Z>)\n(sort Vec<<i64,i128>>)\n(sort Lin)\n(sort Vec<Lin>)\n(sort Vec<i128>)\n"
+    ) +
+        "(ctor Tup<Z,Z>.mk (Z Z) Tup<Z,Z>)\n" + list(T, P).as_str() + "(ctor Lin.mk (Vec<<i64,i128>> Z) Lin)\n" +
+        list(F, L).as_str() + list(W, "Z").as_str()
+}
+
+// The model of `check`, over the program's data. Sorts come first, one
+// per line, so that proof.code.theory can put them before every
+// declaration.
+pub fn model() -> String {
+    let t = T
+    String.from("(sort N)\n(sort X)\n") + "(ctor n0 () N) (ctor ns (N) N)\n" +
+        "(ctor look (X Z) Z) (ctor ev (" + t + " X) Z) (ctor val (Lin X) Z)\n" +
+        "(pred push (Z Z " + t + " " + t + ")) (pred ms (N " + t + " " + t + " Z " + t + "))\n" +
+        "(pred as (Lin Lin Z Lin)) (pred sums (Vec<Lin> Vec<i128> Lin Lin)) (pred good (Vec<Lin> Vec<i128> Lin))\n" +
+        "(pred nnw (Vec<i128>)) (pred sat (Vec<Lin> X)) (pred accepts (Vec<Lin> Lin Vec<i128>))\n" +
         "(rule eq.look ((eq ?a ?b)) (eq (look ?x ?a) (look ?x ?b)))\n" +
-        "(rule ev.nil () (eq (ev tnil ?x) z0))\n" +
-        "(rule ev.cons () (eq (ev (tcons (pair ?v ?k) ?r) ?x) (add (mul ?k (look ?x ?v)) (ev ?r ?x))))\n" +
-        "(rule val.lin () (eq (val (lin ?t ?c) ?x) (add (ev ?t ?x) ?c)))\n" +
-        "(rule push.keep () (push ?v ?k ?r (tcons (pair ?v ?k) ?r)))\n" +
+        "(rule ev.nil () (eq (ev " + t + ".nil ?x) z0))\n" +
+        "(rule ev.cons () (eq (ev (" + t + ".cons (Tup<Z,Z>.mk ?v ?k) ?r) ?x) (add (mul ?k (look ?x ?v)) (ev ?r ?x))))\n" +
+        "(rule val.lin () (eq (val (Lin.mk ?t ?c) ?x) (add (ev ?t ?x) ?c)))\n" +
+        "(rule push.keep () (push ?v ?k ?r (" + t + ".cons (Tup<Z,Z>.mk ?v ?k) ?r)))\n" +
         "(rule push.drop ((eq ?k z0)) (push ?v ?k ?r ?r))\n" +
-        "(rule ms.nil () (ms n0 tnil tnil ?w tnil))\n" +
-        "(rule ms.left ((ms ?n ?a ?b ?w ?r) (push ?v ?k ?r ?s)) (ms (ns ?n) (tcons (pair ?v ?k) ?a) ?b ?w ?s))\n" +
-        "(rule ms.right ((ms ?n ?a ?b ?w ?r) (push ?v (mul ?k ?w) ?r ?s)) (ms (ns ?n) ?a (tcons (pair ?v ?k) ?b) ?w ?s))\n" +
-        "(rule ms.both ((eq ?v ?u) (ms ?n ?a ?b ?w ?r) (push ?v (add ?j (mul ?k ?w)) ?r ?s))" +
-        " (ms (ns ?n) (tcons (pair ?v ?j) ?a) (tcons (pair ?u ?k) ?b) ?w ?s))\n" +
-        "(rule as.lin ((ms ?n ?t ?u ?w ?r)) (as (lin ?t ?c) (lin ?u ?d) ?w (lin ?r (add ?c (mul ?d ?w)))))\n" +
-        "(rule sums.nil () (sums fnil wnil ?s ?s))\n" +
-        "(rule sums.skip ((eq ?w z0) (sums ?fs ?ws ?s ?t)) (sums (fcons ?f ?fs) (wcons ?w ?ws) ?s ?t))\n" +
-        "(rule sums.add ((as ?s ?f ?w ?u) (sums ?fs ?ws ?u ?t)) (sums (fcons ?f ?fs) (wcons ?w ?ws) ?s ?t))\n" +
-        "(rule nnw.nil () (nnw wnil))\n" +
-        "(rule nnw.cons ((le z0 ?w) (nnw ?ws)) (nnw (wcons ?w ?ws)))\n" +
-        "(rule sat.nil () (sat fnil ?x))\n" +
-        "(rule sat.cons ((le z0 (val ?f ?x)) (sat ?fs ?x)) (sat (fcons ?f ?fs) ?x))\n" +
-        "(rule accepts ((nnw ?ws) (le z0 ?wc) (as (lin tnil (neg z1)) ?cl (neg z1) ?ng)" +
-        " (as (lin tnil z0) ?ng ?wc ?first) (sums ?fs ?ws ?first (lin tnil ?c)) (le (add ?c z1) z0))" +
-        " (accepts ?fs ?cl ?ws ?wc))\n"
+        "(rule ms.nil () (ms n0 " + t + ".nil " + t + ".nil ?w " + t + ".nil))\n" +
+        "(rule ms.left ((ms ?n ?a ?b ?w ?r) (push ?v ?k ?r ?s)) (ms (ns ?n) (" + t + ".cons (Tup<Z,Z>.mk ?v ?k) ?a) ?b ?w ?s))\n" +
+        "(rule ms.right ((eq ?p (mul ?k ?w)) (ms ?n ?a ?b ?w ?r) (push ?v ?p ?r ?s))" +
+        " (ms (ns ?n) ?a (" + t + ".cons (Tup<Z,Z>.mk ?v ?k) ?b) ?w ?s))\n" +
+        "(rule ms.both ((eq ?v ?u) (eq ?p (add ?j (mul ?k ?w))) (ms ?n ?a ?b ?w ?r) (push ?v ?p ?r ?s))" +
+        " (ms (ns ?n) (" + t + ".cons (Tup<Z,Z>.mk ?v ?j) ?a) (" + t + ".cons (Tup<Z,Z>.mk ?u ?k) ?b) ?w ?s))\n" +
+        "(rule as.lin ((eq ?e (add ?c (mul ?d ?w))) (ms ?n ?t ?u ?w ?r))" +
+        " (as (Lin.mk ?t ?c) (Lin.mk ?u ?d) ?w (Lin.mk ?r ?e)))\n" +
+        "(rule sums.nil () (sums Vec<Lin>.nil ?ws ?s ?s))\n" +
+        "(rule sums.skip ((eq ?w z0) (sums ?fs ?ws ?s ?t)) (sums (Vec<Lin>.cons ?f ?fs) (Vec<i128>.cons ?w ?ws) ?s ?t))\n" +
+        "(rule sums.add ((as ?s ?f ?w ?u) (sums ?fs ?ws ?u ?t)) (sums (Vec<Lin>.cons ?f ?fs) (Vec<i128>.cons ?w ?ws) ?s ?t))\n" +
+        "(rule good ((sums ?fs ?ws ?s (Lin.mk " + t + ".nil ?c)) (le (add ?c z1) z0)) (good ?fs ?ws ?s))\n" +
+        "(rule nnw.nil () (nnw Vec<i128>.nil))\n" +
+        "(rule nnw.cons ((le z0 ?w) (nnw ?ws)) (nnw (Vec<i128>.cons ?w ?ws)))\n" +
+        "(rule sat.nil () (sat Vec<Lin>.nil ?x))\n" +
+        "(rule sat.cons ((le z0 (val ?f ?x)) (sat ?fs ?x)) (sat (Vec<Lin>.cons ?f ?fs) ?x))\n" +
+        "(rule accepts ((nnw ?ws) (Vec<Lin>.len ?fs ?n) (Vec<i128>.nth ?ws ?n ?wc)" +
+        " (as (Lin.mk " + t + ".nil (neg z1)) ?cl (neg z1) ?ng) (as (Lin.mk " + t + ".nil z0) ?ng ?wc ?first)" +
+        " (good ?fs ?ws ?first)) (accepts ?fs ?cl ?ws))\n"
+}
+
+// The model alone: the ring, the program's data and the model.
+pub fn theory() -> String {
+    let d = data()
+    let m = model()
+    var sorts = String.from("(sort Z)\n")
+    var rest = String.new()
+    for text in [d.as_str(), m.as_str()] {
+        for line in text.lines() {
+            if line.starts_with("(sort ") {
+                sorts.push_str(line)
+                sorts.push('\n')
+            } else {
+                rest.push_str(line)
+                rest.push('\n')
+            }
+        }
+    }
+    sorts + ring.theory().as_str() + rest.as_str()
 }
 
 pub fn goals() -> String {
-    String.from("(var fs F) (var cl L) (var ws W) (var wc Z) (var x X)\n") +
-        "(goal sound ((accepts fs cl ws wc) (sat fs x) (le (add (val cl x) z1) z0)) (false))\n"
+    String.from("(var fs Vec<Lin>) (var cl Lin) (var ws Vec<i128>) (var x X)\n") +
+        "(goal sound ((accepts fs cl ws) (sat fs x) (le (add (val cl x) z1) z0)) (false))\n"
 }
+
+fn tnil() -> cert.Tm { cert.c("Vec<<i64,i128>>.nil") }
 
 fn v(n: str) -> cert.Tm { cert.v(n) }
 
@@ -71,7 +130,7 @@ fn val(l: cert.Tm, x: cert.Tm) -> cert.Tm { tm("val", [l.clone(), x.clone()]) }
 
 fn look(x: cert.Tm, n: cert.Tm) -> cert.Tm { tm("look", [x.clone(), n.clone()]) }
 
-fn lin(t: cert.Tm, c: cert.Tm) -> cert.Tm { tm("lin", [t.clone(), c.clone()]) }
+fn lin(t: cert.Tm, c: cert.Tm) -> cert.Tm { tm("Lin.mk", [t.clone(), c.clone()]) }
 
 struct Dev {
     k: cert.Cert
@@ -99,18 +158,18 @@ impl Dev {
                 return ring.trans(&self.k, p, rest)
             }
         }
-        if e.is("val") && e.arg(0).is("lin") {
+        if e.is("val") && e.arg(0).is("Lin.mk") {
             let l = e.arg(0)
             let j = ring.eq(e, ring.add(ev(l.arg(0), e.arg(1)), l.arg(1)))
             let p = ring.axiom(&self.k, "val.lin", j)
             let rest = self.unfold(ring.rhs(p), eqs)
             return ring.trans(&self.k, p, rest)
         }
-        if e.is("ev") && e.arg(0).is("tnil") {
+        if e.is("ev") && e.arg(0).is("Vec<<i64,i128>>.nil") {
             let p = ring.axiom(&self.k, "ev.nil", ring.eq(e, ring.z0()))
             return p
         }
-        if e.is("ev") && e.arg(0).is("tcons") {
+        if e.is("ev") && e.arg(0).is("Vec<<i64,i128>>.cons") {
             let t = e.arg(0)
             let x = e.arg(1)
             let p = t.arg(0)
@@ -225,6 +284,8 @@ struct Lemmas {
     nnw_head: i64
     nnw_tail: i64
     sums_nonneg: i64
+    nth_nnw: i64
+    good_false: i64
 }
 
 fn ms_at(n: cert.Tm) -> cert.Tm { tm("ms", [n.clone(), v("ma"), v("mb"), v("mw"), v("mr")]) }
@@ -240,8 +301,8 @@ impl Dev {
     fn push_ev(inout self) -> i64 {
         self.k.declare("pv", "Z")
         self.k.declare("pk", "Z")
-        self.k.declare("pr", "T")
-        self.k.declare("ps", "T")
+        self.k.declare("pr", T)
+        self.k.declare("ps", T)
         self.k.declare("px", "X")
         let h = self.hyp(tm("push", [v("pv"), v("pk"), v("pr"), v("ps")]))
         let j = ring.eq(
@@ -276,10 +337,10 @@ impl Dev {
     // ms n a b w r ⊢ ev r x = ev a x + w * ev b x, by induction on n.
     fn ms_ev(inout self, push_ev: i64) -> i64 {
         self.k.declare("mn", "N")
-        self.k.declare("ma", "T")
-        self.k.declare("mb", "T")
+        self.k.declare("ma", T)
+        self.k.declare("mb", T)
         self.k.declare("mw", "Z")
-        self.k.declare("mr", "T")
+        self.k.declare("mr", T)
         self.k.declare("mx", "X")
         self.k.declare("m1", "N")
         let x = v("mx")
@@ -298,40 +359,48 @@ impl Dev {
         for rule in ["ms.left", "ms.right", "ms.both"] {
             let o = self.open(hs, [ih.clone()], rule, "mc")
             let want = o.b.theta.apply(j)
-            // The branch's variables: n a b w r v k s, or for ms.both
-            // v u n a b w r j k s, with the premise v = u first.
-            let both = rule == "ms.both"
-            let at = if both { 2 } else { 0 }
-            let nv = o.b.vars.len()
-            let a = o.at(at + 1)
-            let b = o.at(at + 2)
-            let rr = o.at(at + 4)
-            let vv = if both { o.at(0) } else { o.at(5) }
-            let s = o.at(nv - 1)
-            let pm = if both { 1 } else { 0 }
+            // The premises by their roles: ms n a b w r, push v p r s, and
+            // for ms.right and ms.both an equation for p (and v = u).
+            var msp = 0
+            var pushp = 0
+            for q in 0..o.prem.len() {
+                if o.prem[q].judgment.is("ms") { msp = q }
+                if o.prem[q].judgment.is("push") { pushp = q }
+            }
+            let mj = o.prem[msp].judgment.clone()
+            let pj = o.prem[pushp].judgment.clone()
+            let a = mj.arg(1).clone()
+            let b = mj.arg(2).clone()
+            let rr = mj.arg(4).clone()
+            let vv = pj.arg(0).clone()
+            let s = pj.arg(3).clone()
             let i1 = self.k.apply_at(
                 o.ctx[0].index(),
                 ["ma", "mb", "mr"],
                 [a.clone(), b.clone(), rr.clone()],
-                one(o.prem[pm].clone()).as_slice()
+                one(o.prem[msp].clone()).as_slice()
             )
-            let pushed = o.prem[pm + 1].judgment.arg(1)
+            let pushed = pj.arg(1)
             let p1 = self.k.apply_at(
                 push_ev,
                 ["pv", "pk", "pr", "ps", "px"],
                 [vv.clone(), pushed.clone(), rr.clone(), s.clone(), x.clone()],
-                one(o.prem[pm + 1].clone()).as_slice()
+                one(o.prem[pushp].clone()).as_slice()
             )
             var eqs = Vec(cert.Ref).new()
             eqs.push(p1.clone())
             eqs.push(i1.clone())
-            if both {
-                // look x u = look x v, from v = u.
-                let uv = ring.sym(&self.k, o.prem[0].clone())
-                let u = o.at(1)
-                let lj = ring.eq(look(x, u), look(x, vv))
-                let l = self.step("eq.look", [uv], lj)
-                eqs.push(l)
+            for q in 0..o.prem.len() {
+                let qj = o.prem[q].judgment.clone()
+                if !qj.is("eq") { continue }
+                if rule == "ms.both" && q == 0 {
+                    // look x u = look x v, from v = u.
+                    let uv = ring.sym(&self.k, o.prem[0].clone())
+                    let u = qj.arg(1)
+                    let lj = ring.eq(look(x, u), look(x, vv))
+                    let l = self.step("eq.look", [uv], lj)
+                    eqs.push(l)
+                } else { eqs.push(o.prem[q].clone()) }
             }
             let r = self.prove(want.arg(0), want.arg(1), eqs.as_slice())
             cases.push(o.case(r))
@@ -349,10 +418,10 @@ impl Dev {
 impl Dev {
     // as a b w l ⊢ val l x = val a x + w * val b x
     fn as_val(inout self, ms_ev: i64) -> i64 {
-        self.k.declare("aa", "L")
-        self.k.declare("ab", "L")
+        self.k.declare("aa", "Lin")
+        self.k.declare("ab", "Lin")
         self.k.declare("aw", "Z")
-        self.k.declare("al", "L")
+        self.k.declare("al", "Lin")
         self.k.declare("ax", "X")
         let x = v("ax")
         let h = self.hyp(tm("as", [v("aa"), v("ab"), v("aw"), v("al")]))
@@ -360,16 +429,24 @@ impl Dev {
             val(v("al"), x),
             ring.add(val(v("aa"), x), ring.mul(v("aw"), val(v("ab"), x)))
         )
-        // The branch's variables: n t u w r c d.
+        // The premises: e = c + d * w, then ms n t u w r.
         let o = self.open(h, [], "as.lin", "al")
         let want = o.b.theta.apply(j)
+        let mj = o.prem[1].judgment.clone()
         let b = self.k.apply_at(
             ms_ev,
             ["mn", "ma", "mb", "mw", "mr", "mx"],
-            [o.at(0), o.at(1), o.at(2), o.at(3), o.at(4), x.clone()],
-            one(o.prem[0].clone()).as_slice()
+            [
+                mj.arg(0).clone(),
+                mj.arg(1).clone(),
+                mj.arg(2).clone(),
+                mj.arg(3).clone(),
+                mj.arg(4).clone(),
+                x.clone()
+            ],
+            one(o.prem[1].clone()).as_slice()
         )
-        let r = self.prove(want.arg(0), want.arg(1), [b.clone()])
+        let r = self.prove(want.arg(0), want.arg(1), [b.clone(), o.prem[0].clone()])
         self.close(h, [], j, [o.case(r)]).index()
     }
 
@@ -386,13 +463,13 @@ impl Dev {
     // sums fs ws s t, sat fs x, nnw ws, 0 <= val s x ⊢ 0 <= val t x, by
     // induction on fs, for every ws and s.
     fn sums_nonneg(inout self, l: Lemmas) -> i64 {
-        self.k.declare("sf", "F")
-        self.k.declare("sws", "W")
-        self.k.declare("ss", "L")
-        self.k.declare("st", "L")
+        self.k.declare("sf", F)
+        self.k.declare("sws", W)
+        self.k.declare("ss", "Lin")
+        self.k.declare("st", "Lin")
         self.k.declare("sx", "X")
-        self.k.declare("cf", "L")
-        self.k.declare("cfs", "F")
+        self.k.declare("cf", "Lin")
+        self.k.declare("cfs", F)
         let x = v("sx")
         let j = ring.le(ring.z0(), val(v("st"), x))
         var hs = Vec(i64).new()
@@ -401,7 +478,7 @@ impl Dev {
             for p in ps { hs.push(self.hyp(p).index()) }
         }
         // fs = fnil: only sums.nil, so t = s.
-        let g = sums_hyps(cert.c("fnil"))
+        let g = sums_hyps(cert.c("Vec<Lin>.nil"))
         var gs = Vec(cert.Ref).new()
         for p in g { gs.push(self.hyp(p)) }
         let o = self.open(gs[0], [gs[3].index()], "sums.nil", "sn")
@@ -409,7 +486,7 @@ impl Dev {
         let nil_case = self.close(gs[0], [gs[3].index()], j, [o.case(r)])
         // fs = fcons cf cfs
         let ih = self.k.rule_hyp(sums_hyps(v("cfs")).as_slice(), j.clone(), ["sws", "ss"])
-        let g = sums_hyps(cert.app2("fcons", v("cf"), v("cfs")))
+        let g = sums_hyps(cert.app2("Vec<Lin>.cons", v("cf"), v("cfs")))
         var gs = Vec(cert.Ref).new()
         for p in g { gs.push(self.hyp(p)) }
         let context = [ih, gs[1].index(), gs[2].index(), gs[3].index()]
@@ -493,16 +570,121 @@ impl Dev {
         self.k.induct("sf", hs.as_slice(), true, j, ind.as_slice())
     }
 
-    // accepts fs cl ws wc, sat fs x, val cl x + 1 <= 0 ⊢ false
+    // nnw ws, nth ws n w ⊢ 0 <= w, by induction on ws, for every n.
+    fn nth_nnw(inout self, l: Lemmas) -> i64 {
+        self.k.declare("qw", W)
+        self.k.declare("qn", "Z")
+        self.k.declare("qe", "Z")
+        self.k.declare("qa", "Z")
+        self.k.declare("qr", W)
+        let j = ring.le(ring.z0(), v("qe"))
+        let at = fn(ws: cert.Tm) -> Vec(cert.Tm) {
+            var out = Vec(cert.Tm).new()
+            out.push(tm("nnw", [ws.clone()]))
+            out.push(tm("Vec<i128>.nth", [ws.clone(), v("qn"), v("qe")]))
+            out
+        }
+        var hs = Vec(i64).new()
+        for p in at(v("qw")) { hs.push(self.hyp(p).index()) }
+        // nil: no rule gives nth of an empty list.
+        let g = at(cert.c("Vec<i128>.nil"))
+        self.hyp(g[0].clone())
+        let n1 = self.hyp(g[1].clone())
+        let nil_case = self.close(n1, [], j, [])
+        // cons qa qr
+        let ih = self.k.rule_hyp(at(v("qr")).as_slice(), j.clone(), ["qn"])
+        let g = at(cert.app2("Vec<i128>.cons", v("qa"), v("qr")))
+        let g1 = self.hyp(g[0].clone())
+        let g2 = self.hyp(g[1].clone())
+        let context = [ih, g1.index()]
+        var cases = Vec(cert.InvCase).new()
+        // zero: the element is the head.
+        let o = self.open(g2, context, "Vec<i128>.nth.zero", "nz")
+        let nj = o.ctx[1].judgment.arg(0).clone()
+        let r = self.k.apply_at(
+            l.nnw_head,
+            ["nw", "nws"],
+            [nj.arg(0).clone(), nj.arg(1).clone()],
+            one(o.ctx[1].clone()).as_slice()
+        )
+        cases.push(o.case(r))
+        // succ: the element is in the tail, at j.
+        let o = self.open(g2, context, "Vec<i128>.nth.succ", "ns")
+        let nj = o.ctx[1].judgment.arg(0).clone()
+        let tail = self.k.apply_at(
+            l.nnw_tail,
+            ["nw", "nws"],
+            [nj.arg(0).clone(), nj.arg(1).clone()],
+            one(o.ctx[1].clone()).as_slice()
+        )
+        let pj = o.prem[0].judgment.clone()
+        let r = self.k.apply_at(
+            o.ctx[0].index(),
+            ["qn"],
+            [pj.arg(1).clone()],
+            [tail, o.prem[0].clone()]
+        )
+        cases.push(o.case(r))
+        let cons_case = self.close(g2, context, j, cases.as_slice())
+        var ind = Vec(cert.Case).new()
+        ind.push(cert.Case { step: nil_case.index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(String.from("qa"))
+        vs.push(String.from("qr"))
+        ind.push(cert.Case { step: cons_case.index(), vars: vs })
+        self.k.induct("qw", hs.as_slice(), true, j, ind.as_slice())
+    }
+
+    // good fs ws s, sat fs x, nnw ws, 0 <= val s x ⊢ false: the sum is a
+    // constant c with c + 1 <= 0, and it is non-negative.
+    fn good_false(inout self, l: Lemmas) -> i64 {
+        self.k.declare("gf", F)
+        self.k.declare("gw", W)
+        self.k.declare("gs", "Lin")
+        self.k.declare("gx", "X")
+        let x = v("gx")
+        let h = self.hyp(tm("good", [v("gf"), v("gw"), v("gs")]))
+        let c1 = self.hyp(tm("sat", [v("gf"), x.clone()]))
+        let c2 = self.hyp(tm("nnw", [v("gw")]))
+        let c3 = self.hyp(ring.le(ring.z0(), val(v("gs"), x)))
+        let context = [c1.index(), c2.index(), c3.index()]
+        let o = self.open(h, context, "good", "gd")
+        let sj = o.prem[0].judgment.clone()
+        let total = sj.arg(3).clone()
+        let c = total.arg(1).clone()
+        let s = self.k.apply_at(
+            l.sums_nonneg,
+            ["sf", "sws", "ss", "st", "sx"],
+            [sj.arg(0).clone(), sj.arg(1).clone(), sj.arg(2).clone(), total.clone(), x.clone()],
+            [o.prem[0].clone(), o.ctx[0].clone(), o.ctx[1].clone(), o.ctx[2].clone()]
+        )
+        let nonneg_c = self.le_eq(s, ring.z0(), c, [])
+        let t2 = self.step(
+            "le.add",
+            [nonneg_c.clone()],
+            ring.le(ring.add(ring.z0(), ring.z1()), ring.add(c, ring.z1()))
+        )
+        let t3 = self.step(
+            "le.trans",
+            [t2, o.prem[1].clone()],
+            ring.le(ring.add(ring.z0(), ring.z1()), ring.z0())
+        )
+        let t4 = self.le_eq(t3, ring.z1(), ring.z0(), [])
+        let f = self.step("absurd", [t4.clone()], cert.c("false"))
+        self.close(h, context, cert.c("false"), [o.case(f)]).index()
+    }
+
+    // accepts fs cl ws, sat fs x, val cl x + 1 <= 0 ⊢ false
     fn sound(inout self, l: Lemmas) -> i64 {
         let x = v("x")
-        let m1 = self.hyp(tm("accepts", [v("fs"), v("cl"), v("ws"), v("wc")]))
+        let m1 = self.hyp(tm("accepts", [v("fs"), v("cl"), v("ws")]))
         let m2 = self.hyp(tm("sat", [v("fs"), x.clone()]))
         let m3 = self.hyp(ring.le(ring.add(val(v("cl"), x), ring.z1()), ring.z0()))
         let context = [m2.index(), m3.index()]
-        // The variables are ws wc cl ng first fs c.
+        // The variables are ws fs n wc cl ng first; the premises nnw, len,
+        // nth, the negated claim, the first sum and good.
         let o = self.open(m1, context, "accepts", "ac")
-        let (ws, wc, cl, ng, first, fs, c) = (
+        let (ws, fs, n, wc, cl, ng, first) = (
             o.at(0),
             o.at(1),
             o.at(2),
@@ -511,13 +693,19 @@ impl Dev {
             o.at(5),
             o.at(6)
         )
+        let wc_nonneg = self.k.apply_at(
+            l.nth_nnw,
+            ["qw", "qn", "qe"],
+            [ws.clone(), n.clone(), wc.clone()],
+            [o.prem[0].clone(), o.prem[2].clone()]
+        )
         let minus_one = ring.neg(ring.z1())
         // The negated claim: val ng x = -1 - val cl x >= 0.
         let a1 = self.k.apply_at(
             l.as_val,
             ["aa", "ab", "aw", "al", "ax"],
-            [lin(cert.c("tnil"), minus_one), cl.clone(), minus_one.clone(), ng.clone(), x.clone()],
-            one(o.prem[2].clone()).as_slice()
+            [lin(tnil(), minus_one), cl.clone(), minus_one.clone(), ng.clone(), x.clone()],
+            one(o.prem[3].clone()).as_slice()
         )
         let claim = ring.add(val(cl, x), ring.z1())
         let t1 = self.step(
@@ -530,36 +718,21 @@ impl Dev {
         let a2 = self.k.apply_at(
             l.as_val,
             ["aa", "ab", "aw", "al", "ax"],
-            [lin(cert.c("tnil"), ring.z0()), ng.clone(), wc.clone(), first.clone(), x.clone()],
-            one(o.prem[3].clone()).as_slice()
+            [lin(tnil(), ring.z0()), ng.clone(), wc.clone(), first.clone(), x.clone()],
+            one(o.prem[4].clone()).as_slice()
         )
         let p = self.step(
             "le.mul",
-            [o.prem[1].clone(), nonneg_ng],
+            [wc_nonneg, nonneg_ng],
             ring.le(ring.z0(), ring.mul(wc, val(ng, x)))
         )
         let nonneg_first = self.le_eq(p, ring.z0(), val(first, x), [a2.clone()])
-        // The whole sum is the constant c, and 0 <= c while c + 1 <= 0.
-        let total = lin(cert.c("tnil"), c)
-        let s = self.k.apply_at(
-            l.sums_nonneg,
-            ["sf", "sws", "ss", "st", "sx"],
-            [fs.clone(), ws.clone(), first.clone(), total.clone(), x.clone()],
-            [o.prem[4].clone(), o.ctx[0].clone(), o.prem[0].clone(), nonneg_first]
+        let f = self.k.apply_at(
+            l.good_false,
+            ["gf", "gw", "gs", "gx"],
+            [fs.clone(), ws.clone(), first.clone(), x.clone()],
+            [o.prem[5].clone(), o.ctx[0].clone(), o.prem[0].clone(), nonneg_first]
         )
-        let nonneg_c = self.le_eq(s, ring.z0(), c, [])
-        let t2 = self.step(
-            "le.add",
-            [nonneg_c.clone()],
-            ring.le(ring.add(ring.z0(), ring.z1()), ring.add(c, ring.z1()))
-        )
-        let t3 = self.step(
-            "le.trans",
-            [t2, o.prem[5].clone()],
-            ring.le(ring.add(ring.z0(), ring.z1()), ring.z0())
-        )
-        let t4 = self.le_eq(t3, ring.z1(), ring.z0(), [])
-        let f = self.step("absurd", [t4.clone()], cert.c("false"))
         self.close(m1, context, cert.c("false"), [o.case(f)]).index()
     }
 }
@@ -584,15 +757,15 @@ pub fn certificate() -> String {
     let push_ev = d.push_ev()
     let ms_ev = d.ms_ev(push_ev)
     let as_val = d.as_val(ms_ev)
-    d.k.declare("tf", "L")
-    d.k.declare("tfs", "F")
+    d.k.declare("tf", "Lin")
+    d.k.declare("tfs", F)
     d.k.declare("tx", "X")
-    let sat_fcons = tm("sat", [cert.app2("fcons", v("tf"), v("tfs")), v("tx")])
+    let sat_fcons = tm("sat", [cert.app2("Vec<Lin>.cons", v("tf"), v("tfs")), v("tx")])
     let sat_head = d.premise(sat_fcons, "sat.cons", 0, ring.le(ring.z0(), val(v("tf"), v("tx"))))
     let sat_tail = d.premise(sat_fcons, "sat.cons", 1, tm("sat", [v("tfs"), v("tx")]))
     d.k.declare("nw", "Z")
-    d.k.declare("nws", "W")
-    let nnw_wcons = tm("nnw", [cert.app2("wcons", v("nw"), v("nws"))])
+    d.k.declare("nws", W)
+    let nnw_wcons = tm("nnw", [cert.app2("Vec<i128>.cons", v("nw"), v("nws"))])
     let nnw_head = d.premise(nnw_wcons, "nnw.cons", 0, ring.le(ring.z0(), v("nw")))
     let nnw_tail = d.premise(nnw_wcons, "nnw.cons", 1, tm("nnw", [v("nws")]))
     var l = Lemmas {
@@ -603,9 +776,13 @@ pub fn certificate() -> String {
         sat_tail,
         nnw_head,
         nnw_tail,
-        sums_nonneg: 0
+        sums_nonneg: 0,
+        nth_nnw: 0,
+        good_false: 0
     }
     l.sums_nonneg = d.sums_nonneg(l)
+    l.nth_nnw = d.nth_nnw(l)
+    l.good_false = d.good_false(l)
     let main = d.sound(l)
     d.k.result("sound", main)
     d.k.text().to_string()
@@ -627,7 +804,7 @@ fn edit(s: str, old: str, new: str) -> String {
 #[test]
 fn the_checker_is_sound() {
     match check() {
-        Ok(r) => assert(r.goals == 1 && r.inductions == 2, "one theorem, two inductions")
+        Ok(r) => assert(r.goals == 1 && r.inductions == 3, "one theorem, three inductions")
         Err(e) => panic("rejected: " + e.as_str())
     }
 }
@@ -639,10 +816,8 @@ fn a_weaker_checker_is_not_proved() {
     let c = certificate()
     let g = goals()
     let th = theory()
-    let no_sign = edit(th.as_str(), " (le (add ?c z1) z0)) (accepts", ") (accepts")
+    let no_sign = edit(th.as_str(), " (le (add ?c z1) z0)) (good", ") (good")
     assert(schematic.check(no_sign.as_str(), g.as_str(), c.as_str()).is_err(), "sum's sign")
-    let no_weights = edit(th.as_str(), "((nnw ?ws) (le z0 ?wc)", "((nnw ?ws)")
-    assert(schematic.check(no_weights.as_str(), g.as_str(), c.as_str()).is_err(), "claim's weight")
     let any_weight = edit(
         th.as_str(),
         "(rule nnw.cons ((le z0 ?w) (nnw ?ws))",
@@ -657,6 +832,6 @@ fn a_wrong_merge_is_not_proved() {
     let c = certificate()
     let g = goals()
     let th = theory()
-    let wrong = edit(th.as_str(), "((eq ?v ?u) (ms ?n ?a ?b ?w ?r)", "((ms ?n ?a ?b ?w ?r)")
+    let wrong = edit(th.as_str(), "((eq ?v ?u) (eq ?p", "((eq ?p")
     assert(schematic.check(wrong.as_str(), g.as_str(), c.as_str()).is_err(), "both branch")
 }
