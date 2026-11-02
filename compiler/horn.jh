@@ -151,6 +151,47 @@ fn negate(op: Op, a: Hm, b: Hm) -> Val {
     }
 }
 
+fn atom(op: Op, a: Hm, b: Hm) -> Hm {
+    let name = match op {
+        Lt => "lt"
+        Le => "le"
+        Eq => "eq"
+        _ => "ne"
+    }
+    ap2(name, a, b)
+}
+
+impl St {
+    // The path takes the comparison: false when it took one that
+    // contradicts it before (its negation, or for `==` a strict order).
+    fn assume(inout self, op: Op, a: Hm, b: Hm) -> bool {
+        var bad = Vec(Hm).new()
+        match op {
+            Lt => {
+                bad.push(atom(Op.Le, b, a))
+                bad.push(atom(Op.Eq, a, b))
+                bad.push(atom(Op.Eq, b, a))
+            }
+            Le => bad.push(atom(Op.Lt, b, a))
+            Eq => {
+                bad.push(atom(Op.Ne, a, b))
+                bad.push(atom(Op.Ne, b, a))
+                bad.push(atom(Op.Lt, a, b))
+                bad.push(atom(Op.Lt, b, a))
+            }
+            _ => {
+                bad.push(atom(Op.Eq, a, b))
+                bad.push(atom(Op.Eq, b, a))
+            }
+        }
+        for f in self.facts {
+            if contains(bad.as_slice(), f) { return false }
+        }
+        self.facts.push(atom(op, a, b))
+        true
+    }
+}
+
 // The premises under which a comparison holds: one list per case.
 fn holds(op: Op, a: Hm, b: Hm) -> Vec(Vec(Hm)) {
     var out = Vec(Vec(Hm)).new()
@@ -176,6 +217,13 @@ struct St {
     block: u32
     stmt: i64
     steps: i64
+    // The comparisons the path has taken, as (lt a b), (le a b), (eq a b)
+    // or (ne a b): a path that takes one and its negation has no rule.
+    facts: Vec(Hm)
+    // Calls of `Vec`'s `len` and `index` so far, which are functions: the
+    // call (without its result) and the result.
+    memo_keys: Vec(Hm)
+    memo_vals: Vec(Hm)
 }
 
 impl St {
@@ -197,6 +245,16 @@ impl St {
         for i in 0..self.prem.len() {
             let p = self.prem[i].subst(x, t)
             self.prem[i] = p
+        }
+        for i in 0..self.facts.len() {
+            let p = self.facts[i].subst(x, t)
+            self.facts[i] = p
+        }
+        for i in 0..self.memo_keys.len() {
+            let k = self.memo_keys[i].subst(x, t)
+            let r = self.memo_vals[i].subst(x, t)
+            self.memo_keys[i] = k
+            self.memo_vals[i] = r
         }
     }
 }
@@ -458,37 +516,109 @@ fn cut_points(b: Body) -> Vec(bool) {
     cuts
 }
 
-// Locals whose storage may be live on entry to each block, and the
-// arguments.
+// Locals whose value may be read, before it is set, from the entry of
+// each block on: what a cut point's state must hold. A local read where
+// it is not in the state is an error, so a mistake here loses a
+// translation, never soundness.
 fn live_locals(b: Body) -> Vec(Vec(bool)) {
     let n = b.blocks.len()
     let m = b.locals.len()
+    var uses = Vec(Vec(bool)).new()
+    var defs = Vec(Vec(bool)).new()
+    for k in 0..n {
+        var u = Vec(bool).filled(m, false)
+        var d = Vec(bool).filled(m, false)
+        for st in b.blocks[k].stmts {
+            match st {
+                Assign(p, rv, _) => {
+                    rvalue_uses(rv, d.as_slice(), &u)
+                    target(p, &u, &d)
+                }
+                _ => {}
+            }
+        }
+        match b.blocks[k].term {
+            Switch(op, _, _) => operand_use(op, d.as_slice(), &u)
+            Assert(op, _, _, _) => operand_use(op, d.as_slice(), &u)
+            Call(_, args, dest, _, _) => {
+                for a in args { operand_use(a, d.as_slice(), &u) }
+                target(dest, &u, &d)
+            }
+            Return => if !d[0] { u[0] = true }
+            _ => {}
+        }
+        uses.push(u)
+        defs.push(d)
+    }
     var live = Vec(Vec(bool)).new()
     for _ in 0..n { live.push(Vec(bool).filled(m, false)) }
-    for a in 1..b.arg_count + 1 { live[0][a] = true }
     var changed = true
     while changed {
         changed = false
-        for k in 0..n {
-            var cur = live[k].clone()
-            for s in b.blocks[k].stmts {
-                match s {
-                    StorageLive(l) => cur[l as i64] = true
-                    StorageDead(l) => cur[l as i64] = false
-                    _ => {}
-                }
-            }
+        var k = n
+        while k > 0 {
+            k -= 1
+            var cur = uses[k].clone()
             for s in successors(b.blocks[k].term) {
                 for l in 0..m {
-                    if cur[l] && !live[s as i64][l] {
-                        live[s as i64][l] = true
-                        changed = true
-                    }
+                    if live[s as i64][l] && !defs[k][l] { cur[l] = true }
+                }
+            }
+            for l in 0..m {
+                if cur[l] && !live[k][l] {
+                    live[k][l] = true
+                    changed = true
                 }
             }
         }
     }
     live
+}
+
+// A write: of a whole local defines it, of a part reads it too.
+fn target(p: Place, inout u: Vec(bool), inout d: Vec(bool)) {
+    let l = p.local as i64
+    if p.proj.len() == 0 {
+        d[l] = true
+    } else {
+        place_use(p, d.as_slice(), &u)
+    }
+}
+
+fn place_use(p: Place, d: [bool], inout u: Vec(bool)) {
+    if !d[p.local as i64] { u[p.local as i64] = true }
+    for pr in p.proj {
+        match pr {
+            Index(l) => if !d[l as i64] { u[l as i64] = true }
+            _ => {}
+        }
+    }
+}
+
+fn operand_use(op: Operand, d: [bool], inout u: Vec(bool)) {
+    match op {
+        Copy(p) | Move(p) => place_use(p, d, &u)
+        Const(_) => {}
+    }
+}
+
+fn rvalue_uses(rv: Rvalue, d: [bool], inout u: Vec(bool)) {
+    match rv {
+        Use(x) => operand_use(x, d, &u)
+        Bin(_, x, y) => {
+            operand_use(x, d, &u)
+            operand_use(y, d, &u)
+        }
+        Un(_, x) => operand_use(x, d, &u)
+        Cast(x, _, _) => operand_use(x, d, &u)
+        Ref(p) | RefMut(p) | Addr(p) | Discriminant(p) => place_use(p, d, &u)
+        Aggregate(_, xs) => for x in xs { operand_use(x, d, &u) }
+        Offset(x, y) => {
+            operand_use(x, d, &u)
+            operand_use(y, d, &u)
+        }
+        Repeat(x, _) => operand_use(x, d, &u)
+    }
 }
 
 // The translation of the functions named in `roots` and of what they call.
@@ -610,7 +740,16 @@ fn start(prog: Program, b: Body, inout o: Out) -> St {
             Val.Undef
         ) }
     }
-    St { vals, head: Vec(Hm).new(), prem: Vec(Hm).new(), block: 0, stmt: 0, steps: 0 }
+    St {
+        vals,
+        head: Vec(Hm).new(),
+        prem: Vec(Hm).new(),
+        block: 0,
+        stmt: 0,
+        steps: 0,
+        facts: Vec(Hm).new()
+        memo_keys: Vec(Hm).new(), memo_vals: Vec(Hm).new()
+    }
 }
 
 fn write_rule(inout o: Out, head: Hm, prem: [Hm]) {
@@ -692,22 +831,7 @@ fn run(
                 let r = match st.vals[0].clone() {
                     Cmp(op, x, y) => {
                         // Return each truth value under its case.
-                        for c in holds(op, x, y) {
-                            var s2 = st.clone()
-                            for p in c { s2.prem.push(p.clone()) }
-                            s2.vals[0] = Val.Term(sym("B.tt"))
-                            finish(fx, from, s2, &o)?
-                        }
-                        let nv = negate(op, x, y)
-                        match nv {
-                            Cmp(op2, x2, y2) => for c in holds(op2, x2, y2) {
-                                var s2 = st.clone()
-                                for p in c { s2.prem.push(p.clone()) }
-                                s2.vals[0] = Val.Term(sym("B.ff"))
-                                finish(fx, from, s2, &o)?
-                            }
-                            _ => {}
-                        }
+                        for s2 in truth(st, op, x, y, 0).into_iter() { finish(fx, from, s2, &o)? }
                         return Ok(())
                     }
                     other => other
@@ -806,23 +930,7 @@ fn reify(
     var next = Vec(St).new()
     for st in pending.into_iter() {
         match st.vals[l].clone() {
-            Cmp(op, x, y) => {
-                for c in holds(op, x, y) {
-                    var s2 = st.clone()
-                    for p in c { s2.prem.push(p.clone()) }
-                    s2.vals[l] = Val.Term(sym("B.tt"))
-                    next.push(s2)
-                }
-                match negate(op, x, y) {
-                    Cmp(op2, x2, y2) => for c in holds(op2, x2, y2) {
-                        var s2 = st.clone()
-                        for p in c { s2.prem.push(p.clone()) }
-                        s2.vals[l] = Val.Term(sym("B.ff"))
-                        next.push(s2)
-                    }
-                    _ => {}
-                }
-            }
+            Cmp(op, x, y) => for s2 in truth(st, op, x, y, l).into_iter() { next.push(s2) }
             Is(t, pos) => {
                 for want in [true, false] {
                     var s2 = st.clone()
@@ -836,6 +944,44 @@ fn reify(
         }
     }
     reify(locals, i + 1, next, &out, &o)
+}
+
+// The states where local l, the comparison op(x, y), is B.tt and B.ff:
+// one per case of each, unless the path took the opposite already.
+fn truth(st: St, op: Op, x: Hm, y: Hm, l: i64) -> Vec(St) {
+    var out = Vec(St).new()
+    for want in [true, false] {
+        let v = if want { Val.Cmp(op, x.clone(), y.clone()) } else { negate(op, x, y) }
+        let Cmp(op2, x2, y2) = v else { continue }
+        for s2 in take(st, op2, x2, y2).into_iter() {
+            var s3 = s2
+            s3.vals[l] = Val.Term(sym(if want { "B.tt" } else { "B.ff" }))
+            out.push(s3)
+        }
+    }
+    out
+}
+
+// The states where the path takes op(x, y): one per case (`!=` is `<` or
+// `>`), each without a case the path took the opposite of.
+fn take(st: St, op: Op, x: Hm, y: Hm) -> Vec(St) {
+    var out = Vec(St).new()
+    if op == Op.Ne {
+        var s0 = st.clone()
+        if !s0.assume(Op.Ne, x, y) { return out }
+        for s2 in take(s0, Op.Lt, x, y).into_iter() { out.push(s2) }
+        for s2 in take(s0, Op.Lt, y, x).into_iter() { out.push(s2) }
+        return out
+    }
+    var s1 = st.clone()
+    if !s1.assume(op, x, y) { return out }
+    for c in holds(op, x, y) {
+        for p in c {
+            if !contains(s1.prem.as_slice(), p) { s1.prem.push(p.clone()) }
+        }
+    }
+    out.push(s1)
+    out
 }
 
 // The rule for a path that reaches cut point k.
@@ -877,12 +1023,11 @@ fn branch(
         Cmp(op, x, y) => {
             let v = if want { Val.Cmp(op, x.clone(), y.clone()) } else { negate(op, x, y) }
             match v {
-                Cmp(op2, x2, y2) => for case in holds(op2, x2, y2) {
-                    var s2 = st.clone()
-                    for p in case { s2.prem.push(p.clone()) }
-                    s2.block = next
-                    s2.stmt = 0
-                    run(prog, b, fx, from, s2, &o)?
+                Cmp(op2, x2, y2) => for s2 in take(st, op2, x2, y2).into_iter() {
+                    var s3 = s2
+                    s3.block = next
+                    s3.stmt = 0
+                    run(prog, b, fx, from, s3, &o)?
                 }
                 _ => {}
             }
@@ -1206,14 +1351,26 @@ fn call(
         if method == "clone" { return operand(prog, b, &st, args[0], &o) }
         if method == "len" {
             let v = term(operand(prog, b, &st, args[0], &o)?)?
+            let key = ap2("len", v, sym("U.u"))
+            for k in 0..st.memo_keys.len() {
+                if st.memo_keys[k] == key { return Ok(Val.Term(st.memo_vals[k].clone())) }
+            }
             let n = o.fresh_var()
+            st.memo_keys.push(key)
+            st.memo_vals.push(n.clone())
             st.prem.push(ap2((s + ".len").as_str(), v, n))
             return Ok(Val.Term(n))
         }
         if method == "index" {
             let v = term(operand(prog, b, &st, args[0], &o)?)?
             let i = term(operand(prog, b, &st, args[1], &o)?)?
+            let key = ap2("nth", v, i)
+            for k in 0..st.memo_keys.len() {
+                if st.memo_keys[k] == key { return Ok(Val.Term(st.memo_vals[k].clone())) }
+            }
             let e = o.fresh_var()
+            st.memo_keys.push(key)
+            st.memo_vals.push(e.clone())
             var xs = Vec(Hm).new()
             xs.push(v)
             xs.push(i)
@@ -1251,6 +1408,13 @@ fn call(
     xs.push(r.clone())
     st.prem.push(ap(pred_name(prog, g).as_str(), xs))
     Ok(Val.Term(r))
+}
+
+fn contains(xs: [Hm], x: Hm) -> bool {
+    for y in xs {
+        if y == x { return true }
+    }
+    false
 }
 
 fn last_dot(s: str) -> Option(i64) {
