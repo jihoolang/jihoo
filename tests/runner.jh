@@ -640,6 +640,50 @@ impl Tests {
         Ok(())
     }
 
+    // Verification erases what it proves from the IR: in
+    // tests/verify/slices.jh, the functions whose checks are all proved
+    // have no panic or overflow check left, while `unchecked` keeps its
+    // check, and with `--no-verify` every one has its checks.
+    fn erased(self) -> Result((), String) {
+        let ll = self.temp("erased.ll")
+        let path = "tests/verify/slices.jh"
+        for verified in [true, false] {
+            let o = if verified {
+                exec(self.compiler.as_str(), ["emit-llvm", path, "-o", ll.as_str()])
+            } else {
+                exec(self.compiler.as_str(), ["emit-llvm", "--no-verify", path, "-o", ll.as_str()])
+            }
+            if !o.status.success() { return Err("emit-llvm failed:\n" + o.stderr.as_str()) }
+            let ir = read_file(ll.as_str())?
+            for name in ["tail", "head", "middle", "second", "spaces", "unchecked"] {
+                // The definition's lines, up to its closing brace.
+                let head = "@\"main." + name + "."
+                var inside = false
+                var found = false
+                var checked = false
+                for line in ir.as_str().lines() {
+                    if line.starts_with("define") && line.contains(head.as_str()) {
+                        inside = true
+                        found = true
+                    } else if inside && line == "}" {
+                        inside = false
+                    } else if inside && (line.contains("@jihoo.panic") || line.contains("with.overflow")) {
+                        checked = true
+                    }
+                }
+                if !found { return Err("no function " + name) }
+                let want = !verified || name == "unchecked"
+                if checked != want {
+                    return Err(
+                        name.to_string() + (if want { " has no check" } else { " keeps a check" }) +
+                            (if verified { "" } else { " with --no-verify" })
+                    )
+                }
+            }
+        }
+        Ok(())
+    }
+
     // `jihoo verify --all` on the file: its `//>` lines are what it says
     // of the checks in the file itself, without the file's path.
     fn verify_one(self, path: str) -> Result((), String) {
@@ -1460,6 +1504,8 @@ fn main() -> i32 {
             t.check("verify: the compiler's #[test] functions", r)
             let sv = t.self_verify()
             t.check("verify: the compiler verifies itself", sv)
+            let e = t.erased()
+            t.check("verify: proved checks are absent from the IR", e)
             t.suite_files("tests/verify", "verify")
             t.suite_files("tests/run", "unverified")
         } else if s == "examples" {

@@ -65,8 +65,8 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 | Part | Trusted | Why |
 | --- | --- | --- |
 | The checker (`linear.jh`, 155 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 1,594 lines, the model `obligations.jh` builds from MIR, 2,250, and the arithmetic on forms in `forms.jh`, 53) | yes | it states what MIR means: a wrong rule proves a false thing |
-| What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
+| The obligation generator (`vc.jh`, 1,670 lines, the model `obligations.jh` builds from MIR, 2,250, and the arithmetic on forms in `forms.jh`, 53) | yes | it states what MIR means: a wrong rule proves a false thing |
+| What a proof rests on, what is removed and which contracts are errors (`verify.jh`, 840) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
 | Provers (`fm.jh`), invariant inference and cut points (`infer.jh`) | no | everything they say is checked |

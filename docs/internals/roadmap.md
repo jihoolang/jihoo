@@ -443,6 +443,14 @@ and moves into the compiler once its trust boundary is stated.
    jihoo can verify its own compiler, and the seed moving to it lets the
    compiler state contracts itself.
 
+Status of the completion criteria: the `verify` suite runs `tests/run`
+with and without verification, and checks that the proved checks of
+`tests/verify/slices.jh` are absent from its IR while the unproved one
+stays; `tests/fail` has a case for each rejected contract (`unproved_*`);
+jihoo-proofs' CI runs the differential test against the interpreter, with
+its own verdicts and the compiler's, on both targets; the design lists the
+trusted parts and their sizes.
+
 Completion: every `tests/run` program compiles with the same output, with
 or without verification; proved checks are absent from optimized IR and
 unproved ones remain. `tests/fail` has a case for every rejected contract
