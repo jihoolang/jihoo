@@ -455,6 +455,15 @@ impl Rules {
         app(h, args)
     }
 
+    // The rules whose conclusion is a judgment of `pred`.
+    pub fn names_for(self, pred: str) -> Vec(String) {
+        var out = Vec(String).new()
+        for r in self.rules {
+            if r.conclusion.head() == pred { out.push(r.name.clone()) }
+        }
+        out
+    }
+
     fn rule(self, name: str) -> ref RuleInfo {
         for i in 0..self.rules.len() {
             if self.rules[i].name == name { return self.rules.index(i) }

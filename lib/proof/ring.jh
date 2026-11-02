@@ -34,6 +34,8 @@ pub fn theory() -> String {
         "(rule mul.one () (eq (mul ?a z1) ?a))\n" +
         "(rule mul.dist () (eq (mul ?a (add ?b ?c)) (add (mul ?a ?b) (mul ?a ?c))))\n" +
         "(rule le.eq ((le ?a ?b) (eq ?a ?c) (eq ?b ?d)) (le ?c ?d))\n" +
+        "(rule le.refl () (le ?a ?a))\n" +
+        "(rule le.antisym ((le ?a ?b) (le ?b ?a)) (eq ?a ?b))\n" +
         "(rule le.trans ((le ?a ?b) (le ?b ?c)) (le ?a ?c))\n" +
         "(rule le.add ((le ?a ?b)) (le (add ?a ?c) (add ?b ?c)))\n" +
         "(rule le.mul ((le z0 ?a) (le z0 ?b)) (le z0 (mul ?a ?b)))\n" +
