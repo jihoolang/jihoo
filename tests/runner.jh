@@ -592,16 +592,53 @@ impl Tests {
     // raise the numbers there. A `clean FILE` line says that no check in
     // FILE is kept.
     // `jihoo emit-horn` translates the linear checker, and lib/proof
-    // reads the result as a theory.
+    // proves what it computes sound; copies of it without the test of the
+    // sum's sign, or of the weights', are not proved.
     fn horn(self) -> Result((), String) {
-        let o = exec(self.compiler.as_str(), ["emit-horn", "--lib", "compiler/linear.jh", "--fn", "check"])
+        let src = read_file("compiler/linear.jh")?
+        let broken = [
+            ("    if sum.constant >= 0 { return Err(\"the weighted facts are not contradictory\") }\n", "sign"),
+            ("        if c.weights[i] < 0 { return Err(\"negative weight\") }\n", "weights")
+        ]
+        self.horn_one(src.as_str(), "", "")?
+        for b in broken {
+            let Some(at) = src.as_str().find(b.0) else { return Err("linear.jh has no line " + b.0) }
+            let text = src.as_str()[0..at] + src.as_str()[at + b.0.len..src.len()]
+            self.horn_one(text.as_str(), b.1, "--reject")?
+        }
+        Ok(())
+    }
+
+    fn horn_one(self, source: str, name: str, mode: str) -> Result((), String) {
+        let file = self.temp(("linear" + name + ".jh").as_str())
+        match fs.write_file(file.as_str(), source) {
+            Ok(_) => {}
+            Err(e) => return Err("cannot write " + file.as_str() + ": " + e.to_string().as_str())
+        }
+        let o = exec(self.compiler.as_str(), ["emit-horn", "--lib", file.as_str(), "--fn", "check"])
         if !o.status.success() { return Err("emit-horn failed:\n" + o.stderr.as_str()) }
-        let path = self.temp("check.horn")
+        let path = self.temp(("check" + name + ".horn").as_str())
         match fs.write_file(path.as_str(), o.stdout.as_str()) {
             Ok(_) => {}
             Err(e) => return Err("cannot write " + path.as_str() + ": " + e.to_string().as_str())
         }
-        let r = exec(self.compiler.as_str(), ["run", "tests/horn/theory.jh", "--", path.as_str()])
+        var args = Vec(str).new()
+        args.push("run")
+        args.push("tests/horn/linear.jh")
+        args.push("--")
+        args.push(path.as_str())
+        if mode.len > 0 { args.push(mode) }
+        let r = exec(self.compiler.as_str(), args.as_slice())
+        if mode.len > 0 {
+            // A panic of the proof's builder rejects too.
+            if r.status.success() && !r.stdout.as_str().starts_with("rejected") {
+                return Err("the copy without the " + name + " test was proved:\n" + r.stdout.as_str())
+            }
+            if !r.status.success() && r.stdout.as_str().contains("was proved") {
+                return Err(r.stdout + r.stderr.as_str())
+            }
+            return Ok(())
+        }
         if !r.status.success() { return Err(r.stdout + r.stderr.as_str()) }
         Ok(())
     }
@@ -1522,7 +1559,7 @@ fn main() -> i32 {
             let e = t.erased()
             t.check("verify: proved checks are absent from the IR", e)
             let h = t.horn()
-            t.check("verify: the linear checker as Horn rules", h)
+            t.check("verify: the linear checker's code is proved sound", h)
             // `+ - *` wrap in `--release` builds, and std's and the
             // compiler's contracts must hold there too.
             let o = exec(t.compiler.as_str(), ["verify", "--release", "compiler/main.jh"])

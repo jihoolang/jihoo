@@ -160,6 +160,16 @@ impl Dev {
         Some(Opened { b, prem, ctx })
     }
 
+    // `j` from `false`, by the theory's rule that concludes j's predicate
+    // from `false`.
+    pub fn from_false(inout self, f: cert.Ref, j: cert.Tm) -> cert.Ref {
+        if j.head() == "false" { return f.clone() }
+        for r in self.rules.names_for(j.head()) {
+            if r.as_str().starts_with("efq") { return self.step(r.as_str(), [f.clone()], j) }
+        }
+        panic("no rule concludes " + j.head() + " from false")
+    }
+
     pub fn close(
         inout self,
         h: cert.Ref,
@@ -167,7 +177,27 @@ impl Dev {
         j: cert.Tm,
         cases: [cert.InvCase]
     ) -> cert.Ref {
-        let n = self.k.invert(h.index(), context, j.clone(), cases)
+        // A rule that concludes anything from `false` is a case too: its
+        // `false` gives the judgment.
+        var all = Vec(cert.InvCase).new()
+        for c in cases { all.push(c.clone()) }
+        for r in self.rules.names_for(h.judgment.head()) {
+            if !r.as_str().starts_with("efq") { continue }
+            var given = false
+            for c in cases {
+                if c.rule == r { given = true }
+            }
+            if given { continue }
+            match self.try_open(h, context, r.as_str(), "ef") {
+                Some(o) => {
+                    let want = o.b.theta.apply(j)
+                    let s = self.from_false(o.prem[0].clone(), want)
+                    all.push(o.case(s))
+                }
+                None => {}
+            }
+        }
+        let n = self.k.invert(h.index(), context, j.clone(), all.as_slice())
         self.k.plain(n)
     }
 }

@@ -9,6 +9,7 @@
 // meaning. `efq.P` rules conclude anything from `false`, which no rule
 // derives. Nothing here is trusted: proof.schematic checks the result.
 import proof.cert
+import proof.code
 import proof.dev
 import proof.farkas
 import proof.ring
@@ -43,7 +44,16 @@ pub fn helpers() -> String {
         out.push_str("(rule " + s + ".next ((" + s + ".sfx ?l (add ?i z1) ?r)) (" + s + ".next ?l ?i (" + s + ".cons ?e ?r) ?e))\n")
         out.push_str("(rule " + s + ".nexts ((" + s + ".sfx ?l (add ?i z1) ?r)) (" + s + ".nexts ?l ?i (" + s + ".cons ?e ?r)))\n")
         out.push_str("(rule " + s + ".nilp () (" + s + ".nilp " + s + ".nil))\n")
-        for p in [".sfx ?a ?b ?c", ".next ?a ?b ?c ?d", ".nexts ?a ?b ?c", ".nilp ?a"] {
+        out.push_str("(pred " + s + ".haslen (" + s + ")) (rule " + s + ".haslen ((" + s + ".len ?l ?n)) (" + s + ".haslen ?l))\n")
+        out.push_str("(pred " + s + ".hassfx (" + s + " Z)) (rule " + s + ".hassfx ((" + s + ".sfx ?l ?i ?s)) (" + s + ".hassfx ?l ?i))\n")
+        for p in [
+            ".sfx ?a ?b ?c",
+            ".next ?a ?b ?c ?d",
+            ".nexts ?a ?b ?c",
+            ".nilp ?a",
+            ".hassfx ?a ?b",
+            ".haslen ?a"
+        ] {
             let name = p[0..index_of(p, ' ')]
             out.push_str("(rule efq" + s + name + " ((false)) (" + s + p + "))\n")
         }
@@ -54,10 +64,12 @@ pub fn helpers() -> String {
     out.push_str(
         "(rule app.cons ((app ?l ?m ?r)) (app (" + t + ".cons ?x ?l) ?m (" + t + ".cons ?x ?r)))\n"
     )
-    out.push_str("(pred ares (" + t + " " + t + " " + t + " Z Z Z Lin))\n")
+    // What add_scaled's loop has left to do from i and j: the suffixes a
+    // and b merge to m, and the output so far followed by m is the result.
+    out.push_str("(pred ares (Lin Z Lin Z " + t + " Z Lin))\n")
     out.push_str(
-        "(rule ares ((ms ?n ?a ?b ?w ?m) (app ?out ?m ?r) (eq ?c (add ?c1 (mul ?c2 ?w))))" +
-            " (ares ?out ?a ?b ?w ?c1 ?c2 (Lin.mk ?r ?c)))\n"
+        "(rule ares ((" + t + ".sfx ?ts ?i ?a) (" + t + ".sfx ?to ?j ?b) (ms ?n ?a ?b ?w ?m) (app ?out ?m ?r)" +
+            " (eq ?c (add ?c1 (mul ?c2 ?w)))) (ares (Lin.mk ?ts ?c1) ?i (Lin.mk ?to ?c2) ?j ?out ?w (Lin.mk ?r ?c)))\n"
     )
     out.push_str(
         "(pred rest (Vec<Lin> Lin Vec<i128>)) (pred nnwr (Vec<i128> Vec<Lin> Lin Vec<i128>))\n"
@@ -66,6 +78,16 @@ pub fn helpers() -> String {
         " (as (Lin.mk " + t + ".nil (neg z1)) ?cl (neg z1) ?ng) (as (Lin.mk " + t + ".nil z0) ?ng ?wc ?first)" +
         " (good ?fs ?ws ?first)) (rest ?fs ?cl ?ws))\n")
     out.push_str("(rule nnwr ((nnw ?r) (rest ?fs ?cl ?ws)) (nnwr ?r ?fs ?cl ?ws))\n")
+    // What the sum loop and the weights loop have left to do from i.
+    out.push_str("(pred g80 (Vec<Lin> Vec<i128> Z Lin)) (pred g45 (Vec<Lin> Lin Vec<i128> Z))\n")
+    out.push_str("(rule g80 ((Vec<Lin>.sfx ?fs ?i ?a) (Vec<i128>.sfx ?ws ?i ?b) (good ?a ?b ?s)) (g80 ?fs ?ws ?i ?s))\n")
+    out.push_str(
+        "(rule g45 ((Vec<i128>.sfx ?ws ?i ?b) (nnw ?b) (rest ?fs ?cl ?ws)) (g45 ?fs ?cl ?ws ?i))\n"
+    )
+    out.push_str(
+        "(rule efq.g80 ((false)) (g80 ?a ?b ?c ?d)) (rule efq.g45 ((false)) (g45 ?a ?b ?c ?d))\n"
+    )
+    out.push_str("(rule efq.rest ((false)) (rest ?a ?b ?c))\n")
     out.push_str("(rule efq.eq ((false)) (eq ?a ?b)) (rule efq.le ((false)) (le ?a ?b))\n")
     out.push_str("(rule efq.app ((false)) (app ?a ?b ?c))\n")
     out.push_str("(rule efq.ares ((false)) (ares ?a ?b ?c ?d ?e ?f ?g))\n")
@@ -228,53 +250,28 @@ impl Refine {
         }
         let n = les.len()
         var pick = Vec(i64).new()
-        for i in 0..n {
-            let f = forms[i].clone()
-            if f.is_constant() && f.constant < 0 {
-                pick.push(i)
-                return Some(self.contradiction(
-                    les.as_slice(),
-                    back.as_slice(),
-                    forms.as_slice(),
-                    pick.as_slice()
-                ))
-            }
-        }
-        for i in 0..n {
-            for j in i + 1..n {
-                let f = forms[i].plus(forms[j], 1)
-                if f.is_constant() && f.constant < 0 {
-                    pick.push(i)
-                    pick.push(j)
-                    return Some(self.contradiction(
-                        les.as_slice(),
-                        back.as_slice(),
-                        forms.as_slice(),
-                        pick.as_slice()
-                    ))
-                }
-            }
-        }
-        for i in 0..n {
-            for j in i + 1..n {
-                let fij = forms[i].plus(forms[j], 1)
-                for k in j + 1..n {
-                    let f = fij.plus(forms[k], 1)
-                    if f.is_constant() && f.constant < 0 {
-                        pick.push(i)
-                        pick.push(j)
-                        pick.push(k)
-                        return Some(self.contradiction(
-                            les.as_slice(),
-                            back.as_slice(),
-                            forms.as_slice(),
-                            pick.as_slice()
-                        ))
-                    }
-                }
-            }
+        if self.search(forms.as_slice(), Form.num(0), 0, 4, &pick) {
+            return Some(self.contradiction(
+                les.as_slice(),
+                back.as_slice(),
+                forms.as_slice(),
+                pick.as_slice()
+            ))
         }
         None
+    }
+
+    // Indices from `from` on, at most `left` more, whose forms added to
+    // `sum` make a negative constant.
+    fn search(self, forms: [Form], sum: Form, from: i64, left: i64, inout pick: Vec(i64)) -> bool {
+        if pick.len() > 0 && sum.is_constant() && sum.constant < 0 { return true }
+        if left == 0 { return false }
+        for i in from..forms.len {
+            pick.push(i)
+            if self.search(forms, sum.plus(forms[i], 1), i + 1, left - 1, &pick) { return true }
+            pick.pop()
+        }
+        false
     }
 
     fn contradiction(
@@ -381,6 +378,10 @@ pub struct ListLemmas {
     next: i64
     nexts: i64
     sfx_end: i64
+    len_fun: i64
+    sfx_len_end: i64
+    sfx_prev: i64
+    haslen: i64
 }
 
 impl Refine {
@@ -480,6 +481,10 @@ impl Refine {
             next: 0,
             nexts: 0
             sfx_end: 0
+            len_fun: 0
+            sfx_len_end: 0
+            sfx_prev: 0
+            haslen: 0
         }
         l.len_nonneg = self.len_nonneg(ls)
         l.nth_nonneg = self.nth_nonneg(ls)
@@ -492,6 +497,10 @@ impl Refine {
         l.next = self.next(ls, l)
         l.nexts = self.nexts(ls, l)
         l.sfx_end = self.sfx_end(ls, l)
+        l.len_fun = self.len_fun(ls)
+        l.sfx_len_end = self.sfx_len_end(ls)
+        l.sfx_prev = self.sfx_prev(ls, l)
+        l.haslen = self.haslen(ls)
         l
     }
 
@@ -1304,7 +1313,2567 @@ fn list_lemmas_check() {
     let f = r.step("le.refl", [], ring.le(z0(), z0()))
     r.d.k.result("refl", f.index())
     match schematic.check(th.as_str(), "(goal refl (le z0 z0))", r.d.k.text()) {
-        Ok(rep) => assert(rep.inductions == 24, "eight inductions per list sort")
+        Ok(rep) => assert(rep.inductions == 36, "twelve inductions per list sort")
         Err(e) => panic("rejected: " + e.as_str())
     }
+}
+
+// The steps of the lemmas about appending terms.
+#[derive(Clone)]
+pub struct AppLemmas {
+    nil_right: i64
+    snoc: i64
+}
+
+impl Refine {
+    pub fn app_lemmas(inout self) -> AppLemmas {
+        let ls = Ls { s: farkas.T.to_string(), p: "a".to_string() }
+        AppLemmas { nil_right: self.app_nil_right(ls), snoc: self.snoc_app(ls) }
+    }
+
+    // ⊢ app l nil l
+    fn app_nil_right(inout self, ls: Ls) -> i64 {
+        let lv = self.decl("anl", ls.s.as_str())
+        let xv = self.decl("anx", farkas.P)
+        let rv = self.decl("anr", ls.s.as_str())
+        let jl = tm("app", [lv.clone(), ls.nil(), lv.clone()])
+        let nil_case = self.step("app.nil", [], at_list(jl, "anl", ls.nil()))
+        let ih = self.hyp(at_list(jl, "anl", rv))
+        let cons_case = self.step("app.cons", [ih], at_list(jl, "anl", ls.cons(xv, rv)))
+        var cs = Vec(cert.Case).new()
+        cs.push(cert.Case { step: nil_case.index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(String.from("anx"))
+        vs.push(String.from("anr"))
+        cs.push(cert.Case { step: cons_case.index(), vars: vs })
+        self.d.k.induct("anl", [], false, jl, cs.as_slice())
+    }
+
+    // snoc out e out2, app out2 m r ⊢ app out (cons e m) r
+    fn snoc_app(inout self, ls: Ls) -> i64 {
+        let ov = self.decl("aso", ls.s.as_str())
+        let ev = self.decl("ase", farkas.P)
+        let o2 = self.decl("aso2", ls.s.as_str())
+        let mv = self.decl("asm", ls.s.as_str())
+        let rr = self.decl("asr", ls.s.as_str())
+        let xv = self.decl("asx", farkas.P)
+        let tv = self.decl("ast", ls.s.as_str())
+        let jl = tm("app", [ov.clone(), ls.cons(ev, mv), rr.clone()])
+        let snoc = fn(o: cert.Tm) -> cert.Tm { ls.pred("snoc", [o.clone(), ev.clone(), o2.clone()]) }
+        let app2 = tm("app", [o2.clone(), mv.clone(), rr.clone()])
+        let hs = self.hyps([snoc(ov), app2.clone()])
+        var steps = Vec(cert.Ref).new()
+        for at in [ls.nil(), ls.cons(xv, tv)] {
+            let is_nil = steps.len() == 0
+            let j = at_list(jl, "aso", at)
+            var ctx = Vec(i64).new()
+            if !is_nil { ctx.push(self.d.k.rule_hyp(
+                [snoc(tv), app2.clone()],
+                at_list(jl, "aso", tv),
+                ["aso2", "asr"]
+            )) }
+            let g = self.hyps([snoc(at), app2.clone()])
+            ctx.push(g[1].index())
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[0], ctx.as_slice(), "sa", j, &cases).into_iter() {
+                let want = o.b.theta.apply(j)
+                let k = o.ctx.len()
+                var ictx = Refine.indices(o.prem.as_slice())
+                for c in 0..k - 1 { ictx.push(o.ctx[c].index()) }
+                var inner = Vec(cert.InvCase).new()
+                for q in self.cases_of(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    "sb",
+                    want,
+                    &inner
+                ).into_iter() {
+                    let want2 = q.b.theta.apply(want)
+                    let r = if is_nil {
+                        // out2 = cons e nil: app nil m r gives r = m.
+                        var deep = Vec(cert.InvCase).new()
+                        for u in self.cases_of(
+                            q.prem[0].clone(),
+                            [],
+                            "sc",
+                            want2,
+                            &deep
+                        ).into_iter() {
+                            let want3 = u.b.theta.apply(want2)
+                            deep.push(u.case(self.step("app.nil", [], want3)))
+                        }
+                        self.d.close(q.prem[0].clone(), [], want2, deep.as_slice())
+                    } else {
+                        // out2 = cons x m2, r = cons x r2, app m2 m r2
+                        let sj = q.ctx[0].judgment.clone()
+                        let aj = q.prem[0].judgment.clone()
+                        let ih = self.d.k.apply_at(
+                            q.ctx[1].index(),
+                            ["aso2", "asr"],
+                            [sj.arg(2).clone(), aj.arg(2).clone()],
+                            [q.ctx[0].clone(), q.prem[0].clone()]
+                        )
+                        self.step("app.cons", [ih], want2)
+                    }
+                    inner.push(q.case(r))
+                }
+                cases.push(o.case(self.d.close(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    want,
+                    inner.as_slice()
+                )))
+            }
+            steps.push(self.d.close(g[0], ctx.as_slice(), j, cases.as_slice()))
+        }
+        var cs = Vec(cert.Case).new()
+        cs.push(cert.Case { step: steps[0].index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(String.from("asx"))
+        vs.push(String.from("ast"))
+        cs.push(cert.Case { step: steps[1].index(), vars: vs })
+        let hi = Refine.indices(hs.as_slice())
+        self.d.k.induct("aso", hi.as_slice(), true, jl, cs.as_slice())
+    }
+}
+
+#[test]
+fn app_lemmas_check() {
+    let th = test_theory()
+    var r = start(th.as_str())
+    r.app_lemmas()
+    let f = r.step("le.refl", [], ring.le(z0(), z0()))
+    r.d.k.result("refl", f.index())
+    match schematic.check(th.as_str(), "(goal refl (le z0 z0))", r.d.k.text()) {
+        Ok(rep) => assert(rep.inductions == 2, "two inductions")
+        Err(e) => panic("rejected: " + e.as_str())
+    }
+}
+
+impl Refine {
+    // Apply lemma `m` of a list sort, its variables named by the sort's
+    // letter, the tag and the letters in `vs`.
+    fn use_lemma(
+        inout self,
+        ls: Ls,
+        m: i64,
+        tag: str,
+        vs: [str],
+        to: [cert.Tm],
+        refs: [cert.Ref]
+    ) -> cert.Ref {
+        var names = Vec(String).new()
+        for x in vs { names.push(ls.p.clone() + tag + x) }
+        var ns = Vec(str).new()
+        for x in names { ns.push(x.as_str()) }
+        self.d.k.apply_at(m, ns.as_slice(), to, refs)
+    }
+
+    // len l a, len l b ⊢ a = b
+    fn len_fun(inout self, ls: Ls) -> i64 {
+        let n = Refine.names(ls, "lf", ["l", "a", "b", "x", "r"])
+        let lv = self.decl(n[0].as_str(), ls.s.as_str())
+        let av = self.decl(n[1].as_str(), "Z")
+        let bv = self.decl(n[2].as_str(), "Z")
+        let xv = self.decl(n[3].as_str(), elem(ls.s.as_str()))
+        let rv = self.decl(n[4].as_str(), ls.s.as_str())
+        let j = ring.eq(av, bv)
+        let hs = self.hyps([ls.len(lv, av), ls.len(lv, bv)])
+        var steps = Vec(cert.Ref).new()
+        for at in [ls.nil(), ls.cons(xv, rv)] {
+            let is_nil = steps.len() == 0
+            var ctx = Vec(i64).new()
+            if !is_nil { ctx.push(self.d.k.rule_hyp(
+                [ls.len(rv, av), ls.len(rv, bv)],
+                j.clone(),
+                [n[1].as_str(), n[2].as_str()]
+            )) }
+            let g = self.hyps([ls.len(at, av), ls.len(at, bv)])
+            ctx.push(g[1].index())
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[0], ctx.as_slice(), "fa", j, &cases).into_iter() {
+                let want = o.b.theta.apply(j)
+                let k = o.ctx.len()
+                var ictx = Refine.indices(o.prem.as_slice())
+                for c in 0..k - 1 { ictx.push(o.ctx[c].index()) }
+                var inner = Vec(cert.InvCase).new()
+                for q in self.cases_of(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    "fb",
+                    want,
+                    &inner
+                ).into_iter() {
+                    let want2 = q.b.theta.apply(want)
+                    let r = if is_nil {
+                        ring.refl(&self.d.k, z0())
+                    } else {
+                        let m1 = q.ctx[0].judgment.arg(1).clone()
+                        let m2 = q.prem[0].judgment.arg(1).clone()
+                        let e = self.d.k.apply_at(
+                            q.ctx[1].index(),
+                            [n[1].as_str(), n[2].as_str()],
+                            [m1, m2],
+                            [q.ctx[0].clone(), q.prem[0].clone()]
+                        )
+                        let one = ring.refl(&self.d.k, z1())
+                        ring.cong_add(&self.d.k, e, one)
+                    }
+                    if r.judgment != want2 { panic(
+                        "len_fun: " + r.judgment.show().as_str() + " for " + want2.show().as_str()
+                    ) }
+                    inner.push(q.case(r))
+                }
+                cases.push(o.case(self.d.close(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    want,
+                    inner.as_slice()
+                )))
+            }
+            steps.push(self.d.close(g[0], ctx.as_slice(), j, cases.as_slice()))
+        }
+        self.ind(
+            n[0].as_str(),
+            hs.as_slice(),
+            j,
+            steps[0],
+            steps[1],
+            [n[3].as_str(), n[4].as_str()]
+        ).index()
+    }
+
+    // len l n, eq i n ⊢ sfx l i nil
+    fn sfx_len_end(inout self, ls: Ls) -> i64 {
+        let n = Refine.names(ls, "le", ["l", "i", "n", "x", "r"])
+        let lv = self.decl(n[0].as_str(), ls.s.as_str())
+        let iv = self.decl(n[1].as_str(), "Z")
+        let nv = self.decl(n[2].as_str(), "Z")
+        let xv = self.decl(n[3].as_str(), elem(ls.s.as_str()))
+        let rv = self.decl(n[4].as_str(), ls.s.as_str())
+        let jl = ls.sfx(lv, iv, ls.nil())
+        let hs = self.hyps([ls.len(lv, nv), ring.eq(iv, nv)])
+        var steps = Vec(cert.Ref).new()
+        for at in [ls.nil(), ls.cons(xv, rv)] {
+            let is_nil = steps.len() == 0
+            let j = at_list(jl, n[0].as_str(), at)
+            var ctx = Vec(i64).new()
+            if !is_nil { ctx.push(self.d.k.rule_hyp(
+                [ls.len(rv, nv), ring.eq(iv, nv)],
+                at_list(jl, n[0].as_str(), rv),
+                [n[1].as_str(), n[2].as_str()]
+            )) }
+            let g = self.hyps([ls.len(at, nv), ring.eq(iv, nv)])
+            ctx.push(g[1].index())
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[0], ctx.as_slice(), "ea", j, &cases).into_iter() {
+                let want = o.b.theta.apply(j)
+                let k = o.ctx.len()
+                let ein = o.ctx[k - 1].clone()
+                let r = if is_nil {
+                    self.step(ls.rule("sfx.zero").as_str(), [ein], want)
+                } else {
+                    // n = m + 1: the tail from i - 1
+                    let m = o.prem[0].judgment.arg(1).clone()
+                    let i = want.arg(1).clone()
+                    let im = ring.add(i, ring.neg(z1()))
+                    let e1 = self.d.prove(im, m, [ein.clone()])
+                    let t = self.d.k.apply_at(
+                        o.ctx[0].index(),
+                        [n[1].as_str(), n[2].as_str()],
+                        [im.clone(), m.clone()],
+                        [o.prem[0].clone(), e1]
+                    )
+                    let e2 = self.d.ring.prove(&self.d.k, i, plus1(im))
+                    self.step(ls.rule("sfx.cons").as_str(), [t, e2], want)
+                }
+                cases.push(o.case(r))
+            }
+            steps.push(self.d.close(g[0], ctx.as_slice(), j, cases.as_slice()))
+        }
+        self.ind(
+            n[0].as_str(),
+            hs.as_slice(),
+            jl,
+            steps[0],
+            steps[1],
+            [n[3].as_str(), n[4].as_str()]
+        ).index()
+    }
+
+    // sfx l (i + 1) r, nth l i e ⊢ sfx l i (cons e r)
+    fn sfx_prev(inout self, ls: Ls, l: ListLemmas) -> i64 {
+        let n = Refine.names(ls, "sp", ["l", "i", "r", "e", "x", "t"])
+        let e = elem(ls.s.as_str())
+        let lv = self.decl(n[0].as_str(), ls.s.as_str())
+        let iv = self.decl(n[1].as_str(), "Z")
+        let rv = self.decl(n[2].as_str(), ls.s.as_str())
+        let ev = self.decl(n[3].as_str(), e)
+        let xv = self.decl(n[4].as_str(), e)
+        let tv = self.decl(n[5].as_str(), ls.s.as_str())
+        let jl = ls.sfx(lv, iv, ls.cons(ev, rv))
+        let hs = self.hyps([ls.sfx(lv, plus1(iv), rv), ls.nth(lv, iv, ev)])
+        var steps = Vec(cert.Ref).new()
+        for at in [ls.nil(), ls.cons(xv, tv)] {
+            let is_nil = steps.len() == 0
+            let j = at_list(jl, n[0].as_str(), at)
+            var ctx = Vec(i64).new()
+            if !is_nil { ctx.push(self.d.k.rule_hyp(
+                [ls.sfx(tv, plus1(iv), rv), ls.nth(tv, iv, ev)],
+                at_list(jl, n[0].as_str(), tv),
+                [n[1].as_str(), n[2].as_str()]
+            )) }
+            let g = self.hyps([ls.sfx(at, plus1(iv), rv), ls.nth(at, iv, ev)])
+            ctx.push(g[0].index())
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[1], ctx.as_slice(), "pa", j, &cases).into_iter() {
+                if is_nil { panic("nth of nil") }
+                let want = o.b.theta.apply(j)
+                let zero = o.b.rule.as_str().ends_with("nth.zero")
+                let k = o.ctx.len()
+                var ictx = Refine.indices(o.prem.as_slice())
+                for c in 0..k - 1 { ictx.push(o.ctx[c].index()) }
+                var inner = Vec(cert.InvCase).new()
+                for q in self.cases_of(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    "pb",
+                    want,
+                    &inner
+                ).into_iter() {
+                    let want2 = q.b.theta.apply(want)
+                    let sfx_zero = q.b.rule.as_str().ends_with("sfx.zero")
+                    let r = if zero && sfx_zero {
+                        // i + 1 = 0 and i = 0
+                        self.by_refuting([q.prem[0].clone(), q.ctx[0].clone()], want2)
+                    } else if zero {
+                        // the tail from j = 0 is the list's tail: invert it
+                        let sj = q.prem[0].judgment.clone()
+                        var deep = Vec(cert.InvCase).new()
+                        let dctx = [q.prem[1].index(), q.ctx[0].index()]
+                        for u in self.cases_of(
+                            q.prem[0].clone(),
+                            dctx,
+                            "pc",
+                            want2,
+                            &deep
+                        ).into_iter() {
+                            let want3 = u.b.theta.apply(want2)
+                            let r3 = if u.b.rule.as_str().ends_with("sfx.zero") {
+                                self.step(ls.rule("sfx.zero").as_str(), [u.ctx[1].clone()], want3)
+                            } else {
+                                let tj = u.prem[0].judgment.clone()
+                                let p = self.use_lemma(
+                                    ls,
+                                    l.sfx_nonneg,
+                                    "sn",
+                                    ["l", "i", "s"],
+                                    [tj.arg(0).clone(), tj.arg(1).clone(), tj.arg(2).clone()],
+                                    [u.prem[0].clone()]
+                                )
+                                self.by_refuting(
+                                    [p, u.prem[1].clone(), u.ctx[0].clone(), u.ctx[1].clone()],
+                                    want3
+                                )
+                            }
+                            deep.push(u.case(r3))
+                        }
+                        self.d.close(q.prem[0].clone(), dctx, want2, deep.as_slice())
+                    } else if sfx_zero {
+                        // i + 1 = 0 and i = j + 1 with 0 <= j
+                        let nj = q.ctx[0].judgment.clone()
+                        let p = self.use_lemma(
+                            ls,
+                            l.nth_nonneg,
+                            "nn",
+                            ["l", "i", "e"],
+                            [nj.arg(0).clone(), nj.arg(1).clone(), nj.arg(2).clone()],
+                            [q.ctx[0].clone()]
+                        )
+                        self.by_refuting([p, q.prem[0].clone(), q.ctx[1].clone()], want2)
+                    } else {
+                        // j2 = i = j + 1: the induction hypothesis at j
+                        let sj = q.prem[0].judgment.clone()
+                        let nj = q.ctx[0].judgment.clone()
+                        let jj = nj.arg(1).clone()
+                        let a = self.cancel_succ(q.prem[1].clone())
+                        let a = ring.sym(&self.d.k, a)
+                        let e2 = self.d.prove(sj.arg(1).clone(), plus1(jj), [a, q.ctx[1].clone()])
+                        let at_j = self.use_lemma(
+                            ls,
+                            l.sfx_idx,
+                            "si",
+                            ["l", "i", "s", "k"],
+                            [sj.arg(0).clone(), sj.arg(1).clone(), sj.arg(2).clone(), plus1(jj)],
+                            [q.prem[0].clone(), e2]
+                        )
+                        let ihr = self.d.k.apply_at(
+                            q.ctx[2].index(),
+                            [n[1].as_str(), n[2].as_str()],
+                            [jj.clone(), sj.arg(2).clone()],
+                            [at_j, q.ctx[0].clone()]
+                        )
+                        self.step(ls.rule("sfx.cons").as_str(), [ihr, q.ctx[1].clone()], want2)
+                    }
+                    inner.push(q.case(r))
+                }
+                cases.push(o.case(self.d.close(
+                    o.ctx[k - 1].clone(),
+                    ictx.as_slice(),
+                    want,
+                    inner.as_slice()
+                )))
+            }
+            steps.push(self.d.close(g[1], ctx.as_slice(), j, cases.as_slice()))
+        }
+        self.ind(
+            n[0].as_str(),
+            hs.as_slice(),
+            jl,
+            steps[0],
+            steps[1],
+            [n[4].as_str(), n[5].as_str()]
+        ).index()
+    }
+
+    // ⊢ haslen l
+    fn haslen(inout self, ls: Ls) -> i64 {
+        let n = Refine.names(ls, "hl", ["l", "x", "r"])
+        let lv = self.decl(n[0].as_str(), ls.s.as_str())
+        let xv = self.decl(n[1].as_str(), elem(ls.s.as_str()))
+        let rv = self.decl(n[2].as_str(), ls.s.as_str())
+        let jl = ls.pred("haslen", [lv.clone()])
+        let l0 = self.step(ls.rule("len.nil").as_str(), [], ls.len(ls.nil(), z0()))
+        let nil_case = self.step(
+            ls.rule("haslen").as_str(),
+            [l0],
+            at_list(jl, n[0].as_str(), ls.nil())
+        )
+        let ih = self.hyp(at_list(jl, n[0].as_str(), rv))
+        let j = at_list(jl, n[0].as_str(), ls.cons(xv, rv))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(ih, [], "hc", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            let lj = o.prem[0].judgment.clone()
+            let c = self.step(
+                ls.rule("len.cons").as_str(),
+                [o.prem[0].clone()],
+                ls.len(want.arg(0).clone(), plus1(lj.arg(1).clone()))
+            )
+            cases.push(o.case(self.step(ls.rule("haslen").as_str(), [c], want)))
+        }
+        let cons_case = self.d.close(ih, [], j, cases.as_slice())
+        var cs = Vec(cert.Case).new()
+        cs.push(cert.Case { step: nil_case.index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(n[1].clone())
+        vs.push(n[2].clone())
+        cs.push(cert.Case { step: cons_case.index(), vars: vs })
+        self.d.k.induct(n[0].as_str(), [], false, jl, cs.as_slice())
+    }
+}
+
+// ---- the code ----
+
+// The whole theory: the code's rules, the model and the proof's own.
+pub fn theory(rules: str) -> String {
+    let m = farkas.model()
+    let h = helpers()
+    code.theory_of([rules, m.as_str(), h.as_str()])
+}
+
+// The predicates of `check`'s loop heads, of `f`'s, in block order.
+fn cut_preds(theory: str, f: str) -> Vec(String) {
+    var out = Vec(String).new()
+    var nums = Vec(i64).new()
+    let prefix = "(pred " + f + "@"
+    for line in theory.lines() {
+        var at = 0
+        loop {
+            let rest = line[at..line.len]
+            let Some(k) = rest.find(prefix.as_str()) else { break }
+            let start = at + k + 6
+            var e = start
+            while e < line.len && line[e] != ' ' { e += 1 }
+            let name = line[start..e]
+            let num = name[f.len + 1..name.len]
+            let Some(nv) = num.parse_int() else { break }
+            var p = 0
+            while p < nums.len() && nums[p] < nv { p += 1 }
+            nums.insert(p, nv)
+            out.insert(p, name.to_string())
+            at = e
+        }
+    }
+    out
+}
+
+#[derive(Clone)]
+pub struct FnLemmas {
+    add_some: i64
+    mul_some: i64
+}
+
+impl Refine {
+    // fn.add a b (Some s) ⊢ s = a + b, and the same for fn.mul.
+    fn fn_lemmas(inout self) -> FnLemmas {
+        var out = Vec(i64).new()
+        for f in ["add", "mul"] {
+            let a = self.decl(("fl" + f + "a").as_str(), "Z")
+            let b = self.decl(("fl" + f + "b").as_str(), "Z")
+            let s = self.decl(("fl" + f + "s").as_str(), "Z")
+            let j = ring.eq(s, cert.app2(f, a, b))
+            let h = self.hyp(tm(
+                ("fn." + f).as_str(),
+                [a.clone(), b.clone(), cert.app1("Option<i128>.Some", s.clone())]
+            ))
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(h, [], "fl", j, &cases).into_iter() {
+                let want = o.b.theta.apply(j)
+                cases.push(o.case(ring.refl(&self.d.k, want.arg(0).clone())))
+            }
+            out.push(self.d.close(h, [], j, cases.as_slice()).index())
+        }
+        FnLemmas { add_some: out[0], mul_some: out[1] }
+    }
+}
+
+// The steps of the lemmas for one pass of add_scaled's loop.
+#[derive(Clone)]
+pub struct StepLemmas {
+    left_keep: i64
+    left_drop: i64
+    right_keep: i64
+    right_drop: i64
+    both_keep: i64
+    both_drop: i64
+}
+
+fn tup(v: cert.Tm, k: cert.Tm) -> cert.Tm { cert.app2("Tup<Z,Z>.mk", v, k) }
+
+fn lin_mk(t: cert.Tm, c: cert.Tm) -> cert.Tm { cert.app2("Lin.mk", t, c) }
+
+fn ares(
+    a: cert.Tm,
+    i: cert.Tm,
+    b: cert.Tm,
+    j: cert.Tm,
+    out: cert.Tm,
+    w: cert.Tm,
+    l: cert.Tm
+) -> cert.Tm {
+    tm("ares", [a.clone(), i.clone(), b.clone(), j.clone(), out.clone(), w.clone(), l.clone()])
+}
+
+impl Refine {
+    // One pass: from what the loop has left after it (the first
+    // hypothesis), what it has left before it. `shape` is left, right or
+    // both; `keep` whether the pass pushed a term.
+    fn step_lemma(inout self, lt: ListLemmas, apps: AppLemmas, shape: str, keep: bool) -> i64 {
+        let tag = "st" + shape + if keep { "k" } else { "d" }
+        let nm = fn(x: str) -> String { tag.clone() + x }
+        let t = farkas.T
+        let ts = self.decl(nm("ts").as_str(), t)
+        let to = self.decl(nm("to").as_str(), t)
+        let c1 = self.decl(nm("c1").as_str(), "Z")
+        let c2 = self.decl(nm("c2").as_str(), "Z")
+        let i = self.decl(nm("i").as_str(), "Z")
+        let j = self.decl(nm("j").as_str(), "Z")
+        let out = self.decl(nm("o").as_str(), t)
+        let out2 = self.decl(nm("o2").as_str(), t)
+        let w = self.decl(nm("w").as_str(), "Z")
+        let l = self.decl(nm("l").as_str(), "Lin")
+        let v = self.decl(nm("v").as_str(), "Z")
+        let k = self.decl(nm("k").as_str(), "Z")
+        let u = self.decl(nm("u").as_str(), "Z")
+        let k2 = self.decl(nm("k2").as_str(), "Z")
+        let p = self.decl(nm("p").as_str(), "Z")
+        let ls = Ls { s: t.to_string(), p: "t".to_string() }
+        let a = lin_mk(ts, c1)
+        let b = lin_mk(to, c2)
+        let left = shape == "left" || shape == "both"
+        let right = shape == "right" || shape == "both"
+        let i2 = if left { plus1(i) } else { i.clone() }
+        let j2 = if right { plus1(j) } else { j.clone() }
+        let o2 = if keep { out2.clone() } else { out.clone() }
+        // The pushed coefficient: k, k * w, or k + k2 * w.
+        let pushed = if shape == "left" { k.clone() } else { p.clone() }
+        var hs = Vec(cert.Tm).new()
+        hs.push(ares(a, i2, b, j2, o2, w, l))
+        if left { hs.push(ls.nth(ts, i, tup(v, k))) }
+        if shape == "right" { hs.push(ls.nth(to, j, tup(v, k))) }
+        if shape == "both" {
+            hs.push(ls.nth(to, j, tup(u, k2)))
+            hs.push(ring.eq(v, u))
+        }
+        if shape == "right" { hs.push(ring.eq(p, ring.mul(k, w))) }
+        if shape == "both" { hs.push(ring.eq(p, ring.add(k, ring.mul(k2, w)))) }
+        if keep { hs.push(ls.pred("snoc", [out.clone(), tup(v, pushed), out2.clone()])) } else { hs.push(ring.eq(
+            pushed,
+            z0()
+        )) }
+        let want_j = ares(a, i, b, j, out, w, l)
+        let g = self.hyps(hs.as_slice())
+        var ctx = Vec(i64).new()
+        for x in 1..g.len() { ctx.push(g[x].index()) }
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(g[0], ctx.as_slice(), "sl", want_j, &cases).into_iter() {
+            let want = o.b.theta.apply(want_j)
+            // sfx ts i2 a', sfx to j2 b', ms n a' b' w m, app o2 m r, eq c ...
+            let sa = o.prem[0].clone()
+            let sb = o.prem[1].clone()
+            let msj = o.prem[2].judgment.clone()
+            let apj = o.prem[3].judgment.clone()
+            let a1 = msj.arg(1).clone()
+            let b1 = msj.arg(2).clone()
+            let m = msj.arg(4).clone()
+            var x = 0
+            let mut_sa = if left {
+                let nj = o.ctx[x].judgment.clone()
+                x += 1
+                self.use_lemma(
+                    ls,
+                    lt.sfx_prev,
+                    "sp",
+                    ["l", "i", "r", "e"],
+                    [nj.arg(0).clone(), nj.arg(1).clone(), a1.clone(), nj.arg(2).clone()],
+                    [sa.clone(), o.ctx[x - 1].clone()]
+                )
+            } else { sa.clone() }
+            let mut_sb = if right {
+                let nj = o.ctx[x].judgment.clone()
+                x += 1
+                self.use_lemma(
+                    ls,
+                    lt.sfx_prev,
+                    "sp",
+                    ["l", "i", "r", "e"],
+                    [nj.arg(0).clone(), nj.arg(1).clone(), b1.clone(), nj.arg(2).clone()],
+                    [sb.clone(), o.ctx[x - 1].clone()]
+                )
+            } else { sb.clone() }
+            let vv = want.arg(4).clone()
+            let last = o.ctx[o.ctx.len() - 1].clone()
+            // the pushed term and its coefficient, under the case
+            let pt = if keep { last.judgment.arg(1).clone() } else { tup(
+                o.b.theta.apply(v),
+                last.judgment.arg(0).clone()
+            ) }
+            let m2 = if keep { cert.app2((t + ".cons").as_str(), pt.clone(), m.clone()) } else { m.clone() }
+            let push = if keep {
+                self.step(
+                    "push.keep",
+                    [],
+                    tm("push", [pt.arg(0).clone(), pt.arg(1).clone(), m.clone(), m2.clone()])
+                )
+            } else { self.step(
+                "push.drop",
+                [last.clone()],
+                tm("push", [pt.arg(0).clone(), pt.arg(1).clone(), m.clone(), m2.clone()])
+            ) }
+            let an = if left { mut_sa.judgment.arg(2).clone() } else { a1.clone() }
+            let bn = if right { mut_sb.judgment.arg(2).clone() } else { b1.clone() }
+            let ms_n = cert.app1("ns", msj.arg(0).clone())
+            let ms_j = tm("ms", [ms_n, an, bn, msj.arg(3).clone(), m2.clone()])
+            let ms = if shape == "left" {
+                self.step("ms.left", [o.prem[2].clone(), push], ms_j)
+            } else if shape == "right" {
+                self.step("ms.right", [o.ctx[x].clone(), o.prem[2].clone(), push], ms_j)
+            } else { self.step(
+                "ms.both",
+                [o.ctx[x].clone(), o.ctx[x + 1].clone(), o.prem[2].clone(), push],
+                ms_j
+            ) }
+            let app = if keep {
+                let sj = last.judgment.clone()
+                self.d.k.apply_at(
+                    apps.snoc,
+                    ["aso", "ase", "aso2", "asm", "asr"],
+                    [
+                        sj.arg(0).clone(),
+                        sj.arg(1).clone(),
+                        sj.arg(2).clone(),
+                        m.clone(),
+                        apj.arg(2).clone()
+                    ],
+                    [last.clone(), o.prem[3].clone()]
+                )
+            } else { o.prem[3].clone() }
+            let r = self.step("ares", [mut_sa, mut_sb, ms, app, o.prem[4].clone()], want.clone())
+            let unused = vv
+            cases.push(o.case(r))
+        }
+        self.d.close(g[0], ctx.as_slice(), want_j, cases.as_slice()).index()
+    }
+
+    fn step_lemmas(inout self, lt: ListLemmas, apps: AppLemmas) -> StepLemmas {
+        StepLemmas {
+            left_keep: self.step_lemma(lt, apps, "left", true)
+            left_drop: self.step_lemma(lt, apps, "left", false)
+            right_keep: self.step_lemma(lt, apps, "right", true)
+            right_drop: self.step_lemma(lt, apps, "right", false)
+            both_keep: self.step_lemma(lt, apps, "both", true)
+            both_drop: self.step_lemma(lt, apps, "both", false)
+        }
+    }
+}
+
+#[test]
+fn step_lemmas_check() {
+    let th = test_theory()
+    var r = start(th.as_str())
+    let ls = all_lists(&r)
+    let apps = r.app_lemmas()
+    r.step_lemmas(ls[0], apps)
+    let f = r.step("le.refl", [], ring.le(z0(), z0()))
+    r.d.k.result("refl", f.index())
+    match schematic.check(th.as_str(), "(goal refl (le z0 z0))", r.d.k.text()) {
+        Ok(_) => {}
+        Err(e) => panic("rejected: " + e.as_str())
+    }
+}
+
+// Bindings of a lemma's variables, named by its tag.
+struct Binds {
+    tag: String
+    names: Vec(String)
+    vals: Vec(cert.Tm)
+}
+
+impl Binds {
+    fn add(inout self, x: str, t: cert.Tm) {
+        self.names.push(self.tag.clone() + x)
+        self.vals.push(t.clone())
+    }
+}
+
+fn find(ps: [cert.Ref], f: fn(cert.Tm) -> bool) -> Option(cert.Ref) {
+    for p in ps {
+        if f(p.judgment) { return Some(p.clone()) }
+    }
+    None
+}
+
+impl Refine {
+    // The loop of add_scaled at its head (predicate `cut`): returning
+    // Some(l) from there means what `ares` says, by induction on the fuel.
+    fn scaled_loop(
+        inout self,
+        cut: str,
+        lt: ListLemmas,
+        apps: AppLemmas,
+        st: StepLemmas,
+        fl: FnLemmas
+    ) -> i64 {
+        let t = farkas.T
+        let ls = Ls { s: t.to_string(), p: "t".to_string() }
+        let f = self.decl("lpf", "Fuel")
+        let ts = self.decl("lpts", t)
+        let to = self.decl("lpto", t)
+        let c1 = self.decl("lpc1", "Z")
+        let c2 = self.decl("lpc2", "Z")
+        let w = self.decl("lpw", "Z")
+        let out = self.decl("lpo", t)
+        let i = self.decl("lpi", "Z")
+        let j = self.decl("lpj", "Z")
+        let n1 = self.decl("lpn1", "Z")
+        let n2 = self.decl("lpn2", "Z")
+        let l = self.decl("lpl", "Lin")
+        let f1 = self.decl("lpf1", "Fuel")
+        let a = lin_mk(ts, c1)
+        let b = lin_mk(to, c2)
+        let at = fn(fuel: cert.Tm) -> Vec(cert.Tm) {
+            var hs = Vec(cert.Tm).new()
+            hs.push(tm(
+                cut,
+                [
+                    fuel.clone(),
+                    a.clone(),
+                    b.clone(),
+                    w.clone(),
+                    out.clone(),
+                    i.clone(),
+                    j.clone(),
+                    cert.app1("Option<Lin>.Some", l.clone())
+                ]
+            ))
+            hs.push(ls.len(ts, n1))
+            hs.push(ring.le(i, n1))
+            hs.push(ls.len(to, n2))
+            hs.push(ring.le(j, n2))
+            hs
+        }
+        let jj = ares(a, i, b, j, out, w, l)
+        let hs = self.hyps(at(f).as_slice())
+        var steps = Vec(cert.Ref).new()
+        for fuel in [cert.c("fuel0"), cert.app1("fuel1", f1.clone())] {
+            let succ = steps.len() == 1
+            var ctx = Vec(i64).new()
+            if succ { ctx.push(self.d.k.rule_hyp(
+                at(f1).as_slice(),
+                jj.clone(),
+                ["lpo", "lpi", "lpj"]
+            )) }
+            let g = self.hyps(at(fuel).as_slice())
+            for x in 1..g.len() { ctx.push(g[x].index()) }
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[0], ctx.as_slice(), "lp", jj, &cases).into_iter() {
+                let want = o.b.theta.apply(jj)
+                let r = self.scaled_case(cut, ls, o, want, succ, lt, apps, st, fl)
+                cases.push(o.case(r))
+            }
+            steps.push(self.d.close(g[0], ctx.as_slice(), jj, cases.as_slice()))
+        }
+        var cs = Vec(cert.Case).new()
+        cs.push(cert.Case { step: steps[0].index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(String.from("lpf1"))
+        cs.push(cert.Case { step: steps[1].index(), vars: vs })
+        let hi = Refine.indices(hs.as_slice())
+        self.d.k.induct("lpf", hi.as_slice(), true, jj, cs.as_slice())
+    }
+
+    // One rule of the loop head, as a case of the induction.
+    fn scaled_case(
+        inout self,
+        cut: str,
+        ls: Ls,
+        o: dev.Opened,
+        want: cert.Tm,
+        succ: bool,
+        lt: ListLemmas,
+        apps: AppLemmas,
+        st: StepLemmas,
+        fl: FnLemmas
+    ) -> cert.Ref {
+        let base = if succ { 1 } else { 0 }
+        let len_s = o.ctx[base].clone()
+        let le_i = o.ctx[base + 1].clone()
+        let len_o = o.ctx[base + 2].clone()
+        let le_j = o.ctx[base + 3].clone()
+        let a = want.arg(0).clone()
+        let b = want.arg(2).clone()
+        let ts = a.arg(0).clone()
+        let to = b.arg(0).clone()
+        let i = want.arg(1).clone()
+        let j = want.arg(3).clone()
+        let out = want.arg(4).clone()
+        let w = want.arg(5).clone()
+        // Facts: the path's comparisons, the bounds, and what the lengths
+        // and indices of the path say.
+        var facts = Vec(cert.Ref).new()
+        facts.push(le_i.clone())
+        facts.push(le_j.clone())
+        for p in o.prem {
+            let pj = p.judgment.clone()
+            if pj.is("le") || pj.is("eq") { facts.push(p.clone()) }
+            if pj.is((ls.s.clone() + ".len").as_str()) {
+                let mine = if pj.arg(0) == ts { len_s.clone() } else { len_o.clone() }
+                if pj.arg(0) == ts || pj.arg(0) == to {
+                    let mj = mine.judgment.clone()
+                    facts.push(self.use_lemma(
+                        ls,
+                        lt.len_fun,
+                        "lf",
+                        ["l", "a", "b"],
+                        [mj.arg(0).clone(), mj.arg(1).clone(), pj.arg(1).clone()],
+                        [mine, p.clone()]
+                    ))
+                }
+            }
+            if pj.is((ls.s.clone() + ".nth").as_str()) && (pj.arg(0) == ts || pj.arg(0) == to) {
+                let mine = if pj.arg(0) == ts { len_s.clone() } else { len_o.clone() }
+                facts.push(self.use_lemma(
+                    ls,
+                    lt.nth_bound,
+                    "nb",
+                    ["l", "i", "e", "n"],
+                    [
+                        pj.arg(0).clone(),
+                        pj.arg(1).clone(),
+                        pj.arg(2).clone(),
+                        mine.judgment.arg(1).clone()
+                    ],
+                    [p.clone(), mine]
+                ))
+                facts.push(self.use_lemma(
+                    ls,
+                    lt.nth_nonneg,
+                    "nn",
+                    ["l", "i", "e"],
+                    [pj.arg(0).clone(), pj.arg(1).clone(), pj.arg(2).clone()],
+                    [p.clone()]
+                ))
+            }
+        }
+        match self.refute(facts.as_slice()) {
+            Some(fr) => return self.efq(fr, want)
+            None => {}
+        }
+        let rec = find(o.prem.as_slice(), fn(x: cert.Tm) -> bool { x.is(cut) })
+        let n1 = len_s.judgment.arg(1).clone()
+        let n2 = len_o.judgment.arg(1).clone()
+        match rec {
+            None => self.scaled_exit(
+                ls,
+                o,
+                want,
+                facts.as_slice(),
+                lt,
+                apps,
+                fl,
+                i,
+                j,
+                n1,
+                n2,
+                le_i,
+                le_j,
+                len_s,
+                len_o
+            )
+            Some(r) => {
+                let rj = r.judgment.clone()
+                let out2 = rj.arg(4).clone()
+                let i2 = rj.arg(5).clone()
+                let j2 = rj.arg(6).clone()
+                let left = i2 == plus1(i)
+                let right = j2 == plus1(j)
+                let nth_s = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is((ls.s.clone() + ".nth").as_str()) && x.arg(0) == ts && x.arg(
+                        1
+                    ) == i }
+                )
+                let nth_o = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is((ls.s.clone() + ".nth").as_str()) && x.arg(0) == to && x.arg(
+                        1
+                    ) == j }
+                )
+                // The bounds for the induction hypothesis.
+                let bi = if left {
+                    let p = nth_s.clone().unwrap()
+                    let pj = p.judgment.clone()
+                    self.use_lemma(
+                        ls,
+                        lt.nth_bound,
+                        "nb",
+                        ["l", "i", "e", "n"],
+                        [pj.arg(0).clone(), pj.arg(1).clone(), pj.arg(2).clone(), n1.clone()],
+                        [p, len_s.clone()]
+                    )
+                } else { le_i.clone() }
+                let bj = if right {
+                    let p = nth_o.clone().unwrap()
+                    let pj = p.judgment.clone()
+                    self.use_lemma(
+                        ls,
+                        lt.nth_bound,
+                        "nb",
+                        ["l", "i", "e", "n"],
+                        [pj.arg(0).clone(), pj.arg(1).clone(), pj.arg(2).clone(), n2.clone()],
+                        [p, len_o.clone()]
+                    )
+                } else { le_j.clone() }
+                let ih = self.d.k.apply_at(
+                    o.ctx[0].index(),
+                    ["lpo", "lpi", "lpj"],
+                    [out2.clone(), i2.clone(), j2.clone()],
+                    [r.clone(), len_s.clone(), bi, len_o.clone(), bj]
+                )
+                let keep = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is((ls.s.clone() + ".snoc").as_str()) && x.arg(0) == out }
+                )
+                self.scaled_step(ls, o, want, ih, left, right, nth_s, nth_o, keep, st, fl)
+            }
+        }
+    }
+}
+
+impl Refine {
+    // eq x n from le x n and a path's le m x, where the facts say n = m.
+    fn pinned(
+        inout self,
+        o: dev.Opened,
+        facts: [cert.Ref],
+        x: cert.Tm,
+        n: cert.Tm,
+        le_xn: cert.Ref
+    ) -> cert.Ref {
+        for p in o.prem {
+            let pj = p.judgment.clone()
+            if !pj.is("le") || pj.arg(1) != x { continue }
+            let m = pj.arg(0).clone()
+            if m == n {
+                return self.step("le.antisym", [le_xn.clone(), p.clone()], ring.eq(x, n))
+            }
+            for f in facts {
+                let fj = f.judgment.clone()
+                if fj.is("eq") && fj.arg(0) == n && fj.arg(1) == m {
+                    let back = ring.sym(&self.d.k, f.clone())
+                    let le_nx = self.d.le_eq(p.clone(), n, x, [back])
+                    return self.step("le.antisym", [le_xn.clone(), le_nx], ring.eq(x, n))
+                }
+            }
+        }
+        panic("no bound pins " + x.show().as_str())
+    }
+
+    // The loop ends: both suffixes are empty, and the constant is computed.
+    fn scaled_exit(
+        inout self,
+        ls: Ls,
+        o: dev.Opened,
+        want: cert.Tm,
+        facts: [cert.Ref],
+        lt: ListLemmas,
+        apps: AppLemmas,
+        fl: FnLemmas,
+        i: cert.Tm,
+        j: cert.Tm,
+        n1: cert.Tm,
+        n2: cert.Tm,
+        le_i: cert.Ref,
+        le_j: cert.Ref,
+        len_s: cert.Ref,
+        len_o: cert.Ref
+    ) -> cert.Ref {
+        let a = want.arg(0).clone()
+        let b = want.arg(2).clone()
+        let out = want.arg(4).clone()
+        let w = want.arg(5).clone()
+        let res = want.arg(6).clone()
+        let ei = self.pinned(o, facts, i, n1, le_i)
+        let ej = self.pinned(o, facts, j, n2, le_j)
+        let s1 = self.use_lemma(
+            ls,
+            lt.sfx_len_end,
+            "le",
+            ["l", "i", "n"],
+            [a.arg(0).clone(), i.clone(), n1.clone()],
+            [len_s.clone(), ei]
+        )
+        let s2 = self.use_lemma(
+            ls,
+            lt.sfx_len_end,
+            "le",
+            ["l", "i", "n"],
+            [b.arg(0).clone(), j.clone(), n2.clone()],
+            [len_o.clone(), ej]
+        )
+        let nil = ls.nil()
+        let ms0 = self.step(
+            "ms.nil",
+            [],
+            tm("ms", [cert.c("n0"), nil.clone(), nil.clone(), w.clone(), nil.clone()])
+        )
+        let app = self.d.k.instance(apps.nil_right, ["anl"], [out.clone()])
+        // c = c1 + p, p = c2 * w
+        let c = res.arg(1).clone()
+        let c1 = a.arg(1).clone()
+        let c2 = b.arg(1).clone()
+        let pm = find(
+            o.prem.as_slice(),
+            fn(x: cert.Tm) -> bool { x.is("fn.mul") && x.arg(0) == c2 && x.arg(1) == w }
+        ).unwrap()
+        let p = pm.judgment.arg(2).arg(0).clone()
+        let pa = find(
+            o.prem.as_slice(),
+            fn(x: cert.Tm) -> bool { x.is("fn.add") && x.arg(0) == c1 && x.arg(1) == p }
+        ).unwrap()
+        let e1 = self.d.k.apply_at(
+            fl.mul_some,
+            ["flmula", "flmulb", "flmuls"],
+            [c2.clone(), w.clone(), p.clone()],
+            [pm]
+        )
+        let e2 = self.d.k.apply_at(
+            fl.add_some,
+            ["fladda", "fladdb", "fladds"],
+            [c1.clone(), p.clone(), c.clone()],
+            [pa]
+        )
+        let eqc = self.d.prove(c, ring.add(c1, ring.mul(c2, w)), [e2, e1])
+        self.step("ares", [s1, s2, ms0, app, eqc], want)
+    }
+
+    fn scaled_step(
+        inout self,
+        ls: Ls,
+        o: dev.Opened,
+        want: cert.Tm,
+        ih: cert.Ref,
+        left: bool,
+        right: bool,
+        nth_s: Option(cert.Ref),
+        nth_o: Option(cert.Ref),
+        keep: Option(cert.Ref),
+        st: StepLemmas,
+        fl: FnLemmas
+    ) -> cert.Ref {
+        let a = want.arg(0).clone()
+        let b = want.arg(2).clone()
+        let i = want.arg(1).clone()
+        let j = want.arg(3).clone()
+        let out = want.arg(4).clone()
+        let w = want.arg(5).clone()
+        let l = want.arg(6).clone()
+        let shape = if left && right { "both" } else if left { "left" } else { "right" }
+        let tag = "st" + shape + if keep.is_some() { "k" } else { "d" }
+        var bs = Binds { tag: tag.clone(), names: Vec(String).new(), vals: Vec(cert.Tm).new() }
+        var refs = Vec(cert.Ref).new()
+        bs.add("ts", a.arg(0).clone())
+        bs.add("to", b.arg(0).clone())
+        bs.add("c1", a.arg(1).clone())
+        bs.add("c2", b.arg(1).clone())
+        bs.add("i", i.clone())
+        bs.add("j", j.clone())
+        bs.add("o", out.clone())
+        bs.add("w", w.clone())
+        bs.add("l", l.clone())
+        refs.push(ih.clone())
+        // The element the pass reads, and the pushed coefficient.
+        var pushed = z0()
+        if left {
+            let ns = nth_s.clone().unwrap()
+            let e = ns.judgment.arg(2).clone()
+            bs.add("v", e.arg(0).clone())
+            bs.add("k", e.arg(1).clone())
+            refs.push(ns.clone())
+            pushed = e.arg(1).clone()
+        }
+        if right {
+            let no = nth_o.clone().unwrap()
+            let e = no.judgment.arg(2).clone()
+            if left {
+                bs.add("u", e.arg(0).clone())
+                bs.add("k2", e.arg(1).clone())
+            } else {
+                bs.add("v", e.arg(0).clone())
+                bs.add("k", e.arg(1).clone())
+            }
+            refs.push(no.clone())
+            let k2 = e.arg(1).clone()
+            let pm = find(
+                o.prem.as_slice(),
+                fn(x: cert.Tm) -> bool { x.is("fn.mul") && x.arg(0) == k2 && x.arg(1) == w }
+            ).unwrap()
+            let p = pm.judgment.arg(2).arg(0).clone()
+            let e1 = self.d.k.apply_at(
+                fl.mul_some,
+                ["flmula", "flmulb", "flmuls"],
+                [k2.clone(), w.clone(), p.clone()],
+                [pm]
+            )
+            if left {
+                // v = u from v <= u and u <= v; s = k + p = k + k2 * w
+                let v = bs.vals[9].clone()
+                let u = e.arg(0).clone()
+                let p1 = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == v && x.arg(1) == u }
+                ).unwrap()
+                let p2 = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == u && x.arg(1) == v }
+                ).unwrap()
+                refs.push(self.step("le.antisym", [p1, p2], ring.eq(v, u)))
+                let k = bs.vals[10].clone()
+                let pa = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("fn.add") && x.arg(0) == k && x.arg(1) == p }
+                ).unwrap()
+                let s = pa.judgment.arg(2).arg(0).clone()
+                let e2 = self.d.k.apply_at(
+                    fl.add_some,
+                    ["fladda", "fladdb", "fladds"],
+                    [k.clone(), p.clone(), s.clone()],
+                    [pa]
+                )
+                refs.push(self.d.prove(s, ring.add(k, ring.mul(k2, w)), [e2, e1]))
+                bs.add("p", s.clone())
+                pushed = s
+            } else {
+                refs.push(e1)
+                bs.add("p", p.clone())
+                pushed = p
+            }
+        }
+        match keep.clone() {
+            Some(sn) => {
+                bs.add("o2", sn.judgment.arg(2).clone())
+                refs.push(sn.clone())
+            }
+            None => {
+                let z = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("eq") && x.arg(0) == pushed && x.arg(1) == z0() }
+                )
+                let Some(zp) = z else { panic("no zero coefficient for " + pushed.show().as_str()) }
+                refs.push(zp.clone())
+            }
+        }
+        let lemma = if shape == "left" {
+            if keep.is_some() { st.left_keep } else { st.left_drop }
+        } else if shape == "right" {
+            if keep.is_some() { st.right_keep } else { st.right_drop }
+        } else if keep.is_some() { st.both_keep } else { st.both_drop }
+        var ns = Vec(str).new()
+        for x in bs.names { ns.push(x.as_str()) }
+        self.d.k.apply_at(lemma, ns.as_slice(), bs.vals.as_slice(), refs.as_slice())
+    }
+}
+
+// The lemmas so far over the code's rules, checked with a trivial goal.
+pub fn check_scaled(rules: str) -> Result(schematic.Report, String) {
+    let th = theory(rules)
+    var r = start(th.as_str())
+    let ls = all_lists(&r)
+    let apps = r.app_lemmas()
+    let fl = r.fn_lemmas()
+    let st = r.step_lemmas(ls[0], apps)
+    let cut = cut_preds(th.as_str(), "fn.Lin.add_scaled")[0].clone()
+    let lp = r.scaled_loop(cut.as_str(), ls[0], apps, st, fl)
+    let aa = r.ares_as(ls[0])
+    r.scaled_as(cut.as_str(), ls[0], lp, aa)
+    let f = r.step("le.refl", [], ring.le(z0(), z0()))
+    r.d.k.result("refl", f.index())
+    schematic.check(th.as_str(), "(goal refl (le z0 z0))", r.d.k.text())
+}
+
+// The code's lemmas so far, as `check`'s proof uses them.
+#[derive(Clone)]
+pub struct CodeLemmas {
+    lt: ListLemmas
+    lf: ListLemmas
+    lw: ListLemmas
+    scaled: i64
+    next_has: i64
+    has_step: i64
+}
+
+fn ls_of(s: str, p: str) -> Ls { Ls { s: s.to_string(), p: p.to_string() } }
+
+impl Refine {
+    // Search the hypotheses of a case for one.
+    fn hyp_where(o: dev.Opened, f: fn(cert.Tm) -> bool) -> Option(cert.Ref) {
+        match find(o.prem.as_slice(), f) {
+            Some(r) => Some(r)
+            None => find(o.ctx.as_slice(), f)
+        }
+    }
+
+    // All hypotheses of a case, for an inner inversion's context.
+    fn all_hyps(o: dev.Opened, except: i64) -> Vec(i64) {
+        var out = Vec(i64).new()
+        for p in o.prem {
+            if p.index() != except { out.push(p.index()) }
+        }
+        for p in o.ctx {
+            if p.index() != except { out.push(p.index()) }
+        }
+        out
+    }
+
+    // Invert h, sfx l z0 s, keeping the case where s is l: the other one
+    // is refuted (its index would be negative). Closes the refuted case.
+    fn sfx_at_zero(
+        inout self,
+        ls: Ls,
+        lt: ListLemmas,
+        h: cert.Ref,
+        ctx: [i64],
+        want: cert.Tm,
+        inout cases: Vec(cert.InvCase)
+    ) -> dev.Opened {
+        var keep = Vec(dev.Opened).new()
+        for o in self.cases_of(h, ctx, "sz0", want, &cases).into_iter() {
+            if o.b.rule.as_str().ends_with("sfx.zero") {
+                keep.push(o)
+                continue
+            }
+            let w2 = o.b.theta.apply(want)
+            let sj = o.prem[0].judgment.clone()
+            let p = self.use_lemma(
+                ls,
+                lt.sfx_nonneg,
+                "sn",
+                ["l", "i", "s"],
+                [sj.arg(0).clone(), sj.arg(1).clone(), sj.arg(2).clone()],
+                [o.prem[0].clone()]
+            )
+            cases.push(o.case(self.by_refuting([p, o.prem[1].clone()], w2)))
+        }
+        keep.pop().unwrap()
+    }
+
+    // ares a z0 b z0 nil w l ⊢ as a b w l
+    fn ares_as(inout self, lt: ListLemmas) -> i64 {
+        let t = farkas.T
+        let ls = ls_of(t, "t")
+        let a = self.decl("aaa", "Lin")
+        let b = self.decl("aab", "Lin")
+        let w = self.decl("aaw", "Z")
+        let l = self.decl("aal", "Lin")
+        let j = tm("as", [a.clone(), b.clone(), w.clone(), l.clone()])
+        let h = self.hyp(ares(a, z0(), b, z0(), ls.nil(), w, l))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [], "aa", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            // sfx ts 0 a', sfx to 0 b', ms n a' b' w m, app nil m r, eq c ...
+            var c1 = Vec(cert.InvCase).new()
+            let ctx1 = Refine.all_hyps(o, o.prem[0].index())
+            let q = self.sfx_at_zero(ls, lt, o.prem[0].clone(), ctx1.as_slice(), want, &c1)
+            let want2 = q.b.theta.apply(want)
+            let sb = Refine.hyp_where(
+                q,
+                fn(x: cert.Tm) -> bool { x.is((t + ".sfx").as_str()) }
+            ).unwrap()
+            var c2 = Vec(cert.InvCase).new()
+            let ctx2 = Refine.all_hyps(q, sb.index())
+            let u = self.sfx_at_zero(ls, lt, sb.clone(), ctx2.as_slice(), want2, &c2)
+            let want3 = u.b.theta.apply(want2)
+            let ap = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is("app") }).unwrap()
+            var c3 = Vec(cert.InvCase).new()
+            let ctx3 = Refine.all_hyps(u, ap.index())
+            for y in self.cases_of(ap.clone(), ctx3.as_slice(), "ab", want3, &c3).into_iter() {
+                let want4 = y.b.theta.apply(want3)
+                let ms = Refine.hyp_where(y, fn(x: cert.Tm) -> bool { x.is("ms") }).unwrap()
+                let eqc = Refine.hyp_where(
+                    y,
+                    fn(x: cert.Tm) -> bool { x.is("eq") && x.arg(1).is("add") }
+                ).unwrap()
+                c3.push(y.case(self.step("as.lin", [eqc, ms], want4)))
+            }
+            c2.push(u.case(self.d.close(ap, ctx3.as_slice(), want3, c3.as_slice())))
+            c1.push(q.case(self.d.close(sb, ctx2.as_slice(), want2, c2.as_slice())))
+            cases.push(o.case(self.d.close(
+                o.prem[0].clone(),
+                ctx1.as_slice(),
+                want,
+                c1.as_slice()
+            )))
+        }
+        self.d.close(h, [], j, cases.as_slice()).index()
+    }
+
+    // haslen to, add_scaled (Lin.mk ts c1) (Lin.mk to c2) w (Some l) ⊢ as ...;
+    // then add_scaled a b w (Some l) ⊢ as a b w l.
+    fn scaled_as(inout self, cut: str, lt: ListLemmas, loop_lemma: i64, ares_as: i64) -> i64 {
+        let t = farkas.T
+        let ls = ls_of(t, "t")
+        let ts = self.decl("asts", t)
+        let to = self.decl("asto", t)
+        let c1 = self.decl("asc1", "Z")
+        let c2 = self.decl("asc2", "Z")
+        let w = self.decl("asw", "Z")
+        let l = self.decl("asl", "Lin")
+        let a = lin_mk(ts, c1)
+        let b = lin_mk(to, c2)
+        let j = tm("as", [a.clone(), b.clone(), w.clone(), l.clone()])
+        let call = tm(
+            "fn.Lin.add_scaled",
+            [a.clone(), b.clone(), w.clone(), cert.app1("Option<Lin>.Some", l.clone())]
+        )
+        let g = self.hyps([ls.pred("haslen", [to.clone()]), call.clone()])
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(g[0], [g[1].index()], "ah", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            let len_o = o.prem[0].clone()
+            var inner = Vec(cert.InvCase).new()
+            let ictx = [len_o.index()]
+            for q in self.cases_of(o.ctx[0].clone(), ictx, "ai", want, &inner).into_iter() {
+                let want2 = q.b.theta.apply(want)
+                let rec = Refine.hyp_where(q, fn(x: cert.Tm) -> bool { x.is(cut) }).unwrap()
+                let len_s = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is((t + ".len").as_str()) && x.arg(0) == want2.arg(0).arg(
+                        0
+                    ) }
+                ).unwrap()
+                let lo = q.ctx[0].clone()
+                let rj = rec.judgment.clone()
+                let n1 = len_s.judgment.arg(1).clone()
+                let n2 = lo.judgment.arg(1).clone()
+                let p1 = self.use_lemma(
+                    ls,
+                    lt.len_nonneg,
+                    "ln",
+                    ["l", "n"],
+                    [len_s.judgment.arg(0).clone(), n1.clone()],
+                    [len_s.clone()]
+                )
+                let p2 = self.use_lemma(
+                    ls,
+                    lt.len_nonneg,
+                    "ln",
+                    ["l", "n"],
+                    [lo.judgment.arg(0).clone(), n2.clone()],
+                    [lo.clone()]
+                )
+                let sa = rj.arg(1).clone()
+                let sb = rj.arg(2).clone()
+                let res = self.d.k.apply_at(
+                    loop_lemma,
+                    [
+                        "lpf",
+                        "lpts",
+                        "lpto",
+                        "lpc1",
+                        "lpc2",
+                        "lpw",
+                        "lpo",
+                        "lpi",
+                        "lpj",
+                        "lpn1",
+                        "lpn2",
+                        "lpl"
+                    ],
+                    [
+                        rj.arg(0).clone(),
+                        sa.arg(0).clone(),
+                        sb.arg(0).clone(),
+                        sa.arg(1).clone(),
+                        sb.arg(1).clone(),
+                        rj.arg(3).clone(),
+                        rj.arg(4).clone(),
+                        rj.arg(5).clone(),
+                        rj.arg(6).clone(),
+                        n1,
+                        n2,
+                        rj.arg(7).arg(0).clone()
+                    ],
+                    [rec, len_s, p1, lo, p2]
+                )
+                let r = self.d.k.apply_at(
+                    ares_as,
+                    ["aaa", "aab", "aaw", "aal"],
+                    [sa, sb, rj.arg(3).clone(), rj.arg(7).arg(0).clone()],
+                    [res]
+                )
+                inner.push(q.case(r))
+            }
+            cases.push(o.case(self.d.close(o.ctx[0].clone(), ictx, want, inner.as_slice())))
+        }
+        let wrapper = self.d.close(g[0], [g[1].index()], j, cases.as_slice()).index()
+        // For any a and b: inverting the call gives their constructors.
+        let a2 = self.decl("asa", "Lin")
+        let b2 = self.decl("asb", "Lin")
+        let j2 = tm("as", [a2.clone(), b2.clone(), w.clone(), l.clone()])
+        let h = self.hyp(tm(
+            "fn.Lin.add_scaled",
+            [a2, b2, w.clone(), cert.app1("Option<Lin>.Some", l.clone())]
+        ))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [h.index()], "aj", j2, &cases).into_iter() {
+            let want = o.b.theta.apply(j2)
+            let cj = o.ctx[0].judgment.clone()
+            let to2 = cj.arg(1).arg(0).clone()
+            let hl = self.d.k.instance(lt.haslen, ["thll"], [to2])
+            let r = self.d.k.apply_at(
+                wrapper,
+                ["asts", "asto", "asc1", "asc2", "asw", "asl"],
+                [
+                    cj.arg(0).arg(0).clone(),
+                    cj.arg(1).arg(0).clone(),
+                    cj.arg(0).arg(1).clone(),
+                    cj.arg(1).arg(1).clone(),
+                    cj.arg(2).clone(),
+                    cj.arg(3).arg(0).clone()
+                ],
+                [hl, o.ctx[0].clone()]
+            )
+            cases.push(o.case(r))
+        }
+        self.d.close(h, [h.index()], j2, cases.as_slice()).index()
+    }
+}
+
+// The steps of the lemmas about `check`'s loops.
+#[derive(Clone)]
+struct CheckLemmas {
+    next_has: i64
+    has_step: i64
+    s80_skip: i64
+    s80_add: i64
+    e80: i64
+    g80_zero: i64
+    s45: i64
+    g45_acc: i64
+}
+
+fn g80(
+    fs: cert.Tm,
+    ws: cert.Tm,
+    i: cert.Tm,
+    s: cert.Tm
+) -> cert.Tm { tm("g80", [fs.clone(), ws.clone(), i.clone(), s.clone()]) }
+
+fn g45(
+    fs: cert.Tm,
+    cl: cert.Tm,
+    ws: cert.Tm,
+    i: cert.Tm
+) -> cert.Tm { tm("g45", [fs.clone(), cl.clone(), ws.clone(), i.clone()]) }
+
+impl Refine {
+    fn check_lemmas(inout self, lf: ListLemmas, lw: ListLemmas) -> CheckLemmas {
+        let f = ls_of("Vec<Lin>", "f")
+        let w = ls_of("Vec<i128>", "w")
+        // next l i s e ⊢ hassfx l (i + 1); hassfx l i, nth l i e ⊢ hassfx l (i + 1)
+        let l = self.decl("hnl", w.s.as_str())
+        let i = self.decl("hni", "Z")
+        let sv = self.decl("hns", w.s.as_str())
+        let e = self.decl("hne", "Z")
+        let jn = w.pred("hassfx", [l.clone(), plus1(i)])
+        let h = self.hyp(w.pred("next", [l.clone(), i.clone(), sv.clone(), e.clone()]))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [], "hn", jn, &cases).into_iter() {
+            let want = o.b.theta.apply(jn)
+            cases.push(o.case(self.step(w.rule("hassfx").as_str(), [o.prem[0].clone()], want)))
+        }
+        let next_has = self.d.close(h, [], jn, cases.as_slice()).index()
+        let hs = self.hyps([w.pred("hassfx", [l.clone(), i.clone()]), w.nth(l, i, e)])
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(hs[0], [hs[1].index()], "hs", jn, &cases).into_iter() {
+            let want = o.b.theta.apply(jn)
+            let sj = o.prem[0].judgment.clone()
+            let nx = self.use_lemma(
+                w,
+                lw.next,
+                "nx",
+                ["l", "i", "s", "e"],
+                [
+                    sj.arg(0).clone(),
+                    sj.arg(1).clone(),
+                    sj.arg(2).clone(),
+                    o.ctx[0].judgment.arg(2).clone()
+                ],
+                [o.prem[0].clone(), o.ctx[0].clone()]
+            )
+            let r = self.d.k.apply_at(
+                next_has,
+                ["hnl", "hni", "hns", "hne"],
+                [
+                    sj.arg(0).clone(),
+                    sj.arg(1).clone(),
+                    sj.arg(2).clone(),
+                    o.ctx[0].judgment.arg(2).clone()
+                ],
+                [nx]
+            )
+            if r.judgment != want { panic("has_step: " + r.judgment.show().as_str()) }
+            cases.push(o.case(r))
+        }
+        let has_step = self.d.close(hs[0], [hs[1].index()], jn, cases.as_slice()).index()
+        var c = CheckLemmas {
+            next_has,
+            has_step,
+            s80_skip: 0,
+            s80_add: 0,
+            e80: 0,
+            g80_zero: 0,
+            s45: 0,
+            g45_acc: 0
+        }
+        c.s80_skip = self.s80(f, w, lf, lw, false)
+        c.s80_add = self.s80(f, w, lf, lw, true)
+        c.e80 = self.e80(f, w)
+        c.g80_zero = self.g80_zero(f, w, lf, lw)
+        c.s45 = self.s45(w, lw)
+        c.g45_acc = self.g45_acc(w, lw)
+        c
+    }
+
+    // g80 fs ws (i + 1) s2, nth fs i f, nth ws i w, and eq w z0 (s2 = s) or
+    // as s f w s2 ⊢ g80 fs ws i s
+    fn s80(inout self, f: Ls, w: Ls, lf: ListLemmas, lw: ListLemmas, add: bool) -> i64 {
+        let tag = if add { "sa" } else { "sk" }
+        let fs = self.decl((tag + "fs").as_str(), f.s.as_str())
+        let ws = self.decl((tag + "ws").as_str(), w.s.as_str())
+        let i = self.decl((tag + "i").as_str(), "Z")
+        let s = self.decl((tag + "s").as_str(), "Lin")
+        let s2 = self.decl((tag + "s2").as_str(), "Lin")
+        let fv = self.decl((tag + "f").as_str(), "Lin")
+        let wv = self.decl((tag + "w").as_str(), "Z")
+        let j = g80(fs, ws, i, s)
+        var hs = Vec(cert.Tm).new()
+        hs.push(g80(fs, ws, plus1(i), if add { s2.clone() } else { s.clone() }))
+        hs.push(f.nth(fs, i, fv))
+        hs.push(w.nth(ws, i, wv))
+        if add { hs.push(tm("as", [s.clone(), fv.clone(), wv.clone(), s2.clone()])) } else { hs.push(ring.eq(
+            wv,
+            z0()
+        )) }
+        let g = self.hyps(hs.as_slice())
+        let ctx = [g[1].index(), g[2].index(), g[3].index()]
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(g[0], ctx, "s8", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            // sfx fs (i + 1) a, sfx ws (i + 1) b, good a b s2
+            var inner = Vec(cert.InvCase).new()
+            let ictx = Refine.all_hyps(o, o.prem[2].index())
+            for q in self.cases_of(
+                o.prem[2].clone(),
+                ictx.as_slice(),
+                "s9",
+                want,
+                &inner
+            ).into_iter() {
+                let want2 = q.b.theta.apply(want)
+                let sa = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.sfx") }
+                ).unwrap()
+                let sb = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is("Vec<i128>.sfx") }
+                ).unwrap()
+                let nf = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.nth") }
+                ).unwrap()
+                let nw = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is("Vec<i128>.nth") }
+                ).unwrap()
+                let sums = q.prem[0].clone()
+                let low = q.prem[1].clone()
+                let sj = sa.judgment.clone()
+                let nj = nf.judgment.clone()
+                let pa = self.use_lemma(
+                    f,
+                    lf.sfx_prev,
+                    "sp",
+                    ["l", "i", "r", "e"],
+                    [sj.arg(0).clone(), nj.arg(1).clone(), sj.arg(2).clone(), nj.arg(2).clone()],
+                    [sa, nf]
+                )
+                let sj = sb.judgment.clone()
+                let nj = nw.judgment.clone()
+                let pb = self.use_lemma(
+                    w,
+                    lw.sfx_prev,
+                    "sp",
+                    ["l", "i", "r", "e"],
+                    [sj.arg(0).clone(), nj.arg(1).clone(), sj.arg(2).clone(), nj.arg(2).clone()],
+                    [sb, nw]
+                )
+                let mj = sums.judgment.clone()
+                let s0 = want2.arg(3).clone()
+                let big = tm(
+                    "sums",
+                    [
+                        pa.judgment.arg(2).clone(),
+                        pb.judgment.arg(2).clone(),
+                        s0.clone(),
+                        mj.arg(3).clone()
+                    ]
+                )
+                let last = Refine.hyp_where(
+                    q,
+                    fn(x: cert.Tm) -> bool { x.is(if add { "as" } else { "eq" }) }
+                ).unwrap()
+                let sm = if add {
+                    self.step("sums.add", [last, sums], big)
+                } else { self.step("sums.skip", [last, sums], big) }
+                let gd = self.step(
+                    "good",
+                    [sm.clone(), low],
+                    tm("good", [big.arg(0).clone(), big.arg(1).clone(), s0.clone()])
+                )
+                inner.push(q.case(self.step("g80", [pa, pb, gd], want2)))
+            }
+            cases.push(o.case(self.d.close(
+                o.prem[2].clone(),
+                ictx.as_slice(),
+                want,
+                inner.as_slice()
+            )))
+        }
+        self.d.close(g[0], ctx, j, cases.as_slice()).index()
+    }
+
+    // hassfx ws i, sfx fs i nil, le (c + 1) z0 ⊢ g80 fs ws i (Lin.mk nil c)
+    fn e80(inout self, f: Ls, w: Ls) -> i64 {
+        let fs = self.decl("e8fs", f.s.as_str())
+        let ws = self.decl("e8ws", w.s.as_str())
+        let i = self.decl("e8i", "Z")
+        let c = self.decl("e8c", "Z")
+        let total = lin_mk(cert.c("Vec<<i64,i128>>.nil"), c)
+        let j = g80(fs, ws, i, total)
+        let g = self.hyps([
+            w.pred("hassfx", [ws.clone(), i.clone()]),
+            f.sfx(fs, i, f.nil()),
+            ring.le(plus1(c), z0())
+        ])
+        let ctx = [g[1].index(), g[2].index()]
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(g[0], ctx, "e8", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            let b = o.prem[0].judgment.arg(2).clone()
+            let s = want.arg(3).clone()
+            let sm = self.step(
+                "sums.nil",
+                [],
+                tm("sums", [f.nil(), b.clone(), s.clone(), s.clone()])
+            )
+            let gd = self.step("good", [sm, o.ctx[1].clone()], tm("good", [f.nil(), b, s]))
+            cases.push(o.case(self.step("g80", [o.ctx[0].clone(), o.prem[0].clone(), gd], want)))
+        }
+        self.d.close(g[0], ctx, j, cases.as_slice()).index()
+    }
+
+    // g80 fs ws z0 s ⊢ good fs ws s
+    fn g80_zero(inout self, f: Ls, w: Ls, lf: ListLemmas, lw: ListLemmas) -> i64 {
+        let fs = self.decl("gzfs", f.s.as_str())
+        let ws = self.decl("gzws", w.s.as_str())
+        let s = self.decl("gzs", "Lin")
+        let j = tm("good", [fs.clone(), ws.clone(), s.clone()])
+        let h = self.hyp(g80(fs, ws, z0(), s))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [], "gz", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            var c1 = Vec(cert.InvCase).new()
+            let ctx1 = Refine.all_hyps(o, o.prem[0].index())
+            let q = self.sfx_at_zero(f, lf, o.prem[0].clone(), ctx1.as_slice(), want, &c1)
+            let want2 = q.b.theta.apply(want)
+            let sb = Refine.hyp_where(q, fn(x: cert.Tm) -> bool { x.is("Vec<i128>.sfx") }).unwrap()
+            var c2 = Vec(cert.InvCase).new()
+            let ctx2 = Refine.all_hyps(q, sb.index())
+            let u = self.sfx_at_zero(w, lw, sb.clone(), ctx2.as_slice(), want2, &c2)
+            let want3 = u.b.theta.apply(want2)
+            let gd = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is("good") }).unwrap()
+            if gd.judgment != want3 { panic("g80_zero: " + gd.judgment.show().as_str()) }
+            c2.push(u.case(gd))
+            c1.push(q.case(self.d.close(sb, ctx2.as_slice(), want2, c2.as_slice())))
+            cases.push(o.case(self.d.close(
+                o.prem[0].clone(),
+                ctx1.as_slice(),
+                want,
+                c1.as_slice()
+            )))
+        }
+        self.d.close(h, [], j, cases.as_slice()).index()
+    }
+
+    // g45 fs cl ws (i + 1), nth ws i w, le z0 w ⊢ g45 fs cl ws i
+    fn s45(inout self, w: Ls, lw: ListLemmas) -> i64 {
+        let fs = self.decl("s4fs", "Vec<Lin>")
+        let cl = self.decl("s4cl", "Lin")
+        let ws = self.decl("s4ws", w.s.as_str())
+        let i = self.decl("s4i", "Z")
+        let wv = self.decl("s4w", "Z")
+        let j = g45(fs, cl, ws, i)
+        let g = self.hyps([g45(fs, cl, ws, plus1(i)), w.nth(ws, i, wv), ring.le(z0(), wv)])
+        let ctx = [g[1].index(), g[2].index()]
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(g[0], ctx, "s4", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            let sb = o.prem[0].clone()
+            let sj = sb.judgment.clone()
+            let nj = o.ctx[0].judgment.clone()
+            let pb = self.use_lemma(
+                w,
+                lw.sfx_prev,
+                "sp",
+                ["l", "i", "r", "e"],
+                [sj.arg(0).clone(), nj.arg(1).clone(), sj.arg(2).clone(), nj.arg(2).clone()],
+                [sb, o.ctx[0].clone()]
+            )
+            let nn = self.step(
+                "nnw.cons",
+                [o.ctx[1].clone(), o.prem[1].clone()],
+                tm("nnw", [pb.judgment.arg(2).clone()])
+            )
+            cases.push(o.case(self.step("g45", [pb, nn, o.prem[2].clone()], want)))
+        }
+        self.d.close(g[0], ctx, j, cases.as_slice()).index()
+    }
+
+    // g45 fs cl ws z0 ⊢ accepts fs cl ws
+    fn g45_acc(inout self, w: Ls, lw: ListLemmas) -> i64 {
+        let fs = self.decl("gafs", "Vec<Lin>")
+        let cl = self.decl("gacl", "Lin")
+        let ws = self.decl("gaws", w.s.as_str())
+        let j = tm("accepts", [fs.clone(), cl.clone(), ws.clone()])
+        let h = self.hyp(g45(fs, cl, ws, z0()))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [], "ga", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            var c1 = Vec(cert.InvCase).new()
+            let ctx1 = Refine.all_hyps(o, o.prem[0].index())
+            let q = self.sfx_at_zero(w, lw, o.prem[0].clone(), ctx1.as_slice(), want, &c1)
+            let want2 = q.b.theta.apply(want)
+            let rest = Refine.hyp_where(q, fn(x: cert.Tm) -> bool { x.is("rest") }).unwrap()
+            let nn = Refine.hyp_where(q, fn(x: cert.Tm) -> bool { x.is("nnw") }).unwrap()
+            var c2 = Vec(cert.InvCase).new()
+            let ctx2 = Refine.all_hyps(q, rest.index())
+            for u in self.cases_of(rest.clone(), ctx2.as_slice(), "gb", want2, &c2).into_iter() {
+                let want3 = u.b.theta.apply(want2)
+                let nn3 = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is("nnw") }).unwrap()
+                var refs = Vec(cert.Ref).new()
+                refs.push(nn3)
+                for p in u.prem { refs.push(p.clone()) }
+                c2.push(u.case(self.step("accepts", refs.as_slice(), want3)))
+            }
+            let unused = nn
+            c1.push(q.case(self.d.close(rest, ctx2.as_slice(), want2, c2.as_slice())))
+            cases.push(o.case(self.d.close(
+                o.prem[0].clone(),
+                ctx1.as_slice(),
+                want,
+                c1.as_slice()
+            )))
+        }
+        self.d.close(h, [], j, cases.as_slice()).index()
+    }
+}
+
+fn ok(m: cert.Tm) -> cert.Tm { cert.app1("Result<i64,str>.Ok", m.clone()) }
+
+fn goal_mk(fs: cert.Tm, cl: cert.Tm) -> cert.Tm { cert.app2("Goal.mk", fs, cl) }
+
+fn cert_mk(ws: cert.Tm) -> cert.Tm { cert.app1("Certificate.mk", ws.clone()) }
+
+// The lemmas `check`'s proof is made of.
+struct Parts {
+    lt: ListLemmas
+    lf: ListLemmas
+    lw: ListLemmas
+    ck: CheckLemmas
+    scaled: i64
+    c80: i64
+    c45: i64
+}
+
+impl Refine {
+    // Induction on the fuel of a loop head: `hyps(f)` are the hypotheses at
+    // fuel f, `general` what the induction hypothesis generalizes, and
+    // `case` proves one rule's case.
+    fn fuel_ind(
+        inout self,
+        tag: str,
+        hs_f: [cert.Tm],
+        hs0: [cert.Tm],
+        hs1: [cert.Tm],
+        ih_hs: [cert.Tm],
+        j: cert.Tm,
+        general: [str],
+        which: i64,
+        p: Parts,
+        cuts: [String]
+    ) -> i64 {
+        let fname = tag + "f"
+        let f1 = tag + "f1"
+        let hs = self.hyps(hs_f)
+        var steps = Vec(cert.Ref).new()
+        for succ in [false, true] {
+            var ctx = Vec(i64).new()
+            if succ { ctx.push(self.d.k.rule_hyp(ih_hs, j.clone(), general)) }
+            let g = self.hyps(if succ { hs1 } else { hs0 })
+            for x in 1..g.len() { ctx.push(g[x].index()) }
+            var cases = Vec(cert.InvCase).new()
+            for o in self.cases_of(g[0], ctx.as_slice(), tag, j, &cases).into_iter() {
+                let want = o.b.theta.apply(j)
+                let r = if which == 80 {
+                    self.c80_case(o, want, succ, p, cuts)
+                } else if which == 45 {
+                    self.c45_case(o, want, succ, p, cuts)
+                } else { self.c19_case(o, want, succ, p, cuts) }
+                cases.push(o.case(r))
+            }
+            steps.push(self.d.close(g[0], ctx.as_slice(), j, cases.as_slice()))
+        }
+        var cs = Vec(cert.Case).new()
+        cs.push(cert.Case { step: steps[0].index(), vars: Vec(String).new() })
+        var vs = Vec(String).new()
+        vs.push(f1.clone())
+        cs.push(cert.Case { step: steps[1].index(), vars: vs })
+        let hi = Refine.indices(hs.as_slice())
+        self.d.k.induct(fname.as_str(), hi.as_slice(), true, j.clone(), cs.as_slice())
+    }
+
+    // Facts for refuting a case: its comparisons.
+    fn comparisons(o: dev.Opened) -> Vec(cert.Ref) {
+        var out = Vec(cert.Ref).new()
+        for p in o.prem {
+            if p.judgment.is("le") || p.judgment.is("eq") { out.push(p.clone()) }
+        }
+        for p in o.ctx {
+            if p.judgment.is("le") || p.judgment.is("eq") { out.push(p.clone()) }
+        }
+        out
+    }
+
+    fn c80(inout self, p: Parts, cuts: [String]) -> i64 {
+        let fv = self.decl("c8f", "Fuel")
+        let fs = self.decl("c8fs", "Vec<Lin>")
+        let cl = self.decl("c8cl", "Lin")
+        let ws = self.decl("c8ws", "Vec<i128>")
+        let n = self.decl("c8n", "Z")
+        let i = self.decl("c8i", "Z")
+        let s = self.decl("c8s", "Lin")
+        let m = self.decl("c8m", "Z")
+        let f1 = self.decl("c8f1", "Fuel")
+        let w = ls_of("Vec<i128>", "w")
+        let at = fn(f: cert.Tm) -> Vec(cert.Tm) {
+            var hs = Vec(cert.Tm).new()
+            hs.push(tm(
+                cuts[2].as_str(),
+                [f.clone(), goal_mk(fs, cl), cert_mk(ws), n.clone(), i.clone(), s.clone(), ok(m)]
+            ))
+            hs.push(tm("Vec<Lin>.len", [fs.clone(), n.clone()]))
+            hs.push(w.pred("hassfx", [ws.clone(), i.clone()]))
+            hs.push(ring.le(z0(), i))
+            hs.push(ring.le(i, n))
+            hs
+        }
+        let j = g80(fs, ws, i, s)
+        self.fuel_ind(
+            "c8",
+            at(fv).as_slice(),
+            at(cert.c("fuel0")).as_slice(),
+            at(cert.app1("fuel1", f1.clone())).as_slice(),
+            at(f1).as_slice(),
+            j,
+            ["c8i", "c8s"],
+            80,
+            p,
+            cuts
+        )
+    }
+
+    fn c80_case(
+        inout self,
+        o: dev.Opened,
+        want: cert.Tm,
+        succ: bool,
+        p: Parts,
+        cuts: [String]
+    ) -> cert.Ref {
+        let f = ls_of("Vec<Lin>", "f")
+        let w = ls_of("Vec<i128>", "w")
+        match self.refute(Refine.comparisons(o).as_slice()) {
+            Some(fr) => return self.efq(fr, want)
+            None => {}
+        }
+        let fs = want.arg(0).clone()
+        let ws = want.arg(1).clone()
+        let i = want.arg(2).clone()
+        let s = want.arg(3).clone()
+        let base = if succ { 1 } else { 0 }
+        let len_f = o.ctx[base].clone()
+        let has = o.ctx[base + 1].clone()
+        let le0i = o.ctx[base + 2].clone()
+        let n = len_f.judgment.arg(1).clone()
+        let rec = find(o.prem.as_slice(), fn(x: cert.Tm) -> bool { x.is(cuts[2].as_str()) })
+        match rec {
+            None => {
+                // The loop ends: invert is_constant, then the length it reads.
+                let isc = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("fn.Lin.is_constant") }
+                ).unwrap()
+                let ictx = Refine.all_hyps(o, isc.index())
+                var c1 = Vec(cert.InvCase).new()
+                for q in self.cases_of(isc.clone(), ictx.as_slice(), "c8x", want, &c1).into_iter() {
+                    let want2 = q.b.theta.apply(want)
+                    let lt = q.prem[0].clone()
+                    let qctx = Refine.all_hyps(q, lt.index())
+                    var c2 = Vec(cert.InvCase).new()
+                    for u in self.cases_of(
+                        lt.clone(),
+                        qctx.as_slice(),
+                        "c8y",
+                        want2,
+                        &c2
+                    ).into_iter() {
+                        let want3 = u.b.theta.apply(want2)
+                        let r = if u.b.rule.as_str().ends_with("len.nil") {
+                            let s3 = want3.arg(3).clone()
+                            let c = s3.arg(1).clone()
+                            let lein = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == i && x.arg(1) == n }
+                            ).unwrap()
+                            let leni = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == n && x.arg(1) == i }
+                            ).unwrap()
+                            let low = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == plus1(c) && x.arg(
+                                    1
+                                ) == z0() }
+                            ).unwrap()
+                            let lf = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.len") && x.arg(0) == fs }
+                            ).unwrap()
+                            let hs = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("Vec<i128>.hassfx") }
+                            ).unwrap()
+                            let ein = self.step("le.antisym", [lein, leni], ring.eq(i, n))
+                            let sf = self.use_lemma(
+                                f,
+                                p.lf.sfx_len_end,
+                                "le",
+                                ["l", "i", "n"],
+                                [fs.clone(), i.clone(), n.clone()],
+                                [lf, ein]
+                            )
+                            self.d.k.apply_at(
+                                p.ck.e80,
+                                ["e8fs", "e8ws", "e8i", "e8c"],
+                                [fs.clone(), ws.clone(), i.clone(), c.clone()],
+                                [hs, sf, low]
+                            )
+                        } else {
+                            // a length m + 1 = 0
+                            let lj = u.prem[0].judgment.clone()
+                            let t = ls_of(farkas.T, "t")
+                            let nn2 = self.use_lemma(
+                                t,
+                                p.lt.len_nonneg,
+                                "ln",
+                                ["l", "n"],
+                                [lj.arg(0).clone(), lj.arg(1).clone()],
+                                [u.prem[0].clone()]
+                            )
+                            let ez = Refine.hyp_where(
+                                u,
+                                fn(x: cert.Tm) -> bool { x.is("eq") }
+                            ).unwrap()
+                            self.by_refuting([nn2, ez], want3)
+                        }
+                        c2.push(u.case(r))
+                    }
+                    c1.push(q.case(self.d.close(lt, qctx.as_slice(), want2, c2.as_slice())))
+                }
+                self.d.close(isc, ictx.as_slice(), want, c1.as_slice())
+            }
+            Some(r) => {
+                let rj = r.judgment.clone()
+                let nf = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.nth") }
+                ).unwrap()
+                let nw = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("Vec<i128>.nth") }
+                ).unwrap()
+                let h2 = self.d.k.apply_at(
+                    p.ck.has_step,
+                    ["hnl", "hni", "hne"],
+                    [ws.clone(), i.clone(), nw.judgment.arg(2).clone()],
+                    [has, nw.clone()]
+                )
+                let le0 = self.nonneg_succ(le0i)
+                let lein = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == plus1(i) && x.arg(1) == n }
+                ).unwrap()
+                let ih = self.d.k.apply_at(
+                    o.ctx[0].index(),
+                    ["c8i", "c8s"],
+                    [rj.arg(4).clone(), rj.arg(5).clone()],
+                    [r.clone(), len_f, h2, le0, lein]
+                )
+                let fv = nf.judgment.arg(2).clone()
+                let wv = nw.judgment.arg(2).clone()
+                match find(o.prem.as_slice(), fn(x: cert.Tm) -> bool { x.is("fn.Lin.add_scaled") }) {
+                    Some(call) => {
+                        let s2 = call.judgment.arg(3).arg(0).clone()
+                        let a = self.d.k.apply_at(
+                            p.scaled,
+                            ["asa", "asb", "asw", "asl"],
+                            [s.clone(), fv.clone(), wv.clone(), s2.clone()],
+                            [call]
+                        )
+                        self.d.k.apply_at(
+                            p.ck.s80_add,
+                            ["safs", "saws", "sai", "sas", "sas2", "saf", "saw"],
+                            [fs, ws, i, s, s2, fv, wv],
+                            [ih, nf, nw, a]
+                        )
+                    }
+                    None => {
+                        let ez = find(
+                            o.prem.as_slice(),
+                            fn(x: cert.Tm) -> bool { x.is("eq") && x.arg(0) == wv && x.arg(1) == z0() }
+                        ).unwrap()
+                        self.d.k.apply_at(
+                            p.ck.s80_skip,
+                            ["skfs", "skws", "ski", "sks", "skf", "skw"],
+                            [fs, ws, i, s, fv, wv],
+                            [ih, nf, nw, ez]
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Refine {
+    fn c45(inout self, p: Parts, cuts: [String]) -> i64 {
+        let fv = self.decl("c4f", "Fuel")
+        let fs = self.decl("c4fs", "Vec<Lin>")
+        let cl = self.decl("c4cl", "Lin")
+        let ws = self.decl("c4ws", "Vec<i128>")
+        let n = self.decl("c4n", "Z")
+        let mw = self.decl("c4mw", "Z")
+        let i = self.decl("c4i", "Z")
+        let m = self.decl("c4m", "Z")
+        let f1 = self.decl("c4f1", "Fuel")
+        let at = fn(f: cert.Tm) -> Vec(cert.Tm) {
+            var hs = Vec(cert.Tm).new()
+            hs.push(tm(
+                cuts[1].as_str(),
+                [f.clone(), goal_mk(fs, cl), cert_mk(ws), n.clone(), i.clone(), ok(m)]
+            ))
+            hs.push(tm("Vec<Lin>.len", [fs.clone(), n.clone()]))
+            hs.push(tm("Vec<i128>.len", [ws.clone(), mw.clone()]))
+            hs.push(ring.eq(mw, plus1(n)))
+            hs.push(ring.le(z0(), i))
+            hs.push(ring.le(i, mw))
+            hs
+        }
+        let j = g45(fs, cl, ws, i)
+        self.fuel_ind(
+            "c4",
+            at(fv).as_slice(),
+            at(cert.c("fuel0")).as_slice(),
+            at(cert.app1("fuel1", f1.clone())).as_slice(),
+            at(f1).as_slice(),
+            j,
+            ["c4i"],
+            45,
+            p,
+            cuts
+        )
+    }
+
+    fn c45_case(
+        inout self,
+        o: dev.Opened,
+        want: cert.Tm,
+        succ: bool,
+        p: Parts,
+        cuts: [String]
+    ) -> cert.Ref {
+        let f = ls_of("Vec<Lin>", "f")
+        let w = ls_of("Vec<i128>", "w")
+        match self.refute(Refine.comparisons(o).as_slice()) {
+            Some(fr) => return self.efq(fr, want)
+            None => {}
+        }
+        let fs = want.arg(0).clone()
+        let cl = want.arg(1).clone()
+        let ws = want.arg(2).clone()
+        let i = want.arg(3).clone()
+        let base = if succ { 1 } else { 0 }
+        let len_f = o.ctx[base].clone()
+        let len_w = o.ctx[base + 1].clone()
+        let emw = o.ctx[base + 2].clone()
+        let le0i = o.ctx[base + 3].clone()
+        let leim = o.ctx[base + 4].clone()
+        let n = len_f.judgment.arg(1).clone()
+        let mw = len_w.judgment.arg(1).clone()
+        match find(o.prem.as_slice(), fn(x: cert.Tm) -> bool { x.is(cuts[1].as_str()) }) {
+            Some(r) => {
+                let rj = r.judgment.clone()
+                let nw = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("Vec<i128>.nth") }
+                ).unwrap()
+                let lew = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == z0() }
+                ).unwrap()
+                let cond = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == plus1(i) }
+                ).unwrap()
+                let le2 = self.d.le_eq(cond, plus1(i), mw, [emw.clone()])
+                let le0 = self.nonneg_succ(le0i)
+                let ih = self.d.k.apply_at(
+                    o.ctx[0].index(),
+                    ["c4i"],
+                    [rj.arg(4).clone()],
+                    [r.clone(), len_f, len_w, emw, le0, le2]
+                )
+                let wv = nw.judgment.arg(2).clone()
+                self.d.k.apply_at(
+                    p.ck.s45,
+                    ["s4fs", "s4cl", "s4ws", "s4i", "s4w"],
+                    [fs, cl, ws, i, wv],
+                    [ih, nw, lew]
+                )
+            }
+            None => {
+                // The loop ends; invert the two Lin.num calls, then build rest.
+                let n1 = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is("fn.Lin.num") && x.arg(0) != z0() }
+                ).unwrap()
+                let c1x = Refine.all_hyps(o, n1.index())
+                var cs1 = Vec(cert.InvCase).new()
+                for q in self.cases_of(n1.clone(), c1x.as_slice(), "c4a", want, &cs1).into_iter() {
+                    let want2 = q.b.theta.apply(want)
+                    let n0 = Refine.hyp_where(
+                        q,
+                        fn(x: cert.Tm) -> bool { x.is("fn.Lin.num") && x.arg(0) == z0() }
+                    ).unwrap()
+                    let c2x = Refine.all_hyps(q, n0.index())
+                    var cs2 = Vec(cert.InvCase).new()
+                    for u in self.cases_of(
+                        n0.clone(),
+                        c2x.as_slice(),
+                        "c4b",
+                        want2,
+                        &cs2
+                    ).into_iter() {
+                        let want3 = u.b.theta.apply(want2)
+                        let r3 = self.c45_exit(
+                            u,
+                            want3,
+                            p,
+                            cuts,
+                            fs.clone(),
+                            cl.clone(),
+                            ws.clone(),
+                            i.clone(),
+                            n.clone(),
+                            mw.clone()
+                        )
+                        cs2.push(u.case(r3))
+                    }
+                    cs1.push(q.case(self.d.close(n0, c2x.as_slice(), want2, cs2.as_slice())))
+                }
+                let unused = le0i
+                let unused2 = leim
+                self.d.close(n1, c1x.as_slice(), want, cs1.as_slice())
+            }
+        }
+    }
+
+    fn c45_exit(
+        inout self,
+        u: dev.Opened,
+        want: cert.Tm,
+        p: Parts,
+        cuts: [String],
+        fs: cert.Tm,
+        cl: cert.Tm,
+        ws: cert.Tm,
+        i: cert.Tm,
+        n: cert.Tm,
+        mw: cert.Tm
+    ) -> cert.Ref {
+        let f = ls_of("Vec<Lin>", "f")
+        let w = ls_of("Vec<i128>", "w")
+        let len_f = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.len") }).unwrap()
+        let len_w = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is("Vec<i128>.len") }).unwrap()
+        let emw = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("eq") && x.arg(0) == mw }
+        ).unwrap()
+        let leim = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == i && x.arg(1) == mw }
+        ).unwrap()
+        let cond = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("le") && x.arg(0) == plus1(n) && x.arg(1) == i }
+        ).unwrap()
+        let lemi = self.d.le_eq(cond, mw, i, [emw.clone()])
+        let eim = self.step("le.antisym", [leim, lemi], ring.eq(i, mw))
+        let sw = self.use_lemma(
+            w,
+            p.lw.sfx_len_end,
+            "le",
+            ["l", "i", "n"],
+            [ws.clone(), i.clone(), mw.clone()],
+            [len_w.clone(), eim]
+        )
+        let nn = self.step("nnw.nil", [], tm("nnw", [w.nil()]))
+        // The two calls of add_scaled: the negated claim, then the first sum.
+        let first_call = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("fn.Lin.add_scaled") && x.arg(2) == ring.neg(z1()) }
+        ).unwrap()
+        let fj = first_call.judgment.clone()
+        let ng = fj.arg(3).arg(0).clone()
+        let a1 = self.d.k.apply_at(
+            p.scaled,
+            ["asa", "asb", "asw", "asl"],
+            [fj.arg(0).clone(), fj.arg(1).clone(), fj.arg(2).clone(), ng.clone()],
+            [first_call.clone()]
+        )
+        let second = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("fn.Lin.add_scaled") && x.arg(1) == ng }
+        ).unwrap()
+        let sj = second.judgment.clone()
+        let first = sj.arg(3).arg(0).clone()
+        let a2 = self.d.k.apply_at(
+            p.scaled,
+            ["asa", "asb", "asw", "asl"],
+            [sj.arg(0).clone(), sj.arg(1).clone(), sj.arg(2).clone(), first.clone()],
+            [second.clone()]
+        )
+        let nth_c = Refine.hyp_where(
+            u,
+            fn(x: cert.Tm) -> bool { x.is("Vec<i128>.nth") && x.arg(1) == n }
+        ).unwrap()
+        // The sum loop from 0 gives good.
+        let rec = Refine.hyp_where(u, fn(x: cert.Tm) -> bool { x.is(cuts[2].as_str()) }).unwrap()
+        let rj = rec.judgment.clone()
+        let rz = ring.refl(&self.d.k, z0())
+        let s0 = self.step(w.rule("sfx.zero").as_str(), [rz], w.sfx(ws, z0(), ws))
+        let h0 = self.step(w.rule("hassfx").as_str(), [s0], w.pred("hassfx", [ws.clone(), z0()]))
+        let l00 = self.step("le.refl", [], ring.le(z0(), z0()))
+        let l0n = self.use_lemma(
+            f,
+            p.lf.len_nonneg,
+            "ln",
+            ["l", "n"],
+            [fs.clone(), n.clone()],
+            [len_f.clone()]
+        )
+        let g = self.d.k.apply_at(
+            p.c80,
+            ["c8f", "c8fs", "c8cl", "c8ws", "c8n", "c8i", "c8s", "c8m"],
+            [
+                rj.arg(0).clone(),
+                fs.clone(),
+                cl.clone(),
+                ws.clone(),
+                n.clone(),
+                z0(),
+                first.clone(),
+                rj.arg(6).arg(0).clone()
+            ],
+            [rec.clone(), len_f.clone(), h0, l00, l0n]
+        )
+        let gd = self.d.k.apply_at(
+            p.ck.g80_zero,
+            ["gzfs", "gzws", "gzs"],
+            [fs.clone(), ws.clone(), first.clone()],
+            [g]
+        )
+        let rest = self.step(
+            "rest",
+            [len_f, nth_c, a1, a2, gd],
+            tm("rest", [fs.clone(), cl.clone(), ws.clone()])
+        )
+        self.step("g45", [sw, nn, rest], want)
+    }
+}
+
+impl Refine {
+    fn c19(inout self, p: Parts, cuts: [String]) -> i64 {
+        let fv = self.decl("c1f", "Fuel")
+        let fs = self.decl("c1fs", "Vec<Lin>")
+        let cl = self.decl("c1cl", "Lin")
+        let ws = self.decl("c1ws", "Vec<i128>")
+        let n = self.decl("c1n", "Z")
+        let mw = self.decl("c1mw", "Z")
+        let i = self.decl("c1i", "Z")
+        let m = self.decl("c1m", "Z")
+        let f1 = self.decl("c1f1", "Fuel")
+        let at = fn(f: cert.Tm) -> Vec(cert.Tm) {
+            var hs = Vec(cert.Tm).new()
+            hs.push(tm(
+                cuts[0].as_str(),
+                [f.clone(), goal_mk(fs, cl), cert_mk(ws), n.clone(), i.clone(), ok(m)]
+            ))
+            hs.push(tm("Vec<Lin>.len", [fs.clone(), n.clone()]))
+            hs.push(tm("Vec<i128>.len", [ws.clone(), mw.clone()]))
+            hs.push(ring.eq(mw, plus1(n)))
+            hs
+        }
+        let j = tm("accepts", [fs.clone(), cl.clone(), ws.clone()])
+        self.fuel_ind(
+            "c1",
+            at(fv).as_slice(),
+            at(cert.c("fuel0")).as_slice(),
+            at(cert.app1("fuel1", f1.clone())).as_slice(),
+            at(f1).as_slice(),
+            j,
+            ["c1i"],
+            19,
+            p,
+            cuts
+        )
+    }
+
+    fn c19_case(
+        inout self,
+        o: dev.Opened,
+        want: cert.Tm,
+        succ: bool,
+        p: Parts,
+        cuts: [String]
+    ) -> cert.Ref {
+        let w = ls_of("Vec<i128>", "w")
+        match self.refute(Refine.comparisons(o).as_slice()) {
+            Some(fr) => return self.efq(fr, want)
+            None => {}
+        }
+        let base = if succ { 1 } else { 0 }
+        let len_f = o.ctx[base].clone()
+        let len_w = o.ctx[base + 1].clone()
+        let emw = o.ctx[base + 2].clone()
+        match find(o.prem.as_slice(), fn(x: cert.Tm) -> bool { x.is(cuts[0].as_str()) }) {
+            Some(r) => self.d.k.apply_at(
+                o.ctx[0].index(),
+                ["c1i"],
+                [r.judgment.arg(4).clone()],
+                [r.clone(), len_f, len_w, emw]
+            )
+            None => {
+                let r = find(
+                    o.prem.as_slice(),
+                    fn(x: cert.Tm) -> bool { x.is(cuts[1].as_str()) }
+                ).unwrap()
+                let rj = r.judgment.clone()
+                let fs = want.arg(0).clone()
+                let cl = want.arg(1).clone()
+                let ws = want.arg(2).clone()
+                let n = len_f.judgment.arg(1).clone()
+                let mw = len_w.judgment.arg(1).clone()
+                let l00 = self.step("le.refl", [], ring.le(z0(), z0()))
+                let l0m = self.use_lemma(
+                    w,
+                    p.lw.len_nonneg,
+                    "ln",
+                    ["l", "n"],
+                    [ws.clone(), mw.clone()],
+                    [len_w.clone()]
+                )
+                let g = self.d.k.apply_at(
+                    p.c45,
+                    ["c4f", "c4fs", "c4cl", "c4ws", "c4n", "c4mw", "c4i", "c4m"],
+                    [
+                        rj.arg(0).clone(),
+                        fs.clone(),
+                        cl.clone(),
+                        ws.clone(),
+                        n,
+                        mw,
+                        z0(),
+                        rj.arg(5).arg(0).clone()
+                    ],
+                    [r.clone(), len_f, len_w, emw, l00, l0m]
+                )
+                self.d.k.apply_at(p.ck.g45_acc, ["gafs", "gacl", "gaws"], [fs, cl, ws], [g])
+            }
+        }
+    }
+
+    // fn.check (Goal.mk fs cl) (Certificate.mk ws) (Ok m) ⊢ accepts fs cl ws
+    fn top(inout self, c19: i64, cuts: [String]) -> i64 {
+        let fs = self.decl("tpfs", "Vec<Lin>")
+        let cl = self.decl("tpcl", "Lin")
+        let ws = self.decl("tpws", "Vec<i128>")
+        let m = self.decl("tpm", "Z")
+        let j = tm("accepts", [fs.clone(), cl.clone(), ws.clone()])
+        let h = self.hyp(tm("fn.check", [goal_mk(fs, cl), cert_mk(ws), ok(m)]))
+        var cases = Vec(cert.InvCase).new()
+        for o in self.cases_of(h, [], "tp", j, &cases).into_iter() {
+            let want = o.b.theta.apply(j)
+            let r = find(
+                o.prem.as_slice(),
+                fn(x: cert.Tm) -> bool { x.is(cuts[0].as_str()) }
+            ).unwrap()
+            let rj = r.judgment.clone()
+            let lf = find(
+                o.prem.as_slice(),
+                fn(x: cert.Tm) -> bool { x.is("Vec<Lin>.len") }
+            ).unwrap()
+            let lw = find(
+                o.prem.as_slice(),
+                fn(x: cert.Tm) -> bool { x.is("Vec<i128>.len") }
+            ).unwrap()
+            let mw = lw.judgment.arg(1).clone()
+            let e = find(
+                o.prem.as_slice(),
+                fn(x: cert.Tm) -> bool { x.is("eq") && x.arg(0) == mw }
+            ).unwrap()
+            let fs2 = want.arg(0).clone()
+            let r2 = self.d.k.apply_at(
+                c19,
+                ["c1f", "c1fs", "c1cl", "c1ws", "c1n", "c1mw", "c1i", "c1m"],
+                [
+                    rj.arg(0).clone(),
+                    fs2,
+                    want.arg(1).clone(),
+                    want.arg(2).clone(),
+                    rj.arg(3).clone(),
+                    mw,
+                    z0(),
+                    rj.arg(5).arg(0).clone()
+                ],
+                [r.clone(), lf, lw, e]
+            )
+            cases.push(o.case(r2))
+        }
+        self.d.close(h, [], j, cases.as_slice()).index()
+    }
+}
+
+pub fn goals() -> String {
+    String.from("(var fs Vec<Lin>) (var cl Lin) (var ws Vec<i128>) (var m Z) (var x X)\n") +
+        "(goal check_sound ((fn.check (Goal.mk fs cl) (Certificate.mk ws) (Result<i64,str>.Ok m)) (sat fs x)" +
+        " (le (add (val cl x) z1) z0)) (false))\n"
+}
+
+// The certificate: `check` returning Ok, a point satisfying the facts and
+// the negated claim give `false`.
+pub fn certificate(theory: str) -> String {
+    var r = start(theory)
+    let ls = all_lists(&r)
+    let apps = r.app_lemmas()
+    let fl = r.fn_lemmas()
+    let st = r.step_lemmas(ls[0], apps)
+    let cut = cut_preds(theory, "fn.Lin.add_scaled")[0].clone()
+    let lp = r.scaled_loop(cut.as_str(), ls[0], apps, st, fl)
+    let aa = r.ares_as(ls[0])
+    let scaled = r.scaled_as(cut.as_str(), ls[0], lp, aa)
+    let ck = r.check_lemmas(ls[1], ls[2])
+    let cuts = cut_preds(theory, "fn.check")
+    var p = Parts { lt: ls[0], lf: ls[1], lw: ls[2], ck, scaled, c80: 0, c45: 0 }
+    p.c80 = r.c80(p, cuts.as_slice())
+    p.c45 = r.c45(p, cuts.as_slice())
+    let c19 = r.c19(p, cuts.as_slice())
+    let top = r.top(c19, cuts.as_slice())
+    let sound = farkas.prove_sound(&r.d)
+    // The final theorem.
+    let x = v("x")
+    let h1 = r.hyp(tm("fn.check", [goal_mk(v("fs"), v("cl")), cert_mk(v("ws")), ok(v("m"))]))
+    let h2 = r.hyp(tm("sat", [v("fs"), x.clone()]))
+    let h3 = r.hyp(ring.le(ring.add(tm("val", [v("cl"), x.clone()]), z1()), z0()))
+    let acc = r.d.k.apply_at(
+        top,
+        ["tpfs", "tpcl", "tpws", "tpm"],
+        [v("fs"), v("cl"), v("ws"), v("m")],
+        [h1]
+    )
+    let f = r.d.k.apply_at(sound, [], [], [acc, h2, h3])
+    r.d.k.result("check_sound", f.index())
+    r.d.k.text().to_string()
+}
+
+// Check the proof that `check`, as `jihoo emit-horn` translates it in
+// `rules`, is sound.
+pub fn check(rules: str) -> Result(schematic.Report, String) {
+    let th = theory(rules)
+    let g = goals()
+    let c = certificate(th.as_str())
+    schematic.check(th.as_str(), g.as_str(), c.as_str())
 }

@@ -691,7 +691,9 @@ fn translate(prog: Program, f: u32, inout o: Out) -> Result((), String) {
     }
     // From the entry, then from each cut point.
     var st = start(prog, b, &o)
-    for a in 1..b.arg_count + 1 { st.vals[a] = Val.Term(o.fresh_var()) }
+    // A struct or tuple argument is its constructor of new variables: its
+    // sort has that one constructor.
+    for a in 1..b.arg_count + 1 { st.vals[a] = Val.Term(fresh_value(prog, b.locals[a].ty, &o)?) }
     for a in 1..b.arg_count + 1 {
         match st.vals[a].clone() {
             Term(t) => st.head.push(t)
@@ -720,6 +722,25 @@ fn translate(prog: Program, f: u32, inout o: Out) -> Result((), String) {
         }
     }
     Ok(())
+}
+
+// A value of type t: a new variable, or for a struct or tuple, its
+// constructor applied to new values of its fields.
+fn fresh_value(prog: Program, t: u32, inout o: Out) -> Result(Hm, String) {
+    let u = match prog.types.pointee(t) {
+        Some(x) => if prog.types.is_ref(t) { x } else { t }
+        None => t
+    }
+    let plain = match prog.types.kind(u) {
+        Adt(_) => prog.types.variants(u).is_none() && vec_elem(prog, u).is_none()
+        Tuple(ts) => ts.len() > 0
+        _ => false
+    }
+    if !plain { return Ok(o.fresh_var()) }
+    let c = o.ctor(prog, u, -1)?
+    var args = Vec(Hm).new()
+    for f in prog.types.field_tys(u) { args.push(fresh_value(prog, f, &o)?) }
+    Ok(ap(c.as_str(), args))
 }
 
 fn cut_pred(pred: str, k: u32) -> String { pred + "@" + k.to_string().as_str() }

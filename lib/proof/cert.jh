@@ -353,6 +353,7 @@ pub struct Case {
     pub vars: Vec(String)
 }
 
+#[derive(Clone)]
 pub struct InvCase {
     pub rule: String
     pub step: i64

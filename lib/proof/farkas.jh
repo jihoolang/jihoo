@@ -602,12 +602,10 @@ fn sums_hyps(f: cert.Tm) -> Vec(cert.Tm) {
     out
 }
 
-// The certificate of the theorem `sound`.
-pub fn certificate() -> String {
-    let th = theory()
-    var k = cert.Cert.new()
-    let r = ring.Ring.new(&k)
-    var d = dev.Dev { k, ring: r, rules: cert.Rules.parse(th.as_str()) }
+// Prove the model's lemmas and the theorem `sound` in `d`, over the goal's
+// variables fs, cl, ws and x; returns the step of `sound`, whose
+// hypotheses are accepts fs cl ws, sat fs x and the negated claim.
+pub fn prove_sound(inout d: dev.Dev) -> i64 {
     let push_ev = d.push_ev()
     let ms_ev = d.ms_ev(push_ev)
     let as_val = d.as_val(ms_ev)
@@ -637,7 +635,16 @@ pub fn certificate() -> String {
     l.sums_nonneg = d.sums_nonneg(l)
     l.nth_nnw = d.nth_nnw(l)
     l.good_false = d.good_false(l)
-    let main = d.sound(l)
+    d.sound(l)
+}
+
+// The certificate of the theorem `sound`.
+pub fn certificate() -> String {
+    let th = theory()
+    var k = cert.Cert.new()
+    let r = ring.Ring.new(&k)
+    var d = dev.Dev { k, ring: r, rules: cert.Rules.parse(th.as_str()) }
+    let main = prove_sound(&d)
     d.k.result("sound", main)
     d.k.text().to_string()
 }

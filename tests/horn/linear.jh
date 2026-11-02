@@ -1,0 +1,35 @@
+// args: FILE [--reject]. FILE is `jihoo emit-horn --lib compiler/linear.jh
+// --fn check`: the proof in lib/proof/refine.jh must show that `check`,
+// as the rules say it computes, is sound. With --reject, the rules come
+// from a broken copy of linear.jh, and the proof must not go through.
+import std.env
+import std.fs
+import std.sys
+import proof.refine
+
+fn main() {
+    let a = env.args()
+    let Ok(rules) = fs.read_file(a[1]) else {
+        println("cannot read " + a[1])
+        sys.exit(1)
+    }
+    let reject = a.len() > 2 && a[2] == "--reject"
+    // The proof's builder stops (a panic) where a broken checker leaves
+    // nothing to prove from; that is a rejection too.
+    match refine.check(rules.as_str()) {
+        Ok(r) => {
+            if reject {
+                println("a broken checker was proved sound")
+                sys.exit(1)
+            }
+            println("proved: " + r.steps.to_string() + " steps, " + r.inductions.to_string() + " inductions")
+        }
+        Err(e) => {
+            if !reject {
+                println("not proved: " + e.as_str())
+                sys.exit(1)
+            }
+            println("rejected: " + e.as_str())
+        }
+    }
+}

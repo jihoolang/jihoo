@@ -483,10 +483,9 @@ What is left before the theorem is about the code itself:
    are the least ones (here `ms`, `push`, `as`, `sums`, `nnw`, `sat`,
    `accepts`, and lists). Either is a statement about Horn's calculus for
    the Agda development, not about this theory alone.
-2. **The code.** That `linear.jh` computes what the relations say: a
-   `Lin` denotes a `lin` term, `add_scaled` returning `Some` gives an
-   `ms` derivation, and `check` returning `Ok` gives `accepts`. That is
-   step 6.6.3: contracts that name the theory, proved by the verifier.
+2. **The code.** Done ([below](#the-proof-of-the-code)): the rules
+   `jihoo emit-horn` writes for `linear.jh` give `accepts` when `check`
+   returns `Ok`.
 3. **Compile time.** The check runs as compiled code in the test; at
    compile time it exceeds the interpreter's million steps (0.6, step 3).
 
@@ -517,11 +516,56 @@ does; that `std` does it is assumed, as the verifier assumes `std`'s
 `ensures`. `overflowing_mul(a, b)` is `(a * b, false)` or `(anything,
 true)`, so `linear.jh` uses it rather than the bit tricks it had.
 
-What is outside the fragment is an error, never an approximation. The
-`verify` suite translates `check` (1,281 rules over its six functions)
-and reads the result as a theory with `lib/proof`. Left: the proof that
-those rules give `accepts`, and tests that compare the rules with
-running code.
+What is outside the fragment is an error, never an approximation. A
+loop head's state is the locals that may be read before they are set
+from there on; within a path, `len` and `index` of the same arguments
+give one result (they are functions), and a path that takes a comparison
+and one that contradicts it (its negation, or `<` against `==`) has no
+rule. A struct argument is its constructor of new variables. `check`
+and the five functions it calls are 126 rules.
+
+### The proof of the code
+
+[`lib/proof/refine.jh`](../../lib/proof/refine.jh) proves, from those
+rules, the model and the ring axioms:
+
+```text
+fn.check (Goal.mk fs cl) (Certificate.mk ws) (Ok m), sat fs x,
+val cl x + 1 <= 0  ⊢  false
+```
+
+that is, when the compiled `check` accepts a certificate, no point
+satisfies its facts and negated claim. It is 36,631 steps with 45
+inductions, built in under a second; `lib/proof` checks it, and so does
+Horn's own checker. Its parts:
+
+- **Lists**: for each of `linear.jh`'s list sorts, lemmas about lengths,
+  `nth` and suffixes (`sfx l i s`: `s` is `l` without its first `i`
+  elements), proved by induction on lists; and appending.
+- **`add_scaled`'s loop**, by induction on the fuel of its head: from
+  indices `i`, `j` and the output so far, the result is the output
+  followed by a merge (`ms`) of the two suffixes. Each pass is a lemma of
+  its own (from the left, the right or both, pushing a term or dropping
+  a zero), and every rule of the loop head is either one of those passes,
+  its end, or a path whose comparisons add up to a contradiction (the
+  proof finds the combination). Then a call returning `Some` gives `as`.
+- **`check`'s loops**: the weights loop leaves non-negative weights, the
+  sum loop leaves a sum whose rest is `good`, and both feed `accepts`.
+
+Horn certificates cannot take a derived fact apart (only a hypothesis is
+inverted), so what a loop has left to do is a predicate whose
+definition hides its witnesses (`ares`, `g80`, `g45`), and a lemma whose
+hypothesis is that predicate takes it apart outside the induction.
+
+The `verify` suite translates `check` and checks the proof, and also
+translates two broken copies of `linear.jh`, one without the test of the
+sum's sign and one without the test of the weights', whose proofs do not
+go through. `check` now reads the next fact on every pass of the sum
+loop, so that the proof knows it when its weight is zero.
+
+What this rests on: the translation (`horn.jh`, trusted as `vc.jh` is),
+`std`'s `Vec` being a list as `len`, `nth` and `snoc` say, and the
+adequacy of reading the theory in ℤ (above).
 
 ### Slices
 

@@ -169,8 +169,12 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     while i < n
         invariant 0 <= i && c.weights.len() == n + 1 && g.facts.len() == n
     {
-        if c.weights[i] != 0 {
-            let Some(s) = sum.add_scaled(g.facts[i], c.weights[i]) else {
+        // Both are read on every pass, so that the proof of the code
+        // (lib/proof/refine.jh) knows the next fact even when it is skipped.
+        let f = g.facts[i]
+        let w = c.weights[i]
+        if w != 0 {
+            let Some(s) = sum.add_scaled(f, w) else {
                 return Err("the weighted sum does not fit an i128")
             }
             sum = s
