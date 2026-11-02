@@ -153,8 +153,9 @@ may panic, such as `v[i]`), and
 [contracts](docs/language/contracts.md) (`requires`, `ensures`, loop
 `invariant`s and structs' type invariants, over integers, fields and
 lengths, with `&&`, `||` and `!`) with linear certificates
-that a small trusted checker accepts, and `--verify` removes the proved
-checks from a build. It runs on the compiler's own source
+that a small trusted checker accepts. Every build verifies: it removes
+the proved checks, and an unproved contract is a compile error
+(`--no-verify` keeps every check). It runs on the compiler's own source
 (`jihoo verify compiler/main.jh`), and CI fails if it proves fewer; no
 check is left in the trusted checker itself.
 

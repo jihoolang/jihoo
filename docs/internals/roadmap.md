@@ -373,8 +373,11 @@ and moves into the compiler once its trust boundary is stated.
    the interpreter. Done: verification in parallel, proving each
    obligation as it is generated, which takes it on the compiler from 25
    to 3.5 seconds and 1.6 GB to 530 MB
-   ([design](verification.md#verification-in-parallel)). Left: `--verify`
-   by default, and unproved contracts as errors.
+   ([design](verification.md#verification-in-parallel)). Done:
+   verification by default ([design](verification.md#unproved-contracts-are-errors)):
+   every command that generates code proves the program and removes the
+   proved checks, `--no-verify` keeps them all, and an unproved contract
+   is a compile error.
 4. Contracts: `requires`/`ensures` on functions, `invariant` on loops, and
    `old(x)` for `inout` parameters. A call proves the callee's `requires`
    and assumes its `ensures`. An unproved contract is a compile error;
@@ -388,7 +391,8 @@ and moves into the compiler once its trust boundary is stated.
    contract. Fields, `Vec` lengths (`v.len()`) and `old` of them are
    part of clauses (step 5), and so are `||` and `!`: a clause is then a
    few cases, assumed one at a time and proved by refuting them all
-   failing. Left: unproved contracts as compile errors (with step 3).
+   failing. Done: unproved contracts are compile errors (with step 3),
+   and `tests/fail` has a case for each kind of rejected contract.
 5. `std` contracts: `Vec.index`, `Vec.push`, slicing and `str` lengths,
    so that ordinary loops over vectors and slices have no bounds checks
    left. Started ([design](verification.md#fields-panics-and-calls)):

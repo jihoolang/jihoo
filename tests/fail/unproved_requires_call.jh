@@ -1,0 +1,12 @@
+// A call must meet its callee's `requires`.
+// error: unproved `requires` of half in caller
+// verify
+fn half(x: i64) -> i64
+    requires x >= 0
+{
+    x / 2
+}
+
+fn caller(y: i64) -> i64 { half(y) }
+
+fn main() { println(caller(4)) }

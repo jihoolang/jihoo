@@ -60,7 +60,10 @@ the runner. Its suites:
 - **fail**: every file in `tests/fail/` must not compile, and each
   `// error: text` must appear in the error message and no `// no-error: text`
   may. `check` must return the
-  same diagnostics even with the debug `JIHOO_NO_ELAB` switch set.
+  same diagnostics even with the debug `JIHOO_NO_ELAB` switch set. A file
+  with a `// verify` line fails verification instead (an unproved
+  contract): it is compiled with `emit-llvm`, and checked with
+  `check --verify`.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

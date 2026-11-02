@@ -36,10 +36,13 @@ fn sum(xs: [i64]) -> i64 {
 Contracts are for [verification](../internals/verification.md): they are
 proved while compiling, never checked while the program runs, and a check
 the proof covers (the bounds check of `xs[i]` above) is removed.
-[`jihoo verify`](../reference/command-line.md#verification) proves them
-and lists those that are not proved, and `--verify` removes the proved
-checks from a build. **For now an unproved contract is not an error**,
-and a build without `--verify` is the same with or without contracts.
+Every build proves them, and **a contract that is not proved is a
+compile error**, at the clause (or, for a `requires`, at the call that
+does not meet it); `check --verify` reports the same errors, and
+[`jihoo verify`](../reference/command-line.md#verification) lists them
+with the checks that stay. `--no-verify` builds without proving anything:
+every check stays, and contracts are neither proved nor assumed, so the
+program does the same with or without them.
 
 ## Clauses
 
@@ -224,7 +227,7 @@ fn sum(v: Vec(i64)) -> i64 {
 ```
 
 `v.len()`'s `ensures` relates its result to `v`'s length, and `v[i]`
-cannot reach `Vec.index`'s panic: with `--verify` the call goes to a copy
+cannot reach `Vec.index`'s panic: the call goes to a copy
 of `Vec.index` without the check, and a call that cannot rule it out keeps
 it. A panic that the function rules out itself, as after
 `if x == x + 1 { panic(...) }`, is removed from it.

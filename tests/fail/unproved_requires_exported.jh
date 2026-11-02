@@ -1,0 +1,10 @@
+// Code outside the program does not prove a `requires`.
+// error: `requires` of a function that code outside the program may call
+// verify
+export fn half(x: i64) -> i64
+    requires x >= 0
+{
+    x / 2
+}
+
+fn main() { println(half(4)) }

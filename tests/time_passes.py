@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ROW = re.compile(r"^(\S+(?: \S+)?) +(\d+\.\d{3})s +(\d+\.\d{3})s +(\d+\.\d) MiB$")
 FRONT = ["load", "sema", "elaboration", "effects", "borrows"]
 BACK = ["IR generation", "LLVM parse", "LLVM optimize", "LLVM emit"]
+# Commands that generate code verify the program first.
+VERIFIED = FRONT + ["verification"]
 
 
 def run(compiler, *args):
@@ -55,7 +57,7 @@ def main():
             timed = run(compiler, command, source, "--time-passes")
             assert plain.returncode == timed.returncode == 0 and plain.stdout == timed.stdout
             names, rest = phases(timed.stderr.decode())
-            assert names == FRONT + [{"emit-llvm": "IR generation", "emit-mir": "MIR text"}[command]]
+            assert names == {"emit-llvm": VERIFIED + ["IR generation"], "emit-mir": FRONT + ["MIR text"]}[command]
             assert rest == "" and plain.stderr == b"", timed.stderr
 
         for target in ["x86_64", "aarch64"]:
@@ -64,19 +66,19 @@ def main():
             result = run(compiler, "emit-obj", source, "--target", target, "-o", timed, "--time-passes")
             assert result.returncode == 0 and not result.stdout, result.stderr
             assert plain.read_bytes() == timed.read_bytes()
-            assert phases(result.stderr.decode()) == (FRONT + BACK, "")
+            assert phases(result.stderr.decode()) == (VERIFIED + BACK, "")
 
         exe = tmp / "hello"
         result = run(compiler, "build", source, "-o", exe, "--time-passes")
         assert result.returncode == 0 and not result.stdout, result.stderr
-        assert phases(result.stderr.decode()) == (FRONT + BACK + ["link"], "")
+        assert phases(result.stderr.decode()) == (VERIFIED + BACK + ["link"], "")
 
         # The program's output and status are its own; the phases end before it runs.
         program = tmp / "exit.jh"
         program.write_text('import std.sys\nfn main() {\n    println("out")\n    eprintln("err")\n    sys.exit(3)\n}\n')
         result = run(compiler, "run", program, "--time-passes")
         assert result.returncode == 3 and result.stdout == b"out\n", result
-        assert phases(result.stderr.decode()) == (FRONT + BACK + ["link"], "err\n")
+        assert phases(result.stderr.decode()) == (VERIFIED + BACK + ["link"], "err\n")
 
         # Diagnostics follow the phases that ran, unchanged, in both formats.
         cases = [
@@ -84,6 +86,8 @@ def main():
             ("types", "fn main() {\n    let x: i64 = true\n}\n", ["load", "sema"]),
             ("moves", "fn take(sink s: String) {}\n\nfn main() {\n    let s = String.from(\"a\")\n"
              "    take(s)\n    println(s)\n}\n", FRONT),
+            ("contracts", "fn f(x: i64) -> i64\n    ensures result == 0\n{\n    x\n}\n\n"
+             "fn main() {\n    println(f(1))\n}\n", VERIFIED),
         ]
         for name, text, ran in cases:
             path = tmp / f"{name}.jh"

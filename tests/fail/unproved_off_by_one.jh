@@ -1,0 +1,17 @@
+// An invariant that an off-by-one loop condition breaks: `i` reaches
+// `xs.len + 1`.
+// error: unproved invariant in last
+// verify
+fn last(xs: [i64]) -> i64 {
+    var i = 0
+    var x = 0
+    while i <= xs.len
+        invariant 0 <= i && i <= xs.len
+    {
+        x = i
+        i += 1
+    }
+    x
+}
+
+fn main() { println(last([1, 2, 3][..])) }

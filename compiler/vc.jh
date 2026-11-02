@@ -1191,12 +1191,21 @@ fn start(f: Function, fixed: [bool], block: i64, facts: [Fact], tag: Tag) -> Pat
     }
     let map = state_map(p)
     if block != 0 {
+        // A parameter the function assigns has its value on entry in its
+        // entry variable, which nothing assigns: `requires` holds of that.
+        var entry_map = Vec(Option(Lin)).with_capacity(map.len())
+        for v, x in map {
+            if v < fixed.len && fixed[v] { entry_map.push(copy(x)) } else { entry_map.push(None) }
+        }
+        for e in f.callee.entries {
+            if e.0 < entry_map.len() && e.1 < entry_map.len() { entry_map[e.0] = copy(map[e.1]) }
+        }
         for x in f.requires() {
             var all = x.stated || x.is_or()
             for v in x.names() {
-                if v >= fixed.len || !fixed[v] { all = false }
+                if v >= entry_map.len() || entry_map[v].is_none() { all = false }
             }
-            if all { assume_fact(&p, x, map.as_slice(), Tag.Requires) }
+            if all { assume_fact(&p, x, entry_map.as_slice(), Tag.Requires) }
         }
     }
     // The invariants of what the parameters hold, on entry, and at a cut

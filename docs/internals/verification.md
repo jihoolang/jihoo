@@ -2,8 +2,9 @@
 
 Status: research. The compiler proves checks and
 [contracts](../language/contracts.md) itself
-([`jihoo verify`](../reference/command-line.md#verification), and
-`--verify` removes the proved checks), and runs on its own source; the
+([`jihoo verify`](../reference/command-line.md#verification); every
+build removes the proved checks and rejects unproved contracts), and runs
+on its own source; the
 experiments that led to it are in
 [jihoo-proofs/obligations](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations).
 
@@ -189,7 +190,7 @@ made it fit real programs, the compiler's own first:
   `requires` when every call proves it and nothing else can call it (an
   exported function, the entry, a destructor, a function in a `dyn` table
   or used as a value), its `ensures` and its cut points' facts when
-  every path proves them. A check is proved, and removed by `--verify`,
+  every path proves them. A check is proved, and removed by verification,
   only when each of its obligations is. Without the tags, one wrong
   `ensures` in `main` made every `requires` that `main` proved unproved.
 
@@ -254,7 +255,7 @@ contracts, and one decision.
   the function's variables on entry; a call proves the panic away when
   every such path, with the arguments for the parameters (and the
   caller's variables for their fields), contradicts what the caller knows.
-  The panic is then a check at the call, and `--verify` sends the call to a
+  The panic is then a check at the call, and verification sends the call to a
   copy of the function without the panics that call proved away. A site
   that a path from a loop head reaches, or whose paths say nothing about
   the entry values (`malloc` failed, an enum's tag), is not lifted.
@@ -469,6 +470,40 @@ building a fact's once one of them fails (`vc.INVARIANTS`); the
 generation that records a small function's paths to its panics builds
 none (`vc.LIFT`). The verdicts are the same, check for check, on the same
 source; verification takes 3.5 seconds and 530 MB.
+
+### Unproved contracts are errors
+
+With verification cheap enough, every command that generates code runs
+it: `build`, `run`, `test`, `emit-llvm` and `emit-obj` prove the program
+and remove the proved checks, and `--no-verify` keeps every check and
+proves nothing. An unproved contract is a compile error, as the
+principles above say it must be, at the clause: an `ensures`, a written
+`invariant`, a call that does not meet its callee's `requires`, a writer
+that does not keep a type's invariant, and a `requires` on a function
+that code outside the program may call (exported, the entry, a destructor
+or used as a value), which nothing proves. `check --verify` reports the
+same errors, and `jihoo verify` exits with status 1 when there are any.
+
+A clause counts as unproved when it is not valid in the sense above:
+also when its own proof succeeds but rests on an assumption that does
+not hold. Such a clause's message says what it rests on (a `requires`
+that some call does not meet, an `ensures`, a loop's invariant, a type's
+invariant), and it is reported only when no clause fails on its own,
+since proving those may prove it. One case the checks needed was a
+`sink` parameter that the body assigns: `ensures` reads its value on
+entry, but at a loop head nothing related that value to `requires`. A
+cut point now assumes `requires` of the parameters' values on entry, in
+the variables that hold them, which nothing assigns.
+
+`tests/fail` has a case per kind (`unproved_*.jh`, marked `// verify`,
+built with `emit-llvm` and checked with `check --verify`): a wrong
+`ensures`, a call that does not meet a `requires`, an invariant that does
+not hold on entry, one that an iteration does not preserve, one an
+off-by-one loop breaks, a writer breaking a type's invariant, and an
+exported function with a `requires`. The `verify` suite runs `tests/run`
+with `--no-verify` and compares with the ordinary, verified run. The
+compiler built by itself this way, without its proved checks, passes the
+whole test suite.
 
 ## Open questions
 

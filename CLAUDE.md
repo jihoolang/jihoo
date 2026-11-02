@@ -75,7 +75,8 @@ nix flake check                                    # everything CI runs
 - `tests/test/*.jh`: run with `jihoo test`, with the same directives; the
   output is the list of tests and results. `lib/std` files keep `#[test]`
   functions at their end, run by `jihoo test lib/std/<file>.jh`.
-- `tests/fail/*.jh`: each `// error: text` must appear in the compile error,
+- `tests/fail/*.jh`: each `// error: text` must appear in the compile error
+  (with `// verify`, the error of verification, from `emit-llvm`),
   and no `// no-error: text` may.
   Add one for every error the compiler should give, especially borrow rules.
 - `selfhost`: the tested compiler builds `compiler/main.jh`, and the result must

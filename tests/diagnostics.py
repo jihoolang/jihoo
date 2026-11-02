@@ -88,8 +88,10 @@ def main():
     negative_cases = 0
     for source in sorted((ROOT / "tests/fail").glob("*.jh")):
         path = source.relative_to(ROOT)
-        text = run(compiler, "check", path)
-        structured = run(compiler, "check", path, "--error-format=json")
+        # Verification's errors (`// verify`) come from `check --verify`.
+        verify = ["--verify"] if re.search(r"^// verify$", source.read_text(), re.MULTILINE) else []
+        text = run(compiler, "check", path, *verify)
+        structured = run(compiler, "check", path, *verify, "--error-format=json")
         assert text.returncode == structured.returncode == 1, path
         assert not text.stdout and not structured.stdout, path
         compare(text.stderr.decode("utf-8", errors="replace"), document(structured.stderr))

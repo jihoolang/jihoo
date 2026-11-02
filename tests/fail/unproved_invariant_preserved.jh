@@ -1,0 +1,16 @@
+// A loop invariant must hold again after each iteration.
+// error: unproved invariant in count
+// verify
+fn count(n: i64) -> i64
+    requires 0 <= n && n <= 100
+{
+    var i = 0
+    while i < n
+        invariant 0 <= i && i <= 5
+    {
+        i += 1
+    }
+    i
+}
+
+fn main() { println(count(3)) }

@@ -40,7 +40,7 @@ fn sum(xs: [i64]) -> i64 {
     }
     var k = 0
     for j in 0..3
-        invariant 0 <= k && k <= 3 * 2 - -1
+        invariant 0 <= k && -k <= 3 * 2 - -1 - 7
     {
         k += j
     }

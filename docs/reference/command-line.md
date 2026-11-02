@@ -37,7 +37,8 @@ once the program has none.
 |--------|---|
 | `-O0` … `-O3` | LLVM optimization (default `-O2`) |
 | `--release` | integer overflow wraps instead of trapping |
-| `--verify` | remove the checks [verification](#verification) proves (`build`, `run`, `test`, `emit-llvm`, `emit-obj`) |
+| `--no-verify` | skip [verification](#verification): keep every check, and do not prove contracts (`build`, `run`, `test`, `emit-llvm`, `emit-obj`) |
+| `--verify` | also prove contracts in `check` (code generation always does, unless `--no-verify`) |
 | `--target x86_64\|aarch64` | the machine to compile for (Linux, or UEFI for a `#![uefi]` program) |
 | `-I <dir>` | also look for modules in `<dir>` |
 | `-o <file>` | the output |
@@ -139,6 +140,8 @@ compile-time expressions, elaborates moves and drops, and checks borrowing.
 As with a build, non-generic functions are checked even when unused;
 generic bodies are checked for the instances the program requests.
 By default the root module must have a `main`; `--lib` removes that requirement.
+`check` does not run [verification](#verification), which a build does;
+`check --verify` does, and reports unproved contracts as errors.
 
 A successful check exits with status 0 and writes nothing by default. Source errors
 exit with status 1 and use the same diagnostics as compilation. Invalid
@@ -401,7 +404,8 @@ and `exit`, and 1 when its input ends or `exit` comes first.
 ```sh
 jihoo verify app.jh                  # the checks that stay, and why
 jihoo verify app.jh --all            # every check, proved or kept
-jihoo build --verify app.jh          # without the proved checks
+jihoo build app.jh                   # proves contracts, removes proved checks
+jihoo build --no-verify app.jh       # every check kept, contracts not proved
 ```
 
 [Verification](../internals/verification.md) proves that checks the
@@ -432,8 +436,15 @@ A proof counts only when everything it rests on is proved: a function's
 the entry, a destructor or used as a value is never assumed to be called
 that way), a callee's `ensures`, and the invariants of loops, inferred or
 written. `--machine` prints the verdicts of the root file's functions in
-the line format jihoo-proofs' differential test reads. `--verify` on a
-build runs the same verification and compiles without the proved checks:
+the line format jihoo-proofs' differential test reads. `verify` exits
+with status 1 when a contract is not proved.
+
+Every command that generates code (`build`, `run`, `test`, `emit-llvm`,
+`emit-obj`) runs the same verification, unless `--no-verify` is given. An
+unproved contract is then a compile error, with the message `verify`
+lists; a clause proved only under another that is not proved says what it
+rests on, and is reported only when no clause fails on its own. The build
+compiles without the proved checks:
 an `assert` becomes a jump, a checked `+ - *` wraps, a call that never
 returns becomes `unreachable` (so its branch goes away), and a call that
 proved its callee's panics away calls a copy of the callee without them.

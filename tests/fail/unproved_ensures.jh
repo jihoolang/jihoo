@@ -1,0 +1,11 @@
+// An `ensures` that a path does not meet is an error, in every build.
+// error: unproved `ensures` in next
+// verify
+fn next(x: i64) -> i64
+    requires 0 <= x && x < 10
+    ensures result == x
+{
+    x + 1
+}
+
+fn main() { println(next(1)) }

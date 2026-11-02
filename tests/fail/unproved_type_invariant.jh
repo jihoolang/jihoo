@@ -1,0 +1,16 @@
+// A writer of a struct with an invariant must keep it.
+// error: unproved invariant of `Count` in up
+// verify
+struct Count
+    invariant 0 <= self.n && self.n <= 10
+{
+    n: i64
+}
+
+fn up(inout c: Count) { c.n += 1 }
+
+fn main() {
+    var c = Count { n: 0 }
+    up(&c)
+    println(c.n)
+}

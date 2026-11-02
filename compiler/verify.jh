@@ -175,6 +175,40 @@ fn valid(a: Assumptions, f: i64, o: Outcome, r: Result1) -> bool {
     true
 }
 
+// What the message of a clause proved under an unproved assumption adds.
+const RESTS: str = ": it rests on "
+
+// The message of a contract error in the function `name`.
+fn message(msg: str, name: str) -> String {
+    match msg.find(RESTS) {
+        Some(k) => msg[..k] + " in " + name + msg[k..]
+        None => msg + " in " + name
+    }
+}
+
+// What a proved obligation rests on that is not proved, for its message.
+fn rests_on(p: mir.Program, a: Assumptions, f: i64, r: Result1) -> String {
+    for t in r.used {
+        match t {
+            Requires => if !a.requires[f] {
+                return ": it rests on this function's `requires`, which some call does not meet".to_string()
+            }
+            Cut(k) => if !a.cuts[f][k] {
+                return ": it rests on a loop's invariant that is not proved".to_string()
+            }
+            Ensures(g) => if !a.ensures[g] {
+                return ": it rests on the unproved `ensures` of " + p.fns[g].name.as_str()
+            }
+            TypeInvariant(ty) => if !a.holds(ty) {
+                return ": it rests on the invariant of `" + p.types.show(ty as u32).as_str() +
+                    "`, which some writer does not prove"
+            }
+            Path => {}
+        }
+    }
+    ": it rests on what is not proved".to_string()
+}
+
 fn copy_source(s: vc.Source) -> vc.Source {
     match s {
         Check(x) => vc.Source.Check(x)
@@ -666,8 +700,18 @@ pub fn verify(p: mir.Program) -> Report {
             }
         }
         var reported = Vec(String).new()
+        // A clause is unproved when its own proof fails, and also when it
+        // rests on something that is not proved, which the message names.
+        if escapes[i] && b.contract.requires.len() > 0 {
+            reported.push("requires".to_string())
+            report.contract_errors[i].push((
+                b.contract.requires[0].span,
+                "`requires` of a function that code outside the program may call (exported, the entry, a destructor or used as a value), where no call proves it".to_string()
+            ))
+        }
         for r in o.results {
-            if r.proved && o.whole { continue }
+            if valid(a, i, o, r) { continue }
+            let why = if r.proved && o.whole { rests_on(p, a, i, r) } else { "".to_string() }
             let error = match r.source {
                 Ensures(j) => Some((b.contract.ensures[j].span, "unproved `ensures`".to_string()))
                 Invariant(k, j) => if k < o.written && j < groups[k].1.len() {
@@ -686,20 +730,42 @@ pub fn verify(p: mir.Program) -> Report {
                 _ => None
             }
             match error {
-                Some(e) => {
-                    // Once per clause and place, though several paths reach it.
-                    let key = e.0.lo.to_string() + " " + e.1.as_str()
+                Some(x) => {
+                    // Once per clause and place, though several paths reach
+                    // it; a failure of its own before one through what it
+                    // rests on.
+                    let key = x.0.lo.to_string() + " " + x.1.as_str()
                     var seen = false
-                    for k in reported {
-                        if k == key { seen = true }
+                    for k in 0..reported.len() {
+                        if reported[k] == key {
+                            seen = true
+                            if why.len() == 0 { report.contract_errors[i][k] = (x.0, x.1.clone()) }
+                        }
                     }
                     if !seen {
                         reported.push(key)
-                        report.contract_errors[i].push(e)
+                        report.contract_errors[i].push((x.0, x.1 + why.as_str()))
                     }
                 }
                 None => {}
             }
+        }
+    }
+    // A clause unproved only because what it rests on is unproved is
+    // reported only when nothing else is: proving the others may prove it.
+    var direct = false
+    for es in report.contract_errors {
+        for e in es {
+            if !e.1.as_str().contains(RESTS) { direct = true }
+        }
+    }
+    if direct {
+        for i in 0..report.contract_errors.len() {
+            var kept = Vec((diag.Span, String)).new()
+            for k, e in report.contract_errors[i] {
+                if !e.1.as_str().contains(RESTS) { kept.push((e.0, e.1.clone())) }
+            }
+            report.contract_errors[i] = kept
         }
     }
     report
@@ -815,6 +881,18 @@ fn erase_one(inout body: mir.Body, block: i64, stmt: i64) {
     }
 }
 
+// The contract clauses that are not proved, as errors in the order of
+// the functions.
+pub fn errors(p: mir.Program, r: Report) -> Vec(diag.Diag) {
+    var out = Vec(diag.Diag).new()
+    for i, es in r.contract_errors {
+        for e in es {
+            out.push(diag.Diag.new(e.0, message(e.1.as_str(), p.fns[i].name.as_str()).as_str()))
+        }
+    }
+    out
+}
+
 // One line per check, then a summary.
 pub fn text(p: mir.Program, sources: diag.Sources, r: Report, all: bool) -> String {
     var out = String.new()
@@ -839,9 +917,7 @@ pub fn text(p: mir.Program, sources: diag.Sources, r: Report, all: bool) -> Stri
         for e in es {
             out.push_str(sources.where_(e.0).as_str())
             out.push_str(": ")
-            out.push_str(e.1.as_str())
-            out.push_str(" in ")
-            out.push_str(p.fns[i].name.as_str())
+            out.push_str(message(e.1.as_str(), p.fns[i].name.as_str()).as_str())
             out.push('\n')
         }
     }

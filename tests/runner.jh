@@ -29,9 +29,10 @@
 //   formatting is idempotent and fmt --check detects unformatted source.
 // - verify: the compiler's own #[test] functions (the verifier's checker
 //   and prover) pass, `jihoo verify --all` on each program in tests/verify says what
-//   its `//>` lines say of the checks in the file, and each program in
-//   tests/run does the same with `--verify` (which removes the checks it
-//   proves) as without. `jihoo verify compiler/main.jh` proves at least as
+//   its `//>` lines say of the checks in the file (failing exactly when one
+//   says a contract is unproved), and each program in tests/run does the
+//   same with `--no-verify` (which keeps every check) as with verification,
+//   which removes the checks it proves. `jihoo verify compiler/main.jh` proves at least as
 //   many checks of each kind as tests/verify/compiler.proved says.
 // - examples: each program in examples builds and runs.
 // - backend: the C ABI at every optimization level and with both backends,
@@ -360,9 +361,19 @@ impl Tests {
         if want.len() == 0 {
             return Err(String.from("no `// error:` line"))
         }
+        // `// verify`: the error is verification's, which `emit-llvm` runs
+        // and `check` runs with `--verify`.
+        let verified = directives(src.as_str(), "// verify").len() > 0
         var a = Vec(str).new()
-        a.push("emit-mir")
-        a.push(path)
+        if verified {
+            a.push("emit-llvm")
+            a.push(path)
+            a.push("-o")
+            a.push("/dev/null")
+        } else {
+            a.push("emit-mir")
+            a.push(path)
+        }
         let o = exec(self.compiler.as_str(), a.as_slice())
         if o.status.success() {
             return Err(String.from("compiles, but should not"))
@@ -378,7 +389,9 @@ impl Tests {
             }
         }
         // The debug MIR switch must never bypass validation in check mode.
-        let checked = exec("env", ["JIHOO_NO_ELAB=1", self.compiler.as_str(), "check", path])
+        let checked = if verified {
+            exec("env", ["JIHOO_NO_ELAB=1", self.compiler.as_str(), "check", "--verify", path])
+        } else { exec("env", ["JIHOO_NO_ELAB=1", self.compiler.as_str(), "check", path]) }
         if status(checked) != 1 || checked.stderr != o.stderr.as_str() || checked.stdout.len() != 0 {
             return Err("check disagrees with emit-mir:\n" + checked.stderr.as_str())
         }
@@ -555,8 +568,8 @@ impl Tests {
             }
             let r = if kind == "run" {
                 self.run_one(f.as_str())
-            } else if kind == "verified" {
-                self.run_with(f.as_str(), ["--verify"])
+            } else if kind == "unverified" {
+                self.run_with(f.as_str(), ["--no-verify"])
             } else if kind == "verify" {
                 self.verify_one(f.as_str())
             } else if kind == "fail" {
@@ -637,7 +650,14 @@ impl Tests {
             want.push(if d.starts_with(" ") { d[1..] } else { d })
         }
         let o = exec(self.compiler.as_str(), ["verify", "--all", path])
-        if !o.status.success() { return Err("verify failed:\n" + o.stderr.as_str()) }
+        // An unproved contract makes `verify` fail, and only that.
+        var unproved = false
+        for w in want {
+            if w.contains("unproved") || w.contains("`requires` of a function") { unproved = true }
+        }
+        if o.status.success() == unproved || o.stderr.len() > 0 {
+            return Err("verify failed:\n" + o.stderr.as_str())
+        }
         let prefix = path.to_string() + ":"
         var got = Vec(str).new()
         for l in o.stdout.as_str().lines() {
@@ -1441,7 +1461,7 @@ fn main() -> i32 {
             let sv = t.self_verify()
             t.check("verify: the compiler verifies itself", sv)
             t.suite_files("tests/verify", "verify")
-            t.suite_files("tests/run", "verified")
+            t.suite_files("tests/run", "unverified")
         } else if s == "examples" {
             t.suite_files("examples", "examples")
         } else if s == "backend" {
