@@ -576,7 +576,8 @@ impl Tests {
     // `  P of N KIND` lines), at least as many proved as
     // tests/verify/compiler.proved says (`P KIND` lines), so that a change
     // that loses proofs of the compiler's own checks fails. More is fine:
-    // raise the numbers there.
+    // raise the numbers there. A `clean FILE` line says that no check in
+    // FILE is kept.
     fn self_verify(self) -> Result((), String) {
         let want = read_file("tests/verify/compiler.proved")?
         let o = exec(self.compiler.as_str(), ["verify", "compiler/main.jh"])
@@ -586,6 +587,17 @@ impl Tests {
             let l = line.trim()
             if l.len == 0 || l.starts_with("#") { continue }
             let Some(sp) = l.find(" ") else { return Err("bad line: " + l) }
+            // `clean FILE`: verification keeps no check in the file.
+            if l[..sp] == "clean" {
+                let file = l[sp + 1..].to_string() + ":"
+                for g in o.stdout.as_str().lines() {
+                    if g.starts_with(file.as_str()) && g.contains(": kept ") {
+                        errors.push_str(g)
+                        errors.push('\n')
+                    }
+                }
+                continue
+            }
             let Some(n) = l[..sp].parse_int() else { return Err("bad line: " + l) }
             let kind = l[sp + 1..]
             var found = false

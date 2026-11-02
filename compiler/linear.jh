@@ -1,6 +1,12 @@
 // The trusted checker of verification (docs/internals/verification.md):
 // linear integer implications with Farkas certificates. It finds nothing;
 // it only adds up the weighted facts a prover proposes.
+//
+// It has no check that can trap: its sums are computed with `add` and
+// `mul`, which report overflow, and a certificate whose sum does not fit
+// an i128 is rejected. `jihoo verify compiler/main.jh` keeps no check in
+// this file, and the verify suite tests that it stays so. The generator's
+// arithmetic on forms, which traps, is `forms.jh`.
 
 // sum(k * x_v for each (v, k) in terms) + constant, read as a fact `>= 0`.
 // The terms are sparse, by increasing variable, with no zero coefficient.
@@ -28,9 +34,12 @@ impl Lin {
         0
     }
 
-    // self * a + other * b, merging the two sorted lists of terms.
-    pub fn combine(self, a: i128, other: Lin, b: i128) -> Lin {
-        var terms = Vec((i64, i128)).with_capacity(self.terms.len() + other.terms.len())
+    pub fn is_constant(self) -> bool { self.terms.len() == 0 }
+
+    // self + other * w, merging the two sorted lists of terms, or None when
+    // a number does not fit an i128.
+    pub fn add_scaled(self, other: Lin, w: i128) -> Option(Lin) {
+        var terms = Vec((i64, i128)).with_capacity(self.terms.len())
         var i = 0
         var j = 0
         while i < self.terms.len() || j < other.terms.len()
@@ -43,57 +52,26 @@ impl Lin {
                 i < self.terms.len() && self.terms[i].0 < other.terms[j].0
             ) {
                 v = self.terms[i].0
-                k = self.terms[i].1 * a
+                k = self.terms[i].1
                 i += 1
-            } else if i == self.terms.len() || other.terms[j].0 < self.terms[i].0 {
-                v = other.terms[j].0
-                k = other.terms[j].1 * b
-                j += 1
             } else {
-                v = self.terms[i].0
-                k = self.terms[i].1 * a + other.terms[j].1 * b
-                i += 1
+                let Some(p) = mul(other.terms[j].1, w) else { return None }
+                if i == self.terms.len() || other.terms[j].0 < self.terms[i].0 {
+                    v = other.terms[j].0
+                    k = p
+                } else {
+                    v = self.terms[i].0
+                    let Some(s) = add(self.terms[i].1, p) else { return None }
+                    k = s
+                    i += 1
+                }
                 j += 1
             }
             if k != 0 { terms.push((v, k)) }
         }
-        Lin { terms, constant: self.constant * a + other.constant * b }
-    }
-
-    pub fn plus(self, other: Lin) -> Lin { self.combine(1, other, 1) }
-    pub fn minus(self, other: Lin) -> Lin { self.combine(1, other, -1) }
-
-    pub fn scale(self, k: i128) -> Lin {
-        var terms = Vec((i64, i128)).with_capacity(self.terms.len())
-        if k != 0 {
-            for t in self.terms { terms.push((t.0, t.1 * k)) }
-        }
-        Lin { terms, constant: self.constant * k }
-    }
-
-    pub fn shift(self, k: i128) -> Lin {
-        Lin { terms: self.terms.clone(), constant: self.constant + k }
-    }
-
-    // The largest absolute value among the coefficients and the constant.
-    pub fn magnitude(self) -> i128 {
-        var m = abs(self.constant)
-        for t in self.terms {
-            if abs(t.1) > m { m = abs(t.1) }
-        }
-        m
-    }
-
-    pub fn is_constant(self) -> bool { self.terms.len() == 0 }
-
-    // Every coefficient and the constant are in [-max, max]; unlike
-    // `magnitude`, for any numbers.
-    pub fn within(self, max: i128) -> bool {
-        if self.constant < 0 - max || self.constant > max { return false }
-        for t in self.terms {
-            if t.1 < 0 - max || t.1 > max { return false }
-        }
-        true
+        let Some(p) = mul(other.constant, w) else { return None }
+        let Some(c) = add(self.constant, p) else { return None }
+        Some(Lin { terms, constant: c })
     }
 }
 
@@ -101,6 +79,37 @@ impl Clone for Lin {
     fn clone(self) -> Lin {
         Lin { terms: self.terms.clone(), constant: self.constant }
     }
+}
+
+// a + b, or None when it does not fit an i128.
+pub fn add(a: i128, b: i128) -> Option(i128) {
+    let s = a +% b
+    // Overflow gives the sum the other sign than both operands.
+    if (a < 0) == (b < 0) && (s < 0) != (a < 0) { return None }
+    Some(s)
+}
+
+const LOW: u128 = (1 << 64) - 1
+
+// a * b, or None when it does not fit an i128 (or is i128's least value).
+// The magnitudes are multiplied in halves of 64 bits, none of whose
+// products can wrap a u128.
+pub fn mul(a: i128, b: i128) -> Option(i128) {
+    let x: u128 = if a < 0 { (0 -% a) as u128 } else { a as u128 }
+    let y: u128 = if b < 0 { (0 -% b) as u128 } else { b as u128 }
+    let xh = x >> 64
+    let yh = y >> 64
+    // Both high halves nonzero: the product is at least 2^128.
+    if xh != 0 && yh != 0 { return None }
+    // At most one of the two is nonzero, each below 2^128.
+    let cross = xh *% (y & LOW) +% (x & LOW) *% yh
+    if cross >> 63 != 0 { return None }
+    let low = (x & LOW) *% (y & LOW)
+    let m = (cross << 64) +% low
+    // `m < low`: the sum wrapped; then the magnitude must fit 127 bits.
+    if m < low || m >> 127 != 0 { return None }
+    let r = m as i128
+    Some(if (a < 0) != (b < 0) { 0 -% r } else { r })
 }
 
 // Every fact `>= 0` together implies `claim >= 0`, for all integer values.
@@ -115,17 +124,16 @@ pub struct Certificate {
     pub weights: Vec(i128)
 }
 
-pub fn abs(x: i128) -> i128 { if x < 0 { 0 - x } else { x } }
-
-// The checker computes only within these bounds, where no product or sum
-// can leave an i128: each term is at most 2^65 * 2^50 = 2^115, and at most
-// 2^11 of them are added.
+// The generator and the provers keep their numbers within these bounds,
+// so that the checker's sums fit an i128 and certificates are accepted:
+// each term is at most 2^65 * 2^50 = 2^115, and at most 2^11 of them are
+// added. The checker's soundness does not depend on them.
 pub const MAX_VALUE: i128 = 1 << 65
 pub const MAX_WEIGHT: i128 = 1 << 50
 pub const MAX_FACTS: i64 = 2047
 
 // A form is well made: its terms are by increasing variable and none is
-// zero. `combine` relies on it, so the checker checks it of its inputs.
+// zero. `add_scaled` relies on it, so the checker checks it of its inputs.
 fn sorted(x: Lin) -> bool {
     var i = 0
     while i < x.terms.len()
@@ -141,7 +149,8 @@ fn sorted(x: Lin) -> bool {
 
 // Sound because an integer point satisfying the facts and the negated claim
 // makes the weighted sum non-negative, while the sum is a negative constant.
-// Returns the number of facts used.
+// Every sum is exact: one that does not fit an i128 rejects the
+// certificate. Returns the number of facts used.
 pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     let n = g.facts.len()
     if n > MAX_FACTS { return Err("too many facts to check") }
@@ -151,24 +160,31 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     for i in 0..n
         invariant c.weights.len() == n + 1 && g.facts.len() == n
     {
-        let x = g.facts[i]
-        if !sorted(x) { return Err("a fact is not a well-made form") }
-        if !x.within(MAX_VALUE) { return Err("a fact's numbers are too large to check") }
+        if !sorted(g.facts[i]) { return Err("a fact is not a well-made form") }
     }
     if !sorted(g.claim) { return Err("the claim is not a well-made form") }
-    if !g.claim.within(MAX_VALUE - 1) { return Err("the claim's numbers are too large to check") }
     for i in 0..c.weights.len()
         invariant c.weights.len() == n + 1 && g.facts.len() == n
     {
-        let w = c.weights[i]
-        if w < 0 { return Err("negative weight") }
-        if w > MAX_WEIGHT { return Err("a weight is too large to check") }
+        if c.weights[i] < 0 { return Err("negative weight") }
     }
-    var sum = g.claim.scale(-1).shift(-1).scale(c.weights[n])
+    // The negated claim, -claim - 1 >= 0.
+    let Some(negated) = Lin.num(-1).add_scaled(g.claim, -1) else {
+        return Err("the claim's numbers are too large to check")
+    }
+    let Some(first) = Lin.num(0).add_scaled(negated, c.weights[n]) else {
+        return Err("the weighted sum does not fit an i128")
+    }
+    var sum = first
     for i in 0..n
         invariant c.weights.len() == n + 1 && g.facts.len() == n
     {
-        if c.weights[i] != 0 { sum = sum.plus(g.facts[i].scale(c.weights[i])) }
+        if c.weights[i] != 0 {
+            let Some(s) = sum.add_scaled(g.facts[i], c.weights[i]) else {
+                return Err("the weighted sum does not fit an i128")
+            }
+            sum = s
+        }
     }
     if !sum.is_constant() { return Err("the weighted facts do not cancel") }
     if sum.constant >= 0 { return Err("the weighted facts are not contradictory") }
@@ -183,23 +199,23 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     Ok(used)
 }
 
+fn weights(ws: [i128]) -> Certificate {
+    var w = Vec(i128).new()
+    for x in ws { w.push(x) }
+    Certificate { weights: w }
+}
+
 #[test]
 fn checks_a_certificate() {
     // x >= 0 and 3 - x >= 0 imply 5 - x >= 0: 1 * (3 - x) + 1 * (x - 6) = -3.
     var facts = Vec(Lin).new()
     facts.push(Lin.of(0))
-    facts.push(Lin.of(0).scale(-1).shift(3))
-    let g = Goal { facts, claim: Lin.of(0).scale(-1).shift(5) }
-    var w = Vec(i128).new()
-    w.push(0)
-    w.push(1)
-    w.push(1)
-    assert(check(g, Certificate { weights: w }).is_ok(), "accepted")
-    var bad = Vec(i128).new()
-    bad.push(1)
-    bad.push(0)
-    bad.push(1)
-    assert(check(g, Certificate { weights: bad }).is_err(), "rejected")
+    facts.push(Lin.num(3).add_scaled(Lin.of(0), -1).unwrap())
+    let g = Goal { facts, claim: Lin.num(5).add_scaled(Lin.of(0), -1).unwrap() }
+    assert(check(g, weights([0, 1, 1])).is_ok(), "accepted")
+    assert(check(g, weights([1, 0, 1])).is_err(), "rejected")
+    assert(check(g, weights([0, 1, 1, 0])).is_err(), "one weight per fact")
+    assert(check(g, weights([-1, 1, 1])).is_err(), "negative weight")
 }
 
 #[test]
@@ -210,8 +226,45 @@ fn rejects_unsorted_forms() {
     var facts = Vec(Lin).new()
     facts.push(Lin { terms, constant: 0 })
     let g = Goal { facts, claim: Lin.num(-1) }
-    var w = Vec(i128).new()
-    w.push(0)
-    w.push(1)
-    assert(check(g, Certificate { weights: w }).is_err(), "rejected")
+    assert(check(g, weights([0, 1])).is_err(), "rejected")
+}
+
+// Numbers for the tests, computed while compiling.
+const BIG: i128 = 1 << 126
+const MINUS_BIG: i128 = 0 - BIG
+const MAX: i128 = BIG + (BIG - 1)
+const MIN: i128 = 0 - MAX - 1
+const MINUS_MAX: i128 = 0 - MAX
+const HALVES: i128 = (1 << 64) + 3
+const HALVES2: i128 = (1 << 62) + 5
+const HALVES_PRODUCT: i128 = BIG + 5 * (1 << 64) + 3 * (1 << 62) + 15
+const P100: i128 = 1 << 100
+const MINUS_P64: i128 = 0 - (1 << 64)
+
+#[test]
+fn rejects_sums_that_overflow() {
+    // x - 2^126 >= 0, and -x - 2^126 >= 0, with x's weight wrapping: a sum
+    // computed with wrapping arithmetic would cancel x and be negative.
+    var facts = Vec(Lin).new()
+    facts.push(Lin.num(MINUS_BIG).add_scaled(Lin.of(0), 1).unwrap())
+    facts.push(Lin.num(MINUS_BIG).add_scaled(Lin.of(0), -1).unwrap())
+    let g = Goal { facts, claim: Lin.num(0) }
+    assert(check(g, weights([2, 2, 0])).is_err(), "overflow rejected")
+    assert(check(g, weights([1, 1, 0])).is_ok(), "x - 2^126 and -x - 2^126")
+}
+
+#[test]
+fn exact_arithmetic() {
+    assert(add(MAX, 1).is_none(), "max + 1")
+    assert(add(MIN, -1).is_none(), "min - 1")
+    assert(add(MIN, MAX).unwrap() == -1, "min + max")
+    assert(mul(P100, 1 << 26).unwrap() == BIG, "2^126")
+    assert(mul(P100, 1 << 27).is_none(), "2^127")
+    assert(mul(MINUS_P64, 1 << 62).unwrap() == MINUS_BIG, "negative")
+    assert(mul(MAX, -1).unwrap() == MINUS_MAX, "max * -1")
+    assert(mul(MIN, -1).is_none(), "min * -1")
+    assert(mul(MIN, 1).is_none(), "min is rejected")
+    assert(mul(3, -7).unwrap() == -21, "small")
+    assert(mul(0, MIN).unwrap() == 0, "zero")
+    assert(mul(HALVES, HALVES2).unwrap() == HALVES_PRODUCT, "halves")
 }

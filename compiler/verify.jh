@@ -11,6 +11,7 @@ import std.io
 import std.mem
 import diag
 import fm
+import forms
 import infer
 import lex
 import linear

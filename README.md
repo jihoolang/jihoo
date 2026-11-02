@@ -155,8 +155,8 @@ may panic, such as `v[i]`), and
 lengths, with `&&`, `||` and `!`) with linear certificates
 that a small trusted checker accepts, and `--verify` removes the proved
 checks from a build. It runs on the compiler's own source
-(`jihoo verify compiler/main.jh`), and CI fails if it proves fewer; every
-bounds check in the trusted checker itself is proved.
+(`jihoo verify compiler/main.jh`), and CI fails if it proves fewer; no
+check is left in the trusted checker itself.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

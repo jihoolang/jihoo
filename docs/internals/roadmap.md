@@ -424,8 +424,10 @@ and moves into the compiler once its trust boundary is stated.
    that a range's end equals the length it copies, and its prover looks
    for a negative cycle among difference facts before elimination; the
    compiler proves 969 bounds and overflow checks and 155 calls' panics.
-   Left in the checker: the overflow checks of its `i128` products, which
-   need nonlinear facts and numbers beyond the checker's own.
+   Done: no check is left in the checker. Its sums are exact, with
+   arithmetic that reports overflow, and a certificate whose sum does not
+   fit an i128 is rejected; the `verify` suite fails if a check in
+   `linear.jh` is kept.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when

@@ -1,0 +1,65 @@
+// Arithmetic on linear forms, as the obligation generator and the provers
+// build them. It traps on overflow; the checker (`linear.jh`) does not use
+// it, and computes its sums with arithmetic that reports overflow instead.
+
+import linear
+
+impl linear.Lin {
+    // self * a + other * b, merging the two sorted lists of terms.
+    pub fn combine(self, a: i128, other: linear.Lin, b: i128) -> linear.Lin {
+        var terms = Vec((i64, i128)).with_capacity(self.terms.len() + other.terms.len())
+        var i = 0
+        var j = 0
+        while i < self.terms.len() || j < other.terms.len()
+            invariant 0 <= i && i <= self.terms.len()
+            invariant 0 <= j && j <= other.terms.len()
+        {
+            var v: i64 = 0
+            var k: i128 = 0
+            if j == other.terms.len() || (
+                i < self.terms.len() && self.terms[i].0 < other.terms[j].0
+            ) {
+                v = self.terms[i].0
+                k = self.terms[i].1 * a
+                i += 1
+            } else if i == self.terms.len() || other.terms[j].0 < self.terms[i].0 {
+                v = other.terms[j].0
+                k = other.terms[j].1 * b
+                j += 1
+            } else {
+                v = self.terms[i].0
+                k = self.terms[i].1 * a + other.terms[j].1 * b
+                i += 1
+                j += 1
+            }
+            if k != 0 { terms.push((v, k)) }
+        }
+        linear.Lin { terms, constant: self.constant * a + other.constant * b }
+    }
+
+    pub fn plus(self, other: linear.Lin) -> linear.Lin { self.combine(1, other, 1) }
+    pub fn minus(self, other: linear.Lin) -> linear.Lin { self.combine(1, other, -1) }
+
+    pub fn scale(self, k: i128) -> linear.Lin {
+        var terms = Vec((i64, i128)).with_capacity(self.terms.len())
+        if k != 0 {
+            for t in self.terms { terms.push((t.0, t.1 * k)) }
+        }
+        linear.Lin { terms, constant: self.constant * k }
+    }
+
+    pub fn shift(self, k: i128) -> linear.Lin {
+        linear.Lin { terms: self.terms.clone(), constant: self.constant + k }
+    }
+
+    // The largest absolute value among the coefficients and the constant.
+    pub fn magnitude(self) -> i128 {
+        var m = abs(self.constant)
+        for t in self.terms {
+            if abs(t.1) > m { m = abs(t.1) }
+        }
+        m
+    }
+}
+
+pub fn abs(x: i128) -> i128 { if x < 0 { 0 - x } else { x } }

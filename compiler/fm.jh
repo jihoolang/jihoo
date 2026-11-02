@@ -4,6 +4,7 @@
 // only lose proofs.
 
 import std.sort
+import forms
 import linear
 
 type Lin = linear.Lin
@@ -18,8 +19,8 @@ struct Row {
 const MAX_ROWS: i64 = 4096
 
 fn gcd(a: i128, b: i128) -> i128 {
-    var x = linear.abs(a)
-    var y = linear.abs(b)
+    var x = forms.abs(a)
+    var y = forms.abs(b)
     while y != 0 {
         let t = x % y
         x = y
@@ -46,7 +47,7 @@ fn reduce(sink r: Row) -> Row {
 // but never makes one.
 const LIMIT: i128 = 1 << 120
 
-fn fits(x: i128, k: i128) -> bool { k == 0 || linear.abs(x) <= LIMIT / linear.abs(k) }
+fn fits(x: i128, k: i128) -> bool { k == 0 || forms.abs(x) <= LIMIT / forms.abs(k) }
 
 fn row_fits(r: Row, k: i128) -> bool {
     if !fits(r.lin.magnitude(), k) { return false }
@@ -154,7 +155,7 @@ fn relevant(facts: [Lin], claim: Lin, n: i64, latest: bool) -> Vec(i64) {
 }
 
 // A type's range: a bound beyond 2^62, which rarely helps.
-fn is_range(x: Lin) -> bool { x.terms.len() == 1 && linear.abs(x.constant) >= 1 << 62 }
+fn is_range(x: Lin) -> bool { x.terms.len() == 1 && forms.abs(x.constant) >= 1 << 62 }
 
 // The `cap` relevant facts nearest the claim (all of them if `cap` is
 // negative): by level, then single bounds before relations and ranges

@@ -4,6 +4,7 @@
 // the semantics. Each check gives goals for `linear.check`: *these facts
 // imply that claim*.
 
+import forms
 import linear
 
 type Lin = linear.Lin
@@ -873,7 +874,7 @@ fn operand(p: Path, o: Operand) -> Option(Lin) {
 
 // `x * k` while its numbers stay within the checker's bounds.
 fn scaled(x: Lin, k: i128) -> Option(Lin) {
-    if k != 0 && x.magnitude() > linear.MAX_VALUE / linear.abs(k) { return None }
+    if k != 0 && x.magnitude() > linear.MAX_VALUE / forms.abs(k) { return None }
     Some(x.scale(k))
 }
 

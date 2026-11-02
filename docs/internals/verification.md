@@ -63,8 +63,8 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 
 | Part | Trusted | Why |
 | --- | --- | --- |
-| The checker (`linear.jh`, 146 lines; later the Horn kernel) | yes | it accepts the proof |
-| The obligation generator (`vc.jh`, 1,590 lines, and the model `obligations.jh` builds from MIR, 2,250) | yes | it states what MIR means: a wrong rule proves a false thing |
+| The checker (`linear.jh`, 155 lines; later the Horn kernel) | yes | it accepts the proof |
+| The obligation generator (`vc.jh`, 1,594 lines, the model `obligations.jh` builds from MIR, 2,250, and the arithmetic on forms in `forms.jh`, 53) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on and what is removed (`verify.jh`) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
 | Where the checker runs: compiled into `jihoo`, or in `interp.jh` | yes | |
@@ -410,6 +410,20 @@ arithmetic: products of a coefficient and a weight, which are not linear,
 and `i128` values, whose range the checker's own numbers cannot state.
 `check` no longer computes `abs` of its inputs (`i128::MIN` would trap) but
 tests each number against the bound.
+
+The checker then lost those last checks by computing exactly instead of
+within bounds: its sums go through `add` and `mul`, which give `None`
+when the result does not fit an i128 (overflow of `+%` gives the sum the
+other sign than both operands; `mul` multiplies the magnitudes in halves
+of 64 bits, none of whose products can wrap a `u128`), and a certificate
+whose sum does not fit is rejected. Nothing in the checker can trap, its
+soundness no longer rests on the bounds the generator and provers keep
+their numbers within (those only make certificates fit), and it accepts
+certificates with weights above 2^50 that it used to reject. The
+generator's arithmetic on forms, which traps on overflow, moved to
+`forms.jh`. `jihoo verify compiler/main.jh` keeps no check in
+`linear.jh`, and `tests/verify/compiler.proved` says so with a `clean`
+line, which the `verify` suite checks.
 
 ## Open questions
 

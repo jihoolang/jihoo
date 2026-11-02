@@ -4,6 +4,7 @@
 // to be in its type's range, so the output never claims more than MIR says.
 
 import diag
+import forms
 import lex
 import linear
 import mir

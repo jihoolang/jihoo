@@ -1,7 +1,6 @@
-// Doubling a form 127 times: while a certificate's weights fit the
-// checker's bounds (2^50) each `+` is proved, since `n` is 0; past them
-// the check is kept, and past 2^65 the result is not followed, instead of
-// the verifier's own numbers overflowing.
+// Doubling a form 127 times: while the generator's numbers fit its bounds
+// (2^65) each `+` is proved, since `n` is 0; past them the result is not
+// followed, instead of the verifier's own numbers overflowing.
 
 fn grow(n: i64) -> i64
     requires n == 0
@@ -141,6 +140,7 @@ fn main() {
     println(grow(0))
 }
 
+//> 9:9: proved integer overflow in grow
 //> 10:9: proved integer overflow in grow
 //> 11:9: proved integer overflow in grow
 //> 12:9: proved integer overflow in grow
@@ -191,21 +191,21 @@ fn main() {
 //> 57:9: proved integer overflow in grow
 //> 58:9: proved integer overflow in grow
 //> 59:9: proved integer overflow in grow
-//> 60:9: kept integer overflow in grow (argument)
-//> 61:9: kept integer overflow in grow (argument)
-//> 62:9: kept integer overflow in grow (argument)
-//> 63:9: kept integer overflow in grow (argument)
-//> 64:9: kept integer overflow in grow (argument)
-//> 65:9: kept integer overflow in grow (argument)
-//> 66:9: kept integer overflow in grow (argument)
-//> 67:9: kept integer overflow in grow (argument)
-//> 68:9: kept integer overflow in grow (argument)
-//> 69:9: kept integer overflow in grow (argument)
-//> 70:9: kept integer overflow in grow (argument)
-//> 71:9: kept integer overflow in grow (argument)
-//> 72:9: kept integer overflow in grow (argument)
-//> 73:9: kept integer overflow in grow (argument)
-//> 74:9: kept integer overflow in grow (argument)
+//> 60:9: proved integer overflow in grow
+//> 61:9: proved integer overflow in grow
+//> 62:9: proved integer overflow in grow
+//> 63:9: proved integer overflow in grow
+//> 64:9: proved integer overflow in grow
+//> 65:9: proved integer overflow in grow
+//> 66:9: proved integer overflow in grow
+//> 67:9: proved integer overflow in grow
+//> 68:9: proved integer overflow in grow
+//> 69:9: proved integer overflow in grow
+//> 70:9: proved integer overflow in grow
+//> 71:9: proved integer overflow in grow
+//> 72:9: proved integer overflow in grow
+//> 73:9: proved integer overflow in grow
+//> 74:9: kept integer overflow in grow (unstated)
 //> 75:9: kept integer overflow in grow (unstated)
 //> 76:9: kept integer overflow in grow (unstated)
 //> 77:9: kept integer overflow in grow (unstated)
@@ -267,4 +267,3 @@ fn main() {
 //> 133:9: kept integer overflow in grow (unstated)
 //> 134:9: kept integer overflow in grow (unstated)
 //> 135:9: kept integer overflow in grow (unstated)
-//> 136:9: kept integer overflow in grow (unstated)
