@@ -867,6 +867,53 @@ impl Interpreter {
                 self.write(dst, v, span)?
                 Ok(Value.new())
             }
+            Overflowing(op, ty) => {
+                let x = bits(args[0], span)?
+                let y = bits(args[1], span)?
+                var width: u32 = 64
+                var is_signed = false
+                match t.int(ty) { Some(i) => { width = i.bits; is_signed = i.signed }, None => {} }
+                let a = if is_signed { signed(t, x, ty) } else { x as i128 }
+                let b = if is_signed { signed(t, y, ty) } else { y as i128 }
+                let wrap = if op == lex.Op.Add {
+                    lex.Op.AddWrap
+                } else if op == lex.Op.Sub {
+                    lex.Op.SubWrap
+                } else { lex.Op.MulWrap }
+                let wrapped = match sema.fold_128(wrap, a, b, is_signed, ty, span)?.c {
+                    Int(v, _) => v
+                    _ => 0
+                }
+                // The exact result fits when the checked fold succeeds and
+                // lies within the type's width.
+                var over = false
+                match sema.fold_128(op, a, b, is_signed, ty, span) {
+                    Ok(c) => {
+                        let v = match c.c {
+                            Int(v, _) => v
+                            _ => 0
+                        }
+                        if width < 128 {
+                            if is_signed {
+                                let limit: i128 = 1 << (width - 1)
+                                over = v < 0 - limit || v >= limit
+                            } else {
+                                over = v as u128 >= (1 as u128 << width)
+                            }
+                        }
+                    }
+                    Err(_) => over = true
+                }
+                var parts = Vec(u32).new()
+                parts.push(ty)
+                parts.push(types.BOOL)
+                let pair = t.tuple(parts)
+                var out = zero(t.layout(pair).size)
+                let offs = t.field_offsets(pair)
+                put(&out, offs[0], integer(wrapped as u128, t.layout(ty).size))
+                put(&out, offs[1], integer(if over { 1 } else { 0 }, 1))
+                Ok(out)
+            }
             Trap => Err(error(span, "compile-time evaluation reached a trap"))
             _ => Err(error(span, "this intrinsic is not available during compile-time evaluation"))
         }

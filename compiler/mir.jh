@@ -232,6 +232,9 @@ pub enum Intrinsic {
     Round(u32)
     Abs(u32)
     Copysign(u32)
+    // `overflowing_add` and the like: the wrapped result and whether the
+    // exact one does not fit the type, as a `(T, bool)`.
+    Overflowing(Op, u32)
     // Inline assembly: template, constraints, result type.
     Asm(String, String, u32)
     AtomicLoad(u32)
@@ -695,6 +698,13 @@ fn show_intrinsic(inout s: String, i: Intrinsic) {
         Round(t) => debug_call1(&s, "Round", t)
         Abs(t) => debug_call1(&s, "Abs", t)
         Copysign(t) => debug_call1(&s, "Copysign", t)
+        Overflowing(op, t) => {
+            s.push_str("Overflowing(")
+            s.push_str(op.text())
+            s.push_str(", ")
+            t.show(&s)
+            s.push(')')
+        }
         Asm(tmpl, cons, t) => {
             s.push_str("Asm(")
             debug_str(&s, tmpl.as_str())
@@ -916,6 +926,7 @@ impl Clone for Intrinsic {
             Round(t) => Intrinsic.Round(t)
             Abs(t) => Intrinsic.Abs(t)
             Copysign(t) => Intrinsic.Copysign(t)
+            Overflowing(op, t) => Intrinsic.Overflowing(op, t)
             Asm(a, b, t) => Intrinsic.Asm(a.clone(), b.clone(), t)
             AtomicLoad(t) => Intrinsic.AtomicLoad(t)
             AtomicStore(t) => Intrinsic.AtomicStore(t)

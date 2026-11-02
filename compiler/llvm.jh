@@ -2217,6 +2217,53 @@ impl Gen {
             Trunc(t) => self.math(&cx, "trunc", t, vals, dptr, dt)
             Round(t) => self.math(&cx, "round", t, vals, dptr, dt)
             Abs(t) => self.math(&cx, "fabs", t, vals, dptr, dt)
+            Overflowing(op, t) => {
+                let lt = self.scalar(t)
+                let signed = match self.p.types.int(t) {
+                    Some(i) => i.signed
+                    None => false
+                }
+                let name = if op == Op.Add { "add" } else if op == Op.Sub { "sub" } else { "mul" }
+                let f = fmt.f(
+                    "llvm.{}{}.with.overflow.{}",
+                    [if signed { "s" } else { "u" }, name, lt.as_str()]
+                )
+                self.declare(
+                    f.as_str(),
+                    fmt.f(
+                        "declare { {}, i1 } @{}({}, {})",
+                        [lt.as_str(), f.as_str(), lt.as_str(), lt.as_str()]
+                    ).as_str()
+                )
+                let pair = cx.t()
+                cx.line(fmt.f(
+                    "{} = call { {}, i1 } @{}({} {}, {} {})",
+                    [
+                        pair.as_str(),
+                        lt.as_str(),
+                        f.as_str(),
+                        lt.as_str(),
+                        vals[0].as_str(),
+                        lt.as_str(),
+                        vals[1].as_str()
+                    ]
+                ).as_str())
+                let r = cx.t()
+                cx.line(fmt.f(
+                    "{} = extractvalue { {}, i1 } {}, 0",
+                    [r.as_str(), lt.as_str(), pair.as_str()]
+                ).as_str())
+                let o = cx.t()
+                cx.line(fmt.f(
+                    "{} = extractvalue { {}, i1 } {}, 1",
+                    [o.as_str(), lt.as_str(), pair.as_str()]
+                ).as_str())
+                let offs = self.p.types.field_offsets(dt)
+                let p0 = self.gep(&cx, dptr, offs[0])
+                self.store_scalar(&cx, t, r.as_str(), p0.as_str())
+                let p1 = self.gep(&cx, dptr, offs[1])
+                self.store_scalar(&cx, types.BOOL, o.as_str(), p1.as_str())
+            }
             Copysign(t) => {
                 let lt = self.scalar(t)
                 let suffix = if lt == "float" { "f32" } else { "f64" }

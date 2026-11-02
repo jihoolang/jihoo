@@ -13,6 +13,7 @@ name, which then hides the builtin.
 | `trap()` | stops the program at once |
 | `forget(x)` | gives up `x` without running its destructor |
 | `sqrt`, `floor`, `ceil`, `trunc`, `round`, `abs`, `copysign` | floats (`abs` also on signed integers) |
+| `overflowing_add(a, b)`, `overflowing_sub(a, b)`, `overflowing_mul(a, b)` | integers of one type: the wrapped result and whether the exact one does not fit, as `(T, bool)`; never traps |
 | `argc()`, `argv()` | the program's arguments, as C has them (see `std.env`) |
 | `efi_image()`, `efi_system_table()` | in a [UEFI program](../language/profiles.md#uefi), the image handle and system table the firmware gave it, as `*u8` (see `std.uefi`) |
 

@@ -1,0 +1,42 @@
+// `overflowing_add`, `overflowing_sub` and `overflowing_mul`: the wrapped
+// result and whether the exact one does not fit, while running and at
+// compile time.
+
+fn show(comptime T: type, p: (T, bool)) {
+    print(p.0)
+    print(" ")
+    println(p.1)
+}
+
+const C: (i8, bool) = overflowing_mul(16 as i8, 8 as i8)
+const MAX: i128 = ((1 as i128) << 126) - 1 + ((1 as i128) << 126)
+const D: (i128, bool) = overflowing_add(MAX, 1)
+
+fn main() {
+    show(overflowing_add(100 as i8, 27 as i8))
+    show(overflowing_add(100 as i8, 28 as i8))
+    show(overflowing_sub(0 as u8, 1 as u8))
+    show(overflowing_mul(3 as u8, 85 as u8))
+    show(overflowing_mul(3 as u8, 86 as u8))
+    let big: i128 = 1 << 100
+    show(overflowing_mul(big, 1 << 26))
+    show(overflowing_mul(big, 1 << 27))
+    show(overflowing_mul(-big, 1 << 27))
+    show(overflowing_sub(-MAX - 1, 1))
+    let max: u128 = 0 -% 1
+    show(overflowing_add(max, 1 as u128))
+    show(C)
+    show(D)
+}
+//> 127 false
+//> -128 true
+//> 255 true
+//> 255 false
+//> 2 true
+//> 85070591730234615865843651857942052864 false
+//> -170141183460469231731687303715884105728 true
+//> -170141183460469231731687303715884105728 false
+//> 170141183460469231731687303715884105727 true
+//> 0 true
+//> -128 true
+//> -170141183460469231731687303715884105728 true

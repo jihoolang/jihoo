@@ -403,6 +403,34 @@ impl sema.Sema {
                 span
             )?))
         }
+        if n == "overflowing_add" || n == "overflowing_sub" || n == "overflowing_mul" {
+            arity(args, 2, n, span)?
+            let a = self.expr(&fb, args[0], None)?
+            let t = a.ty
+            if !self.types.is_int(t) {
+                return Err(Diag.new(args[0].span, ("`" + n + "` takes integers").as_str()))
+            }
+            let b = self.expr(&fb, args[1], Some(t))?
+            let b = self.coerce(&fb, b, t, args[1].span)?
+            let o1 = self.operand(&fb, a, span)?
+            let o2 = self.operand(&fb, b, span)?
+            let op = if n == "overflowing_add" {
+                lex.Op.Add
+            } else if n == "overflowing_sub" {
+                lex.Op.Sub
+            } else { lex.Op.Mul }
+            var parts = Vec(u32).new()
+            parts.push(t)
+            parts.push(types.BOOL)
+            let pair = self.types.tuple(parts)
+            return Ok(Some(self.emit_call(
+                &fb,
+                Callee.Intrinsic(Intrinsic.Overflowing(op, t)),
+                ops2(o1, o2),
+                pair,
+                span
+            )?))
+        }
         if n == "argc" {
             arity(args, 0, n, span)?
             return Ok(Some(self.emit_call(

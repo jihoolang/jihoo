@@ -456,9 +456,13 @@ and moves into the compiler once its trust boundary is stated.
       point. Left with it: the adequacy of the theory for ℤ (its axioms
       hold in ℤ; reading derivability as truth is a statement about
       Horn's calculus, for Agda).
-   3. The code: contracts that name that theory, so the verifier proves
-      that `linear.jh`'s own functions compute what its relations say,
-      with lemmas from step 2 where a proof needs induction (0.6, step 2).
+   3. The code: a trusted translation of MIR (a fragment: integers,
+      `Vec` reads and pushes, `Option`, loops) into Horn rules, which
+      says what the code computes the way `vc.jh` says what it checks,
+      and a proof in Horn that `check` returning `Ok` gives `accepts`.
+      `linear.jh`'s `add` and `mul` compute with bit tricks the
+      translation would have to model; 0.4.7's `overflowing_add` and
+      `overflowing_mul` builtins replace them with exact semantics.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
