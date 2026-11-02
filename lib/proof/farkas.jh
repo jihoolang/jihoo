@@ -19,29 +19,26 @@ import proof.ring
 import proof.schematic
 
 pub fn theory() -> String {
-    String.from("(sort Z) (sort N) (sort T) (sort X) (sort L) (sort F) (sort W)\n") + ring.theory().as_str() +
+    String.from("(sort Z) (sort N) (sort P) (sort T) (sort X) (sort L) (sort F) (sort W)\n") + ring.theory().as_str() +
         "(ctor n0 () N) (ctor ns (N) N)\n" +
-        "(ctor tnil () T) (ctor tcons (N Z T) T)\n" +
-        "(ctor xnil () X) (ctor xcons (Z X) X)\n" +
+        "(ctor pair (Z Z) P) (ctor tnil () T) (ctor tcons (P T) T)\n" +
         "(ctor lin (T Z) L)\n" +
         "(ctor fnil () F) (ctor fcons (L F) F)\n" +
         "(ctor wnil () W) (ctor wcons (Z W) W)\n" +
-        "(ctor look (X N) Z) (ctor ev (T X) Z) (ctor val (L X) Z)\n" +
-        "(pred push (N Z T T)) (pred ms (N T T Z T)) (pred as (L L Z L)) (pred sums (F W L L))\n" +
+        "(ctor look (X Z) Z) (ctor ev (T X) Z) (ctor val (L X) Z)\n" +
+        "(pred push (Z Z T T)) (pred ms (N T T Z T)) (pred as (L L Z L)) (pred sums (F W L L))\n" +
         "(pred nnw (W)) (pred sat (F X)) (pred accepts (F L W Z))\n" +
-        "(rule look.nil () (eq (look xnil ?v) z0))\n" +
-        "(rule look.zero () (eq (look (xcons ?a ?e) n0) ?a))\n" +
-        "(rule look.succ () (eq (look (xcons ?a ?e) (ns ?v)) (look ?e ?v)))\n" +
+        "(rule eq.look ((eq ?a ?b)) (eq (look ?x ?a) (look ?x ?b)))\n" +
         "(rule ev.nil () (eq (ev tnil ?x) z0))\n" +
-        "(rule ev.cons () (eq (ev (tcons ?v ?k ?r) ?x) (add (mul ?k (look ?x ?v)) (ev ?r ?x))))\n" +
+        "(rule ev.cons () (eq (ev (tcons (pair ?v ?k) ?r) ?x) (add (mul ?k (look ?x ?v)) (ev ?r ?x))))\n" +
         "(rule val.lin () (eq (val (lin ?t ?c) ?x) (add (ev ?t ?x) ?c)))\n" +
-        "(rule push.keep () (push ?v ?k ?r (tcons ?v ?k ?r)))\n" +
+        "(rule push.keep () (push ?v ?k ?r (tcons (pair ?v ?k) ?r)))\n" +
         "(rule push.drop ((eq ?k z0)) (push ?v ?k ?r ?r))\n" +
         "(rule ms.nil () (ms n0 tnil tnil ?w tnil))\n" +
-        "(rule ms.left ((ms ?n ?a ?b ?w ?r) (push ?v ?k ?r ?s)) (ms (ns ?n) (tcons ?v ?k ?a) ?b ?w ?s))\n" +
-        "(rule ms.right ((ms ?n ?a ?b ?w ?r) (push ?v (mul ?k ?w) ?r ?s)) (ms (ns ?n) ?a (tcons ?v ?k ?b) ?w ?s))\n" +
-        "(rule ms.both ((ms ?n ?a ?b ?w ?r) (push ?v (add ?j (mul ?k ?w)) ?r ?s))" +
-        " (ms (ns ?n) (tcons ?v ?j ?a) (tcons ?v ?k ?b) ?w ?s))\n" +
+        "(rule ms.left ((ms ?n ?a ?b ?w ?r) (push ?v ?k ?r ?s)) (ms (ns ?n) (tcons (pair ?v ?k) ?a) ?b ?w ?s))\n" +
+        "(rule ms.right ((ms ?n ?a ?b ?w ?r) (push ?v (mul ?k ?w) ?r ?s)) (ms (ns ?n) ?a (tcons (pair ?v ?k) ?b) ?w ?s))\n" +
+        "(rule ms.both ((eq ?v ?u) (ms ?n ?a ?b ?w ?r) (push ?v (add ?j (mul ?k ?w)) ?r ?s))" +
+        " (ms (ns ?n) (tcons (pair ?v ?j) ?a) (tcons (pair ?u ?k) ?b) ?w ?s))\n" +
         "(rule as.lin ((ms ?n ?t ?u ?w ?r)) (as (lin ?t ?c) (lin ?u ?d) ?w (lin ?r (add ?c (mul ?d ?w)))))\n" +
         "(rule sums.nil () (sums fnil wnil ?s ?s))\n" +
         "(rule sums.skip ((eq ?w z0) (sums ?fs ?ws ?s ?t)) (sums (fcons ?f ?fs) (wcons ?w ?ws) ?s ?t))\n" +
@@ -116,7 +113,8 @@ impl Dev {
         if e.is("ev") && e.arg(0).is("tcons") {
             let t = e.arg(0)
             let x = e.arg(1)
-            let body = ring.add(ring.mul(t.arg(1), look(x, t.arg(0))), ev(t.arg(2), x))
+            let p = t.arg(0)
+            let body = ring.add(ring.mul(p.arg(1), look(x, p.arg(0))), ev(t.arg(1), x))
             let p = ring.axiom(&self.k, "ev.cons", ring.eq(e, body))
             let rest = self.unfold(ring.rhs(p), eqs)
             return ring.trans(&self.k, p, rest)
@@ -240,7 +238,7 @@ fn one(r: cert.Ref) -> Vec(cert.Ref) {
 impl Dev {
     // push v k r s ⊢ ev s x = k * look x v + ev r x
     fn push_ev(inout self) -> i64 {
-        self.k.declare("pv", "N")
+        self.k.declare("pv", "Z")
         self.k.declare("pk", "Z")
         self.k.declare("pr", "T")
         self.k.declare("ps", "T")
@@ -300,28 +298,42 @@ impl Dev {
         for rule in ["ms.left", "ms.right", "ms.both"] {
             let o = self.open(hs, [ih.clone()], rule, "mc")
             let want = o.b.theta.apply(j)
-            // The branch's variables: n a b w r v (j) k s.
+            // The branch's variables: n a b w r v k s, or for ms.both
+            // v u n a b w r j k s, with the premise v = u first.
+            let both = rule == "ms.both"
+            let at = if both { 2 } else { 0 }
             let nv = o.b.vars.len()
-            let a = o.at(1)
-            let b = o.at(2)
-            let w = o.at(3)
-            let rr = o.at(4)
-            let vv = o.at(5)
+            let a = o.at(at + 1)
+            let b = o.at(at + 2)
+            let rr = o.at(at + 4)
+            let vv = if both { o.at(0) } else { o.at(5) }
             let s = o.at(nv - 1)
+            let pm = if both { 1 } else { 0 }
             let i1 = self.k.apply_at(
                 o.ctx[0].index(),
                 ["ma", "mb", "mr"],
                 [a.clone(), b.clone(), rr.clone()],
-                one(o.prem[0].clone()).as_slice()
+                one(o.prem[pm].clone()).as_slice()
             )
-            let pushed = o.prem[1].judgment.arg(1)
+            let pushed = o.prem[pm + 1].judgment.arg(1)
             let p1 = self.k.apply_at(
                 push_ev,
                 ["pv", "pk", "pr", "ps", "px"],
                 [vv.clone(), pushed.clone(), rr.clone(), s.clone(), x.clone()],
-                one(o.prem[1].clone()).as_slice()
+                one(o.prem[pm + 1].clone()).as_slice()
             )
-            let r = self.prove(want.arg(0), want.arg(1), [p1.clone(), i1.clone()])
+            var eqs = Vec(cert.Ref).new()
+            eqs.push(p1.clone())
+            eqs.push(i1.clone())
+            if both {
+                // look x u = look x v, from v = u.
+                let uv = ring.sym(&self.k, o.prem[0].clone())
+                let u = o.at(1)
+                let lj = ring.eq(look(x, u), look(x, vv))
+                let l = self.step("eq.look", [uv], lj)
+                eqs.push(l)
+            }
+            let r = self.prove(want.arg(0), want.arg(1), eqs.as_slice())
             cases.push(o.case(r))
         }
         let succ_case = self.close(hs, [ih.clone()], j, cases.as_slice())
@@ -645,10 +657,6 @@ fn a_wrong_merge_is_not_proved() {
     let c = certificate()
     let g = goals()
     let th = theory()
-    let wrong = edit(
-        th.as_str(),
-        "(ms (ns ?n) (tcons ?v ?j ?a) (tcons ?v ?k ?b) ?w ?s)",
-        "(ms (ns ?n) (tcons ?v ?j ?a) (tcons ?u ?k ?b) ?w ?s)"
-    )
+    let wrong = edit(th.as_str(), "((eq ?v ?u) (ms ?n ?a ?b ?w ?r)", "((ms ?n ?a ?b ?w ?r)")
     assert(schematic.check(wrong.as_str(), g.as_str(), c.as_str()).is_err(), "both branch")
 }

@@ -3,8 +3,10 @@
 // it only adds up the weighted facts a prover proposes.
 //
 // It has no check that can trap: its sums are computed with `add` and
-// `mul`, which report overflow, and a certificate whose sum does not fit
-// an i128 is rejected. `jihoo verify compiler/main.jh` keeps no check in
+// `mul`, which report overflow (with the `overflowing_*` builtins, whose
+// meaning is exact), and a certificate whose sum does not fit an i128 is
+// rejected. Its loops are `while` loops, without the wrapping counters of
+// range `for`, so that lib/proof's model of it follows the code. `jihoo verify compiler/main.jh` keeps no check in
 // this file, and the verify suite tests that it stays so. The generator's
 // arithmetic on forms, which traps, is `forms.jh`.
 
@@ -83,33 +85,16 @@ impl Clone for Lin {
 
 // a + b, or None when it does not fit an i128.
 pub fn add(a: i128, b: i128) -> Option(i128) {
-    let s = a +% b
-    // Overflow gives the sum the other sign than both operands.
-    if (a < 0) == (b < 0) && (s < 0) != (a < 0) { return None }
+    let (s, over) = overflowing_add(a, b)
+    if over { return None }
     Some(s)
 }
 
-const LOW: u128 = (1 << 64) - 1
-
-// a * b, or None when it does not fit an i128 (or is i128's least value).
-// The magnitudes are multiplied in halves of 64 bits, none of whose
-// products can wrap a u128.
+// a * b, or None when it does not fit an i128.
 pub fn mul(a: i128, b: i128) -> Option(i128) {
-    let x: u128 = if a < 0 { (0 -% a) as u128 } else { a as u128 }
-    let y: u128 = if b < 0 { (0 -% b) as u128 } else { b as u128 }
-    let xh = x >> 64
-    let yh = y >> 64
-    // Both high halves nonzero: the product is at least 2^128.
-    if xh != 0 && yh != 0 { return None }
-    // At most one of the two is nonzero, each below 2^128.
-    let cross = xh *% (y & LOW) +% (x & LOW) *% yh
-    if cross >> 63 != 0 { return None }
-    let low = (x & LOW) *% (y & LOW)
-    let m = (cross << 64) +% low
-    // `m < low`: the sum wrapped; then the magnitude must fit 127 bits.
-    if m < low || m >> 127 != 0 { return None }
-    let r = m as i128
-    Some(if (a < 0) != (b < 0) { 0 -% r } else { r })
+    let (p, over) = overflowing_mul(a, b)
+    if over { return None }
+    Some(p)
 }
 
 // Every fact `>= 0` together implies `claim >= 0`, for all integer values.
@@ -157,16 +142,20 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     if c.weights.len() != n + 1 {
         return Err("a certificate needs one weight per fact and one for the claim")
     }
-    for i in 0..n
-        invariant c.weights.len() == n + 1 && g.facts.len() == n
+    var i = 0
+    while i < n
+        invariant 0 <= i && c.weights.len() == n + 1 && g.facts.len() == n
     {
         if !sorted(g.facts[i]) { return Err("a fact is not a well-made form") }
+        i += 1
     }
     if !sorted(g.claim) { return Err("the claim is not a well-made form") }
-    for i in 0..c.weights.len()
-        invariant c.weights.len() == n + 1 && g.facts.len() == n
+    i = 0
+    while i < n + 1
+        invariant 0 <= i && c.weights.len() == n + 1 && g.facts.len() == n
     {
         if c.weights[i] < 0 { return Err("negative weight") }
+        i += 1
     }
     // The negated claim, -claim - 1 >= 0.
     let Some(negated) = Lin.num(-1).add_scaled(g.claim, -1) else {
@@ -176,8 +165,9 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
         return Err("the weighted sum does not fit an i128")
     }
     var sum = first
-    for i in 0..n
-        invariant c.weights.len() == n + 1 && g.facts.len() == n
+    i = 0
+    while i < n
+        invariant 0 <= i && c.weights.len() == n + 1 && g.facts.len() == n
     {
         if c.weights[i] != 0 {
             let Some(s) = sum.add_scaled(g.facts[i], c.weights[i]) else {
@@ -185,11 +175,12 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
             }
             sum = s
         }
+        i += 1
     }
     if !sum.is_constant() { return Err("the weighted facts do not cancel") }
     if sum.constant >= 0 { return Err("the weighted facts are not contradictory") }
     var used = 0
-    var i = 0
+    i = 0
     while i < c.weights.len()
         invariant 0 <= used && used <= i
     {
@@ -263,7 +254,7 @@ fn exact_arithmetic() {
     assert(mul(MINUS_P64, 1 << 62).unwrap() == MINUS_BIG, "negative")
     assert(mul(MAX, -1).unwrap() == MINUS_MAX, "max * -1")
     assert(mul(MIN, -1).is_none(), "min * -1")
-    assert(mul(MIN, 1).is_none(), "min is rejected")
+    assert(mul(MIN, 1).unwrap() == MIN, "min fits")
     assert(mul(3, -7).unwrap() == -21, "small")
     assert(mul(0, MIN).unwrap() == 0, "zero")
     assert(mul(HALVES, HALVES2).unwrap() == HALVES_PRODUCT, "halves")
