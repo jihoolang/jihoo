@@ -127,10 +127,27 @@ def ground(t):
     return (t[0], tuple(ground(a) for a in t[1]))
 
 
+class Ground(tuple):
+    """A term without variables: the inputs of a query. No variable occurs in
+    it, so the occurs check need not walk it (inputs with many facts made that
+    walk, repeated at every binding, most of the search's time)."""
+
+    __slots__ = ()
+
+
+def freeze(t):
+    """t, with every compound subterm marked as Ground (t has no variables)."""
+    if isinstance(t, tuple):
+        return Ground((t[0], tuple(freeze(a) for a in t[1])))
+    return t
+
+
 def occurs(v, t):
     t = deref(t)
     if t is v:
         return True
+    if type(t) is Ground:
+        return False
     return isinstance(t, tuple) and any(occurs(v, a) for a in t[1])
 
 
@@ -256,7 +273,8 @@ class Rules:
         r = Var()
         trail = []
         out = set()
-        for _ in self.solve([(pred, tuple(inputs) + (r,))], trail):
+        inputs = tuple(freeze(i) for i in inputs)
+        for _ in self.solve([(pred, inputs + (r,))], trail):
             out.add(ground(r))
         return out
 
