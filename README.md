@@ -161,8 +161,10 @@ check is left in the trusted checker itself, and the checker is proved
 sound: [`lib/proof`](lib/proof/refine.jh) checks a Horn proof, from the
 rules `jihoo emit-horn` writes for its code, that when it accepts a
 certificate no integer point satisfies the facts and the negated claim,
-and [`agda/`](agda/Adequacy.agda) proves in Agda that the proof's theory
-means this of the integers.
+and [`agda/`](agda/Certified.agda) checks that proof in Agda with Horn's
+proved checker and reads it in the integers. The translation of the code
+into rules is still trusted, and the composed proof of the verifier
+(execution semantics, condition generation, check removal) is pending.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

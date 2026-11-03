@@ -138,10 +138,11 @@ Horn's. `cert.jh` builds certificates (untrusted), `ring.jh` has the
 ordered-ring axioms and a ring-identity prover, `farkas.jh` proves the
 model of `compiler/linear.jh` sound, and `refine.jh` proves the rules
 `jihoo emit-horn` (`compiler/horn.jh`) writes for its `check` sound (the
-`verify` suite runs it through `tests/horn/linear.jh`). `agda/` proves in
-Agda (with `../horn/agda`, the flake input `horn`) that this theory reads
-correctly in the integers: `agda/check.sh` (`nix shell nixpkgs#agda`), or
-`nix build .#checks.x86_64-linux.adequacy`.
+`verify` suite runs it through `tests/horn/linear.jh`). `agda/` checks
+that certificate in Agda with Horn's proved checker (`../horn/agda`, the
+flake input `horn`) and reads the theorem in the integers, with no
+premise: `agda/check.sh` (needs `agda` and Horn's `schematic-kernel` on
+`PATH`), or `nix build .#checks.x86_64-linux.adequacy`.
 
 ## Docs and website
 

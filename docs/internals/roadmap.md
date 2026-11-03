@@ -487,17 +487,22 @@ and moves into the compiler once its trust boundary is stated.
       `nix flake check` regenerates and checks the certificate from the
       current source, rejects corrupted certificates, and no longer
       relies on the correctness of the jihoo Horn checker for this proof.
-      Started: [`agda/certificate.jh`](../../agda/certificate.jh) exports
-      the actual theory, goals and proof; the `certificate` Nix check
-      retains them and checks acceptance and corrupted-result rejection
-      with the pinned Rust Horn checker. Agda checking of the actual
-      implicational certificate is still pending; the pinned Horn
-      exporter does not support it ([details](../../agda/README.md)).
-      The Agda result adapter now proves equivalence of plain-hypothesis
-      `ValidR` and `Valid`, and checks that all remaining hypotheses are
-      stated by the goal. CI checks its use and rejects discarded or
-      generalized hypotheses at the result boundary. Exporting and
-      checking the actual proof steps remains pending.
+      Done ([details](../../agda/README.md)): Horn's
+      `agda/ImplicationCheck.agda` is a checker for implicational
+      certificates that Agda runs by evaluation, proved sound in every
+      model of the rules from `Implication.agda`'s lemmas and `Unify.agda`'s
+      unifier; Horn's `schematic-kernel --agda` exports the certificate
+      for it. `nix flake check` regenerates the certificate from the
+      current source, exports it, and has Agda check it;
+      [`agda/Certified.agda`](../../agda/Certified.agda) gives its theorem
+      Adequacy's model in the ring, so `Adequacy.sound` no longer takes
+      `Valid goalH goalJ` as a premise. Agda rejects a certificate for a
+      goal without one of its hypotheses (Horn's test on `le_trans`); the
+      `certificate` check keeps the Rust checker's rejection of corrupted
+      results. Doing this found that Horn's checkers, Rust and jihoo's
+      port, accepted a rule hypothesis as a premise without proving its
+      premises, so they accepted false implications; both now reject it,
+      and this proof never relied on it.
    5. Required before 0.5.0: prove the connection from execution to the
       Horn model. Define the execution semantics of the MIR fragment
       used by `linear.jh`, including overflow and the `Vec` operations

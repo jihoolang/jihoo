@@ -500,7 +500,8 @@ What was left before the theorem is about the code itself:
    `pt` from the values of finitely many variables; `X` had no
    constructor before, and a sort without ground terms makes every
    statement about its values hold vacuously. `nix flake check` runs it
-   (`agda/check.sh`, a minute).
+   (`agda/check.sh`, which also checks the certificate in Agda, a few
+   minutes).
 2. **The code.** Done ([below](#the-proof-of-the-code)): the rules
    `jihoo emit-horn` writes for `linear.jh` give `accepts` when `check`
    returns `Ok`.
@@ -581,11 +582,13 @@ sum's sign and one without the test of the weights', whose proofs do not
 go through. `check` now reads the next fact on every pass of the sum
 loop, so that the proof knows it when its weight is zero.
 
-What this rests on: the translation (`horn.jh`, trusted as `vc.jh` is),
-`std`'s `Vec` being a list as `len`, `nth` and `snoc` say, `lib/proof`'s
-checker accepting only what Horn's Agda development proves sound (Horn's
-own checker accepts the same certificate), and the export of the theory
-to Agda. Reading the theory in ℤ is proved ([above](#the-checkers-soundness)).
+What this rests on: the translation (`horn.jh`, trusted as `vc.jh` is) and
+`std`'s `Vec` being a list as `len`, `nth` and `snoc` say. The certificate
+itself is checked by Agda, running Horn's checker for implicational
+certificates, which Horn's Agda development proves sound in every model of
+the rules; [`agda/Certified.agda`](../../agda/Certified.agda) reads the
+result in ℤ ([above](#the-checkers-soundness)), so neither `lib/proof`'s
+checker nor Horn's Rust one is trusted for it.
 
 The translation and `Vec` are tested against the code they describe
 ([`tests/horn/differential`](../../tests/horn/differential/check.py)):

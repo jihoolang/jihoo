@@ -177,8 +177,9 @@
           };
         in
         {
-          # Retain the actual proof for independent consumers. This is a
-          # second implementation check, not yet an Agda certificate check.
+          # Retain the actual proof for independent consumers: the theory,
+          # goals and certificate, checked again by Horn's Rust checker, and
+          # their Agda export, which the `adequacy` check has Agda check.
           certificate = pkgs.runCommand "jihoo-soundness-certificate" {
             nativeBuildInputs = [ jihoo hornChecker ];
           } ''
@@ -191,6 +192,8 @@
             jihoo emit-horn --lib compiler/linear.jh --fn check > "$out/check.horn"
             jihoo run agda/certificate.jh -- "$out/check.horn" "$out"
             schematic-kernel "$out/check.theory" "$out/check.goals" "$out/check.proof" > "$out/checked.txt"
+            schematic-kernel --agda CheckCertificate "$out/check.theory" "$out/check.goals" "$out/check.proof" \
+              "$out/CheckCertificate.agda" > /dev/null
             # Fail if a missing result or a result pointing at the wrong
             # fact is accepted. Keep the original proof intact.
             sed '/^(result /d' "$out/check.proof" > missing.proof
@@ -220,15 +223,17 @@
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);
 
-          # agda/check.sh: the theory in which lib/proof/refine.jh proves
-          # the linear checker sound, read in the integers, checked by Agda
-          # against Horn's agda/.
-          adequacy = pkgs.runCommand "jihoo-adequacy" { nativeBuildInputs = [ jihoo pkgs.agda ]; } ''
+          # agda/check.sh: the certificate lib/proof/refine.jh produces that
+          # the linear checker is sound, checked by Agda running Horn's
+          # proved checker (agda/ImplicationCheck.agda), and the theorem read
+          # in the integers.
+          adequacy = pkgs.runCommand "jihoo-adequacy" { nativeBuildInputs = [ jihoo pkgs.agda hornChecker ]; } ''
             cp -R ${src}/. src
             chmod -R u+w src
             cp -R ${./agda} src/agda
             cd src
-            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR
+            # Agda's messages contain Unicode.
+            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR LC_ALL=C.UTF-8
             HORN=${horn} JIHOO=jihoo bash agda/check.sh
             touch $out
           '';

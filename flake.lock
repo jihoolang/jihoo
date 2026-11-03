@@ -3,11 +3,11 @@
     "horn": {
       "flake": false,
       "locked": {
-        "lastModified": 1793687608,
-        "narHash": "sha256-jakUDtz9iJUWNmQjiEdX1qDzbupv8QKmkb/RPrt/zcU=",
+        "lastModified": 1793693953,
+        "narHash": "sha256-hrPZ2G9eLEjVkkPsfsARXlGbYkXKICgW30J56kwbIXw=",
         "owner": "jihoo12",
         "repo": "horn",
-        "rev": "a1709846d4a8ea777b2b945c8a3ac5bcd51aa61a",
+        "rev": "cf9e6cfa2a945689095d75e28197dfbb02e33853",
         "type": "github"
       },
       "original": {

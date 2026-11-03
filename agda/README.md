@@ -1,53 +1,51 @@
 # Verifier soundness proofs
 
-`nix build .#checks.x86_64-linux.adequacy` checks `Integers.agda` with
-Agda's `--safe` mode. It establishes the interpretation of the generated
-theory in the integers. Its `sound` theorem still takes
-`Valid goalH goalJ` as a premise; this command does not check the actual
-36,631-step certificate in Agda.
+`nix build .#checks.x86_64-linux.adequacy` runs `check.sh`: from the current
+source it generates the theory (`Theory.agda`), the certificate
+`lib/proof/refine.jh` produces that `compiler/linear.jh`'s `check` is sound,
+and that certificate's Agda export (`CheckCertificate.agda`, written by
+Horn's `schematic-kernel --agda`), then checks `Certified.agda` with Agda's
+`--safe` mode. The theorem it proves has no premise: when `check` returns
+`Ok`, no integer point satisfies the facts and the negated claim.
 
-`nix build .#checks.x86_64-linux.certificate` generates the actual proof
-from the current `compiler/linear.jh` and checks it with the pinned Horn
-Rust checker, separately from jihoo's checker. The output directory holds:
+- `CheckCertificate.agda`: Agda decodes the certificate and runs Horn's
+  checker for implicational certificates (Horn's
+  `agda/ImplicationCheck.agda`) on it, by evaluation, once
+  (`accepted = refl`). That checker is proved sound in every model of the
+  rules, so `theorem` holds in each. The exporter is untrusted: whatever it
+  writes must still be accepted for the stated goal.
+- `Adequacy.agda`: the theory's model in an ordered commutative ring, and
+  `sound`, which turns `Valid goalH goalJ` there into the statement about
+  `check`.
+- `Certified.agda`: `theorem` in that model gives `Valid goalH goalJ`.
+  The certificate's signature gives sorts to all of its variables,
+  Adequacy's to the goal's five; Horn's `Transfer` moves the model across
+  because the two agree on every symbol and on the goal's variables. The
+  rules and the goal are the same terms in both, which Agda checks by
+  conversion. `InIntegers` is the theorem for `Integers.agda`'s ring.
+
+What remains trusted here: Agda, Horn's Agda development, and the
+translation of MIR into the rules (`compiler/horn.jh`) with `std`'s `Vec`
+as the rules' lists. jihoo's own Horn checker (`lib/proof/schematic.jh`)
+and the Rust one are not: the certificate is checked by Agda.
+
+`nix build .#checks.x86_64-linux.certificate` keeps the theory, goals,
+certificate and Agda export for other consumers, and checks the
+certificate with the pinned Horn Rust checker as well. The output
+directory holds:
 
 - `check.horn`: the rules generated from MIR;
 - `check.theory`: the complete theory, including the proof's helper rules;
 - `check.goals`: the expected soundness statement;
 - `check.proof`: the actual certificate produced by `proof.refine`;
-- `checked.txt`: the independent checker's acceptance report;
+- `CheckCertificate.agda`: its Agda export;
+- `checked.txt`: the Rust checker's acceptance report;
 - `missing-rejected.txt` and `wrong-rejected.txt`: rejection reports for
   removing the result and replacing its reference with the wrong fact.
 
 Use the matching system attribute on aarch64. Both checks are part of
-`nix flake check`. Generation is separate from checking: consumers must
-validate the certificate against the expected theory and goals, rather than
-trust the exporter to have checked it.
-
-## Remaining connection to Agda
-
-`ImplicationBridge.agda` now proves the result boundary in every model of
-the rules. It converts between the implicational calculus's `ValidR`
-with plain hypotheses and the `Valid` interface used by `Adequacy.sound`.
-Its `result` lemma permits reordering and contraction only with an explicit
-proof that every remaining hypothesis occurs in the stated goal. It cannot
-silently drop an assumption or treat a generalized rule hypothesis as a
-plain premise. `bridge-check.sh`, run by the adequacy check, checks the
-positive examples and requires Agda to reject both of those invalid uses.
-This is a proved adapter for the eventual exporter, not the certificate
-itself and not a discharge of `Valid goalH goalJ`.
-
-The pinned Horn revision's `schematic-kernel --agda` exporter explicitly
-rejects implicational certificates. This proof uses implication goals,
-generalized induction hypotheses, `apply` and `invert`; the existing
-non-implicational exporter cannot supply `Valid goalH goalJ`.
-
-The next implementation must export those steps with their side conditions
-and check them using the soundness results in `Implication.agda` (including
-the unification obligations for inversion). It must instantiate the result
-in `Adequacy`'s model and connect the exact exported goal to `goalH` and
-`goalJ`. Checking the Rust implementation or merely importing the Agda
-soundness lemmas is not a substitute for this step. Corrupted proof steps
-must also be rejected by Agda itself.
+`nix flake check`. To run `check.sh` by hand, put Horn's `schematic-kernel`
+on `PATH` (or set `SCHEMATIC_KERNEL`) and Horn's checkout in `HORN`.
 
 The execution-to-Horn and verification-condition-generation proofs remain
 separate release requirements in the [roadmap](../docs/internals/roadmap.md).
