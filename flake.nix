@@ -169,8 +169,41 @@
           llvm = llvmFor pkgs;
           jihoo = self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo;
           otherTarget = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64" else "x86_64";
+          hornChecker = pkgs.rustPlatform.buildRustPackage {
+            pname = "jihoo-horn-checker";
+            version = "0.3.0";
+            src = horn;
+            cargoLock.lockFile = "${horn}/Cargo.lock";
+          };
         in
         {
+          # Retain the actual proof for independent consumers. This is a
+          # second implementation check, not yet an Agda certificate check.
+          certificate = pkgs.runCommand "jihoo-soundness-certificate" {
+            nativeBuildInputs = [ jihoo hornChecker ];
+          } ''
+            cp -R ${src}/. src
+            chmod -R u+w src
+            cp -R ${./agda} src/agda
+            cd src
+            export JIHOO_PATH=$PWD/lib
+            mkdir -p "$out"
+            jihoo emit-horn --lib compiler/linear.jh --fn check > "$out/check.horn"
+            jihoo run agda/certificate.jh -- "$out/check.horn" "$out"
+            schematic-kernel "$out/check.theory" "$out/check.goals" "$out/check.proof" > "$out/checked.txt"
+            # Fail if a missing result or a result pointing at the wrong
+            # fact is accepted. Keep the original proof intact.
+            sed '/^(result /d' "$out/check.proof" > missing.proof
+            sed 's/^(result check_sound [0-9]*)$/(result check_sound 0)/' "$out/check.proof" > wrong.proof
+            for bad in missing wrong; do
+              if schematic-kernel "$out/check.theory" "$out/check.goals" "$bad.proof" > "$bad.log" 2>&1; then
+                echo "accepted corrupted certificate: $bad" >&2
+                exit 1
+              fi
+              cp "$bad.log" "$out/$bad-rejected.txt"
+            done
+          '';
+
           # tests/runner.jh, built and run by the installed compiler, tests
           # it: the programs of tests/run, tests/fail and examples, the
           # backend, that it builds a compiler that writes the same IR, and

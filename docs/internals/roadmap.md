@@ -487,6 +487,17 @@ and moves into the compiler once its trust boundary is stated.
       `nix flake check` regenerates and checks the certificate from the
       current source, rejects corrupted certificates, and no longer
       relies on the correctness of the jihoo Horn checker for this proof.
+      Started: [`agda/certificate.jh`](../../agda/certificate.jh) exports
+      the actual theory, goals and proof; the `certificate` Nix check
+      retains them and checks acceptance and corrupted-result rejection
+      with the pinned Rust Horn checker. Agda checking of the actual
+      implicational certificate is still pending; the pinned Horn
+      exporter does not support it ([details](../../agda/README.md)).
+      The Agda result adapter now proves equivalence of plain-hypothesis
+      `ValidR` and `Valid`, and checks that all remaining hypotheses are
+      stated by the goal. CI checks its use and rejects discarded or
+      generalized hypotheses at the result boundary. Exporting and
+      checking the actual proof steps remains pending.
    5. Required before 0.5.0: prove the connection from execution to the
       Horn model. Define the execution semantics of the MIR fragment
       used by `linear.jh`, including overflow and the `Vec` operations

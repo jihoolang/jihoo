@@ -16,5 +16,6 @@ trap 'rm -rf "$out"' EXIT
 mkdir "$out/horn"
 cp "$horn"/agda/*.agda "$out/horn"/
 cp "$root"/agda/*.agda "$out"/
+(cd "$out" && bash "$root/agda/bridge-check.sh")
 agda --safe --no-libraries -i "$out/horn" -i "$out" "$out/Integers.agda"
 echo "adequacy: checked"
