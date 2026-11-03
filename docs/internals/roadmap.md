@@ -438,11 +438,10 @@ and moves into the compiler once its trust boundary is stated.
    fit an i128 is rejected; the `verify` suite fails if a check in
    `linear.jh` is kept. The compiler proves 1,145 of its bounds and
    overflow checks, and its contracts and `std`'s hold in both overflow
-   modes. Left: the checker's soundness proved in jihoo. It is a
-   statement about every integer point (an implication), which the
-   schematic checker in jihoo-proofs cannot state: it has no implication
-   goals or induction under hypotheses, and no integers. So 0.6's first
-   steps come before 0.5.0, in this order:
+   modes. The soundness proof needs a statement about every integer
+   point (an implication), implication goals, induction under hypotheses
+   and integers. These pulled 0.6's first steps before 0.5.0, in this
+   order; the remaining proof connections below are release requirements:
    1. Done: Horn's whole schematic checker as a library,
       [`lib/proof`](../../lib/proof/schematic.jh): implication goals,
       rule hypotheses, `apply`, induction under hypotheses and `invert`,
@@ -479,14 +478,53 @@ and moves into the compiler once its trust boundary is stated.
       against the code ([design](verification.md#the-proof-of-the-code)):
       on random inputs, the rules derive what the compiled checker
       returns, and nothing else but overflow results.
+   4. Required before 0.5.0: independently check the actual certificate
+      produced by `refine.jh` in Agda. Export its proof steps, not only
+      its theory, and use the checked certificate to supply
+      `Valid goalH goalJ` to `Adequacy.sound`. Today that validity is a
+      premise of the Agda theorem, established by the jihoo checker;
+      checking the theorem alone does not discharge it. Completion:
+      `nix flake check` regenerates and checks the certificate from the
+      current source, rejects corrupted certificates, and no longer
+      relies on the correctness of the jihoo Horn checker for this proof.
+   5. Required before 0.5.0: prove the connection from execution to the
+      Horn model. Define the execution semantics of the MIR fragment
+      used by `linear.jh`, including overflow and the `Vec` operations
+      it calls, and prove that a run returning `Ok` satisfies the
+      generated Horn execution relation. Connect the library operations
+      to their list model, with any remaining memory and runtime
+      assumptions explicit. Completion: compose this theorem with step 4
+      to prove the checker's soundness for that execution semantics;
+      differential tests remain regression checks, not this proof.
+   6. Required before 0.5.0: prove verification-condition generation and
+      check removal sound. For `obligations.jh`, `vc.jh` and `verify.jh`,
+      show that valid generated obligations imply that removed checks
+      cannot fail, accepted contracts hold, and erasure preserves
+      behavior under the stated MIR assumptions. Start with integers and
+      branches, then cover loops, calls, recursion, mutable borrows and
+      type invariants, including dependencies on other contracts and
+      incomplete analysis. Completion: every rule used to remove a check
+      or accept a contract is covered by the composed proof; unsupported
+      cases keep their checks and do not silently establish contracts.
+   7. Required before 0.5.0: publish the composed theorem, its supported
+      semantics and its remaining trusted components, and check the proof
+      chain in CI. Distinguish checks proved in the compiler's own source
+      from the soundness of its verifier. Source-to-MIR and MIR-to-LLVM
+      semantic preservation are a separate compiler-correctness milestone;
+      specify their proof obligations and whether LLVM remains trusted.
+      Until those are proved too, do not describe this as formal
+      verification of the entire compiler or its emitted executables.
 7. The releases. A 0.4.x release that parses contracts lets `lib/std`
    state its contracts (step 5) before 0.5.0, since the seed compiles
    `lib/std`; contracts' syntax is fixed from then on. 0.5.0 comes when
    jihoo can verify its own compiler, and the seed moving to it lets the
    compiler state contracts itself. 0.4.6 verifies every build and makes
    an unproved contract an error, so with it as the seed, stage 1 is
-   verified too. 0.5.0 waits for step 6's soundness proof, even though
-   that pulls 0.6's library ahead of it.
+   verified too. 0.5.0 waits for all of step 6, including independent
+   certificate checking, execution-to-model correspondence and the
+   soundness of verification-condition generation and check removal.
+   The existing conditional adequacy proof and passing self-verification
+   tests alone do not satisfy this release gate.
 
 Status of the completion criteria: the `verify` suite runs `tests/run`
 with and without verification, and checks that the proved checks of
@@ -502,7 +540,9 @@ unproved ones remain. `tests/fail` has a case for every rejected contract
 (wrong `ensures`, missing `requires` at a call, an invariant that fails on
 entry or is not preserved, an off-by-one loop). The generator's
 interpreter tests run in CI on both targets, and the trusted parts and their
-sizes are listed in the design.
+sizes are listed in the design. Step 6's composed soundness proof and
+independent certificate checks run in CI, with all remaining assumptions
+and the separate compiler-correctness boundary documented.
 
 ### 7. Proofs as a library (0.6)
 
