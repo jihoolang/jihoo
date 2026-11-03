@@ -23,8 +23,9 @@
 //     (invert N K (C...) J (CASE...))  how hypothesis K was derived;
 //                                      CASE = (RULE STEP (X...))
 //     (result NAME REF)
-//     REF = N | (N (X TERM)...)        a step, or an instance of one
-//                                      without hypotheses
+//     REF = N | (N (X TERM)...)        a step other than a rule hypothesis
+//                                      (which only `apply` uses), or an
+//                                      instance of one without hypotheses
 //
 // A step with judgment J and hypotheses H is valid when every ground
 // instance of J is derivable from the theory whenever the same instance of
@@ -569,6 +570,11 @@ impl Checker {
         if !x.is_list() {
             let n = index(x)?
             if n >= self.facts.len() { return Err("reference to a later step") }
+            // A rule hypothesis P ⊢ J gives J only through `apply`, which
+            // proves P; referencing it would assume J outright.
+            if self.facts[n].is_hyp && !self.facts[n].is_plain_hyp() {
+                return Err("step " + n.to_string() + " is a rule hypothesis; apply it")
+            }
             return Ok((self.facts[n].judgment, self.facts[n].hyps.clone()))
         }
         let xs = x.list()?
@@ -1583,4 +1589,18 @@ fn a_proved_implication_applies_as_a_rule() {
         "(step 21 le.zero () (le z (s z))) (step 22 le.succ (21) (le (s z) (s (s z))))" +
         "(apply 23 16 ((A z) (B (s z)) (C (s (s z)))) (17 22)) (result two 23)"
     accepts(LE, goals.as_str(), proof.as_str())
+}
+
+#[test]
+fn a_rule_hypothesis_is_not_its_conclusion() {
+    // h holds of successors, j of nothing, so h A → j A is false at s z.
+    // In the successor case the induction hypothesis h Y ⊢ j Y must be
+    // applied, proving h Y; referenced as a premise it would give j Y alone.
+    let theory = String.from("(sort N) (ctor z () N) (ctor s (N) N) (pred h (N)) (pred j (N))") +
+        "(rule h.s () (h (s ?n))) (rule j.s ((j ?n)) (j (s ?n)))"
+    let goals = "(var A N) (goal bad ((h A)) (j A))"
+    let proof = String.from("(var Y N) (hyp 0 (h A)) (hyp 1 (h z)) (invert 2 1 () (j z) ())") +
+        "(hyp 3 ((h Y)) (j Y) ()) (step 4 j.s (3) (j (s Y)))" +
+        "(induct 5 A (0) (j A) ((2) (4 Y))) (result bad 5)"
+    rejects(theory.as_str(), goals, proof.as_str(), "step 3 is a rule hypothesis")
 }
