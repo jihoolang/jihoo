@@ -24,6 +24,7 @@ it bootstraps the next ([Self-hosting](self-hosting.md)).
 | `types.jh` | interned types and their memory layout |
 | `sema.jh`, `body.jh`, `pat.jh`, `builtins.jh` | names, types, generic instances, and lowering to MIR |
 | `mir.jh` | the intermediate representation |
+| `core.jh`, `core_parse.jh`, `core_lower.jh`, `core_driver.jh` | experimental dependent core: check programs and proofs together, erase and lower the checked terms directly to MIR |
 | `elab.jh` | initialization: use after move, drop elaboration and drop flags |
 | `check.jh` | the borrow kernel: exclusivity and the lifetimes of views |
 | `llvm.jh` | MIR to LLVM IR text |
@@ -33,6 +34,12 @@ it bootstraps the next ([Self-hosting](self-hosting.md)).
 | `main.jh` | the `jihoo` command |
 
 ## Sema
+
+The [native dependent core](dependent-core.md) is the replacement direction
+for verification. Its first `.jhc` frontend uses the existing MIR backend
+after checking its own program terms. Ordinary `.jh` source has not yet
+been elaborated into the new core; the sections below describe the
+existing frontend.
 
 Sema checks and lowers in one pass per function instance. A generic
 function is checked per instance, with its compile-time arguments known, as

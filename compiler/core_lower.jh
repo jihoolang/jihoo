@@ -1,0 +1,213 @@
+// Erase and lower the checked core itself to MIR. The executable fragment
+// is pure: scalar exports, immutable local arrays, beta-reduced helpers
+// and proof-carrying indexing. Array values and erased preconditions cannot
+// cross the C ABI. No independent source/model translation is used.
+import core
+import diag
+import lex
+import mir
+import target
+import types
+
+struct Value {
+    op: mir.Operand
+    ty: u32
+}
+
+struct Lower {
+    body: mir.Body
+    types: types.Types
+    block: u32
+}
+
+impl Lower {
+    fn local(inout self, ty: u32, kind: mir.LocalKind, sp: diag.Span) -> u32 {
+        let id = self.body.locals.len() as u32
+        self.body.locals.push(mir.LocalDecl { ty, name: None, span: sp, mutable: true, kind })
+        id
+    }
+
+    fn block(inout self) -> u32 {
+        let id = self.body.blocks.len() as u32
+        self.body.blocks.push(mir.Block { stmts: Vec(mir.Stmt).new(), term: mir.Term.Pending })
+        id
+    }
+
+    fn term(inout self, sink t: mir.Term) { self.body.blocks[self.block as i64].term = t }
+
+    fn assign(inout self, local: u32, sink rv: mir.Rvalue, sp: diag.Span) {
+        self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
+            mir.Place.local(local),
+            rv,
+            sp
+        ))
+    }
+
+    fn value(inout self, ty: u32, sink rv: mir.Rvalue, sp: diag.Span) -> Value {
+        let local = self.local(ty, mir.LocalKind.Temp, sp)
+        self.assign(local, rv, sp)
+        Value { op: mir.Operand.Copy(mir.Place.local(local)), ty }
+    }
+
+    fn expr(
+        inout self,
+        c: core.Core,
+        id: u32,
+        env: [Option(Value)],
+        depth: u32
+    ) -> Result(Value, diag.Diag) {
+        if depth == 0 { return Err(c.error(id, "lowering nesting limit reached")) }
+        let sp = c.nodes[id as i64].span
+        match c.term(id) {
+            Var(k) => {
+                if k as i64 >= env.len { return Err(c.error(id, "unbound lowering variable")) }
+                match env[env.len - 1 - k as i64] {
+                    Some(v) => Ok(Value { op: v.op.clone(), ty: v.ty })
+                    None => Err(c.error(id, "erased evidence reached runtime lowering"))
+                }
+            }
+            Natural(n) => Ok(Value {
+                op: mir.Operand.Const(mir.Const.Int(n as i128, types.U64)),
+                ty: types.U64
+            })
+            Integer(n) => Ok(Value {
+                op: mir.Operand.Const(mir.Const.Int(n as i128, types.I64)),
+                ty: types.I64
+            })
+            Elements(xs) => {
+                var ops = Vec(mir.Operand).new()
+                for x in xs {
+                    let v = self.expr(c, x, env, depth - 1)?
+                    if v.ty != types.I64 { return Err(c.error(x, "array element layout mismatch")) }
+                    ops.push(v.op.clone())
+                }
+                let ty = self.types.intern(types.TyKind.Array(types.I64, xs.len() as u64))
+                Ok(self.value(ty, mir.Rvalue.Aggregate(mir.Agg.Array(ty), ops), sp))
+            }
+            Index(array, index, _) => {
+                // The checker required exactly Lt index (array's length).
+                // Evidence is deliberately not visited or materialized.
+                let a = self.expr(c, array, env, depth - 1)?
+                let i = self.expr(c, index, env, depth - 1)?
+                let types.TyKind.Array(_, _) = self.types.kind(a.ty) else {
+                    return Err(c.error(array, "array layout mismatch"))
+                }
+                let mir.Operand.Copy(place) = a.op else { return Err(c.error(
+                    array,
+                    "array needs backing storage"
+                )) }
+                let at = self.local(types.U64, mir.LocalKind.Temp, sp)
+                self.assign(at, mir.Rvalue.Use(i.op.clone()), sp)
+                Ok(self.value(types.I64,
+                    mir.Rvalue.Use(mir.Operand.Copy(place.with(mir.Proj.Index(at)))), sp))
+            }
+            IfLt(a, b, yes, no) => {
+                let a = self.expr(c, a, env, depth - 1)?
+                let b = self.expr(c, b, env, depth - 1)?
+                let condition = self.value(
+                    types.BOOL,
+                    mir.Rvalue.Bin(lex.Op.Lt, a.op.clone(), b.op.clone()),
+                    sp
+                )
+                let yes_block = self.block()
+                let no_block = self.block()
+                let join = self.block()
+                var cases = Vec(mir.SwitchTarget).new()
+                cases.push(mir.SwitchTarget { value: 0, block: no_block })
+                self.term(mir.Term.Switch(condition.op.clone(), cases, yes_block))
+                self.block = yes_block
+                var inner = Vec(Option(Value)).new()
+                for x in env {
+                    inner.push(match x { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None })
+                }
+                inner.push(None)
+                let y = self.expr(c, yes, inner.as_slice(), depth - 1)?
+                let result = self.local(y.ty, mir.LocalKind.Temp, sp)
+                self.assign(result, mir.Rvalue.Use(y.op.clone()), sp)
+                self.term(mir.Term.Goto(join))
+                self.block = no_block
+                let n = self.expr(c, no, env, depth - 1)?
+                if n.ty != y.ty { return Err(c.error(id, "branch layout mismatch")) }
+                self.assign(result, mir.Rvalue.Use(n.op.clone()), sp)
+                self.term(mir.Term.Goto(join))
+                self.block = join
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(result)), ty: y.ty })
+            }
+            _ => Err(c.error(id, "term has no runtime representation in this core fragment"))
+        }
+    }
+}
+
+fn scalar(c: core.Core, id: u32) -> Result(u32, diag.Diag) {
+    match c.term(id) {
+        U64 => Ok(types.U64)
+        I64 => Ok(types.I64)
+        _ => Err(c.error(id, "exports require scalar arguments and results"))
+    }
+}
+
+pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, diag.Diag) {
+    var c = c
+    // This entry point always checks, even if called without the parser.
+    c.check()?
+    var out = Vec(mir.Function).new()
+    var runtime_types = types.Types.new()
+    let count = c.definitions.len()
+    for i in 0..count {
+        if !c.definitions[i].exported { continue }
+        let sp = c.definitions[i].span
+        let mut_ty = c.definitions[i].ty
+        let mut_body = c.definitions[i].value
+        var ty = c.normal(mut_ty, core.DEPTH)?
+        var body = c.normal(mut_body, core.DEPTH)?
+        var lower = Lower {
+            body: mir.Body { locals: Vec(mir.LocalDecl).new(), blocks: Vec(mir.Block).new(),
+                arg_count: 0, contract: mir.Contract.new() }
+            types: runtime_types
+            block: 0
+        }
+        lower.local(types.UNIT, mir.LocalKind.Ret, sp)
+        lower.block()
+        var params = Vec(u32).new()
+        var pass = Vec(mir.ParamPass).new()
+        var env = Vec(Option(Value)).new()
+        loop {
+            let core.Term.Pi(erased, domain, result) = c.term(ty) else { break }
+            if erased { return Err(c.error(
+                ty,
+                "exports cannot require erased evidence from foreign callers"
+            )) }
+            let core.Term.Lam(false, _, rest) = c.term(body) else { return Err(c.error(
+                body,
+                "export needs a lambda"
+            )) }
+            let t = scalar(c, domain)?
+            let local = lower.local(t, mir.LocalKind.Arg, sp)
+            params.push(t)
+            pass.push(mir.ParamPass.Value)
+            env.push(Some(Value { op: mir.Operand.Copy(mir.Place.local(local)), ty: t }))
+            ty = result
+            body = rest
+        }
+        let ret = scalar(c, ty)?
+        lower.body.locals[0].ty = ret
+        lower.body.arg_count = params.len()
+        let value = lower.expr(c, body, env.as_slice(), core.DEPTH)?
+        if value.ty != ret { return Err(c.error(body, "return layout mismatch")) }
+        lower.assign(0, mir.Rvalue.Use(value.op.clone()), sp)
+        lower.term(mir.Term.Return)
+        let Lower { body, types: next_types, .. } = move lower
+        runtime_types = next_types
+        out.push(mir.Function {
+            name: c.definitions[i].name.clone(), symbol: c.definitions[i].name.clone()
+            sig: types.Sig { c_abi: true, variadic: false, params, ret }
+            pass, body: Some(body), linkage: mir.Linkage.Export, variadic: false,
+            returns_ref: false, span: sp
+        })
+    }
+    if out.len() == 0 { return Err(c.error(0, "no exported runtime functions")) }
+    Ok(mir.Program { fns: out, types: runtime_types, entry: None, panic_handler: None,
+        profile: target.Profile.Native, checked: true, statics: Vec(mir.StaticDef).new(),
+        drop_impls: Map(u32, u32).new(), invariants: Map(u32, Vec(mir.Clause)).new(),
+        target: tgt, codegen: target.Codegen.default() })
+}

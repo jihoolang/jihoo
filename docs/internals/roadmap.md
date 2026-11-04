@@ -323,6 +323,27 @@ README's Status and the language pages describe 0.4.
 
 ### 6. Verification (0.5)
 
+Direction revised: the replacement is a
+[native dependent core](dependent-core.md). Programs and their proofs
+are checked together, then erased and lowered directly from those terms
+to MIR. Recreating the MIR program in Horn is not part of this path;
+Horn theory/certificate compatibility is not a requirement.
+
+Started: `jihoo core` checks a small dependent core with levelled
+universes, dependent functions, erased evidence and immutable indexed
+arrays. `examples/core_index.jhc` compiles a runtime index through the
+checked program to MIR/LLVM, with the evidence erased and no added bounds
+assertion. Both targets, host execution at `-O0`/`-O2`, independent
+evaluation and false-proof rejection run in the `core` suite.
+
+Next: elaborate ordinary `.jh` source into the core; add equality,
+inductive propositions and user lemmas; cover owned/mutable memory;
+establish the kernel's soundness and erasure/lowering preservation.
+The `.jhc` prototype does not complete the 0.5 release gate. The existing
+verifier and its gaps described below remain applicable to `.jh` programs
+until their guarantees move to the core. Their Horn implementation is
+not a compatibility constraint on its replacement.
+
 Research ([design](verification.md)): 0.5 proves, while compiling, that
 the checks MIR inserts cannot fail and that functions meet their contracts.
 Proofs are checked and erased; a proved check is removed. A small trusted
@@ -638,29 +659,27 @@ and the separate compiler-correctness boundary documented.
 
 ### 7. Proofs as a library (0.6)
 
-0.6 makes jihoo-proofs' kernel and proof development an importable
-library, and uses it for the lemmas 0.5's contracts need: properties of
-integers, sequences and the program's own data, proved by induction
-(`sum(xs[0..i])` and the like). Mathematics beyond what programs need
-grows from there as a library on compile-time evaluation; jihoo's type
-system does not become a proof assistant's.
+Proof libraries target the [native dependent core](dependent-core.md).
+Users prove properties of integers, sequences and their own data by
+induction (`sum(xs[0..i])` and the like), import those lemmas and use them
+in program specifications. Mathematics beyond what programs need grows
+as libraries of the same core terms. Preserving Horn's proof format or
+its kernel API is not a requirement.
 
-1. The Horn kernel and the schematic checker as modules with a stable API,
-   without `-I` paths (jihoo-proofs roadmap, step 4), and the state-machine
-   consumer that binds a proof to the table a program runs (its step 3).
-   Started: the schematic checker is `lib/proof` (0.5's step 6).
-2. Lemmas in contracts: an `ensures` that needs induction names a lemma
-   proved in the library; the checker accepts the call only with the lemma's
-   certificate.
-3. Compile-time evaluation fast enough for real developments, or a limit
-   the program chooses, measured with
+1. A theory library: natural numbers, integers, lists and slices, and the
+   properties needed by standard-library specifications.
+2. Lemmas in specifications: a contract that needs induction applies an
+   imported theorem, checked by the same native core as its program.
+3. Automation produces core proof terms; the small checker remains the
+   authority, independently of the proof search strategy.
+4. Compile-time evaluation fast enough for real developments, with
+   explicit resource limits and measurements using
    [resource reports](../reference/command-line.md#compile-time-resource-reports).
-4. A theory library: natural numbers, integers, lists and slices, and the
-   facts `std`'s contracts use.
 
 Completion: a program proves a loop's `ensures` with a lemma by induction,
-from imported library code, and every rejection case of the kernel and the
-proof development runs in this repository's suites.
+from imported library code, and the checked program is erased and lowered
+from the same core. Rejection cases for the kernel, proof libraries and
+erasure run in this repository's suites.
 
 ## 0.1: the rewrite
 

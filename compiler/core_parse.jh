@@ -1,0 +1,246 @@
+// A small textual input for the dependent core. This is an experimental
+// core format, not an alternate semantics for ordinary .jh programs.
+import core
+import diag
+import std.mem
+
+fn natural(s: str) -> Option(u64) {
+    if s.len == 0 { return None }
+    var n: u64 = 0
+    let maximum: u64 = 0xffffffffffffffff
+    for c in s {
+        if c < '0' || c > '9' { return None }
+        let digit = (c - '0') as u64
+        if n > (maximum - digit) / 10 { return None }
+        n = n * 10 + digit
+    }
+    Some(n)
+}
+
+fn signed(s: str) -> Option(i64) {
+    if s.len == 0 { return None }
+    let negative = s[0] == '-'
+    let start = if negative || s[0] == '+' { 1 } else { 0 }
+    let Some(n) = natural(s[start..s.len]) else { return None }
+    let bound: u64 = if negative { 0x8000000000000000 } else { 0x7fffffffffffffff }
+    if n > bound { return None }
+    let v = n as i128
+    Some((if negative { 0 - v } else { v }) as i64)
+}
+
+struct Token {
+    text: String
+    span: diag.Span
+}
+
+fn ident(s: str) -> bool {
+    if s.len == 0 { return false }
+    for i, c in s {
+        if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') { continue }
+        if i > 0 && c >= '0' && c <= '9' { continue }
+        return false
+    }
+    s != "U64" && s != "I64" && s != "Prop"
+}
+
+struct Parser {
+    tokens: Vec(Token)
+    pos: i64
+    end: diag.Span
+    core: core.Core
+    names: Vec(String)
+}
+
+impl Parser {
+    fn error(self, msg: str) -> diag.Diag {
+        let span = if self.pos < self.tokens.len() { self.tokens[self.pos].span } else { self.end }
+        diag.Diag.new(span, ("core: " + msg).as_str())
+    }
+
+    fn at(self, word: str) -> bool {
+        self.pos < self.tokens.len() && self.tokens[self.pos].text == word
+    }
+
+    fn take(inout self) -> Result(Token, diag.Diag) {
+        if self.pos >= self.tokens.len() { return Err(self.error("unexpected end of core input")) }
+        let token = Token {
+            text: self.tokens[self.pos].text.clone(),
+            span: self.tokens[self.pos].span
+        }
+        self.pos += 1
+        Ok(token)
+    }
+
+    fn expect(inout self, word: str) -> Result((), diag.Diag) {
+        if !self.at(word) { return Err(self.error(("expected `" + word + "`").as_str())) }
+        self.pos += 1
+        Ok(())
+    }
+
+    fn name(inout self) -> Result(String, diag.Diag) {
+        let token = self.take()?
+        if !ident(token.text.as_str()) { return Err(diag.Diag.new(
+            token.span,
+            "core: expected an identifier"
+        )) }
+        Ok(token.text.clone())
+    }
+
+    fn expr(inout self, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(self.error("nesting limit reached")) }
+        let token = self.take()?
+        let sp = token.span
+        let word = token.text.as_str()
+        if word != "(" {
+            let term = if word == "U64" { core.Term.U64 }
+            else if word == "I64" { core.Term.I64 }
+            else if word == "Prop" { core.Term.Prop }
+            else {
+                var found: Option(core.Term) = None
+                var i = self.names.len()
+                while i > 0 {
+                    i -= 1
+                    if self.names[i] == word {
+                        found = Some(core.Term.Var((self.names.len() - 1 - i) as u32))
+                        break
+                    }
+                }
+                if found.is_none() {
+                    for i, d in self.core.definitions {
+                        if d.name == word { found = Some(core.Term.Global(i as u32)); break }
+                    }
+                }
+                match found {
+                    Some(t) => t
+                    None => {
+                        let n = natural(word)
+                        let Some(n) = n else { return Err(diag.Diag.new(sp,
+                            ("core: unknown name or invalid U64 literal: " + word).as_str())) }
+                        core.Term.Natural(n)
+                    }
+                }
+            }
+            return self.core.add(term, sp)
+        }
+        let head = self.take()?
+        let kind = head.text.as_str()
+        let term = if kind == "pi" || kind == "pi0" || kind == "lam" || kind == "lam0" {
+            let name = self.name()?
+            let domain = self.expr(depth - 1)?
+            self.names.push(name)
+            let body = self.expr(depth - 1)?
+            self.names.pop()
+            let erased = kind == "pi0" || kind == "lam0"
+            if kind == "pi" || kind == "pi0" { core.Term.Pi(erased, domain, body) }
+            else { core.Term.Lam(erased, domain, body) }
+        } else if kind == "app" {
+            var f = self.expr(depth - 1)?
+            var count = 0
+            while !self.at(")") {
+                let arg = self.expr(depth - 1)?
+                f = self.core.add(core.Term.App(f, arg), sp)?
+                count += 1
+            }
+            if count == 0 { return Err(diag.Diag.new(sp, "core: app needs an argument")) }
+            self.expect(")")?
+            return Ok(f)
+        } else if kind == "Array" {
+            core.Term.Array(self.expr(depth - 1)?)
+        } else if kind == "Lt" || kind == "decide-lt" {
+            let a = self.expr(depth - 1)?
+            let b = self.expr(depth - 1)?
+            if kind == "Lt" { core.Term.Lt(a, b) } else { core.Term.Decide(a, b) }
+        } else if kind == "Type" {
+            let n = self.take()?
+            let level = natural(n.text.as_str())
+            let Some(level) = level else { return Err(diag.Diag.new(
+                n.span,
+                "core: invalid universe level"
+            )) }
+            if level >= 32 { return Err(diag.Diag.new(n.span, "core: universe level limit reached")) }
+            core.Term.Universe(level as u32)
+        } else if kind == "int" {
+            let n = self.take()?
+            let value = signed(n.text.as_str())
+            let Some(value) = value else { return Err(diag.Diag.new(
+                n.span,
+                "core: invalid I64 literal"
+            )) }
+            core.Term.Integer(value)
+        } else if kind == "array" {
+            var xs = Vec(u32).new()
+            while !self.at(")") { xs.push(self.expr(depth - 1)?) }
+            core.Term.Elements(xs)
+        } else if kind == "index" {
+            let array = self.expr(depth - 1)?
+            let i = self.expr(depth - 1)?
+            let proof = self.expr(depth - 1)?
+            core.Term.Index(array, i, proof)
+        } else if kind == "if-lt" {
+            let a = self.expr(depth - 1)?
+            let b = self.expr(depth - 1)?
+            let name = self.name()?
+            self.names.push(name)
+            let yes = self.expr(depth - 1)?
+            self.names.pop()
+            let no = self.expr(depth - 1)?
+            core.Term.IfLt(a, b, yes, no)
+        } else { return Err(diag.Diag.new(head.span, "core: unknown term constructor")) }
+        self.expect(")")?
+        self.core.add(term, sp)
+    }
+
+    fn definition(inout self) -> Result((), diag.Diag) {
+        self.expect("(")?
+        let mode = self.take()?
+        let exported = mode.text == "export"
+        if !exported && mode.text != "def" { return Err(diag.Diag.new(
+            mode.span,
+            "core: expected def or export"
+        )) }
+        let name = self.name()?
+        for d in self.core.definitions {
+            if d.name == name { return Err(diag.Diag.new(mode.span, "core: duplicate definition")) }
+        }
+        let ty = self.expr(core.DEPTH)?
+        let value = self.expr(core.DEPTH)?
+        self.expect(")")?
+        self.core.definitions.push(core.Definition { name, ty, value, exported, span: mode.span })
+        Ok(())
+    }
+}
+
+pub fn parse(text: str, file: u32) -> Result(core.Core, diag.Diag) {
+    if text.len > 1048576 { return Err(diag.Diag.new(
+        diag.Span.new(file, 0, 0),
+        "core: input limit reached"
+    )) }
+    var tokens = Vec(Token).new()
+    var i = 0
+    while i < text.len {
+        let c = text[i]
+        if c == ' ' || c == '\t' || c == '\n' || c == '\r' { i += 1; continue }
+        if c == ';' {
+            while i < text.len && text[i] != '\n' { i += 1 }
+            continue
+        }
+        let start = i
+        i += 1
+        if c != '(' && c != ')' {
+            while i < text.len {
+                let c = text[i]
+                if c == '(' || c == ')' || c == ';' || c == ' ' || c == '\t' || c == '\n' || c == '\r' { break }
+                i += 1
+            }
+        }
+        tokens.push(Token { text: text[start..i].to_string(), span: diag.Span.new(file, start, i) })
+        if tokens.len() > 50000 { return Err(diag.Diag.new(
+            diag.Span.new(file, start, i),
+            "core: token limit reached"
+        )) }
+    }
+    var parser = Parser { tokens, pos: 0, end: diag.Span.new(file, text.len, text.len),
+        core: core.Core.new(), names: Vec(String).new() }
+    while parser.pos < parser.tokens.len() { parser.definition()? }
+    Ok(mem.replace(&parser.core, core.Core.new()))
+}

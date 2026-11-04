@@ -1,0 +1,481 @@
+// Experimental dependent core. Programs and proofs share this syntax;
+// core_lower emits MIR from the checked terms themselves. No Horn model
+// or external proof checker participates in this path.
+//
+// This finite fragment has levelled universes, dependent functions,
+// immutable I64 arrays indexed by U64 lengths, and propositions Lt i n.
+// There is no recursion, axiom, unsafe operation or proof elimination.
+// Erased binders must be propositions and cannot occur in runtime terms.
+import diag
+
+pub const LIMIT: i64 = 200000
+const STEPS: i64 = 1000000
+pub const DEPTH: u32 = 128
+
+#[derive(Clone, Eq)]
+pub enum Term {
+    Var(u32)
+    Global(u32)
+    Universe(u32)
+    Prop
+    U64
+    I64
+    Array(u32)
+    Lt(u32, u32)
+    Pi(bool, u32, u32)
+    Lam(bool, u32, u32)
+    App(u32, u32)
+    Natural(u64)
+    Integer(i64)
+    Elements(Vec(u32))
+    Index(u32, u32, u32)
+    Decide(u32, u32)
+    // The true branch binds erased evidence of Lt a b at de Bruijn 0.
+    IfLt(u32, u32, u32, u32)
+}
+
+pub struct Node {
+    pub term: Term
+    pub span: diag.Span
+}
+
+pub struct Definition {
+    pub name: String
+    pub ty: u32
+    pub value: u32
+    pub exported: bool
+    pub span: diag.Span
+}
+
+pub struct Binding {
+    pub ty: u32
+    pub erased: bool
+}
+
+pub struct Core {
+    pub nodes: Vec(Node)
+    pub definitions: Vec(Definition)
+    steps: i64
+    visible: u32
+}
+
+impl Core {
+    pub fn new() -> Core {
+        Core { nodes: Vec(Node).new(), definitions: Vec(Definition).new(), steps: 0, visible: 0 }
+    }
+
+    pub fn error(self, id: u32, message: str) -> diag.Diag {
+        let span = if id as i64 < self.nodes.len() { self.nodes[id as i64].span }
+        else { diag.Span.nowhere() }
+        diag.Diag.new(span, ("core: " + message).as_str())
+    }
+
+    pub fn add(inout self, sink term: Term, span: diag.Span) -> Result(u32, diag.Diag) {
+        if self.nodes.len() >= LIMIT { return Err(diag.Diag.new(span, "core: term limit reached")) }
+        let id = self.nodes.len() as u32
+        self.nodes.push(Node { term, span })
+        Ok(id)
+    }
+
+    pub fn term(self, id: u32) -> Term { self.nodes[id as i64].term.clone() }
+
+    fn tick(inout self, id: u32, depth: u32) -> Result((), diag.Diag) {
+        self.steps += 1
+        if self.steps > STEPS { return Err(self.error(id, "checking step limit reached")) }
+        if depth == 0 { return Err(self.error(id, "nesting limit reached")) }
+        if id as i64 >= self.nodes.len() { return Err(self.error(id, "invalid term reference")) }
+        Ok(())
+    }
+
+    // Binder-aware traversal implements weakening and capture-avoiding
+    // substitution. Removing a binder rejects a reference that escapes.
+    fn transform(
+        inout self, id: u32, cutoff: u32, delta: i64, replacement: Option(u32), depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.tick(id, depth)?
+        let sp = self.nodes[id as i64].span
+        let term = match self.term(id) {
+            Var(k) => {
+                match replacement {
+                    Some(value) => {
+                        if k == cutoff { return self.shift(value, cutoff as i64, 0, depth - 1) }
+                        Term.Var(if k > cutoff { k - 1 } else { k })
+                    }
+                    None => {
+                        if k < cutoff { return Ok(id) }
+                        let next = k as i64 + delta
+                        if next < cutoff as i64 { return Err(self.error(
+                            id,
+                            "branch evidence escapes its scope"
+                        )) }
+                        Term.Var(next as u32)
+                    }
+                }
+            }
+            Pi(e, a, b) => Term.Pi(e,
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff + 1, delta, replacement, depth - 1)?)
+            Lam(e, a, b) => Term.Lam(e,
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff + 1, delta, replacement, depth - 1)?)
+            IfLt(a, b, yes, no) => Term.IfLt(
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(yes, cutoff + 1, delta, replacement, depth - 1)?,
+                self.transform(no, cutoff, delta, replacement, depth - 1)?)
+            Array(n) => Term.Array(self.transform(n, cutoff, delta, replacement, depth - 1)?)
+            Lt(a, b) => Term.Lt(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            App(f, a) => Term.App(self.transform(f, cutoff, delta, replacement, depth - 1)?,
+                self.transform(a, cutoff, delta, replacement, depth - 1)?)
+            Decide(a, b) => Term.Decide(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            Index(a, i, p) => Term.Index(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(i, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            Elements(xs) => {
+                var out = Vec(u32).new()
+                for x in xs { out.push(self.transform(x, cutoff, delta, replacement, depth - 1)?) }
+                Term.Elements(out)
+            }
+            t => t
+        }
+        self.add(term, sp)
+    }
+
+    pub fn shift(
+        inout self,
+        id: u32,
+        delta: i64,
+        cutoff: u32,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.transform(id, cutoff, delta, None, depth)
+    }
+
+    pub fn substitute(inout self, body: u32, value: u32, depth: u32) -> Result(u32, diag.Diag) {
+        self.transform(body, 0, 0, Some(value), depth)
+    }
+
+    // Normalization is computation in the finite core, including beta
+    // reduction. Resource exhaustion is rejection, never proof acceptance.
+    pub fn normal(inout self, id: u32, depth: u32) -> Result(u32, diag.Diag) {
+        self.tick(id, depth)?
+        let sp = self.nodes[id as i64].span
+        let term = match self.term(id) {
+            Global(g) => {
+                if g >= self.visible { return Err(self.error(id, "recursive or forward definition")) }
+                let body = self.definitions[g as i64].value
+                return self.normal(body, depth - 1)
+            }
+            App(f, a) => {
+                let f = self.normal(f, depth - 1)?
+                let a = self.normal(a, depth - 1)?
+                match self.term(f) {
+                    Lam(_, _, body) => {
+                        let body = self.substitute(body, a, depth - 1)?
+                        return self.normal(body, depth - 1)
+                    }
+                    _ => Term.App(f, a)
+                }
+            }
+            Pi(e, a, b) => Term.Pi(e, self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
+            Lam(e, a, b) => Term.Lam(e, self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
+            Array(n) => Term.Array(self.normal(n, depth - 1)?)
+            Lt(a, b) => Term.Lt(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
+            IfLt(a, b, yes, no) => {
+                let a = self.normal(a, depth - 1)?
+                let b = self.normal(b, depth - 1)?
+                match (self.term(a), self.term(b)) {
+                    (Natural(x), Natural(y)) => {
+                        if x < y {
+                            let p = self.add(Term.Decide(a, b), sp)?
+                            let body = self.substitute(yes, p, depth - 1)?
+                            return self.normal(body, depth - 1)
+                        }
+                        return self.normal(no, depth - 1)
+                    }
+                    _ => Term.IfLt(a, b, self.normal(yes, depth - 1)?, self.normal(no, depth - 1)?)
+                }
+            }
+            Decide(a, b) => Term.Decide(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
+            Index(a, i, p) => Term.Index(self.normal(a, depth - 1)?, self.normal(i, depth - 1)?,
+                self.normal(p, depth - 1)?)
+            Elements(xs) => {
+                var out = Vec(u32).new()
+                for x in xs { out.push(self.normal(x, depth - 1)?) }
+                Term.Elements(out)
+            }
+            t => return Ok(id)
+        }
+        self.add(term, sp)
+    }
+
+    fn identical(self, a: u32, b: u32, depth: u32) -> bool {
+        if depth == 0 { return false }
+        match (self.term(a), self.term(b)) {
+            (Array(x), Array(y)) => self.identical(x, y, depth - 1)
+            (Lt(a, b), Lt(c, d)) | (App(a, b), App(c, d)) | (Decide(a, b), Decide(c, d)) =>
+                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Pi(e, a, b), Pi(f, c, d)) | (Lam(e, a, b), Lam(f, c, d)) =>
+                e == f && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Index(a, i, p), Index(b, j, q)) => self.identical(a, b, depth - 1) &&
+                self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
+            (IfLt(a, b, y, n), IfLt(c, d, z, m)) => self.identical(a, c, depth - 1) &&
+                self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1) && self.identical(
+                n,
+                m,
+                depth - 1
+            )
+            (Elements(xs), Elements(ys)) => {
+                if xs.len() != ys.len() { return false }
+                for i in 0..xs.len() { if !self.identical(xs[i], ys[i], depth - 1) { return false } }
+                true
+            }
+            (x, y) => x == y
+        }
+    }
+
+    pub fn equal(inout self, a: u32, b: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let a = self.normal(a, depth)?
+        let b = self.normal(b, depth)?
+        Ok(self.identical(a, b, depth))
+    }
+
+    fn sort(inout self, ty: u32, depth: u32) -> Result(i64, diag.Diag) {
+        let n = self.normal(ty, depth)?
+        match self.term(n) {
+            Prop => Ok(-1)
+            Universe(level) => Ok(level as i64)
+            _ => Err(self.error(ty, "expected a type or proposition"))
+        }
+    }
+
+    fn binder(
+        inout self,
+        domain: u32,
+        erased: bool,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result(i64, diag.Diag) {
+        let ty = self.infer(domain, ctx, true, depth)?
+        let level = self.sort(ty, depth)?
+        if erased && level != -1 { return Err(self.error(
+            domain,
+            "erased binders must be propositions"
+        )) }
+        if !erased && level == -1 { return Err(self.error(domain, "proof binders must be erased")) }
+        Ok(level)
+    }
+
+    pub fn require(
+        inout self,
+        id: u32,
+        expected: u32,
+        ctx: [Binding],
+        ghost: bool,
+        depth: u32
+    ) -> Result((), diag.Diag) {
+        let actual = self.infer(id, ctx, ghost, depth)?
+        if !self.equal(actual, expected, depth)? { return Err(self.error(id, "type mismatch")) }
+        Ok(())
+    }
+
+    pub fn infer(
+        inout self,
+        id: u32,
+        ctx: [Binding],
+        ghost: bool,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.tick(id, depth)?
+        let sp = self.nodes[id as i64].span
+        let ty = match self.term(id) {
+            Var(k) => {
+                if k as i64 >= ctx.len { return Err(self.error(id, "unbound variable")) }
+                let b = ctx[ctx.len - 1 - k as i64]
+                if b.erased && !ghost { return Err(self.error(
+                    id,
+                    "erased evidence used at runtime"
+                )) }
+                return self.shift(b.ty, k as i64 + 1, 0, depth - 1)
+            }
+            Global(g) => {
+                if g >= self.visible { return Err(self.error(id, "recursive or forward definition")) }
+                let ty = self.definitions[g as i64].ty
+                return self.shift(ty, ctx.len, 0, depth - 1)
+            }
+            Universe(level) => {
+                if level >= 32 { return Err(self.error(id, "universe level limit reached")) }
+                Term.Universe(level + 1)
+            }
+            Prop | U64 | I64 => Term.Universe(0)
+            Natural(_) => Term.U64
+            Integer(_) => Term.I64
+            Array(n) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(n, u, ctx, true, depth - 1)?
+                Term.Universe(0)
+            }
+            Lt(a, b) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, true, depth - 1)?
+                self.require(b, u, ctx, true, depth - 1)?
+                Term.Prop
+            }
+            Pi(erased, a, b) => {
+                let level = self.binder(a, erased, ctx, depth - 1)?
+                var inner = Vec(Binding).new()
+                for x in ctx { inner.push(x) }
+                inner.push(Binding { ty: a, erased })
+                let ty = self.infer(b, inner.as_slice(), true, depth - 1)?
+                let result = self.sort(ty, depth - 1)?
+                if result == -1 { Term.Prop } else { Term.Universe(
+                    max(max(level, 0), result) as u32
+                ) }
+            }
+            Lam(erased, a, body) => {
+                self.binder(a, erased, ctx, depth - 1)?
+                var inner = Vec(Binding).new()
+                for x in ctx { inner.push(x) }
+                inner.push(Binding { ty: a, erased })
+                let result = self.infer(body, inner.as_slice(), ghost, depth - 1)?
+                Term.Pi(erased, a, result)
+            }
+            App(f, a) => {
+                let ty = self.infer(f, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Pi(erased, domain, result) = self.term(ty) else {
+                    return Err(self.error(f, "application needs a dependent function"))
+                }
+                self.require(a, domain, ctx, ghost || erased, depth - 1)?
+                return self.substitute(result, a, depth - 1)
+            }
+            Elements(xs) => {
+                let i = self.add(Term.I64, sp)?
+                for x in xs { self.require(x, i, ctx, ghost, depth - 1)? }
+                let n = self.add(Term.Natural(xs.len() as u64), sp)?
+                Term.Array(n)
+            }
+            Index(array, index, proof) => {
+                let ty = self.infer(array, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Array(n) = self.term(ty) else { return Err(self.error(
+                    array,
+                    "index needs an indexed array"
+                )) }
+                let u = self.add(Term.U64, sp)?
+                self.require(index, u, ctx, ghost, depth - 1)?
+                let p = self.add(Term.Lt(index, n), sp)?
+                self.require(proof, p, ctx, true, depth - 1)?
+                Term.I64
+            }
+            Decide(a, b) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, true, depth - 1)?
+                self.require(b, u, ctx, true, depth - 1)?
+                let x = self.normal(a, depth - 1)?
+                let y = self.normal(b, depth - 1)?
+                let valid = match (self.term(x), self.term(y)) {
+                    (Natural(i), Natural(n)) => i < n
+                    _ => false
+                }
+                if !valid { return Err(self.error(id, "decide-lt needs a true closed inequality")) }
+                Term.Lt(a, b)
+            }
+            IfLt(a, b, yes, no) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, ghost, depth - 1)?
+                self.require(b, u, ctx, ghost, depth - 1)?
+                let p = self.add(Term.Lt(a, b), sp)?
+                var inner = Vec(Binding).new()
+                for x in ctx { inner.push(x) }
+                inner.push(Binding { ty: p, erased: true })
+                let yes_ty = self.infer(yes, inner.as_slice(), ghost, depth - 1)?
+                let yes_ty = self.normal(yes_ty, depth - 1)?
+                let result = self.shift(yes_ty, -1, 0, depth - 1)?
+                self.require(no, result, ctx, ghost, depth - 1)?
+                return Ok(result)
+            }
+        }
+        self.add(ty, sp)
+    }
+
+    // Check graph integrity independently of the parser. Definitions are
+    // checked in order; no definition can use itself or a later one.
+    pub fn check(inout self) -> Result((), diag.Diag) {
+        self.steps = 0
+        if self.nodes.len() > LIMIT { return Err(self.error(0, "term limit reached")) }
+        for i in 0..self.nodes.len() {
+            for child in children(self.nodes[i].term) {
+                if child as i64 >= i { return Err(self.error(
+                    i as u32,
+                    "cyclic or invalid term graph"
+                )) }
+            }
+        }
+        let count = self.definitions.len()
+        for i in 0..count {
+            self.visible = i as u32
+            let ty = self.definitions[i].ty
+            let value = self.definitions[i].value
+            let sort = self.infer(ty, [], true, DEPTH)?
+            let ghost = self.sort(sort, DEPTH)? == -1
+            self.require(value, ty, [], ghost, DEPTH)?
+        }
+        self.visible = count as u32
+        Ok(())
+    }
+}
+
+pub fn children(term: Term) -> Vec(u32) {
+    var out = Vec(u32).new()
+    match term {
+        Array(n) => out.push(n)
+        Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
+            out.push(a)
+            out.push(b)
+        }
+        Index(a, i, p) => { out.push(a); out.push(i); out.push(p) }
+        IfLt(a, b, y, n) => { out.push(a); out.push(b); out.push(y); out.push(n) }
+        Elements(xs) => for x in xs { out.push(x) }
+        _ => {}
+    }
+    out
+}
+
+#[test]
+fn rejects_graphs_without_trusting_the_parser() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    c.add(Term.Array(0), sp).unwrap()
+    assert(c.check().is_err(), "self-referential term graph")
+    var c = Core.new()
+    let u = c.add(Term.U64, sp).unwrap()
+    c.definitions.push(Definition { name: "bad".to_string(), ty: u,
+        value: 999, exported: false, span: sp })
+    assert(c.check().is_err(), "out-of-range definition body")
+}
+
+#[test]
+fn rejects_false_proofs_without_trusting_the_parser() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let ty = c.add(Term.Lt(one, zero), sp).unwrap()
+    let value = c.add(Term.Decide(one, zero), sp).unwrap()
+    c.definitions.push(Definition { name: "false".to_string(), ty,
+        value, exported: false, span: sp })
+    assert(c.check().is_err(), "a false closed proposition has no evidence")
+}
+
+#[test]
+fn rejects_type_in_type_without_trusting_the_parser() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let universe = c.add(Term.Universe(0), sp).unwrap()
+    c.definitions.push(Definition { name: "bad".to_string(), ty: universe,
+        value: universe, exported: false, span: sp })
+    assert(c.check().is_err(), "Type 0 has type Type 1")
+}

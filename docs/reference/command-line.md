@@ -1,6 +1,7 @@
 # Command line
 
 ```text
+jihoo core <action> <file.jhc>              check or compile the experimental dependent core
 jihoo fmt <paths> [--check|--write] [--width N]  format source or check its layout
 jihoo check <file.jh> [--lib]                check without generating code
 jihoo lsp [-I dir] [--target t]               serve the Language Server Protocol on stdio
@@ -53,6 +54,17 @@ once the program has none.
 
 Link inputs are C sources, object files and `-l`/`-L` flags, passed to the
 C compiler when linking a native program.
+
+## Experimental dependent core
+
+`jihoo core check FILE.jhc` checks a [native dependent-core](../internals/dependent-core.md)
+program and its proofs. `core emit-mir`, `core emit-llvm` and
+`core emit-obj` erase and lower those checked terms; `emit-obj` requires
+`-o PATH` and produces a C-linkable library object. `--target`, `-O0` to
+`-O3`, `-o` and `--error-format=text|json` are supported as appropriate.
+`jihoo core --help` prints the syntax. The `.jhc` input is experimental
+core syntax, separate from ordinary `.jh` source. Checking always runs;
+`--no-verify` is not a core option.
 
 ## Source formatting
 

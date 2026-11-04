@@ -1,5 +1,13 @@
 # Design: verification (0.5) and mathematics (0.6)
 
+The replacement direction is a [native dependent core](dependent-core.md):
+check the program and its proofs together, then erase and lower those
+same terms. The first executable `.jhc` slice is available through
+`jihoo core`. Ordinary `.jh` elaboration has not yet moved to that core.
+The implementation, principles and unfinished proof connections below
+describe the existing verifier while that migration is in progress;
+its Horn encoding is not a compatibility requirement on the replacement.
+
 Status: research. The compiler proves checks and
 [contracts](../language/contracts.md) itself
 ([`jihoo verify`](../reference/command-line.md#verification); every
@@ -15,12 +23,12 @@ that its functions meet their contracts. A proof costs nothing at run time:
 it is checked and then erased, and a check that is proved is removed, so a
 verified program is faster than the same program unverified.
 
-jihoo 0.6 makes the proofs themselves a jihoo library: lemmas about
-integers, sequences and the program's own data, proved by induction and used
-by 0.5's contracts. Mathematics beyond what programs need grows from there,
-as a library on compile-time evaluation, not as a change to jihoo's type
-system: jihoo stays a systems language that is good at running a proof
-kernel.
+jihoo 0.6 makes proofs importable libraries over the native core: lemmas
+about integers, sequences and the program's own data, proved by induction
+and used in program specifications. Mathematics beyond what programs need
+grows from there through the same core's types and proofs, erased before
+runtime code generation. The earlier Horn library remains part of the
+existing verifier's development, not a required API for these libraries.
 
 ## Principles
 

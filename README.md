@@ -173,6 +173,15 @@ connects initialized prefixes, capacity-checked pushes and copying
 relocation to the list relations; connecting the library's actual MIR,
 allocator and pointer/borrow behavior remains required.
 
+The replacement direction is a [native dependent core](docs/internals/dependent-core.md)
+that checks programs and proofs together and emits MIR directly from the
+checked terms. The experimental `jihoo core` frontend compiles
+[`examples/core_index.jhc`](examples/core_index.jhc): a runtime array
+lookup whose proof is erased before code generation, without Horn or
+Agda in that compilation path. Ordinary `.jh` elaboration, general
+induction, mutable memory and proofs of the new kernel and lowering
+remain required before this replaces the existing verifier.
+
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
 [`std.os`](docs/reference/standard-library.md#files-and-errors) reports

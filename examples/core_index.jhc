@@ -1,0 +1,17 @@
+; Experimental typed core, not ordinary .jh surface syntax.
+; get is checked for arbitrary n, xs : Array n and i : U64.
+; Its erased argument must establish the exact proposition Lt i n.
+(def get
+  (pi n U64 (pi xs (Array n) (pi i U64 (pi0 p (Lt i n) I64))))
+  (lam n U64 (lam xs (Array n) (lam i U64 (lam0 p (Lt i n)
+    (index xs i p))))))
+
+; The input is a runtime U64. Only the true branch can supply p.
+; Foreign callers see one U64 argument and an I64 result, with no proof
+; precondition, array pointer or erased argument in the ABI.
+(export lookup
+  (pi i U64 I64)
+  (lam i U64
+    (if-lt i 3 p
+      (app get 3 (array (int 11) (int 22) (int 33)) i p)
+      (int -1))))

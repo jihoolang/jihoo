@@ -599,7 +599,10 @@ impl Tests {
     fn horn(self) -> Result((), String) {
         let src = read_file("compiler/linear.jh")?
         let broken = [
-            ("    if sum.constant >= 0 { return Err(\"the weighted facts are not contradictory\") }\n", "sign"),
+            (
+                "    if sum.constant >= 0 { return Err(\"the weighted facts are not contradictory\") }\n",
+                "sign"
+            ),
             ("        if c.weights[i] < 0 { return Err(\"negative weight\") }\n", "weights")
         ]
         self.horn_one(src.as_str(), "", "")?
@@ -659,7 +662,9 @@ impl Tests {
         if mode.len > 0 {
             // A panic of the proof's builder rejects too.
             if r.status.success() && !r.stdout.as_str().starts_with("rejected") {
-                return Err("the copy without the " + name + " test was proved:\n" + r.stdout.as_str())
+                return Err(
+                    "the copy without the " + name + " test was proved:\n" + r.stdout.as_str()
+                )
             }
             if !r.status.success() && r.stdout.as_str().contains("was proved") {
                 return Err(r.stdout + r.stderr.as_str())
@@ -746,7 +751,9 @@ impl Tests {
                         found = true
                     } else if inside && line == "}" {
                         inside = false
-                    } else if inside && (line.contains("@jihoo.panic") || line.contains("with.overflow")) {
+                    } else if inside && (
+                        line.contains("@jihoo.panic") || line.contains("with.overflow")
+                    ) {
                         checked = true
                     }
                 }
@@ -1010,7 +1017,9 @@ impl Tests {
                 ["emit-llvm", "--lib", "--target", t, "-mno-red-zone", "-mgeneral-regs-only", file]
             )
             let ir = o.stdout.as_str()
-            if !o.status.success() || !ir.contains("attributes #0 = { noredzone \"target-features\"=\"-") {
+            if !o.status.success() || !ir.contains(
+                "attributes #0 = { noredzone \"target-features\"=\"-"
+            ) {
                 return Err("the " + t + " IR has no kernel attributes:\n" + ir + o.stderr.as_str())
             }
             for line in ir.lines() {
@@ -1024,7 +1033,17 @@ impl Tests {
             let obj = self.temp("kernel.o")
             let built = exec(
                 self.compiler.as_str(),
-                ["emit-obj", "--lib", "--target", t, "-mno-red-zone", "-mgeneral-regs-only", file, "-o", obj.as_str()]
+                [
+                    "emit-obj",
+                    "--lib",
+                    "--target",
+                    t,
+                    "-mno-red-zone",
+                    "-mgeneral-regs-only",
+                    file,
+                    "-o",
+                    obj.as_str()
+                ]
             )
             fs.remove_file(obj.as_str())
             if !built.status.success() {
@@ -1040,7 +1059,10 @@ impl Tests {
             return Err("the default IR has attributes:\n" + plain.stdout.as_str())
         }
         let floats = "tests/ffi/kernel_floats.jh"
-        let rejected = exec(self.compiler.as_str(), ["check", "--lib", "-mgeneral-regs-only", floats])
+        let rejected = exec(
+            self.compiler.as_str(),
+            ["check", "--lib", "-mgeneral-regs-only", floats]
+        )
         let err = rejected.stderr.as_str()
         if status(rejected) != 1 || !err.contains("`half` uses a floating-point value") ||
             err.contains("`address`") {
@@ -1053,7 +1075,14 @@ impl Tests {
         let exe = self.temp("kernel-flags")
         let built = exec(
             self.compiler.as_str(),
-            ["build", "-mno-red-zone", "-mgeneral-regs-only", "examples/freestanding.jh", "-o", exe.as_str()]
+            [
+                "build",
+                "-mno-red-zone",
+                "-mgeneral-regs-only",
+                "examples/freestanding.jh",
+                "-o",
+                exe.as_str()
+            ]
         )
         if !built.status.success() {
             return Err("a program with both flags does not build:\n" + built.stderr.as_str())
@@ -1516,7 +1545,19 @@ fn main() -> i32 {
         suites.push(args[i])
     }
     if suites.len() == 0 {
-        for s in ["format", "check", "run", "test", "fail", "verify", "examples", "backend", "selfhost", "uefi"] {
+        for s in [
+            "format",
+            "check",
+            "run",
+            "test",
+            "fail",
+            "core",
+            "verify",
+            "examples",
+            "backend",
+            "selfhost",
+            "uefi"
+        ] {
             suites.push(s)
         }
     }
@@ -1574,6 +1615,15 @@ fn main() -> i32 {
             t.std_tests()
         } else if s == "fail" {
             t.suite_files("tests/fail", "fail")
+        } else if s == "core" {
+            let o = exec("python3", ["tests/core.py", "--compiler", t.compiler.as_str()])
+            let r: Result((), String) = if o.status.success() { Ok(()) }
+            else { Err("core validation failed:\n" + o.stdout.as_str() + o.stderr.as_str()) }
+            t.check("core: dependent checking, erasure and native execution", r)
+            let o = exec(t.compiler.as_str(), ["test", "-O1", "compiler/core.jh"])
+            let r: Result((), String) = if o.status.success() { Ok(()) }
+            else { Err("core kernel tests failed:\n" + o.stdout.as_str() + o.stderr.as_str()) }
+            t.check("core: kernel rejects malformed graphs and false evidence", r)
         } else if s == "verify" {
             // The checker's and the prover's own tests.
             let o = exec(t.compiler.as_str(), ["test", "-O1", "compiler/main.jh"])
@@ -1605,7 +1655,7 @@ fn main() -> i32 {
         } else if s == "uefi" {
             t.uefi()
         } else {
-            eprintln("unknown suite " + s + "; the suites are format, check, run, test, fail, verify, examples, backend, selfhost and uefi")
+            eprintln("unknown suite " + s + "; the suites are format, check, run, test, fail, core, verify, examples, backend, selfhost and uefi")
             return 2
         }
     }

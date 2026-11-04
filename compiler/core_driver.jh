@@ -1,0 +1,117 @@
+// The experimental core frontend. Ordinary .jh compilation remains a
+// separate frontend; this path checks and lowers core terms directly.
+import core_parse
+import core_lower
+import diag
+import mir
+import llvm
+import backend
+import check
+import target
+import timing
+import std.fs
+import std.sys
+import std.env
+
+const USAGE = "usage: jihoo core <check|emit-mir|emit-llvm|emit-obj> FILE.jhc [-o PATH] [--target x86_64|aarch64] [-O0|-O1|-O2|-O3] [--error-format=text|json]"
+
+fn usage(message: str) -> never {
+    var json = false
+    for arg in env.args() { if arg == "--error-format=json" { json = true } }
+    let sources = diag.Sources.new()
+    let d = diag.Diag.failure(diag.Kind.Usage, None, message)
+    eprintln(if json { sources.render_json(d) } else { sources.render(d) })
+    if !json { eprintln(USAGE) }
+    sys.exit(2)
+}
+
+fn perform(
+    action: str,
+    text: str,
+    file: u32,
+    tgt: target.Target,
+    output: Option(str),
+    opt: str
+) -> Result((), diag.Diag) {
+    var c = core_parse.parse(text, file)?
+    if action == "check" { return c.check() }
+    var program = core_lower.compile(c, tgt)?
+    var timer = timing.Timer.start()
+    check.program(&program, &timer)?
+    let contents = if action == "emit-mir" {
+        var text = String.new()
+        for f in program.fns { text.push_str(mir.show_function(program, f).as_str()) }
+        text
+    } else {
+        llvm.emit(program)
+    }
+    if action == "emit-obj" {
+        let Some(output) = output else { usage("emit-obj requires -o PATH") }
+        match backend.object(contents.as_str(), output, opt, tgt, target.Profile.Native, &timer) {
+            Ok(_) => {}
+            Err(e) => return Err(diag.Diag.failure(diag.Kind.Backend, None, e.as_str()))
+        }
+    } else {
+        match output {
+            Some(path) => match fs.write_file(path, contents.as_str()) {
+                Ok(_) => {}
+                Err(e) => return Err(diag.Diag.failure(diag.Kind.Io, None, e.to_string().as_str()))
+            }
+            None => print(contents)
+        }
+    }
+    Ok(())
+}
+
+pub fn drive(args: [str]) {
+    if args.len == 3 && (args[2] == "--help" || args[2] == "-h") { println(USAGE); return }
+    if args.len < 4 { usage("expected an action and core input") }
+    let action = args[2]
+    if action != "check" && action != "emit-mir" && action != "emit-llvm" && action != "emit-obj" {
+        usage("unknown core action")
+    }
+    var output: Option(str) = None
+    var tgt = target.Target.host()
+    var opt = "-O2"
+    var json = false
+    var i = 4
+    while i < args.len {
+        let a = args[i]
+        if a == "-o" || a == "--target" {
+            i += 1
+            if i >= args.len { usage("missing option argument") }
+            if a == "-o" { output = Some(args[i]) }
+            else {
+                let Some(t) = target.Target.parse(args[i]) else { usage("unknown target") }
+                tgt = t
+            }
+        } else if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" { opt = a }
+        else if a == "--error-format=json" { json = true }
+        else if a == "--error-format=text" {}
+        else { usage("unknown core option") }
+        i += 1
+    }
+    if action == "check" && output.is_some() { usage("check does not accept -o") }
+    var sources = diag.Sources.new()
+    let path = args[3]
+    let text = match fs.read_file(path) {
+        Ok(text) => text
+        Err(e) => {
+            let d = diag.Diag.failure(
+                diag.Kind.Io,
+                None,
+                ("cannot read " + path + ": " + e.to_string().as_str()).as_str()
+            )
+            eprintln(if json { sources.render_json(d) } else { sources.render(d) })
+            sys.exit(1)
+        }
+    }
+    let file = sources.add(path.to_string(), text.clone())
+    match perform(action, text.as_str(), file, tgt, output, opt) {
+        Ok(_) => {}
+        Err(d) => {
+            eprintln(if json { sources.render_json(d) } else { sources.render(d) })
+            sys.exit(1)
+        }
+    }
+}
