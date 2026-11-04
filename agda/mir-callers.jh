@@ -2,3 +2,14 @@
 // calls must run the exported helpers, rather than assume their contracts.
 fn mir_add(a: i128, b: i128) -> Option(i128) { add(a, b) }
 fn mir_mul(a: i128, b: i128) -> Option(i128) { mul(a, b) }
+
+// A genuine back edge: for b == 0 this need not terminate. Every return
+// gives the last in-range accumulator, just before the next sum overflows.
+fn mir_loop(a: i128, b: i128) -> Option(i128) {
+    var value = a
+    loop {
+        let (next, over) = overflowing_add(value, b)
+        if over { return Some(value) }
+        value = next
+    }
+}

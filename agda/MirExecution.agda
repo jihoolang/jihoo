@@ -9,7 +9,8 @@
 -- `wp-sound` proves finite proof-directed symbolic execution sound for
 -- arbitrary graphs and nondeterministic calls. Its fuel limits the proof,
 -- not Run: Run and Calls describe arbitrary finite executions, including
--- recursive calls. Invariants for unbounded loops are future work.
+-- recursive calls. `Paths` and `paths-sound` also support inductive loop
+-- invariants, without bounding the number of times a cut point is visited.
 ------------------------------------------------------------------------
 module MirExecution where
 
@@ -174,3 +175,30 @@ module Semantics (bounds : Scalar.Bounds) where
   wp-sound p f (suc fuel) (invoke c args dest bb s) post proof (called {v = v} invoked run) =
     wp-sound p f fuel (advance f bb (set s dest (just v))) post (proof v invoked) run
   wp-sound p f (suc fuel) stuck post () run
+
+  -- A finite proof follows a path until it returns or reaches an annotated
+  -- block. At a call it covers every result of the actual Calls relation.
+  -- The invariant need only describe cut points, not every basic block.
+  data Paths (p : Program) (f : Function) (inv : ℕ → Store → Set)
+             (post : Value → Set) : Action → Set where
+    done : ∀ {v} → post v → Paths p f inv post (finished v)
+    cut : ∀ {bb s} → inv bb s → Paths p f inv post (next bb s)
+    jump : ∀ {bb s} → Paths p f inv post (advance f bb s)
+         → Paths p f inv post (next bb s)
+    calling : ∀ {c args dest bb s}
+           → (∀ v → Calls p c args v → Paths p f inv post (advance f bb (set s dest (just v))))
+           → Paths p f inv post (invoke c args dest bb s)
+
+  -- Each use of a cut consumes a continued step of the finite execution.
+  -- A cyclic graph therefore needs an inductive invariant, but no fuel
+  -- bound or termination assumption. Calls still execute their own graph.
+  paths-sound : ∀ p f inv post
+              → (∀ bb s → inv bb s → Paths p f inv post (advance f bb s))
+              → ∀ {a v} → Paths p f inv post a → Run p f a v → post v
+  paths-sound p f inv post closed (done proof) returned = proof
+  paths-sound p f inv post closed (cut {bb} {s} proof) (continued run) =
+    paths-sound p f inv post closed (closed bb s proof) run
+  paths-sound p f inv post closed (jump proof) (continued run) =
+    paths-sound p f inv post closed proof run
+  paths-sound p f inv post closed (calling proof) (called {v = v} invoked run) =
+    paths-sound p f inv post closed (proof v invoked) run

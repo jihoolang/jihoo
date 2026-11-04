@@ -1,4 +1,4 @@
-// FILE TARGET. Export the checked MIR of add, mul, mir_add and mir_mul
+// FILE TARGET. Export the checked MIR of add, mul and the MIR fixtures
 // as GeneratedMir.agda. This is a trusted serializer, not a proof search:
 // every statement and terminator in the selected bodies must be supported.
 // Every block is serialized, including unreachable blocks. Agda checks the
@@ -255,8 +255,8 @@ fn function(p: mir.Program, ids: [u32], id: u32) -> Result(String, String) {
 }
 
 fn emit(p: mir.Program) -> Result(String, String) {
-    let names = ["add", "mul", "mir_add", "mir_mul"]
-    let aliases = ["helper-add", "helper-mul", "caller-add", "caller-mul"]
+    let names = ["add", "mul", "mir_add", "mir_mul", "mir_loop"]
+    let aliases = ["helper-add", "helper-mul", "caller-add", "caller-mul", "loop-add"]
     var ids = Vec(u32).new()
     for name in names {
         var found: Option(u32) = None
@@ -274,7 +274,7 @@ fn emit(p: mir.Program) -> Result(String, String) {
         let text = function(p, ids.as_slice(), ids[i])?
         out.push_str(aliases[i] + " : Function\n" + aliases[i] + " = " + text.as_str() + "\n\n")
     }
-    out.push_str("program : Program\nprogram = helper-add ∷ helper-mul ∷ caller-add ∷ caller-mul ∷ []\n")
+    out.push_str("program : Program\nprogram = helper-add ∷ helper-mul ∷ caller-add ∷ caller-mul ∷ loop-add ∷ []\n")
     Ok(out)
 }
 

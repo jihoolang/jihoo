@@ -544,10 +544,22 @@ and moves into the compiler once its trust boundary is stated.
       executions for every permitted intrinsic outcome. Nix checks both
       targets and rejects incorrect operations, returns, callees,
       lifetimes and caller rules, plus unsupported wrapping arithmetic.
+      Started: [`agda/MirLoopCorrespondence.agda`](../../agda/MirLoopCorrespondence.agda)
+      uses inductive block invariants, proved sound in `MirExecution.agda`,
+      to connect an exported accumulator loop to its generated Horn entry,
+      back-edge and exit rules. Every return from an initially in-range
+      accumulator gives its last in-range value before the next sum
+      overflows. The proof has no fixed iteration bound or termination
+      premise and constructs graph executions for finite sequences of
+      permitted intrinsic outcomes. Nix checks both targets, multiple
+      iterations in both directions, equivalent integer representations
+      and a non-returning cycle, and rejects incorrect loop operations,
+      returns, updates, branches and Horn steps or a missing Horn exit.
       The serializer/frontend remain trusted; general MIR operations,
-      loop invariants, borrow/pointer and `Vec` memory semantics, and the
-      backend still need their connections. This covers these four
-      exported graphs, not the entire checker or all MIR paths/calls.
+      invariants for the checker's list-processing loops, borrow/pointer
+      and `Vec` memory semantics, and the backend still need their
+      connections. This covers these five exported graphs, not the entire
+      checker or all MIR paths/calls.
    6. Required before 0.5.0: prove verification-condition generation and
       check removal sound. For `obligations.jh`, `vc.jh` and `verify.jh`,
       show that valid generated obligations imply that removed checks

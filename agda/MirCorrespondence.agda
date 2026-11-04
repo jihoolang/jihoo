@@ -24,8 +24,9 @@ open Adequate ℤ-ring using (OD; closure; ⟦_⟧)
 -- MIR's argument count, passing conventions and supported value types.
 signatures : (map M.Function.arguments program ≡
   ((M.int-type ∷ M.int-type ∷ []) ∷ (M.int-type ∷ M.int-type ∷ []) ∷
-   (M.int-type ∷ M.int-type ∷ []) ∷ (M.int-type ∷ M.int-type ∷ []) ∷ []))
-  × (map M.Function.result program ≡ (M.option-type ∷ M.option-type ∷ M.option-type ∷ M.option-type ∷ []))
+   (M.int-type ∷ M.int-type ∷ []) ∷ (M.int-type ∷ M.int-type ∷ []) ∷
+   (M.int-type ∷ M.int-type ∷ []) ∷ []))
+  × (map M.Function.result program ≡ (M.option-type ∷ M.option-type ∷ M.option-type ∷ M.option-type ∷ M.option-type ∷ []))
 signatures = refl , refl
 
 data Represents : M.Value → Tm → Set where

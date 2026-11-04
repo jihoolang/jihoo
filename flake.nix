@@ -220,7 +220,8 @@
           '';
 
           # Retain both targets' exported MIR and Horn theory for review.
-          # The proof runs the actual callee graphs for direct calls.
+          # The proof runs actual callee graphs and checks an inductive
+          # invariant against the exported loop and its Horn cut rules.
           mir-execution = pkgs.runCommand "jihoo-mir-execution" {
             nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
           } ''

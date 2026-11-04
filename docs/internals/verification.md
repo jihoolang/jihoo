@@ -688,12 +688,17 @@ graph in a fresh frame and resume with its result; the call relation
 contains that execution derivation. It can describe arbitrary finite
 executions and recursive calls. `wp-sound` proves finite symbolic
 execution sound, with its fuel limiting the proof rather than the
-execution relation. Loop invariants and proofs for recursive programs
-remain further work.
+execution relation. `Paths` and `paths-sound` also support inductive
+invariants at selected blocks: each finite proof follows a path to a return
+or an invariant, and executing an annotated block must re-establish these
+conditions. Induction on a returning execution proves the postcondition
+without fuel or a termination premise. Direct calls still require their
+actual execution derivations. Proofs for recursive programs remain further
+work.
 
 [`agda/export-mir.jh`](../../agda/export-mir.jh) loads and compiles the
-current `linear.jh` with two appended direct callers, performs borrow/drop
-checking and serializes the actual MIR objects. It preserves every block,
+current `linear.jh` with two appended direct callers and an accumulator
+loop, performs borrow/drop checking and serializes the actual MIR objects. It preserves every block,
 statement and terminator of the selected functions, checks frame/graph
 bounds, signatures and supported types, and rejects unsupported operations.
 It is a trusted data serializer, not a certified translation of the
@@ -709,15 +714,35 @@ specializes the intrinsic contract to signed i128. The wrapped result
 still need not be modeled bit for bit because the helpers discard it on
 overflow, which is now established by their exported control flow.
 
+[`agda/MirLoopCorrespondence.agda`](../../agda/MirLoopCorrespondence.agda)
+connects an inductive invariant to the actual exported `mir_loop` graph.
+Starting with an in-range accumulator, the loop repeatedly adds a fixed
+step, and returns the previous accumulator when the intrinsic reports
+overflow. Every returning execution gives an in-range value whose next
+addition is out of range. Its invariant also carries a numerical Horn
+representation of the accumulator and a history that composes the
+generated loop rules back to the function's entry. The proof checks the
+entry, back-edge and exit schemas and their variable sorts; the back-edge
+rule adds `fuel1`, and the exit starts at `fuel0`. No fixed iteration
+bound is imposed. Every finite sequence of permitted intrinsic outcomes
+also constructs an actual graph execution. The theorem is partial
+correctness: a zero step need not terminate, and no termination result is
+claimed.
+
 The `mir-execution` Nix check regenerates data for both targets, checks
 positive returning executions, and rejects changes to the operation,
 overflow return, direct callee, local lifetime and caller rule. It also
-requires an unsupported wrapping operation to fail export. Its output
+requires rejection of an incorrect loop operation, return, accumulator
+update, overflow branch or Horn step, and a missing Horn exit. Positive
+examples exercise zero and multiple back edges, both overflow directions,
+numerically equal integer representations and a cycle without a returning
+execution. An unsupported wrapping operation must fail export. Its output
 retains each target's MIR data, theory and Horn rules for review.
 
 The proof depends on the serializer faithfully reading MIR and on the
-stated MIR intrinsic contract. Other MIR operations, loop invariants,
-borrow/pointer and `Vec` memory semantics, observable wrapping and the LLVM
+stated MIR intrinsic contract. Other MIR operations, invariants for the
+checker's list-processing loops, borrow/pointer and `Vec` memory semantics,
+observable wrapping and the LLVM
 intrinsic implementation remain separate obligations. This does not
 establish execution correspondence for the whole checker or preservation
 from source to MIR and from MIR to LLVM.

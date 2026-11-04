@@ -165,6 +165,9 @@ and [`agda/`](agda/Certified.agda) checks that proof in Agda with Horn's
 proved checker and reads it in the integers. The translation of the code
 into rules is still trusted, and the composed proof of the verifier
 (execution semantics, condition generation, check removal) is pending.
+Agda currently connects exported scalar helpers, direct callers and an
+[accumulator loop](agda/MirLoopCorrespondence.agda) to their generated Horn
+relations, with inductive invariants for arbitrary finite loop executions.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

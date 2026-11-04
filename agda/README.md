@@ -122,9 +122,9 @@ overflow and interprets integer bits in their source type.
 
 `nix build .#checks.x86_64-linux.mir-execution` runs `check-mir.sh`.
 `export-mir.jh` uses the compiler's loader, sema and borrow/drop checker to
-export the actual MIR objects of `linear.add`, `linear.mul` and two direct
-callers appended from `mir-callers.jh`. It retains every basic block,
-statement, lifetime marker, branch, call and return in the supported
+export the actual MIR objects of `linear.add`, `linear.mul`, two direct
+callers and an accumulator loop appended from `mir-callers.jh`. It retains
+every basic block, statement, lifetime marker, branch, call and return in the supported
 fragment. It checks signatures, frame/graph bounds and integer types,
 and rejects unsupported operations rather than approximating them.
 
@@ -135,6 +135,10 @@ function's actual graph in a fresh frame, then resumes the caller.
 `Run` and `Calls` describe arbitrary finite executions, including recursive
 calls. `wp-sound` proves a finite symbolic execution certificate sound;
 its fuel bounds the proof computation, not the execution semantics.
+`Paths` gives a second proof method: follow each path to a return or an
+annotated block, and prove the invariant again after executing that block.
+`paths-sound` checks arbitrary finite returning executions by induction,
+without bounding how often a loop visits its header or assuming termination.
 
 `MirCorrespondence.agda` checks the signatures and evaluates the exported
 graphs to prove that every helper return is the corresponding intrinsic
@@ -145,12 +149,27 @@ returned values have numerical Horn representations, and Agda checks
 the actual helper/caller Horn rules used to compose the correspondence.
 `InI128` instantiates the intrinsic contract with signed i128 bounds.
 
+`MirLoopCorrespondence.agda` applies `Paths` to the actual `mir_loop`
+graph, which repeatedly adds a fixed step until overflow. Given an
+initially in-range accumulator, every return gives its last in-range
+value, and adding the step to it is out of range. A history of numerical
+representations derives the generated loop entry, back-edge and exit
+rules, with one `fuel1` per successful iteration. Agda checks their full
+schemas and variable sorts. Constructive executions cover any finite
+sequence of permitted intrinsic outcomes, so the proof cannot hide a
+stuck loop. The overflowed value is discarded, as in the scalar helpers.
+
 Nix regenerates and checks the MIR and Horn theory for both targets.
 Five negative cases change the operation, overflow return, direct callee,
 local lifetime or caller Horn rule. Each must fail with a type mismatch
 in the correspondence proof. A wrapping arithmetic operation must be
-rejected by the exporter. Positive examples contain actual returning
-callee/caller executions, overflow rejection and stale-read checks.
+rejected by the exporter. Six more negative cases change the loop's
+operation, returned value, accumulator update, overflow branch or Horn
+step, or remove its Horn exit. Positive examples contain actual returning
+callee/caller executions, overflow rejection and stale-read checks, and
+immediate and multiple-iteration loop returns in both directions, including
+numerically equal integer representations. A pure cycle cannot return,
+even with an uninhabited postcondition.
 Small-bound examples test control flow; they do not claim that the
 native i128 operation overflows at those small bounds.
 
@@ -158,8 +177,9 @@ The output retains `GeneratedMir.agda`, `Theory.agda` and `program.horn`
 under `x86_64/` and `aarch64/` for review. The MIR serializer
 (`export-mir.jh`) and compiler frontend are still trusted to supply faithful
 data; the proof is about those exported graphs. MIR semantics for other
-operations, loop invariants, pointer/borrow and `Vec` memory behavior,
-observable wrapped bits, and the LLVM intrinsic implementation remain
+operations, invariants for the checker's list-processing loops,
+pointer/borrow and `Vec` memory behavior, observable wrapped bits, and the
+LLVM intrinsic implementation remain
 release requirements. This does not prove the full checker's execution
 correspondence or the source-to-MIR/MIR-to-LLVM translations.
 
