@@ -522,6 +522,18 @@ and moves into the compiler once its trust boundary is stated.
       Connecting `std.Vec`'s memory and capacity semantics to finite lists,
       MIR arithmetic and overflow, calls and the path-to-rule translation
       remains required before composing a whole checker run with step 4.
+      Started: [`agda/ScalarExecution.agda`](../../agda/ScalarExecution.agda)
+      defines executable bounded addition and multiplication and proves
+      that the exact/overflow flag projection used by `linear.add` and
+      `linear.mul` has a numerical result represented by their actual Horn
+      rules. Bounds are parameters, including signed i128; rejected
+      operations are outside them. Nix checks boundary examples and
+      rejects wrong operations and a missing overflow result. Independent
+      numeral tests found and now cover translation overflow at i128's
+      minimum and the negative encoding of upper-half u128 constants, on
+      both targets. The raw wrapped bits and the LLVM intrinsic
+      implementation, general MIR paths/calls and `Vec`'s memory model
+      still need correspondence proofs; step 5 remains incomplete.
    6. Required before 0.5.0: prove verification-condition generation and
       check removal sound. For `obligations.jh`, `vc.jh` and `verify.jh`,
       show that valid generated obligations imply that removed checks

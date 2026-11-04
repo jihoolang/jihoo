@@ -81,6 +81,43 @@ MIR integer overflow, calls and path-to-rule translation also remain
 separate requirements before an execution of the whole checker can be
 composed with `Certified.check-sound`.
 
+## Scalar execution and overflow
+
+`nix build .#checks.x86_64-linux.scalar-execution` runs `check-scalars.sh`.
+`ScalarExecution.agda` defines executable exact addition and multiplication,
+inclusive integer bounds and an overflow decision. Its theorems quantify
+over arbitrary bounds; `signed 127` describes i128 without enumerating its
+values. Successful results are in range and exact, and rejection means
+the exact result is outside the range.
+
+`Overflowing` states the MIR intrinsic contract used by `linear.add` and
+`linear.mul`: a false flag gives the exact result, and a true flag means
+it did not fit. The overflowed value is discarded by these helpers, so
+this projection admits any in-range wrapped value. `projection-correct`
+connects the helpers' flag branch to the executable checked operation.
+`checked-execution` and `intrinsic-execution` give a numerical
+representation of each returned `Option` and derive the corresponding
+`fn.add` or `fn.mul` judgment in the generated theory. The result's term
+need only have the same integer value, not the same spelling.
+
+Agda finds the actual four helper rules by their full schemas and variable
+sorts rather than by fresh names or positions. The Nix check requires
+rejection of rules that add instead of multiplying, multiply instead of
+adding, or lose an overflow rejection. Examples cover both inclusive
+bounds, overflow in either direction, negative products, negating the
+minimum and noncanonical integer representations. This is a simulation
+into the Horn model, which may also derive extra overflow rejections.
+The observable wrapped bits, the LLVM implementation of intrinsics and
+general MIR paths/calls remain separate proof obligations.
+
+The same check and the ordinary `verify` suite independently read emitted
+signed and unsigned boundary constants and solve switch cases on both
+targets (`tests/horn/scalars.py`). This found two translation bugs:
+`i128::MIN` made the compiler overflow while constructing its magnitude,
+and upper-half `u128` constants were read as negative i128 bit patterns.
+The compiler now constructs the minimum's ring expression without that
+overflow and interprets integer bits in their source type.
+
 ## Semantic check removal
 
 `nix build .#checks.x86_64-linux.check-removal` runs `check-removal.sh`:
@@ -114,7 +151,7 @@ retargeting are not proved by this core. They must be connected before the
 0.5.0 release gate is met. Source-to-MIR and MIR-to-LLVM preservation also
 remain separate compiler-correctness obligations, with LLVM trusted.
 
-Use the matching system attribute on aarch64. All four proof checks are part of
+Use the matching system attribute on aarch64. All five proof checks are part of
 `nix flake check`. For all proof tools and the pinned Horn source:
 
 ```sh
@@ -123,6 +160,7 @@ jihoo build -O2 compiler/main.jh -o out/jihoo
 JIHOO=out/jihoo bash agda/check.sh
 bash agda/check-removal.sh
 JIHOO=out/jihoo bash agda/check-lists.sh
+JIHOO=out/jihoo bash agda/check-scalars.sh
 ```
 
 `check.sh` uses Horn's `schematic-kernel` on `PATH` (or

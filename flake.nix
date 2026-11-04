@@ -207,6 +207,18 @@
             touch $out
           '';
 
+          scalar-execution = pkgs.runCommand "jihoo-scalar-execution" {
+            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
+          } ''
+            cp -R ${src}/. src
+            chmod -R u+w src
+            cp -R ${./agda} src/agda
+            cd src
+            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR LC_ALL=C.UTF-8
+            HORN=${horn} bash agda/check-scalars.sh
+            touch $out
+          '';
+
           # Retain the actual proof for independent consumers: the theory,
           # goals and certificate, checked again by Horn's Rust checker, and
           # their Agda export, which the `adequacy` check has Agda check.

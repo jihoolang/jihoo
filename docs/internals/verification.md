@@ -641,6 +641,42 @@ relation required by `Certified.check-sound`. Differential testing remains
 a regression check, and this partial bridge does not complete the 0.5.0
 execution-correspondence release gate.
 
+### Execution bridge for scalar helpers
+
+[`agda/ScalarExecution.agda`](../../agda/ScalarExecution.agda) defines
+executable exact addition and multiplication with inclusive integer
+bounds. Success gives an in-range exact value; rejection means the exact
+value lies outside the bounds. The theorems quantify over the bounds, so
+signed i128 is an instance rather than an enumeration of values.
+
+The MIR intrinsic contract says a false overflow flag gives the exact
+result. A true flag says that result did not fit, with an in-range wrapped
+value. `linear.add` and `linear.mul` discard that value, returning `None`;
+the semantic projection therefore leaves its bits unspecified.
+`projection-correct` proves that this flag branch agrees, up to integer
+equality, with the executable checked operation. `checked-execution` and
+`intrinsic-execution` give Horn witnesses representing each helper's
+result numerically. Agda finds the actual generated rules by their
+premises, conclusions and variable sorts, without depending on their
+fresh identifiers. The Horn model may additionally derive spurious
+overflow rejections; this proves the execution-to-model direction.
+
+The `scalar-execution` Nix check regenerates the theory and checks the
+proof and concrete boundary cases, and rejects rules with the wrong
+arithmetic operation or a missing overflow result. Independent tests in
+`tests/horn/scalars.py` read signed and unsigned boundary constants and
+solve switch cases for both targets, also in the ordinary `verify` suite.
+They found two bugs in numeral translation: taking i128's minimum's
+magnitude overflowed in the compiler, and upper-half u128 bit patterns
+were interpreted as negative values. Both now have regressions.
+
+This does not yet prove observable wrapping behavior or the LLVM
+implementation of overflowing intrinsics. The checker's general MIR
+paths, calls and memory operations still need a simulation before the
+whole execution-to-Horn theorem can be composed with its checked
+soundness certificate. The source-to-MIR and MIR-to-LLVM boundaries remain
+as stated in the roadmap.
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,
