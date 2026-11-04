@@ -114,17 +114,63 @@ fn show(t: Hm) -> String {
 fn num(v: i128) -> Hm {
     if v == 0 { return sym("z0") }
     if v == 1 { return sym("z1") }
-    if v < 0 { return Hm.A("neg".to_string(), one(num(0 - v))) }
+    if v < 0 {
+        let (magnitude, over) = overflowing_sub(0 as i128, v)
+        // -MIN does not fit an i128, but its ring expression does. Keep
+        // the usual spelling for every other negative numeral.
+        let n = if over {
+            ap2("add", num(0 - (v + 1)), sym("z1"))
+        } else { num(magnitude) }
+        return Hm.A("neg".to_string(), one(n))
+    }
     // 2 * (v / 2) + v % 2
     let two = ap2("add", sym("z1"), sym("z1"))
     let half = ap2("mul", two, num(v / 2))
     if v % 2 == 0 { half } else { ap2("add", half, sym("z1")) }
 }
 
+// MIR stores integer bits in i128, including the upper half of u128.
+// Interpret those constants and switch labels in their source type.
+fn typed_num(prog: Program, ty: u32, v: i128) -> Hm {
+    match prog.types.int(ty) {
+        Some(i) => if !i.signed && i.bits == 128 && v < 0 {
+            let modulus = ap2("mul", num((1 as i128) << 126), num(4))
+            return ap2("add", num(v), modulus)
+        }
+        None => {}
+    }
+    num(v)
+}
+
 fn one(sink t: Hm) -> Vec(Hm) {
     var xs = Vec(Hm).new()
     xs.push(t)
     xs
+}
+
+// Interpret a numeral's magnitude independently, in u128 so that 2^127
+// fits. Used by the signed-boundary regression below.
+fn numeral_magnitude(t: Hm) -> u128 {
+    let n = t.name()
+    if n == "z0" { return 0 }
+    if n == "z1" { return 1 }
+    let xs = t.args()
+    if n == "add" { return numeral_magnitude(xs[0]) + numeral_magnitude(xs[1]) }
+    if n == "mul" { return numeral_magnitude(xs[0]) * numeral_magnitude(xs[1]) }
+    panic("not a non-negative numeral")
+}
+
+#[test]
+fn signed_numeral_boundaries() {
+    let half: i128 = 1 << 126
+    let min = (0 - half) - half
+    let limit: u128 = 1 << 127
+    let t = num(min)
+    assert(t.name() == "neg", "the minimum is negative")
+    assert(numeral_magnitude(t.args()[0]) == limit, "the minimum's exact magnitude")
+    assert(numeral_magnitude(num(half + (half - 1))) == limit - 1, "the maximum")
+    assert(show(num(-1)) == "(neg z1)", "keep the existing negative spelling")
+    assert(show(num(0)) == "z0", "zero")
 }
 
 // A local's value while a path runs.
@@ -1155,7 +1201,11 @@ fn switch(
                 "a switch on an integer with several values"
             )) }
             // x == value, or x < value, or x > value.
-            let c = Val.Cmp(Op.Eq, x.clone(), num(targets[0].value))
+            let c = Val.Cmp(
+                Op.Eq,
+                x.clone(),
+                typed_num(prog, operand_ty(prog, b, op), targets[0].value)
+            )
             branch(prog, b, fx, from, st, c, true, targets[0].block, &o)?
             branch(prog, b, fx, from, st, c, false, otherwise, &o)
         }
@@ -1167,7 +1217,7 @@ fn operand(prog: Program, b: Body, inout st: St, op: Operand, inout o: Out) -> R
     match op {
         Copy(p) | Move(p) => read(prog, b, &st, p, &o)
         Const(c) => match c {
-            Int(v, _) => Ok(Val.Term(num(v)))
+            Int(v, t) => Ok(Val.Term(typed_num(prog, t, v)))
             Bool(x) => Ok(Val.Term(sym(if x { "B.tt" } else { "B.ff" })))
             Str(_) => Ok(Val.Term(sym("Str.s")))
             Zst(_) => Ok(Val.Term(sym("U.u")))

@@ -604,6 +604,8 @@ impl Tests {
         ]
         self.horn_one(src.as_str(), "", "")?
         self.differential()?
+        let scalars = exec("python3", ["-I", "tests/horn/scalars.py", self.compiler.as_str()])
+        if !scalars.status.success() { return Err(scalars.stdout + scalars.stderr.as_str()) }
         for b in broken {
             let Some(at) = src.as_str().find(b.0) else { return Err("linear.jh has no line " + b.0) }
             let text = src.as_str()[0..at] + src.as_str()[at + b.0.len..src.len()]

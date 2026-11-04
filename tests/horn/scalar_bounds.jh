@@ -1,0 +1,23 @@
+// Horn numeral encodings at signed and unsigned boundaries. -i128::MIN
+// does not fit the compiler's i128 host representation, and upper-half
+// u128 constants are stored there as negative bit patterns.
+const HALF: i128 = 1 << 126
+const MIN: i128 = (0 - HALF) - HALF
+const MAX: i128 = HALF + (HALF - 1)
+
+fn minimum() -> i128 { MIN }
+fn maximum() -> i128 { MAX }
+fn minimum_next() -> i128 { MIN + 1 }
+fn negative_one() -> i128 { -1 }
+
+const UPPER: u128 = 1 << 127
+const UMAX: u128 = 0 -% 1
+fn unsigned_upper() -> u128 { UPPER }
+fn unsigned_maximum() -> u128 { UMAX }
+
+fn unsigned_case(v: u128) -> i64 {
+    match v {
+        0xffffffffffffffff => 1
+        _ => 0
+    }
+}
