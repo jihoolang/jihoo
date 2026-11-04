@@ -614,6 +614,33 @@ the index), are equivalent (a swapped comparison next to an equality),
 or change a rule no run reaches. A search that does not end (a rule that
 leaves a list unbound) fails after 10 seconds.
 
+### Execution bridge for list primitives
+
+[`agda/ListExecution.agda`](../../agda/ListExecution.agda) begins the
+execution-to-Horn proof with the three list sorts used by `linear.check`:
+terms, facts and weights. Its executable operations are finite-list
+length, recursive lookup and appending one element. For every list of
+well-sorted ground values, it proves that each operation's result derives
+the matching `len`, `nth` or `snoc` judgment in `Adequacy`'s model. A
+lookup's index may be any ground integer expression with the appropriate
+value; it is not required to have the syntax of a canonical numeral.
+
+The proof uses six rule schemas per sort. Agda checks that each schema,
+including its premises and variable sorts, is present in the theory
+generated from the current `linear.jh`. They are not additional axioms.
+The `list-execution` Nix check regenerates that theory, checks concrete
+integer examples and requires rejection of three incorrect generated
+rules: an off-by-one length, an off-by-one index and a lost push result.
+
+This establishes finite-list primitive correspondence, not a native
+`std.Vec` memory model. Its representation, allocation, capacity bounds,
+pointer accesses and borrowing still need a simulation into these lists.
+The checker's MIR arithmetic, overflow, calls and control-flow translation
+also remain to be connected before its execution implies the Horn
+relation required by `Certified.check-sound`. Differential testing remains
+a regression check, and this partial bridge does not complete the 0.5.0
+execution-correspondence release gate.
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,

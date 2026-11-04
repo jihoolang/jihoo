@@ -50,6 +50,37 @@ directory holds:
 - `missing-rejected.txt` and `wrong-rejected.txt`: rejection reports for
   removing the result and replacing its reference with the wrong fact.
 
+## List execution and the Horn model
+
+`nix build .#checks.x86_64-linux.list-execution` runs `check-lists.sh`.
+`ListExecution.agda` gives executable finite-list operations and proves
+their correspondence to the actual `len`, `nth` and `snoc` relations
+generated from `linear.jh`, for its term, fact and weight lists.
+
+For arbitrary well-sorted ground elements, length gives the list's size,
+a successful recursive lookup gives its element, and push gives the list
+with that element appended. Each result derives the corresponding Horn
+judgment in `Adequacy`'s model. The integer expression for an index may be
+any ground expression with the same value as its natural index; it need
+not have the syntax of the canonical numeral. Numerals' values are proved
+to be the corresponding sums of ones in the ordered ring.
+
+The six rule schemas for each list sort must occur in the generated
+theory, with their premises, conclusions and variable sorts unchanged.
+Agda checks these witnesses by conversion. The script regenerates the
+theory from the current compiler, checks integer examples in
+`ListExecutionExamples.agda`, and requires rejection of three incorrect
+rules: a length increment of zero, indexing the head at one, and a push
+that loses its element. Every mutation uses a fresh module directory;
+parser errors and missing imports do not count as proof rejection.
+
+This is the finite-list-to-Horn part of the execution bridge. The memory
+representation, allocation, capacity bounds, pointer accesses and borrow
+behavior of `std.Vec` remain assumptions until connected to these lists.
+MIR integer overflow, calls and path-to-rule translation also remain
+separate requirements before an execution of the whole checker can be
+composed with `Certified.check-sound`.
+
 ## Semantic check removal
 
 `nix build .#checks.x86_64-linux.check-removal` runs `check-removal.sh`:
@@ -83,7 +114,7 @@ retargeting are not proved by this core. They must be connected before the
 0.5.0 release gate is met. Source-to-MIR and MIR-to-LLVM preservation also
 remain separate compiler-correctness obligations, with LLVM trusted.
 
-Use the matching system attribute on aarch64. All three checks are part of
+Use the matching system attribute on aarch64. All four proof checks are part of
 `nix flake check`. For all proof tools and the pinned Horn source:
 
 ```sh
@@ -91,10 +122,11 @@ nix develop .#proofs
 jihoo build -O2 compiler/main.jh -o out/jihoo
 JIHOO=out/jihoo bash agda/check.sh
 bash agda/check-removal.sh
+JIHOO=out/jihoo bash agda/check-lists.sh
 ```
 
 `check.sh` uses Horn's `schematic-kernel` on `PATH` (or
-`SCHEMATIC_KERNEL`), and both scripts use `HORN` for the Horn checkout.
+`SCHEMATIC_KERNEL`), and the proof scripts use `HORN` for the Horn checkout.
 
 The execution-to-Horn and verification-condition-generation proofs remain
 separate release requirements in the [roadmap](../docs/internals/roadmap.md).

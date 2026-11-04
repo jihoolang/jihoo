@@ -512,6 +512,16 @@ and moves into the compiler once its trust boundary is stated.
       assumptions explicit. Completion: compose this theorem with step 4
       to prove the checker's soundness for that execution semantics;
       differential tests remain regression checks, not this proof.
+      Started: [`agda/ListExecution.agda`](../../agda/ListExecution.agda)
+      proves that executable finite-list length, successful lookup and
+      push derive the actual generated `len`, `nth` and `snoc` relations
+      for the checker's term, fact and weight lists. The proofs cover all
+      well-sorted ground elements and indices; an index may be any ground
+      integer expression with the appropriate value. Nix/CI regenerates
+      the theory and rejects incorrect length, index and push rules.
+      Connecting `std.Vec`'s memory and capacity semantics to finite lists,
+      MIR arithmetic and overflow, calls and the path-to-rule translation
+      remains required before composing a whole checker run with step 4.
    6. Required before 0.5.0: prove verification-condition generation and
       check removal sound. For `obligations.jh`, `vc.jh` and `verify.jh`,
       show that valid generated obligations imply that removed checks
