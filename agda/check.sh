@@ -5,8 +5,9 @@
 # refine.jh produces (agda/certificate.jh), exports that certificate for
 # Agda with Horn's `schematic-kernel --agda`, and checks agda/Certified.agda,
 # where Agda runs Horn's proved checker on it and reads the theorem in the
-# integers. HORN: a checkout of Horn, by default ../horn beside this
-# repository, for its agda/; SCHEMATIC_KERNEL: Horn's `schematic-kernel`
+# integers. CertifiedRemoval.agda then connects it to the semantic guard
+# conditions of CheckRemoval.agda. HORN: a checkout of Horn, by default
+# ../horn beside this repository, for its agda/; SCHEMATIC_KERNEL: Horn's `schematic-kernel`
 # (default: on PATH); JIHOO: the compiler (default `jihoo`), whose standard
 # library must have lib/proof (JIHOO_PATH=$PWD/lib in the dev shell).
 set -euo pipefail
@@ -26,5 +27,6 @@ mkdir "$out/horn"
 cp "$horn"/agda/*.agda "$out/horn"/
 cp "$root"/agda/*.agda "$out"/
 # A larger allocation area spares the collector most of the work.
-agda --safe --no-libraries -i "$out/horn" -i "$out" "$out/Certified.agda" +RTS -A256m -RTS
+agda --safe --no-libraries -i "$out/horn" -i "$out" "$out/CertifiedRemoval.agda" +RTS -A256m -RTS
 echo "linear checker: sound, certificate checked by Agda"
+echo "certified linear guards discharge semantic check-removal conditions"

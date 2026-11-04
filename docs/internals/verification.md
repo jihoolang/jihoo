@@ -705,6 +705,52 @@ suite checks that `jihoo verify --release compiler/main.jh` reports no
 unproved contract. With `reserve`'s shorter fast path the compiler proves
 1,145 of its 2,681 bounds and overflow checks.
 
+### Semantic check-removal specification
+
+[`agda/CheckRemoval.agda`](../../agda/CheckRemoval.agda) starts the
+verification-condition and check-removal proof required for 0.5.0. Its
+small-step semantics describes a graph of assertions, checked primitive
+operations, branches, jumps, returns and traps. `vc` constructs local
+conditions from a proposed invariant at every program point and a mask
+of checks to remove. A removed guard must hold in every invariant state;
+each possible successful step must preserve the next invariant. A
+return establishes the postcondition. A retained check may still fail.
+
+When all these conditions hold, the original and erased graphs have
+matching steps from invariant states, in both directions. The proof
+preserves every finite trace, including observable effects, and the
+entire final state or retained failure. It works on cyclic graphs
+without a fuel bound or a termination assumption. Primitive operations
+may change arbitrary state nondeterministically: their continuation
+condition must cover every transition, which prevents reusing a fact
+after an opaque write without proving it still holds.
+
+[`agda/CertifiedRemoval.agda`](../../agda/CertifiedRemoval.agda) connects
+this guard condition to `Certified.check-sound`: if the generated Horn
+relation for the checker accepts, the path's facts hold in every
+invariant state, and failure of the guard makes the claim negative, the
+guard always holds there. Continuing to the next invariant remains a
+separate obligation. This composition uses the certificate Agda checks,
+not a trusted prover or jihoo's Horn checker.
+
+`nix flake check` checks these theorems. The `check-removal` check also
+checks an observable countdown loop, arbitrary writes and retained
+failures, and requires Agda to reject conditions that remove a false
+guard, preserve an invalid invariant after a write, omit a branch or
+return without establishing a postcondition.
+`nix develop .#proofs` supplies the same tools and pinned Horn input.
+
+The specification is not yet connected to the implementation's
+conditions in `obligations.jh` and `vc.jh`, or all erasures in `verify.jh`.
+Checked primitives are defined as guarded unchecked operations; relating
+this to exact machine arithmetic, overflow and memory is still a proof
+obligation. Execution-to-Horn correspondence, contract and recursive-call
+dependencies, mutable borrows, type invariants, incomplete analysis,
+panic removal and call retargeting remain required for 0.5.0. Neither
+these proofs nor self-verification tests establish preservation from
+source to MIR or from MIR to LLVM; those are separate obligations and
+LLVM remains trusted.
+
 ## Open questions
 
 - **Syntax.** Settled for functions and loops

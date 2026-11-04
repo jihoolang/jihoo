@@ -522,6 +522,22 @@ and moves into the compiler once its trust boundary is stated.
       incomplete analysis. Completion: every rule used to remove a check
       or accept a contract is covered by the composed proof; unsupported
       cases keep their checks and do not silently establish contracts.
+      Started: [`agda/CheckRemoval.agda`](../../agda/CheckRemoval.agda)
+      defines a graph semantics and generates semantic local conditions
+      for assertions, guarded operations, branches, loops, jumps, returns
+      and traps. Discharging those conditions proves one-step
+      correspondence and preservation of finite traces and final states
+      in both directions after local check removal, including retained
+      failures and arbitrary primitive effects. `CertifiedRemoval.agda`
+      uses the independently checked linear certificate to discharge a
+      guard when the path-fact and negated-claim connections hold. Nix/CI
+      checks the proofs, loop and opaque-effect examples, and rejection
+      of false guards, invalid state preservation, missing branches and
+      unestablished postconditions.
+      These are semantic specifications: the implementation-to-condition
+      connection, concrete arithmetic and memory semantics, contracts and
+      dependencies, incomplete analysis and panic/call erasure remain
+      required. This does not complete step 5 or step 6.
    7. Required before 0.5.0: publish the composed theorem, its supported
       semantics and its remaining trusted components, and check the proof
       chain in CI. Distinguish checks proved in the compiler's own source

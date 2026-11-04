@@ -58,6 +58,13 @@
       # shared library at major version 21, as checked by both backends.
       llvmFor = pkgs: pkgs.llvmPackages_21;
 
+      hornCheckerFor = pkgs: pkgs.rustPlatform.buildRustPackage {
+        pname = "jihoo-horn-checker";
+        version = "0.3.0";
+        src = horn;
+        cargoLock.lockFile = "${horn}/Cargo.lock";
+      };
+
       # Ship the standard library, libLLVM, and native/freestanding linkers.
       wrapCompiler = llvm: ''
         mkdir -p $out/share/jihoo
@@ -169,14 +176,23 @@
           llvm = llvmFor pkgs;
           jihoo = self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo;
           otherTarget = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64" else "x86_64";
-          hornChecker = pkgs.rustPlatform.buildRustPackage {
-            pname = "jihoo-horn-checker";
-            version = "0.3.0";
-            src = horn;
-            cargoLock.lockFile = "${horn}/Cargo.lock";
-          };
+          hornChecker = hornCheckerFor pkgs;
         in
         {
+          # A semantic specification for the VC generator and local
+          # erasure, independent of the compiler and the Horn certificate.
+          # Loops, opaque effects and retained failures are covered; bad
+          # proposed conditions must be rejected by Agda's type checker.
+          check-removal = pkgs.runCommand "jihoo-check-removal" {
+            nativeBuildInputs = [ pkgs.agda ];
+          } ''
+            cp -R ${./agda} agda
+            chmod -R u+w agda
+            export HOME=$TMPDIR LC_ALL=C.UTF-8
+            HORN=${horn} bash agda/check-removal.sh
+            touch $out
+          '';
+
           # Retain the actual proof for independent consumers: the theory,
           # goals and certificate, checked again by Horn's Rust checker, and
           # their Agda export, which the `adequacy` check has Agda check.
@@ -276,6 +292,13 @@
         in
         {
           default = pkgs.mkShell shell;
+
+          # All tools for agda/check.sh and agda/check-removal.sh, with the
+          # same Horn input and Agda as the proof checks in CI.
+          proofs = pkgs.mkShell (shell // {
+            nativeBuildInputs = shell.nativeBuildInputs ++ [ pkgs.agda (hornCheckerFor pkgs) ];
+            HORN = "${horn}";
+          });
 
           # The default shell with QEMU, OVMF and the UEFI shell, which the
           # uefi suite of tests/runner.jh runs UEFI programs with (x86_64).
