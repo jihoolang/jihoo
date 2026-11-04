@@ -182,8 +182,11 @@ a runtime array lookup whose proof is erased before code generation,
 without Horn, Agda or legacy VC generation. The
 [equality example](examples/core_equality.jh) adds erased U64 equality
 and proposition-only transport, with user-written lemmas rewriting the
-runtime bound to the array length. General `.jh` coverage,
-induction, mutable memory and proofs of the new kernel, elaboration and
+runtime bound to the array length. The
+[induction example](examples/core_chain.jh) checks a structural induction
+lemma over indexed equality chains and erases the recursive proof before
+emitting the array load. General `.jh` coverage,
+dependent induction, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and

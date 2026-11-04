@@ -1,7 +1,7 @@
 // Explicit .jh subset -> the existing dependent core, directly from AST.
 // Contextual forms use the ordinary parser: erased(P), if_lt(a, b,
 // fn(p) { yes }, no), index(xs, i, p), decide_lt(a, b), Eq, refl,
-// if_eq and proposition-only transport.
+// if_eq, proposition-only transport and indexed chain induction.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -17,7 +17,8 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 }
 
 fn reserved(name: str) -> bool {
-    name == "erased" || name == "Lt" || name == "Eq" || name == "if_lt" ||
+    name == "erased" || name == "Lt" || name == "Eq" || name == "EqChain" ||
+        name == "chain_refl" || name == "chain_step" || name == "chain_induct" || name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
         name == "__jihoo_dependent_main"
@@ -66,13 +67,14 @@ impl Elaborator {
                     e.span,
                     "unsupported type"
                 )) }
-                if (n != "Lt" && n != "Eq") || args.len() != 2 {
-                    return Err(error(e.span, "expected Lt(i, n) or Eq(a, b)"))
+                if (n != "Lt" && n != "Eq" && n != "EqChain") || args.len() != 2 {
+                    return Err(error(e.span, "expected Lt(i, n), Eq(a, b) or EqChain(a, b)"))
                 }
                 let u = self.u64(e.span)?
                 let a = self.expr(args[0], Some(u), depth - 1)?
                 let b = self.expr(args[1], Some(u), depth - 1)?
-                let proposition = if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(a, b) }
+                let proposition = if n == "EqChain" { core.Term.EqChain(a, b) }
+                else if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(a, b) }
                 self.c.add(proposition, e.span)
             }
             _ => Err(error(e.span, "unsupported type in dependent_core"))
@@ -90,11 +92,12 @@ impl Elaborator {
                         if n == "i64" { return self.c.add(core.Term.I64, t.span) }
                     }
                     Some(args) => {
-                        if (n == "Lt" || n == "Eq") && args.len() == 2 {
+                        if (n == "Lt" || n == "Eq" || n == "EqChain") && args.len() == 2 {
                             let u = self.u64(t.span)?
                             let a = self.expr(args[0], Some(u), depth - 1)?
                             let b = self.expr(args[1], Some(u), depth - 1)?
-                            let proposition = if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
+                            let proposition = if n == "EqChain" { core.Term.EqChain(a, b) }
+                            else if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
                                 a,
                                 b
                             ) }
@@ -147,27 +150,81 @@ impl Elaborator {
         self.expr(tail.deref(), expected, depth)
     }
 
-    fn family(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
+    fn family(inout self, e: ast.Expr, arity: i64, depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
-            return Err(error(e.span, "transport family requires fn(k) { proposition }"))
+            return Err(error(e.span, "proof family requires fn(...) { proposition }"))
         }
-        if ps.len() != 1 || ps[0].ty.is_some() || ret.is_some() || reserved(ps[0].name.as_str()) {
-            return Err(error(e.span, "transport family requires one untyped U64 binder"))
+        if ps.len() != arity || ret.is_some() {
+            return Err(error(e.span, "wrong proof family arity"))
+        }
+        for i, p in ps {
+            if p.ty.is_some() || reserved(p.name.as_str()) {
+                return Err(error(p.span, "proof family requires untyped U64 binders"))
+            }
+            for j in 0..i {
+                if ps[j].name == p.name { return Err(error(p.span, "duplicate family parameter")) }
+            }
         }
         if body.stmts.len() != 0 { return Err(error(
             body.span,
-            "transport family requires a single proposition"
+            "proof family requires a single proposition"
         )) }
         let Some(tail) = body.tail else { return Err(error(
             body.span,
-            "transport family requires a proposition"
+            "proof family requires a proposition"
         )) }
         let u = self.u64(e.span)?
-        self.push(ps[0].name.as_str(), u, false)
-        let proposition = self.type_expr(tail.deref(), depth - 1)?
-        self.pop()
-        self.c.add(core.Term.Lam(false, u, proposition), e.span)
+        for p in ps { self.push(p.name.as_str(), u, false) }
+        var proposition = self.type_expr(tail.deref(), depth - 1)?
+        for _ in 0..ps.len() {
+            self.pop()
+            proposition = self.c.add(core.Term.Lam(false, u, proposition), e.span)?
+        }
+        Ok(proposition)
+    }
+
+    fn proof_case(
+        inout self,
+        e: ast.Expr,
+        expected: u32,
+        arity: i64,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
+            return self.expr(e, Some(expected), depth - 1)
+        }
+        if ps.len() != arity || ret.is_some() { return Err(error(
+            e.span,
+            "wrong induction case arity"
+        )) }
+        var domains = Vec((bool, u32)).new()
+        var result = expected
+        for i, p in ps {
+            if p.ty.is_some() || reserved(p.name.as_str()) {
+                return Err(error(p.span, "induction case requires untyped binders"))
+            }
+            for j in 0..i {
+                if ps[j].name == p.name { return Err(error(p.span, "duplicate induction parameter")) }
+            }
+            let normal = self.c.normal(result, core.DEPTH)?
+            let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else {
+                return Err(error(p.span, "invalid induction case signature"))
+            }
+            self.push(p.name.as_str(), domain, erased)
+            domains.push((erased, domain))
+            result = rest
+        }
+        var value = self.block(body, Some(result), depth - 1)?
+        var i = domains.len()
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = domains[i]
+            self.pop()
+            value = self.c.add(core.Term.Lam(erased, domain, value), e.span)?
+        }
+        Ok(value)
     }
 
     fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
@@ -257,6 +314,40 @@ impl Elaborator {
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
                 }
+                if n == "chain_refl" {
+                    if args.len() != 1 { return Err(error(
+                        sp,
+                        "chain_refl requires one U64 argument"
+                    )) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    return self.c.add(core.Term.ChainRefl(a), sp)
+                }
+                if n == "chain_step" {
+                    if args.len() != 5 { return Err(error(
+                        sp,
+                        "chain_step requires three indices, equality and tail"
+                    )) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let b = self.expr(args[1], Some(u), depth - 1)?
+                    let c = self.expr(args[2], Some(u), depth - 1)?
+                    let e = self.expr(args[3], None, depth - 1)?
+                    let tail = self.expr(args[4], None, depth - 1)?
+                    return self.c.add(core.Term.ChainStep(a, b, c, e, tail), sp)
+                }
+                if n == "chain_induct" {
+                    if args.len() != 4 { return Err(error(
+                        sp,
+                        "chain_induct requires motive, base, step and chain"
+                    )) }
+                    let p = self.family(args[0], 2, depth - 1)?
+                    let (base_ty, step_ty) = self.c.chain_case_types(p, sp, core.DEPTH)?
+                    let base = self.proof_case(args[1], base_ty, 1, depth - 1)?
+                    let step = self.proof_case(args[2], step_ty, 6, depth - 1)?
+                    let chain = self.expr(args[3], None, depth - 1)?
+                    return self.c.add(core.Term.ChainInd(p, base, step, chain), sp)
+                }
                 if n == "refl" {
                     if args.len() != 1 { return Err(error(sp, "refl requires one U64 argument")) }
                     let u = self.u64(sp)?
@@ -268,7 +359,7 @@ impl Elaborator {
                         sp,
                         "transport requires family, equality and proof"
                     )) }
-                    let family = self.family(args[0], depth - 1)?
+                    let family = self.family(args[0], 1, depth - 1)?
                     let equality = self.expr(args[1], None, depth - 1)?
                     let proof = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Transport(family, equality, proof), sp)

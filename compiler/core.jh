@@ -4,7 +4,8 @@
 //
 // This finite fragment has levelled universes, dependent functions,
 // immutable I64 arrays indexed by U64 lengths, Lt and U64 equality.
-// Equality eliminates only into Prop. There is no recursion, axiom,
+// Equality and indexed chain induction eliminate only into Prop.
+// There is no general recursion, axiom,
 // unsafe operation or elimination of evidence into runtime data.
 // Erased binders must be propositions and cannot occur in runtime terms.
 import diag
@@ -27,6 +28,12 @@ pub enum Term {
     Refl(u32)
     // P : U64 -> Prop, e : Eq a b, p : P a yields evidence of P b.
     Transport(u32, u32, u32)
+    EqChain(u32, u32)
+    ChainRefl(u32)
+    // Endpoints a,b,c, edge Eq a b, recursive tail EqChain b c.
+    ChainStep(u32, u32, u32, u32, u32)
+    // Motive U64 -> U64 -> Prop, base, step, chain evidence.
+    ChainInd(u32, u32, u32, u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -141,6 +148,26 @@ impl Core {
                 self.transform(f, cutoff, delta, replacement, depth - 1)?,
                 self.transform(e, cutoff, delta, replacement, depth - 1)?,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            EqChain(a, b) => Term.EqChain(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            ChainRefl(a) => Term.ChainRefl(self.transform(
+                a,
+                cutoff,
+                delta,
+                replacement,
+                depth - 1
+            )?)
+            ChainStep(a, b, c, e, tail) => Term.ChainStep(
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(c, cutoff, delta, replacement, depth - 1)?,
+                self.transform(e, cutoff, delta, replacement, depth - 1)?,
+                self.transform(tail, cutoff, delta, replacement, depth - 1)?)
+            ChainInd(p, base, step, chain) => Term.ChainInd(
+                self.transform(p, cutoff, delta, replacement, depth - 1)?,
+                self.transform(base, cutoff, delta, replacement, depth - 1)?,
+                self.transform(step, cutoff, delta, replacement, depth - 1)?,
+                self.transform(chain, cutoff, delta, replacement, depth - 1)?)
             Array(n) => Term.Array(self.transform(n, cutoff, delta, replacement, depth - 1)?)
             Lt(a, b) => Term.Lt(self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
@@ -203,6 +230,35 @@ impl Core {
             Lt(a, b) => Term.Lt(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Eq(a, b) => Term.Eq(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Refl(a) => Term.Refl(self.normal(a, depth - 1)?)
+            EqChain(a, b) => Term.EqChain(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
+            ChainRefl(a) => Term.ChainRefl(self.normal(a, depth - 1)?)
+            ChainStep(a, b, c, e, tail) => Term.ChainStep(
+                self.normal(a, depth - 1)?, self.normal(b, depth - 1)?,
+                self.normal(c, depth - 1)?, self.normal(e, depth - 1)?,
+                self.normal(tail, depth - 1)?)
+            ChainInd(p, base, step, chain) => {
+                let p = self.normal(p, depth - 1)?
+                let base = self.normal(base, depth - 1)?
+                let step = self.normal(step, depth - 1)?
+                let chain = self.normal(chain, depth - 1)?
+                match self.term(chain) {
+                    ChainRefl(a) => {
+                        let result = self.add(Term.App(base, a), sp)?
+                        return self.normal(result, depth - 1)
+                    }
+                    ChainStep(a, b, c, e, tail) => {
+                        // The only recursive call is on this constructor's
+                        // strictly positive tail. No user-chosen recursion.
+                        let ih = self.add(Term.ChainInd(p, base, step, tail), sp)?
+                        var result = step
+                        for argument in [a, b, c, e, tail, ih] {
+                            result = self.add(Term.App(result, argument), sp)?
+                        }
+                        return self.normal(result, depth - 1)
+                    }
+                    _ => Term.ChainInd(p, base, step, chain)
+                }
+            }
             Transport(f, e, p) => {
                 let f = self.normal(f, depth - 1)?
                 let e = self.normal(e, depth - 1)?
@@ -250,8 +306,15 @@ impl Core {
     fn identical(self, a: u32, b: u32, depth: u32) -> bool {
         if depth == 0 { return false }
         match (self.term(a), self.term(b)) {
-            (Array(x), Array(y)) | (Refl(x), Refl(y)) => self.identical(x, y, depth - 1)
-            (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (App(a, b), App(c, d)) | (
+            (Array(x), Array(y)) | (Refl(x), Refl(y)) | (ChainRefl(x), ChainRefl(y)) => self.identical(
+                x,
+                y,
+                depth - 1
+            )
+            (EqChain(a, b), EqChain(c, d)) | (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (
+                App(a, b),
+                App(c, d)
+            ) | (
                 Decide(a, b),
                 Decide(c, d)
             ) =>
@@ -264,7 +327,12 @@ impl Core {
                 depth - 1
             ) &&
                 self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
-            (IfLt(a, b, y, n), IfLt(c, d, z, m)) |
+            (ChainStep(a, b, c, e, t), ChainStep(x, y, z, f, u)) =>
+                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
+                self.identical(c, z, depth - 1) && self.identical(e, f, depth - 1) &&
+                self.identical(t, u, depth - 1)
+            (ChainInd(a, b, y, n), ChainInd(c, d, z, m)) |
+                (IfLt(a, b, y, n), IfLt(c, d, z, m)) |
                 (IfEq(a, b, y, n), IfEq(c, d, z, m)) => self.identical(a, c, depth - 1) &&
                 self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1) && self.identical(
                 n,
@@ -325,6 +393,45 @@ impl Core {
         Ok(())
     }
 
+    fn apply2(inout self, f: u32, a: u32, b: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
+        let f = self.add(Term.App(f, a), sp)?
+        self.add(Term.App(f, b), sp)
+    }
+
+    // Expected case types are also used to elaborate contextual source
+    // lambdas. infer always checks those elaborated terms independently.
+    pub fn chain_case_types(
+        inout self,
+        p: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result((u32, u32), diag.Diag) {
+        // Each domain is expressed under its preceding binders. The
+        // motive comes from the outer context and must be weakened.
+        let u = self.add(Term.U64, sp)?
+        let x0 = self.add(Term.Var(0), sp)?
+        let p1 = self.shift(p, 1, 0, depth)?
+        let base_result = self.apply2(p1, x0, x0, sp)?
+        let base = self.add(Term.Pi(false, u, base_result), sp)?
+        let x1 = self.add(Term.Var(1), sp)?
+        let x2 = self.add(Term.Var(2), sp)?
+        let x3 = self.add(Term.Var(3), sp)?
+        let x5 = self.add(Term.Var(5), sp)?
+        let edge = self.add(Term.Eq(x2, x1), sp)?
+        let tail = self.add(Term.EqChain(x2, x1), sp)?
+        let p5 = self.shift(p, 5, 0, depth)?
+        let ih = self.apply2(p5, x3, x2, sp)?
+        let p6 = self.shift(p, 6, 0, depth)?
+        let result = self.apply2(p6, x5, x3, sp)?
+        let step = self.add(Term.Pi(true, ih, result), sp)?
+        let step = self.add(Term.Pi(true, tail, step), sp)?
+        let step = self.add(Term.Pi(true, edge, step), sp)?
+        let step = self.add(Term.Pi(false, u, step), sp)?
+        let step = self.add(Term.Pi(false, u, step), sp)?
+        let step = self.add(Term.Pi(false, u, step), sp)?
+        Ok((base, step))
+    }
+
     pub fn infer(
         inout self,
         id: u32,
@@ -361,7 +468,7 @@ impl Core {
                 self.require(n, u, ctx, true, depth - 1)?
                 Term.Universe(0)
             }
-            Eq(a, b) | Lt(a, b) => {
+            EqChain(a, b) | Eq(a, b) | Lt(a, b) => {
                 let u = self.add(Term.U64, sp)?
                 self.require(a, u, ctx, true, depth - 1)?
                 self.require(b, u, ctx, true, depth - 1)?
@@ -371,6 +478,36 @@ impl Core {
                 let u = self.add(Term.U64, sp)?
                 self.require(a, u, ctx, true, depth - 1)?
                 Term.Eq(a, a)
+            }
+            ChainRefl(a) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, true, depth - 1)?
+                Term.EqChain(a, a)
+            }
+            ChainStep(a, b, c, edge, tail) => {
+                let u = self.add(Term.U64, sp)?
+                for x in [a, b, c] { self.require(x, u, ctx, true, depth - 1)? }
+                let eq = self.add(Term.Eq(a, b), sp)?
+                self.require(edge, eq, ctx, true, depth - 1)?
+                let chain = self.add(Term.EqChain(b, c), sp)?
+                self.require(tail, chain, ctx, true, depth - 1)?
+                Term.EqChain(a, c)
+            }
+            ChainInd(p, base, step, chain) => {
+                let u = self.add(Term.U64, sp)?
+                let prop = self.add(Term.Prop, sp)?
+                let inner = self.add(Term.Pi(false, u, prop), sp)?
+                let motive = self.add(Term.Pi(false, u, inner), sp)?
+                self.require(p, motive, ctx, true, depth - 1)?
+                let (base_ty, step_ty) = self.chain_case_types(p, sp, depth - 1)?
+                self.require(base, base_ty, ctx, true, depth - 1)?
+                self.require(step, step_ty, ctx, true, depth - 1)?
+                let ty = self.infer(chain, ctx, true, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let EqChain(a, b) = self.term(ty) else {
+                    return Err(self.error(chain, "chain-induct requires EqChain evidence"))
+                }
+                return self.apply2(p, a, b, sp)
             }
             Transport(family, evidence, proof) => {
                 // Restrict equality elimination to propositions. In
@@ -498,13 +635,18 @@ impl Core {
 pub fn children(term: Term) -> Vec(u32) {
     var out = Vec(u32).new()
     match term {
-        Array(n) | Refl(n) => out.push(n)
-        Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
+        Array(n) | Refl(n) | ChainRefl(n) => out.push(n)
+        EqChain(a, b) | Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
             out.push(a)
             out.push(b)
         }
         Index(a, i, p) | Transport(a, i, p) => { out.push(a); out.push(i); out.push(p) }
-        IfLt(a, b, y, n) | IfEq(a, b, y, n) => { out.push(a); out.push(b); out.push(y); out.push(n) }
+        ChainStep(a, b, c, e, tail) => { out.push(a); out.push(b); out.push(c); out.push(e); out.push(
+            tail
+        ) }
+        ChainInd(a, b, y, n) | IfLt(a, b, y, n) | IfEq(a, b, y, n) => { out.push(a); out.push(b); out.push(
+            y
+        ); out.push(n) }
         Elements(xs) => for x in xs { out.push(x) }
         _ => {}
     }
@@ -602,5 +744,90 @@ fn rejects_cycles_in_equality_graphs() {
         var c = Core.new()
         c.add(term.clone(), sp).unwrap()
         assert(c.check().is_err(), "new equality nodes must obey term graph integrity")
+    }
+}
+
+#[test]
+fn rejects_false_chain_constructors_without_frontends() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let edge = c.add(Term.Refl(zero), sp).unwrap()
+    let tail = c.add(Term.ChainRefl(one), sp).unwrap()
+    let value = c.add(Term.ChainStep(zero, one, one, edge, tail), sp).unwrap()
+    let ty = c.add(Term.EqChain(zero, one), sp).unwrap()
+    c.definitions.push(Definition { name: "bad".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "chain edges must prove their exact endpoints")
+}
+
+// A raw, independently constructed case signature for the constant
+// proposition Eq 0 0. This bypasses parser/elaboration and case generation.
+fn induction_fixture(inout c: Core, bad_step: bool) -> (u32, u32, u32) {
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let ty = c.add(Term.Eq(zero, zero), sp).unwrap()
+    let proof = c.add(Term.Refl(zero), sp).unwrap()
+    let wrong = c.add(Term.Refl(one), sp).unwrap()
+    let p = c.add(Term.Lam(false, u, ty), sp).unwrap()
+    let p = c.add(Term.Lam(false, u, p), sp).unwrap()
+    let base = c.add(Term.Lam(false, u, proof), sp).unwrap()
+    let x0 = c.add(Term.Var(0), sp).unwrap()
+    let x1 = c.add(Term.Var(1), sp).unwrap()
+    let x2 = c.add(Term.Var(2), sp).unwrap()
+    let edge_ty = c.add(Term.Eq(x2, x1), sp).unwrap()
+    let tail_ty = c.add(Term.EqChain(x2, x1), sp).unwrap()
+    let step = c.add(Term.Lam(true, ty, if bad_step { wrong } else { x0 }), sp).unwrap()
+    let step = c.add(Term.Lam(true, tail_ty, step), sp).unwrap()
+    let step = c.add(Term.Lam(true, edge_ty, step), sp).unwrap()
+    let step = c.add(Term.Lam(false, u, step), sp).unwrap()
+    let step = c.add(Term.Lam(false, u, step), sp).unwrap()
+    let step = c.add(Term.Lam(false, u, step), sp).unwrap()
+    var chain = c.add(Term.ChainRefl(zero), sp).unwrap()
+    if !bad_step {
+        for _ in 0..2 { chain = c.add(Term.ChainStep(zero, zero, zero, proof, chain), sp).unwrap() }
+    }
+    let value = c.add(Term.ChainInd(p, base, step, chain), sp).unwrap()
+    (ty, value, proof)
+}
+
+#[test]
+fn structural_induction_computes_on_the_tail() {
+    var c = Core.new()
+    let (ty, value, expected) = induction_fixture(&c, false)
+    c.definitions.push(Definition { name: "valid".to_string(), ty, value,
+        exported: false, span: diag.Span.nowhere() })
+    c.check().unwrap()
+    let normal = c.normal(value, DEPTH).unwrap()
+    c.require(normal, ty, [], true, DEPTH).unwrap()
+    assert(
+        c.equal(normal, expected, DEPTH).unwrap(),
+        "two induction steps compute the recursive hypothesis"
+    )
+}
+
+#[test]
+fn induction_checks_unused_step_without_frontends() {
+    var c = Core.new()
+    let (ty, value, _) = induction_fixture(&c, true)
+    c.definitions.push(Definition { name: "bad".to_string(), ty, value,
+        exported: false, span: diag.Span.nowhere() })
+    assert(c.check().is_err(), "a reflexive chain cannot hide an invalid step")
+}
+
+#[test]
+fn rejects_cycles_in_inductive_graphs() {
+    let sp = diag.Span.nowhere()
+    for term in [
+        Term.EqChain(0, 0),
+        Term.ChainRefl(0),
+        Term.ChainStep(0, 0, 0, 0, 0),
+        Term.ChainInd(0, 0, 0, 0)
+    ] {
+        var c = Core.new()
+        c.add(term.clone(), sp).unwrap()
+        assert(c.check().is_err(), "inductive terms obey the same graph integrity checks")
     }
 }

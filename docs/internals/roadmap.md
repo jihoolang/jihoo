@@ -357,8 +357,22 @@ assertions. Both targets at `-O0`/`-O2`, native differential execution,
 false-equality rejection and direct kernel tests run in the `core` suite.
 No runtime data casts or equality reflection are enabled.
 
-Next: add inductive propositions, general induction, erased indices and
-broader lemma libraries; cover owned/mutable memory;
+Implemented first inductive proposition: indexed `EqChain(a, b)` has
+reflexive and strictly positive step constructors. Its structural induction
+checks an arbitrary proposition family on the endpoints, the base case
+and the exact tail hypothesis; only that tail is used for recursive
+reduction. Both frontends support named or contextual proof cases,
+including captured endpoints and erased evidence. `examples/core_chain.jh`
+uses a universally checked chain-to-equality lemma to justify a runtime
+array load, with no proof storage, recursion or added bounds checks in
+MIR. Paired core/source tests cover both targets, host execution, invalid
+indices/cases and raw kernel reduction. The supported inductive family is
+fixed in the kernel. General declarations and dependent elimination over
+chain evidence remain future work.
+
+Next: add user-declared strictly positive inductive propositions, general
+dependent induction, erased indices and broader lemma libraries;
+cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing

@@ -1,0 +1,32 @@
+; Indexed EqChain, arbitrary-length structural induction, and an array load.
+(def trans
+  (pi a U64 (pi b U64 (pi c U64 (pi0 p (Eq a b) (pi0 q (Eq b c) (Eq a c))))))
+  (lam a U64 (lam b U64 (lam c U64 (lam0 p (Eq a b) (lam0 q (Eq b c)
+    (transport (lam k U64 (Eq a k)) q p)))))))
+
+(def chain_base (pi a U64 (Eq a a)) (lam a U64 (refl a)))
+
+(def chain_case
+  (pi a U64 (pi b U64 (pi c U64 (pi0 e (Eq a b)
+    (pi0 tail (EqChain b c) (pi0 ih (Eq b c) (Eq a c)))))))
+  (lam a U64 (lam b U64 (lam c U64 (lam0 e (Eq a b)
+    (lam0 tail (EqChain b c) (lam0 ih (Eq b c)
+      (app trans a b c e ih))))))))
+
+(def chain_eq
+  (pi a U64 (pi b U64 (pi0 p (EqChain a b) (Eq a b))))
+  (lam a U64 (lam b U64 (lam0 p (EqChain a b)
+    (chain-induct (lam x U64 (lam y U64 (Eq x y))) chain_base chain_case p)))))
+
+(def get
+  (pi n U64 (pi xs (Array n) (pi i U64 (pi0 p (Lt i n) I64))))
+  (lam n U64 (lam xs (Array n) (lam i U64 (lam0 p (Lt i n) (index xs i p))))))
+
+(export lookup
+  (pi n U64 (pi m U64 (pi i U64 I64)))
+  (lam n U64 (lam m U64 (lam i U64
+    (if-eq n m e (if-eq m 3 f (if-lt i n p
+      (app get 3 (array (int 11) (int 22) (int 33)) i
+        (transport (lam k U64 (Lt i k))
+          (app chain_eq n 3 (chain-step n m 3 e (chain-step m 3 3 f (chain-refl 3)))) p))
+      (int -1)) (int -2)) (int -3))))))

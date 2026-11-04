@@ -1,0 +1,40 @@
+// A recursive proof is checked by structural induction and then erased.
+// `chain_eq` proves equality for chains of arbitrary length, including
+// symbolic chains. The lookup links two runtime equality guards to an
+// array's real length; it exports lookup(n, m, i) and returns 22 from main.
+#![dependent_core]
+
+fn trans(a: u64, b: u64, c: u64, p: erased(Eq(a, b)), q: erased(Eq(b, c))) -> Eq(a, c) {
+    transport(fn(k) { Eq(a, k) }, q, p)
+}
+
+fn chain_base(a: u64) -> Eq(a, a) { refl(a) }
+
+fn chain_case(
+    a: u64,
+    b: u64,
+    c: u64,
+    e: erased(Eq(a, b)),
+    tail: erased(EqChain(b, c)),
+    ih: erased(Eq(b, c))
+) -> Eq(a, c) {
+    trans(a, b, c, e, ih)
+}
+
+fn chain_eq(a: u64, b: u64, p: erased(EqChain(a, b))) -> Eq(a, b) {
+    chain_induct(fn(x, y) { Eq(x, y) }, chain_base, chain_case, p)
+}
+
+fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 { index(xs, i, p) }
+
+export fn lookup(n: u64, m: u64, i: u64) -> i64 {
+    if_eq(n, m, fn(e) { if_eq(m, 3, fn(f) {
+        if_lt(i, n, fn(p) {
+            get(3, [11, 22, 33], i, transport(fn(k) { Lt(i, k) },
+                chain_eq(n, 3, chain_step(n, m, 3, e, chain_step(m, 3, 3, f, chain_refl(3)))), p))
+        }, -1)
+    }, -2) }, -3)
+}
+
+fn main() -> i64 { lookup(3, 3, 1) }
+// exit: 22

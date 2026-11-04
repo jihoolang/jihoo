@@ -108,7 +108,7 @@ in the existing grammar, not global keywords or standard-library types:
 
 | source | elaboration |
 |--------|-------------|
-| `u64`, `i64`, `[i64; n]`, `Lt(i, n)`, `Eq(a, b)` | `U64`, `I64`, `Array n`, `Lt i n`, `Eq a b` |
+| `u64`, `i64`, `[i64; n]`, `Lt(i, n)`, `Eq(a, b)`, `EqChain(a, b)` | scalar/array types and propositions |
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
@@ -118,6 +118,8 @@ in the existing grammar, not global keywords or standard-library types:
 | `if_eq(a, b, fn(e) { yes }, no)` | equality branch binding `e: Eq(a, b)` only in `yes` |
 | `refl(a)` | reflexivity evidence of `Eq(a, a)` |
 | `transport(fn(k) { P(k) }, e, p)` | move evidence from `P(a)` to `P(b)` using `e: Eq(a, b)` |
+| `chain_refl(a)`, `chain_step(a, b, c, e, tail)` | construct indexed equality-chain evidence |
+| `chain_induct(P, base, step, chain)` | structurally prove `P(a, b)` for chain endpoints |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -126,7 +128,7 @@ compile-time array size. The generic helper is checked once with symbolic
 `erased(P)` marks a proof binder; it is not a `comptime` parameter or a
 request to fix a value during specialization. `comptime`, `sink` and
 `inout` parameters are rejected in this subset. A helper can forward
-proofs or return `Lt(i, n)`/`Eq(a, b)` evidence; the checker controls their runtime
+proofs or return `Lt(i, n)`, `Eq(a, b)` or `EqChain(a, b)` evidence; the checker controls their runtime
 relevance. Every definition and both branches are checked, including
 unused helpers and discarded proof arguments.
 
@@ -137,8 +139,9 @@ names, checked integer literals (including negative I64 literals), arrays,
 blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
-`erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `index`,
-`decide_lt`, `u64`, `i64` and the entry symbol `__jihoo_dependent_main` are reserved in marked modules. A branch
+`erased`, `Lt`, `Eq`, `EqChain`, `if_lt`, `if_eq`, `refl`, `transport`,
+`chain_refl`, `chain_step`, `chain_induct`, `index`, `decide_lt`, `u64`,
+`i64` and the entry symbol `__jihoo_dependent_main` are reserved in marked modules. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
 
 Exports accept and return only U64/I64 values and cannot require proof
@@ -152,8 +155,8 @@ without LLVM or a linker.
 
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
-arithmetic, general closures, recursion, induction and mutable memory are
-outside this slice and rejected. Marked modules cannot be imported by the
+arithmetic, general runtime closures/recursion, user-declared inductive
+families and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
 only one execution path. `fmt`, AST dumps and source diagnostics use the
 ordinary parser; checking errors retain `.jh` byte ranges. Source parsing
@@ -198,8 +201,8 @@ The textual equivalents are `(Eq a b)`, `(refl a)`,
 families. Equality symmetry, transitivity and inequality rewriting are
 ordinary user-written proof functions, derived from `refl` and `transport`.
 There are no added axioms or unchecked casts. General equality of types,
-data transport, inductive propositions and general induction remain future
-work.
+data transport, user-declared inductive propositions and general induction
+remain future work.
 
 [`examples/core_equality.jh`](../../examples/core_equality.jh) and its
 [core equivalent](../../examples/core_equality.jhc) define symmetry and
@@ -222,6 +225,74 @@ In both frontends the unoptimized lookup MIR has two scalar arguments,
 two real comparisons/branches and one array load, with no proof locals,
 closures, transport operations or bounds assertions.
 
+## Indexed equality chains and structural induction
+
+The first recursive proposition is the built-in `EqChain(a, b) : Prop`,
+indexed by two U64 values. It has exactly these strictly positive
+constructors:
+
+```text
+chain_refl(a) : EqChain(a, a)
+chain_step(a, b, c, e, tail) : EqChain(a, c)
+    where e : Eq(a, b), tail : EqChain(b, c)
+```
+
+`chain_induct(P, base, step, chain)` eliminates it only into propositions:
+
+```text
+P     : (a : U64) -> (b : U64) -> Prop
+base  : (a : U64) -> P(a, a)
+step  : (a b c : U64) -> (erased e : Eq(a, b))
+     -> (erased tail : EqChain(b, c)) -> (erased ih : P(b, c)) -> P(a, c)
+chain : EqChain(a, c)
+result: P(a, c)
+```
+
+The kernel checks all constructor indices, both cases and the motive,
+including unused cases and fields. A reflexive chain reduces to
+`base(a)`. A step reduces to `step(a, b, c, e, tail, ih)`, where `ih` is
+induction on that constructor's own tail. The normalizer supplies this
+recursive call; user code cannot select a recursive argument. Neutral
+chains remain neutral. The existing checking, node and nesting budgets
+apply and exhaustion rejects the program. No general recursion or runtime
+elimination of chain evidence is introduced.
+
+In `.jh`, `P` is `fn(a, b) { proposition }`. Cases can be named, earlier
+proof functions with the signatures above, or contextual lambdas
+`fn(a) { base }` and `fn(a, b, c, e, tail, ih) { step }`. Their parameter
+types and erasure come from the checked induction signature. Each lambda
+has one value expression and can capture outer parameters/evidence. It is
+elaborated directly to typed core lambdas and checked again by the kernel;
+no runtime closure is created. Explicit type/result annotations and
+duplicate parameters on these contextual lambdas are rejected.
+
+In `.jhc`, use `(EqChain a b)`,
+`(chain-refl a)`, `(chain-step a b c e tail)` and
+`(chain-induct P base step chain)`, with ordinary typed core lambdas for
+the motive and cases. Chain parameters must be erased like other proofs.
+This is one fixed indexed inductive proposition, with induction for any
+proposition family on its endpoints. User-declared inductive families,
+motives depending on the chain evidence itself, erased data indices and
+elimination into runtime data are outside this slice.
+
+[`examples/core_chain.jh`](../../examples/core_chain.jh) and its
+[core equivalent](../../examples/core_chain.jhc) prove `Eq(a, b)` for an
+arbitrary symbolic chain with the motive `fn(a, b) { Eq(a, b) }`. The base
+uses reflexivity; the step composes its edge with the induction hypothesis
+using the previously derived equality-transitivity lemma. The helper is
+checked before any chain is supplied, rather than unrolling sample chains
+to justify the theorem.
+
+The exported `lookup(n, m, i)` links the actual guards `n == m`, `m == 3`
+and `i < n` into an equality chain, derives `Eq(n, 3)` by induction and
+transports the range proof to a length-3 array. It returns 11/22/33 for
+valid indices when both lengths are 3, -1 for an invalid index, -2 when
+`m != 3` after equal lengths, and -3 when the lengths differ. Its native
+entry returns 22 as exit status. Library MIR has three scalar arguments,
+three real comparisons/branches and one array load, with no proof
+arguments, chain storage, recursive calls, closures or added bounds checks.
+Both frontends emit identical MIR before LLVM optimization.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -239,6 +310,9 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(Lt i n)` | proposition that unsigned `i` is below `n` |
 | `(Eq a b)`, `(refl a)` | U64 equality proposition and reflexivity evidence |
 | `(transport family e p)` | equality elimination into a proposition family |
+| `(EqChain a b)` | indexed inductive proposition of equality chains |
+| `(chain-refl a)`, `(chain-step a b c e tail)` | chain constructors |
+| `(chain-induct P base step chain)` | endpoint-indexed, proposition-only structural induction |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -258,9 +332,9 @@ or eliminators that inspect evidence to produce runtime data.
 
 Erased binders must bind propositions; proof binders must be erased.
 Evidence can be used in types and proof arguments, but not as runtime
-data. Erased data/type parameters, inductive propositions, equality beyond
-U64 and general induction are future work. Runtime indices are real U64 values;
-the prototype does not model them as unbounded mathematical naturals.
+data. Erased data/type parameters, user-declared inductive propositions,
+equality beyond U64 and general dependent induction are future work.
+Runtime indices are real U64 values; the prototype does not model them as unbounded mathematical naturals.
 
 Both branches and all definitions are checked before normalization or
 erasure. A false proof in an unused helper, erased argument or unreachable
@@ -305,14 +379,25 @@ proof, runtime/type/array transport, equality reflection, scope escapes,
 erased runtime uses and proof ABI preconditions. Kernel unit tests bypass
 both frontends to check false reflexivity, the proposition-only restriction,
 reflexive reduction and graph integrity for the new terms.
+`tests/core_chain.py` adds constructor/induction tests to this suite,
+including neutral chain checking, reflexive and multiple-step reduction,
+captured motives/cases, shadowing and a second result proposition family.
+It compares both frontends' MIR and native execution at both optimization
+levels and emits objects for both targets. Negative cases reject forged
+induction hypotheses, wrong edge/tail/result indices, unchecked dead cases,
+runtime elimination, scope escapes, proof ABI preconditions and deep
+proofs that exhaust limits. Additional raw kernel tests bypass both
+frontends, recheck a normalized induction result and reject an unused bad
+step and cyclic inductive graphs.
 
 The next stages of the replacement are:
 
 1. Extend ordinary `.jh` elaboration only as additional program operations
    and their guarantees are supported by this same core.
-2. Extend the logical foundations beyond U64 equality: inductive
-   propositions, general induction, erased indices, equality of other
-   types and reusable lemma libraries. Specify normalization, universe
+2. Extend the logical foundations beyond U64 equality and the fixed chain
+   proposition: user-declared strictly positive inductive families,
+   general dependent induction, erased indices, equality of other types
+   and reusable lemma libraries. Specify normalization, universe
    and erasure rules before enabling them.
 3. Add runtime operations with explicit ownership/effect rules, including
    borrowed and mutable memory and dynamic allocation. Extend the direct

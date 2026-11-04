@@ -69,6 +69,28 @@ def evaluate(term, env):
     if head == "if-eq":
         a, b = evaluate(args[0], env), evaluate(args[1], env)
         return evaluate(args[3], {**env, args[2]: ("eq", a, b)}) if a == b else evaluate(args[4], env)
+    if head == "EqChain":
+        a, b = (evaluate(x, env) for x in args)
+        return ("chain", a, b)
+    if head == "chain-refl":
+        return ("chain-refl", evaluate(args[0], env))
+    if head == "chain-step":
+        a, b, c, edge, tail = (evaluate(x, env) for x in args)
+        assert edge == ("eq", a, b) and a == b
+        endpoints = (tail[1], tail[1]) if tail[0] == "chain-refl" else (tail[1], tail[3])
+        assert endpoints == (b, c)
+        return ("chain-step", a, b, c, edge, tail)
+    if head == "chain-induct":
+        _, base, step, chain = (evaluate(x, env) for x in args)
+
+        def fold(proof):
+            if proof[0] == "chain-refl":
+                return base(proof[1])
+            tag, a, b, c, edge, tail = proof
+            assert tag == "chain-step"
+            return step(a)(b)(c)(edge)(tail)(fold(tail))
+
+        return fold(chain)
     if head == "decide-lt":
         a, b = (evaluate(x, env) for x in args)
         assert a < b
@@ -327,6 +349,8 @@ def main():
         source_frontend(compiler, root, temporary, environment)
         from core_equality import validate_equality
         validate_equality(compiler, root, temporary, environment, run, read_terms, evaluate)
+        from core_chain import validate_chain
+        validate_chain(compiler, root, temporary, environment, run, read_terms, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

@@ -80,6 +80,9 @@ the runner. Its suites:
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.
+  `tests/core_chain.py` adds indexed constructors, structural induction,
+  captured proof cases, normalization checks and rejection of forged
+  hypotheses, incorrect indices, data elimination and unchecked dead cases.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with
