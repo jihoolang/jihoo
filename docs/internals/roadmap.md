@@ -347,8 +347,18 @@ extra bounds assertion. Positive, negative and differential execution
 tests run in the same `core` suite, and the compiler still bootstraps
 from the unchanged release seed.
 
-Next: add equality,
-inductive propositions and user lemmas; cover owned/mutable memory;
+Implemented equality slice: `Eq(a, b)` for U64, symbolic reflexivity,
+proposition-only transport and `if_eq` branch evidence work in both
+frontends. User-written symmetry/transitivity and range-rewriting lemmas
+compose through ordinary dependent application. `examples/core_equality.jh`
+rewrites a runtime bound to a local array's length; its MIR equals the
+textual core program with no proof storage, closures or added bounds
+assertions. Both targets at `-O0`/`-O2`, native differential execution,
+false-equality rejection and direct kernel tests run in the `core` suite.
+No runtime data casts or equality reflection are enabled.
+
+Next: add inductive propositions, general induction, erased indices and
+broader lemma libraries; cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing

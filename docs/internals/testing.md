@@ -77,6 +77,9 @@ the runner. Its suites:
   independent evaluator at `-O0` and `-O2`, and requires rejection of bad
   evidence, types, scopes and ABI preconditions. Kernel unit tests also
   bypass the parser to check malformed term graphs and false evidence.
+  `tests/core_equality.py` adds equality/transport cases to this suite:
+  paired source/core execution, user lemmas, proof-only elimination,
+  shadowing, false equalities and incorrect rewriting.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

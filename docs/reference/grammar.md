@@ -71,8 +71,9 @@ alias    = "type" name [ "=" type ]
 - `#![...]` attributes come first in the file. `#![freestanding]` and
   `#![uefi]` select runtime profiles; experimental `#![dependent_core]`
   selects a [restricted source subset](../internals/dependent-core.md#ordinary-source-subset)
-  using contextual `erased(P)`, `if_lt`, `index` and `decide_lt` forms in
-  the existing grammar. Item attributes are `#[view]`, `#[derive(...)]`
+  using contextual `erased(P)`, `if_lt`, `if_eq`, `index`, `decide_lt`,
+  `refl` and `transport` forms in the existing grammar. `Lt(i, n)` and
+  `Eq(a, b)` are its propositions. Item attributes are `#[view]`, `#[derive(...)]`
   ([derive](../language/reflection.md#derive)), `#[interior]`
   ([unsafe code](../language/unsafe.md#changing-behind-a-shared-borrow))
   and, on functions, `#[literal_check(param, check)]`

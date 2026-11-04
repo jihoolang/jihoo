@@ -146,10 +146,18 @@ impl Parser {
             return Ok(f)
         } else if kind == "Array" {
             core.Term.Array(self.expr(depth - 1)?)
-        } else if kind == "Lt" || kind == "decide-lt" {
+        } else if kind == "refl" {
+            core.Term.Refl(self.expr(depth - 1)?)
+        } else if kind == "transport" {
+            let family = self.expr(depth - 1)?
+            let e = self.expr(depth - 1)?
+            let p = self.expr(depth - 1)?
+            core.Term.Transport(family, e, p)
+        } else if kind == "Eq" || kind == "Lt" || kind == "decide-lt" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?
-            if kind == "Lt" { core.Term.Lt(a, b) } else { core.Term.Decide(a, b) }
+            if kind == "Eq" { core.Term.Eq(a, b) }
+            else if kind == "Lt" { core.Term.Lt(a, b) } else { core.Term.Decide(a, b) }
         } else if kind == "Type" {
             let n = self.take()?
             let level = natural(n.text.as_str())
@@ -176,7 +184,7 @@ impl Parser {
             let i = self.expr(depth - 1)?
             let proof = self.expr(depth - 1)?
             core.Term.Index(array, i, proof)
-        } else if kind == "if-lt" {
+        } else if kind == "if-lt" || kind == "if-eq" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?
             let name = self.name()?
@@ -184,7 +192,8 @@ impl Parser {
             let yes = self.expr(depth - 1)?
             self.names.pop()
             let no = self.expr(depth - 1)?
-            core.Term.IfLt(a, b, yes, no)
+            if kind == "if-eq" { core.Term.IfEq(a, b, yes, no) }
+            else { core.Term.IfLt(a, b, yes, no) }
         } else { return Err(diag.Diag.new(head.span, "core: unknown term constructor")) }
         self.expect(")")?
         self.core.add(term, sp)

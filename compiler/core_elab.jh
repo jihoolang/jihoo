@@ -1,6 +1,7 @@
 // Explicit .jh subset -> the existing dependent core, directly from AST.
 // Contextual forms use the ordinary parser: erased(P), if_lt(a, b,
-// fn(p) { yes }, no), index(xs, i, p), and decide_lt(a, b).
+// fn(p) { yes }, no), index(xs, i, p), decide_lt(a, b), Eq, refl,
+// if_eq and proposition-only transport.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -16,7 +17,8 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 }
 
 fn reserved(name: str) -> bool {
-    name == "erased" || name == "Lt" || name == "if_lt" || name == "index" ||
+    name == "erased" || name == "Lt" || name == "Eq" || name == "if_lt" ||
+        name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
         name == "__jihoo_dependent_main"
 }
@@ -64,11 +66,14 @@ impl Elaborator {
                     e.span,
                     "unsupported type"
                 )) }
-                if n != "Lt" || args.len() != 2 { return Err(error(e.span, "expected Lt(i, n)")) }
+                if (n != "Lt" && n != "Eq") || args.len() != 2 {
+                    return Err(error(e.span, "expected Lt(i, n) or Eq(a, b)"))
+                }
                 let u = self.u64(e.span)?
                 let a = self.expr(args[0], Some(u), depth - 1)?
                 let b = self.expr(args[1], Some(u), depth - 1)?
-                self.c.add(core.Term.Lt(a, b), e.span)
+                let proposition = if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(a, b) }
+                self.c.add(proposition, e.span)
             }
             _ => Err(error(e.span, "unsupported type in dependent_core"))
         }
@@ -85,11 +90,15 @@ impl Elaborator {
                         if n == "i64" { return self.c.add(core.Term.I64, t.span) }
                     }
                     Some(args) => {
-                        if n == "Lt" && args.len() == 2 {
+                        if (n == "Lt" || n == "Eq") && args.len() == 2 {
                             let u = self.u64(t.span)?
                             let a = self.expr(args[0], Some(u), depth - 1)?
                             let b = self.expr(args[1], Some(u), depth - 1)?
-                            return self.c.add(core.Term.Lt(a, b), t.span)
+                            let proposition = if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
+                                a,
+                                b
+                            ) }
+                            return self.c.add(proposition, t.span)
                         }
                     }
                 }
@@ -138,6 +147,29 @@ impl Elaborator {
         self.expr(tail.deref(), expected, depth)
     }
 
+    fn family(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
+            return Err(error(e.span, "transport family requires fn(k) { proposition }"))
+        }
+        if ps.len() != 1 || ps[0].ty.is_some() || ret.is_some() || reserved(ps[0].name.as_str()) {
+            return Err(error(e.span, "transport family requires one untyped U64 binder"))
+        }
+        if body.stmts.len() != 0 { return Err(error(
+            body.span,
+            "transport family requires a single proposition"
+        )) }
+        let Some(tail) = body.tail else { return Err(error(
+            body.span,
+            "transport family requires a proposition"
+        )) }
+        let u = self.u64(e.span)?
+        self.push(ps[0].name.as_str(), u, false)
+        let proposition = self.type_expr(tail.deref(), depth - 1)?
+        self.pop()
+        self.c.add(core.Term.Lam(false, u, proposition), e.span)
+    }
+
     fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         let sp = e.span
@@ -178,20 +210,30 @@ impl Elaborator {
                     f.span,
                     "calls require a named function"
                 )) }
-                if n == "if_lt" {
-                    if args.len() != 4 { return Err(error(sp, "if_lt requires four arguments")) }
+                if n == "if_lt" || n == "if_eq" {
+                    if args.len() != 4 { return Err(error(
+                        sp,
+                        (n.as_str() + " requires four arguments").as_str()
+                    )) }
                     let u = self.u64(sp)?
                     let a = self.expr(args[0], Some(u), depth - 1)?
                     let b = self.expr(args[1], Some(u), depth - 1)?
                     let ast.ExprKind.Lambda(ps, ret, yes) = args[2].kind else {
-                        return Err(error(args[2].span, "if_lt requires fn(p) { value }"))
+                        return Err(error(args[2].span, "conditional requires fn(p) { value }"))
                     }
                     if ps.len() != 1 || ps[0].ty.is_some() || ret.is_some() || reserved(
                         ps[0].name.as_str()
                     ) {
-                        return Err(error(args[2].span, "if_lt requires one untyped proof binder"))
+                        return Err(error(
+                            args[2].span,
+                            "conditional requires one untyped proof binder"
+                        ))
                     }
-                    let p = self.c.add(core.Term.Lt(a, b), sp)?
+                    let proposition = if n == "if_eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
+                        a,
+                        b
+                    ) }
+                    let p = self.c.add(proposition, sp)?
                     let inner_expected = match expected {
                         Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                         None => None
@@ -200,7 +242,9 @@ impl Elaborator {
                     let yes = self.block(yes, inner_expected, depth - 1)?
                     self.pop()
                     let no = self.expr(args[3], expected, depth - 1)?
-                    return self.c.add(core.Term.IfLt(a, b, yes, no), sp)
+                    let branch = if n == "if_eq" { core.Term.IfEq(a, b, yes, no) }
+                    else { core.Term.IfLt(a, b, yes, no) }
+                    return self.c.add(branch, sp)
                 }
                 if n == "index" {
                     if args.len() != 3 { return Err(error(
@@ -212,6 +256,22 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
+                }
+                if n == "refl" {
+                    if args.len() != 1 { return Err(error(sp, "refl requires one U64 argument")) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    return self.c.add(core.Term.Refl(a), sp)
+                }
+                if n == "transport" {
+                    if args.len() != 3 { return Err(error(
+                        sp,
+                        "transport requires family, equality and proof"
+                    )) }
+                    let family = self.family(args[0], depth - 1)?
+                    let equality = self.expr(args[1], None, depth - 1)?
+                    let proof = self.expr(args[2], None, depth - 1)?
+                    return self.c.add(core.Term.Transport(family, equality, proof), sp)
                 }
                 if n == "decide_lt" {
                     if args.len() != 2 { return Err(error(sp, "decide_lt requires two arguments")) }

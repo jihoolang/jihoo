@@ -179,7 +179,10 @@ checked terms. The experimental `#![dependent_core]` source subset
 compiles [`examples/core_index.jh`](examples/core_index.jh) through the
 ordinary AST into the same core as [`core_index.jhc`](examples/core_index.jhc):
 a runtime array lookup whose proof is erased before code generation,
-without Horn, Agda or legacy VC generation. General `.jh` coverage,
+without Horn, Agda or legacy VC generation. The
+[equality example](examples/core_equality.jh) adds erased U64 equality
+and proposition-only transport, with user-written lemmas rewriting the
+runtime bound to the array length. General `.jh` coverage,
 induction, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 

@@ -27,8 +27,8 @@ The core path calls neither the existing verification-condition generator
 nor Horn/Agda. Unmarked `.jh` files retain the existing verifier and its
 checks during migration; the new kernel is not yet formally proved
 sound. Source elaboration, erasure and lowering are not yet proved to
-preserve typing or behavior. Passing the prototype's tests does not complete the 0.5 release
-requirements or establish correctness of the compiler or its executables.
+preserve typing or behavior. Passing the prototype's tests does not
+complete the 0.5 release requirements or establish correctness of the compiler or its executables.
 
 ## Run the executable slice
 
@@ -108,13 +108,16 @@ in the existing grammar, not global keywords or standard-library types:
 
 | source | elaboration |
 |--------|-------------|
-| `u64`, `i64`, `[i64; n]`, `Lt(i, n)` | `U64`, `I64`, `Array n`, `Lt i n` |
+| `u64`, `i64`, `[i64; n]`, `Lt(i, n)`, `Eq(a, b)` | `U64`, `I64`, `Array n`, `Lt i n`, `Eq a b` |
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
 | `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
 | `decide_lt(i, n)` | proof of a true, closed unsigned inequality |
 | `if_lt(i, n, fn(p) { yes }, no)` | unsigned branch binding `p: Lt(i, n)` only in `yes` |
+| `if_eq(a, b, fn(e) { yes }, no)` | equality branch binding `e: Eq(a, b)` only in `yes` |
+| `refl(a)` | reflexivity evidence of `Eq(a, a)` |
+| `transport(fn(k) { P(k) }, e, p)` | move evidence from `P(a)` to `P(b)` using `e: Eq(a, b)` |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -123,7 +126,7 @@ compile-time array size. The generic helper is checked once with symbolic
 `erased(P)` marks a proof binder; it is not a `comptime` parameter or a
 request to fix a value during specialization. `comptime`, `sink` and
 `inout` parameters are rejected in this subset. A helper can forward
-proofs or return `Lt(i, n)` evidence; the checker controls their runtime
+proofs or return `Lt(i, n)`/`Eq(a, b)` evidence; the checker controls their runtime
 relevance. Every definition and both branches are checked, including
 unused helpers and discarded proof arguments.
 
@@ -131,11 +134,11 @@ Functions must have explicit parameter and result types and one value
 expression per block. They may refer only to earlier definitions, and
 calls supply exactly the declared number of arguments. Expressions are
 names, checked integer literals (including negative I64 literals), arrays,
-blocks, calls and the three operations above. Integer literals take the
+blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
-`erased`, `Lt`, `if_lt`, `index`, `decide_lt`, `u64`, `i64` and the entry
-symbol `__jihoo_dependent_main` are reserved in marked modules. A branch
+`erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `index`,
+`decide_lt`, `u64`, `i64` and the entry symbol `__jihoo_dependent_main` are reserved in marked modules. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
 
 Exports accept and return only U64/I64 values and cannot require proof
@@ -167,6 +170,58 @@ checking. `check --verify` still checks this same core. Legacy `verify`,
 `emit-horn`, `emit-obligations` and the `test` harness are explicitly
 unsupported for marked files; compilation does not call their VC machinery.
 
+## U64 equality and proof transport
+
+The equality slice adds intensional U64 equality in `Prop`. Its rules
+are deliberately limited to erased evidence; array layouts and runtime
+values do not change because of a proof.
+
+- `Eq(a, b) : Prop` requires `a, b : U64`.
+- `refl(a) : Eq(a, a)` accepts symbolic U64 values. Conversion uses the
+  existing beta/branch normalization; an equality assumption does not make
+  its endpoints definitionally equal.
+- Given `P : U64 -> Prop`, `e : Eq(a, b)` and `p : P(a)`,
+  `transport(P, e, p) : P(b)`. The family cannot return data or universes.
+  Transport reduces to `p` when normalized `e` is `refl(a)`; otherwise it
+  remains an erased proof term. There is no runtime proof inspection.
+- `if_eq(a, b, fn(e) { yes }, no)` compares runtime U64 values and binds
+  erased `e : Eq(a, b)` only in `yes`. Both branches are checked before
+  normalization. A closed comparison reduces to the selected branch,
+  substituting `refl(a)` into a true branch.
+
+Source families are written `fn(k) { Lt(i, k) }` or `fn(k) { Eq(k, a) }`:
+one untyped U64 binder and a proposition as their single expression.
+They elaborate directly to core lambdas; they create no runtime closure.
+The textual equivalents are `(Eq a b)`, `(refl a)`,
+`(transport family e p)` and `(if-eq a b e yes no)`, with a family such as
+`(lam k U64 (Lt i k))`. The full core checks arbitrary `U64 -> Prop`
+families. Equality symmetry, transitivity and inequality rewriting are
+ordinary user-written proof functions, derived from `refl` and `transport`.
+There are no added axioms or unchecked casts. General equality of types,
+data transport, inductive propositions and general induction remain future
+work.
+
+[`examples/core_equality.jh`](../../examples/core_equality.jh) and its
+[core equivalent](../../examples/core_equality.jhc) define symmetry and
+bound rewriting as user lemmas, then export `lookup(n, i)`. It returns
+11/22/33 when `n == 3` and `i` is in range, -1 for an invalid index with
+that length, and -2 for another length. Its entry returns 11 as the
+process exit status. For example, the bound lemma is:
+
+```jihoo
+fn bound(i: u64, n: u64, m: u64, e: erased(Eq(n, m)), p: erased(Lt(i, n))) -> Lt(i, m) {
+    transport(fn(k) { Lt(i, k) }, e, p)
+}
+```
+
+The lookup first obtains `Eq(3, n)` from `if_eq`, derives `Eq(n, 3)`
+with a user-written symmetry lemma, and rewrites `Lt(i, n)` into
+`Lt(i, 3)`. The array's actual length remains 3 throughout. No equality
+reflection silently unifies `n` with 3, and no array cast is performed.
+In both frontends the unoptimized lookup MIR has two scalar arguments,
+two real comparisons/branches and one array load, with no proof locals,
+closures, transport operations or bounds assertions.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -182,6 +237,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | decimal `n`, `(int n)` | checked U64 and I64 literals; no wrapping |
 | `(Array n)` | immutable I64 array indexed by its U64 length |
 | `(Lt i n)` | proposition that unsigned `i` is below `n` |
+| `(Eq a b)`, `(refl a)` | U64 equality proposition and reflexivity evidence |
+| `(transport family e p)` | equality elimination into a proposition family |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -190,6 +247,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(index xs i p)` | load, requiring exactly `Lt i (length of xs)` |
 | `(decide-lt i n)` | evidence of a closed inequality that reduces to true |
 | `(if-lt i n p yes no)` | unsigned branch; erased `p : Lt i n` exists only in `yes` |
+| `(if-eq a b e yes no)` | equality branch; erased `e : Eq a b` exists only in `yes` |
 
 `Type u` has type `Type (u + 1)`, never itself. Dependent function types
 compute their universe levels; a function ending in a proposition is a
@@ -200,8 +258,8 @@ or eliminators that inspect evidence to produce runtime data.
 
 Erased binders must bind propositions; proof binders must be erased.
 Evidence can be used in types and proof arguments, but not as runtime
-data. Erased data/type parameters, inductive propositions, equality and
-general induction are future work. Runtime indices are real U64 values;
+data. Erased data/type parameters, inductive propositions, equality beyond
+U64 and general induction are future work. Runtime indices are real U64 values;
 the prototype does not model them as unbounded mathematical naturals.
 
 Both branches and all definitions are checked before normalization or
@@ -238,20 +296,30 @@ independent evaluator. It checks proof forwarding, nested/shadowed binders,
 signed and unsigned extremes, the entry wrapper, source JSON diagnostics,
 formatter preservation and explicit rejection of unsupported syntax and ABI
 preconditions. Both targets emit objects at `-O0` and `-O2`.
+`tests/core_equality.py`, called by the same suite, also compares both
+frontends' equality programs and objects with the independent evaluator.
+It exercises symbolic symmetry/transitivity lemmas, bound/index rewriting,
+reflexive computation, nested/shadowed binders and arbitrary U64 inputs.
+Negative cases reject false equality, wrong transport direction or source
+proof, runtime/type/array transport, equality reflection, scope escapes,
+erased runtime uses and proof ABI preconditions. Kernel unit tests bypass
+both frontends to check false reflexivity, the proposition-only restriction,
+reflexive reduction and graph integrity for the new terms.
 
 The next stages of the replacement are:
 
 1. Extend ordinary `.jh` elaboration only as additional program operations
    and their guarantees are supported by this same core.
-2. Add the logical foundations users need: inductive propositions,
-   equality, induction, erased indices and user-written lemmas. Specify
-   normalization, universe and erasure rules before enabling them.
+2. Extend the logical foundations beyond U64 equality: inductive
+   propositions, general induction, erased indices, equality of other
+   types and reusable lemma libraries. Specify normalization, universe
+   and erasure rules before enabling them.
 3. Add runtime operations with explicit ownership/effect rules, including
    borrowed and mutable memory and dynamic allocation. Extend the direct
    lowering of checked programs rather than adding a separate Horn model.
 4. Establish the kernel's metatheory and the preservation obligations for
-   source elaboration, erasure and lowering. External proof tools may validate this small
-   trusted foundation; they are not a required user compilation stage.
+   source elaboration, erasure and lowering. External proof tools may
+   validate this small trusted foundation; they are not a required user compilation stage.
 5. Retire legacy verification paths as their source programs and enabled
    guarantees move to the core. Reproducing the legacy certificate format
    or preserving its implementation is not a migration requirement.

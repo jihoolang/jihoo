@@ -1,0 +1,28 @@
+; Same lookup as core_equality.jh. Symmetry and bound rewriting are derived
+; proof functions; no primitive casts or extra array checks are introduced.
+(def sym
+  (pi a U64 (pi b U64 (pi0 e (Eq a b) (Eq b a))))
+  (lam a U64 (lam b U64 (lam0 e (Eq a b)
+    (transport (lam k U64 (Eq k a)) e (refl a))))))
+
+(def bound
+  (pi i U64 (pi n U64 (pi m U64
+    (pi0 e (Eq n m) (pi0 p (Lt i n) (Lt i m))))))
+  (lam i U64 (lam n U64 (lam m U64
+    (lam0 e (Eq n m) (lam0 p (Lt i n)
+      (transport (lam k U64 (Lt i k)) e p)))))))
+
+(def get
+  (pi n U64 (pi xs (Array n) (pi i U64 (pi0 p (Lt i n) I64))))
+  (lam n U64 (lam xs (Array n) (lam i U64 (lam0 p (Lt i n)
+    (index xs i p))))))
+
+(export lookup
+  (pi n U64 (pi i U64 I64))
+  (lam n U64 (lam i U64
+    (if-eq 3 n e
+      (if-lt i n p
+        (app get 3 (array (int 11) (int 22) (int 33)) i
+          (app bound i n 3 (app sym 3 n e) p))
+        (int -1))
+      (int -2)))))

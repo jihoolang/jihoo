@@ -101,12 +101,13 @@ impl Lower {
                 Ok(self.value(types.I64,
                     mir.Rvalue.Use(mir.Operand.Copy(place.with(mir.Proj.Index(at)))), sp))
             }
-            IfLt(a, b, yes, no) => {
+            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                let op = match c.term(id) { IfEq(_, _, _, _) => lex.Op.Eq, _ => lex.Op.Lt }
                 let a = self.expr(c, a, env, depth - 1)?
                 let b = self.expr(c, b, env, depth - 1)?
                 let condition = self.value(
                     types.BOOL,
-                    mir.Rvalue.Bin(lex.Op.Lt, a.op.clone(), b.op.clone()),
+                    mir.Rvalue.Bin(op, a.op.clone(), b.op.clone()),
                     sp
                 )
                 let yes_block = self.block()

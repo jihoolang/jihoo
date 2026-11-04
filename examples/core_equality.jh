@@ -1,0 +1,26 @@
+// U64 equality moves an erased range proof to an equal array length.
+// Symmetry and bound rewriting are user-written proof functions.
+// `lookup(n, i)` returns an element only when n == 3 and i < n;
+// otherwise it returns -2 (wrong length) or -1 (out of bounds).
+#![dependent_core]
+
+fn sym(a: u64, b: u64, e: erased(Eq(a, b))) -> Eq(b, a) {
+    transport(fn(k) { Eq(k, a) }, e, refl(a))
+}
+
+fn bound(i: u64, n: u64, m: u64, e: erased(Eq(n, m)), p: erased(Lt(i, n))) -> Lt(i, m) {
+    transport(fn(k) { Lt(i, k) }, e, p)
+}
+
+fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 {
+    index(xs, i, p)
+}
+
+export fn lookup(n: u64, i: u64) -> i64 {
+    if_eq(3, n, fn(e) {
+        if_lt(i, n, fn(p) { get(3, [11, 22, 33], i, bound(i, n, 3, sym(3, n, e), p)) }, -1)
+    }, -2)
+}
+
+fn main() -> i64 { lookup(3, 0) }
+// exit: 11

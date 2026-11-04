@@ -55,6 +55,20 @@ def evaluate(term, env):
         return int(args[0])
     if head == "array":
         return [evaluate(x, env) for x in args]
+    if head in ("Lt", "Eq"):
+        a, b = (evaluate(x, env) for x in args)
+        return (a, b) if head == "Lt" else ("eq", a, b)
+    if head == "refl":
+        a = evaluate(args[0], env)
+        return ("eq", a, a)
+    if head == "transport":
+        family, equality, proof = (evaluate(x, env) for x in args)
+        tag, a, b = equality
+        assert tag == "eq" and a == b and proof == family(a)
+        return family(b)
+    if head == "if-eq":
+        a, b = evaluate(args[0], env), evaluate(args[1], env)
+        return evaluate(args[3], {**env, args[2]: ("eq", a, b)}) if a == b else evaluate(args[4], env)
     if head == "decide-lt":
         a, b = (evaluate(x, env) for x in args)
         assert a < b
@@ -311,6 +325,8 @@ def main():
                        success=success, env=environment)
 
         source_frontend(compiler, root, temporary, environment)
+        from core_equality import validate_equality
+        validate_equality(compiler, root, temporary, environment, run, read_terms, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)
