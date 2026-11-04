@@ -37,7 +37,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
       - name: nix flake check
-        run: nix flake check -L
+        # Each Agda check can use several GiB. Run derivations one at a
+        # time so the proof checks fit in the hosted runner's memory.
+        run: nix flake check --max-jobs 1 -L
       - name: Fusion benchmark checks
         run: |
           nix build .#jihoo

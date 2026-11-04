@@ -8,11 +8,17 @@ jihoo run tests/runner.jh -- format             # formatting and syntax preserva
 JIHOO_TEST=maps jihoo run tests/runner.jh       # the files whose path has `maps`
 JIHOO_TEST_OPT=-O0 jihoo run tests/runner.jh -- run
 JIHOO_COMPILER=out/jihoo jihoo run tests/runner.jh  # with this compiler
-nix flake check                                 # what CI runs
+nix flake check --max-jobs 1 -L                  # what CI runs
 ```
 
 Run them from the checkout, in the dev shell (`nix develop`), where
 `jihoo` is the seed and `JIHOO_PATH` the checkout's `lib`.
+
+CI limits Nix to one build at a time because each Agda proof check can
+use several GiB of memory. `--max-jobs 1` keeps their combined memory
+within the hosted runner's capacity while running the same checks. Use
+the same limit locally when memory is constrained; `--cores` alone does
+not limit the number of simultaneous derivations.
 
 ## The runner
 
