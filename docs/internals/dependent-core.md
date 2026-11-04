@@ -6,13 +6,16 @@ It does not require reconstructing the program's execution as Horn rules.
 Horn's theory, exporter and certificate format are not compatibility
 requirements for the new core.
 
-The first executable slice is experimental. `jihoo core` reads a `.jhc`
-core file; ordinary `.jh` syntax has not yet been elaborated into this
-core. Its implementation is jihoo code in `compiler/core.jh`,
-`core_parse.jh`, `core_lower.jh` and `core_driver.jh`.
+The executable slice is experimental. Ordinary `.jh` files opt into a
+small source subset with `#![dependent_core]`; `compiler/core_elab.jh`
+constructs core terms directly from the ordinary parser's AST. `jihoo core`
+also reads `.jhc` core files. Both frontends use `compiler/core.jh` and
+`core_lower.jh`; `core_parse.jh` and `core_driver.jh` provide the textual
+core frontend.
 
 ```text
-.jhc terms + types + proofs
+.jh -> ordinary parser AST -> core terms + types + proofs
+.jhc -> core parser        -> core terms + types + proofs
   -> native core checker
   -> beta reduction and proof erasure
   -> MIR from those same terms
@@ -21,10 +24,10 @@ core. Its implementation is jihoo code in `compiler/core.jh`,
 ```
 
 The core path calls neither the existing verification-condition generator
-nor Horn/Agda. The existing `.jh` verifier and its checks remain the
-baseline during migration; the new kernel is not yet formally proved
-sound, and its erasure and lowering are not yet proved to preserve
-behavior. Passing the prototype's tests does not complete the 0.5 release
+nor Horn/Agda. Unmarked `.jh` files retain the existing verifier and its
+checks during migration; the new kernel is not yet formally proved
+sound. Source elaboration, erasure and lowering are not yet proved to
+preserve typing or behavior. Passing the prototype's tests does not complete the 0.5 release
 requirements or establish correctness of the compiler or its executables.
 
 ## Run the executable slice
@@ -73,6 +76,97 @@ a proof argument, proof allocation or an additional bounds assertion.
 This is already true before LLVM optimization. The caller's branch
 remains necessary because its input can be any U64.
 
+## Ordinary source subset
+
+[`examples/core_index.jh`](../../examples/core_index.jh) exports the same
+lookup and adds a small executable entry point:
+
+```jihoo
+#![dependent_core]
+
+fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 {
+    index(xs, i, p)
+}
+
+export fn lookup(i: u64) -> i64 {
+    if_lt(i, 3, fn(p) { get(3, [11, 22, 33], i, p) }, -1)
+}
+
+fn main() -> i64 { lookup(3) }
+```
+
+```sh
+out/jihoo check examples/core_index.jh
+out/jihoo emit-mir --lib examples/core_index.jh
+out/jihoo emit-obj --lib examples/core_index.jh --target x86_64 -O0 -o out/lookup.o
+out/jihoo emit-obj --lib examples/core_index.jh --target aarch64 -O2 -o out/lookup-arm.o
+out/jihoo run examples/core_index.jh   # returns -1 as exit status 255
+```
+
+The file attribute selects the whole module. These are contextual forms
+in the existing grammar, not global keywords or standard-library types:
+
+| source | elaboration |
+|--------|-------------|
+| `u64`, `i64`, `[i64; n]`, `Lt(i, n)` | `U64`, `I64`, `Array n`, `Lt i n` |
+| `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
+| `f(a, ..., p)` | dependent applications, with all arguments explicit |
+| `[11, 22, 33]` | immutable core array |
+| `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
+| `decide_lt(i, n)` | proof of a true, closed unsigned inequality |
+| `if_lt(i, n, fn(p) { yes }, no)` | unsigned branch binding `p: Lt(i, n)` only in `yes` |
+
+`n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
+length symbolically in the core; it does not evaluate `n` as a legacy
+compile-time array size. The generic helper is checked once with symbolic
+`n`, `xs`, `i` and `p`, before any caller substitutes a concrete array.
+`erased(P)` marks a proof binder; it is not a `comptime` parameter or a
+request to fix a value during specialization. `comptime`, `sink` and
+`inout` parameters are rejected in this subset. A helper can forward
+proofs or return `Lt(i, n)` evidence; the checker controls their runtime
+relevance. Every definition and both branches are checked, including
+unused helpers and discarded proof arguments.
+
+Functions must have explicit parameter and result types and one value
+expression per block. They may refer only to earlier definitions, and
+calls supply exactly the declared number of arguments. Expressions are
+names, checked integer literals (including negative I64 literals), arrays,
+blocks, calls and the three operations above. Integer literals take the
+expected scalar type; array elements are I64 and indices/lengths are U64.
+`erased` is allowed only as the outer parameter annotation. The forms
+`erased`, `Lt`, `if_lt`, `index`, `decide_lt`, `u64`, `i64` and the entry
+symbol `__jihoo_dependent_main` are reserved in marked modules. A branch
+binder may shadow another local; de Bruijn indices preserve its scope.
+
+Exports accept and return only U64/I64 values and cannot require proof
+preconditions from foreign callers. Without `--lib`, the entry must be an
+ordinary `fn main() -> i64`; its result becomes the process exit status
+through the existing native entry wrapper. With `--lib`, only explicitly
+exported functions are emitted. Helpers, including a non-exported `main`,
+are still checked. A compilation needs at least one runtime export or an
+entry point. `check` validates this executable subset, including its ABI,
+without LLVM or a linker.
+
+Imports, item attributes, contracts, foreign declarations, other profiles,
+local statements, implicit proof search, ordinary `if`/index syntax,
+arithmetic, general closures, recursion, induction and mutable memory are
+outside this slice and rejected. Marked modules cannot be imported by the
+legacy frontend. This keeps the source scope explicit while extending
+only one execution path. `fmt`, AST dumps and source diagnostics use the
+ordinary parser; checking errors retain `.jh` byte ranges. Source parsing
+uses the ordinary parser's limits; core checking and normalization retain
+the core limits below.
+
+`check`, `build`, `run`, `emit-mir`, `emit-llvm` and `emit-obj` route marked
+files through the same core checker, erasure and MIR lowering as `.jhc`.
+No temporary `.jhc` text is produced or reparsed. The ordinary initialization
+and borrow checks and LLVM backend then run on that MIR. The branch proof
+has no MIR argument or local, and `index` adds no bounds assertion.
+`--no-verify`, `--release` and debug MIR switches never bypass proof
+checking. `check --verify` still checks this same core. Legacy `verify`,
+`emit-horn`, `emit-obligations` and the `test` harness are explicitly
+unsupported for marked files; compilation does not call their VC machinery.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -118,7 +212,8 @@ erased precondition or accept array pointers: the ABI cannot ensure that
 a foreign caller supplies the evidence or a correctly indexed allocation.
 
 Checking is bounded by one million checking steps, 200,000 arena nodes,
-128 levels of nesting and a 1 MiB/50,000-token source limit. Exhaustion
+128 levels of nesting. The `.jhc` parser also enforces a
+1 MiB/50,000-token source limit. Exhaustion
 rejects the input. `check` needs neither LLVM nor any proof tools.
 Diagnostics support `--error-format=json`. No option bypasses the kernel.
 
@@ -137,11 +232,17 @@ signed element boundaries and arbitrary U64 indices. Negative cases
 cover false and mismatched evidence, wrong lengths, erased runtime uses,
 universe errors, recursion, overflow and scope escape. Kernel unit tests
 also construct malformed graphs and false evidence without the parser.
+The same suite now parses `.jh` programs, compares their MIR with the
+corresponding `.jhc` programs, and compares host execution with the
+independent evaluator. It checks proof forwarding, nested/shadowed binders,
+signed and unsigned extremes, the entry wrapper, source JSON diagnostics,
+formatter preservation and explicit rejection of unsupported syntax and ABI
+preconditions. Both targets emit objects at `-O0` and `-O2`.
 
 The next stages of the replacement are:
 
-1. Elaborate an explicit subset of ordinary `.jh` definitions into this
-   same core, including source diagnostics and proof syntax.
+1. Extend ordinary `.jh` elaboration only as additional program operations
+   and their guarantees are supported by this same core.
 2. Add the logical foundations users need: inductive propositions,
    equality, induction, erased indices and user-written lemmas. Specify
    normalization, universe and erasure rules before enabling them.
@@ -149,7 +250,7 @@ The next stages of the replacement are:
    borrowed and mutable memory and dynamic allocation. Extend the direct
    lowering of checked programs rather than adding a separate Horn model.
 4. Establish the kernel's metatheory and the preservation obligations for
-   erasure and lowering. External proof tools may validate this small
+   source elaboration, erasure and lowering. External proof tools may validate this small
    trusted foundation; they are not a required user compilation stage.
 5. Retire legacy verification paths as their source programs and enabled
    guarantees move to the core. Reproducing the legacy certificate format

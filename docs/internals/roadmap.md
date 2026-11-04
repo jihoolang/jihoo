@@ -336,13 +336,27 @@ checked program to MIR/LLVM, with the evidence erased and no added bounds
 assertion. Both targets, host execution at `-O0`/`-O2`, independent
 evaluation and false-proof rejection run in the `core` suite.
 
-Next: elaborate ordinary `.jh` source into the core; add equality,
+Implemented source slice: `#![dependent_core]` routes a restricted ordinary
+`.jh` AST directly into that same checker and lowering. Explicit
+`erased(Lt(i, n))` proof parameters remain distinct from `comptime`;
+`if_lt` introduces scoped symbolic evidence and dependent application
+connects it to an immutable array's length. `examples/core_index.jh`
+supports ordinary checking, both targets' objects and host execution.
+Its library MIR equals the `.jhc` example, with no evidence locals or
+extra bounds assertion. Positive, negative and differential execution
+tests run in the same `core` suite, and the compiler still bootstraps
+from the unchanged release seed.
+
+Next: add equality,
 inductive propositions and user lemmas; cover owned/mutable memory;
-establish the kernel's soundness and erasure/lowering preservation.
+establish the kernel's soundness and elaboration/erasure/lowering
+preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing
-verifier and its gaps described below remain applicable to `.jh` programs
-until their guarantees move to the core. Their Horn implementation is
-not a compatibility constraint on its replacement.
+verifier and its gaps described below remain applicable to unmarked `.jh`
+programs until their supported operations and guarantees move to the core.
+Only the explicit pure source subset bypasses legacy VC generation today;
+no broader legacy path is retired by this slice. Horn implementation or
+certificate compatibility is not a constraint on its replacement.
 
 Research ([design](verification.md)): 0.5 proves, while compiling, that
 the checks MIR inserts cannot fail and that functions meet their contracts.

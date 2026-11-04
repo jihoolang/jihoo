@@ -1,0 +1,369 @@
+// Explicit .jh subset -> the existing dependent core, directly from AST.
+// Contextual forms use the ordinary parser: erased(P), if_lt(a, b,
+// fn(p) { yes }, no), index(xs, i, p), and decide_lt(a, b).
+// No source text or independent execution model is generated here.
+import ast
+import core
+import core_lower
+import diag
+import load
+import mir
+import target
+import std.mem
+
+fn error(sp: diag.Span, message: str) -> diag.Diag {
+    diag.Diag.new(sp, ("core: " + message).as_str())
+}
+
+fn reserved(name: str) -> bool {
+    name == "erased" || name == "Lt" || name == "if_lt" || name == "index" ||
+        name == "decide_lt" || name == "u64" || name == "i64" ||
+        name == "__jihoo_dependent_main"
+}
+
+struct Elaborator {
+    c: core.Core
+    names: Vec(String)
+    ctx: Vec(core.Binding)
+    arities: Vec(i64)
+}
+
+impl Elaborator {
+    fn push(inout self, name: str, ty: u32, erased: bool) {
+        self.names.push(name.to_string())
+        self.ctx.push(core.Binding { ty, erased })
+    }
+
+    fn pop(inout self) { self.names.pop(); self.ctx.pop() }
+
+    fn name(inout self, name: str, sp: diag.Span) -> Result(u32, diag.Diag) {
+        var i = self.names.len()
+        while i > 0 {
+            i -= 1
+            if self.names[i] == name {
+                return self.c.add(core.Term.Var((self.names.len() - 1 - i) as u32), sp)
+            }
+        }
+        for i, d in self.c.definitions {
+            if d.name == name { return self.c.add(core.Term.Global(i as u32), sp) }
+        }
+        Err(error(sp, ("unknown name (or recursive/forward definition): " + name).as_str()))
+    }
+
+    fn u64(inout self, sp: diag.Span) -> Result(u32, diag.Diag) {
+        self.c.add(core.Term.U64, sp)
+    }
+
+    fn type_expr(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        match e.kind {
+            Name(n) if n == "u64" => self.u64(e.span)
+            Name(n) if n == "i64" => self.c.add(core.Term.I64, e.span)
+            Call(f, args) => {
+                let ast.ExprKind.Name(n) = f.kind else { return Err(error(
+                    e.span,
+                    "unsupported type"
+                )) }
+                if n != "Lt" || args.len() != 2 { return Err(error(e.span, "expected Lt(i, n)")) }
+                let u = self.u64(e.span)?
+                let a = self.expr(args[0], Some(u), depth - 1)?
+                let b = self.expr(args[1], Some(u), depth - 1)?
+                self.c.add(core.Term.Lt(a, b), e.span)
+            }
+            _ => Err(error(e.span, "unsupported type in dependent_core"))
+        }
+    }
+
+    fn ty(inout self, t: ast.Ty, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(t.span, "elaboration nesting limit reached")) }
+        match t.kind {
+            Path(path, args) if path.len() == 1 => {
+                let n = path[0].as_str()
+                match args {
+                    None => {
+                        if n == "u64" { return self.u64(t.span) }
+                        if n == "i64" { return self.c.add(core.Term.I64, t.span) }
+                    }
+                    Some(args) => {
+                        if n == "Lt" && args.len() == 2 {
+                            let u = self.u64(t.span)?
+                            let a = self.expr(args[0], Some(u), depth - 1)?
+                            let b = self.expr(args[1], Some(u), depth - 1)?
+                            return self.c.add(core.Term.Lt(a, b), t.span)
+                        }
+                    }
+                }
+                Err(error(t.span, "unsupported type in dependent_core"))
+            }
+            Array(element, length) => {
+                let element = self.ty(element.deref(), depth - 1)?
+                if self.c.term(element) != core.Term.I64 { return Err(error(
+                    t.span,
+                    "arrays require i64 elements"
+                )) }
+                let u = self.u64(t.span)?
+                let n = self.expr(length.deref(), Some(u), depth - 1)?
+                self.c.add(core.Term.Array(n), t.span)
+            }
+            _ => Err(error(t.span, "unsupported type in dependent_core"))
+        }
+    }
+
+    fn domain(inout self, t: ast.Ty) -> Result((bool, u32), diag.Diag) {
+        if let_erased(t) {
+            let ast.TyKind.Path(_, Some(args)) = t.kind else { return Err(error(
+                t.span,
+                "expected erased(P)"
+            )) }
+            if args.len() != 1 { return Err(error(t.span, "expected erased(P)")) }
+            return Ok((true, self.type_expr(args[0], core.DEPTH)?))
+        }
+        Ok((false, self.ty(t, core.DEPTH)?))
+    }
+
+    fn block(
+        inout self,
+        b: ast.Block,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if b.stmts.len() != 0 { return Err(error(
+            b.span,
+            "dependent_core blocks require a single value expression"
+        )) }
+        let Some(tail) = b.tail else { return Err(error(
+            b.span,
+            "dependent_core blocks require a value"
+        )) }
+        self.expr(tail.deref(), expected, depth)
+    }
+
+    fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        let sp = e.span
+        match e.kind {
+            Name(n) => self.name(n.as_str(), sp)
+            Int(n) => {
+                var unsigned = false
+                match expected {
+                    Some(t) => {
+                        let t = self.c.normal(t, core.DEPTH)?
+                        unsigned = self.c.term(t) == core.Term.U64
+                    }
+                    None => {}
+                }
+                if unsigned { self.c.add(core.Term.Natural(n), sp) }
+                else {
+                    if n > 0x7fffffffffffffff { return Err(error(sp, "I64 literal overflow")) }
+                    self.c.add(core.Term.Integer(n as i64), sp)
+                }
+            }
+            Unary(ast.UnOp.Neg, value) => {
+                let ast.ExprKind.Int(n) = value.kind else { return Err(error(
+                    sp,
+                    "only literal negation is supported"
+                )) }
+                if n > 0x8000000000000000 { return Err(error(sp, "I64 literal underflow")) }
+                self.c.add(core.Term.Integer((0 - n as i128) as i64), sp)
+            }
+            Array(values) => {
+                let i = self.c.add(core.Term.I64, sp)?
+                var xs = Vec(u32).new()
+                for v in values { xs.push(self.expr(v, Some(i), depth - 1)?) }
+                self.c.add(core.Term.Elements(xs), sp)
+            }
+            Block(b) => self.block(b, expected, depth - 1)
+            Call(f, args) => {
+                let ast.ExprKind.Name(n) = f.kind else { return Err(error(
+                    f.span,
+                    "calls require a named function"
+                )) }
+                if n == "if_lt" {
+                    if args.len() != 4 { return Err(error(sp, "if_lt requires four arguments")) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let b = self.expr(args[1], Some(u), depth - 1)?
+                    let ast.ExprKind.Lambda(ps, ret, yes) = args[2].kind else {
+                        return Err(error(args[2].span, "if_lt requires fn(p) { value }"))
+                    }
+                    if ps.len() != 1 || ps[0].ty.is_some() || ret.is_some() || reserved(
+                        ps[0].name.as_str()
+                    ) {
+                        return Err(error(args[2].span, "if_lt requires one untyped proof binder"))
+                    }
+                    let p = self.c.add(core.Term.Lt(a, b), sp)?
+                    let inner_expected = match expected {
+                        Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
+                        None => None
+                    }
+                    self.push(ps[0].name.as_str(), p, true)
+                    let yes = self.block(yes, inner_expected, depth - 1)?
+                    self.pop()
+                    let no = self.expr(args[3], expected, depth - 1)?
+                    return self.c.add(core.Term.IfLt(a, b, yes, no), sp)
+                }
+                if n == "index" {
+                    if args.len() != 3 { return Err(error(
+                        sp,
+                        "index requires array, index and evidence"
+                    )) }
+                    let a = self.expr(args[0], None, depth - 1)?
+                    let u = self.u64(sp)?
+                    let i = self.expr(args[1], Some(u), depth - 1)?
+                    let p = self.expr(args[2], None, depth - 1)?
+                    return self.c.add(core.Term.Index(a, i, p), sp)
+                }
+                if n == "decide_lt" {
+                    if args.len() != 2 { return Err(error(sp, "decide_lt requires two arguments")) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let b = self.expr(args[1], Some(u), depth - 1)?
+                    return self.c.add(core.Term.Decide(a, b), sp)
+                }
+                let mut_f = self.name(n.as_str(), f.span)?
+                let core.Term.Global(g) = self.c.term(mut_f) else {
+                    return Err(error(f.span, "only declared functions can be called"))
+                }
+                if args.len() != self.arities[g as i64] { return Err(error(
+                    sp,
+                    "wrong argument count (evidence is explicit)"
+                )) }
+                var function = mut_f
+                var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
+                for a in args {
+                    let normal = self.c.normal(ty, core.DEPTH)?
+                    let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
+                        return Err(error(sp, "application requires a dependent function"))
+                    }
+                    let arg = self.expr(a, Some(domain), depth - 1)?
+                    function = self.c.add(core.Term.App(function, arg), sp)?
+                    ty = self.c.substitute(result, arg, core.DEPTH)?
+                }
+                Ok(function)
+            }
+            _ => Err(error(sp, "unsupported expression in dependent_core"))
+        }
+    }
+
+    fn definition(inout self, item: ast.Item, entry: bool) -> Result((), diag.Diag) {
+        let ast.ItemKind.Fn(f) = item.kind else { return Err(error(
+            item.span,
+            "dependent_core supports only function definitions"
+        )) }
+        if item.attrs.len() != 0 || f.is_unsafe || f.variadic || f.requires.len() != 0 ||
+            f.ensures.len() != 0 { return Err(error(
+            item.span,
+            "attributes, unsafe and contracts are unsupported in dependent_core"
+        )) }
+        let ast.RetMode.Value = f.ret_mode else { return Err(error(
+            item.span,
+            "borrowed results are unsupported"
+        )) }
+        let exported = match f.kind {
+            Export => {
+                if f.name == "main" { return Err(error(
+                    f.name_span,
+                    "main must be an ordinary function"
+                )) }
+                true
+            }
+            Normal => entry && f.name == "main"
+            Extern => return Err(error(
+                item.span,
+                "foreign declarations are unsupported in dependent_core"
+            ))
+        }
+        if reserved(f.name.as_str()) { return Err(error(
+            f.name_span,
+            "reserved dependent_core name"
+        )) }
+        for d in self.c.definitions {
+            if d.name == f.name { return Err(error(f.name_span, "duplicate definition")) }
+        }
+        var domains = Vec((bool, u32)).new()
+        for p in f.params {
+            if p.mode != ast.Mode.Let || p.bounds.len() != 0 { return Err(error(
+                p.span,
+                "use erased(P) for evidence; comptime, sink and inout are unsupported"
+            )) }
+            if reserved(p.name.as_str()) { return Err(error(p.span, "reserved dependent_core name")) }
+            for name in self.names {
+                if name == p.name { return Err(error(p.span, "duplicate parameter")) }
+            }
+            let Some(t) = p.ty else { return Err(error(p.span, "parameter needs an explicit type")) }
+            let (erased, domain) = self.domain(t)?
+            domains.push((erased, domain))
+            self.push(p.name.as_str(), domain, erased)
+        }
+        let Some(ret) = f.ret else { return Err(error(item.span, "result needs an explicit type")) }
+        let mut_ret = self.ty(ret, core.DEPTH)?
+        let Some(body) = f.body else { return Err(error(item.span, "function needs a body")) }
+        let mut_body = self.block(body, Some(mut_ret), core.DEPTH)?
+        var ty = mut_ret
+        var value = mut_body
+        var i = domains.len()
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = domains[i]
+            ty = self.c.add(core.Term.Pi(erased, domain, ty), item.span)?
+            value = self.c.add(core.Term.Lam(erased, domain, value), item.span)?
+            self.pop()
+        }
+        if entry && f.name == "main" && (domains.len() != 0 || self.c.term(ty) != core.Term.I64) {
+            return Err(error(item.span, "dependent_core main must have signature fn main() -> i64"))
+        }
+        self.c.definitions.push(core.Definition {
+            name: f.name.clone(),
+            ty,
+            value,
+            exported,
+            span: item.span
+        })
+        self.arities.push(f.params.len())
+        // Make previously checked definitions available for type-directed
+        // application elaboration. Lowering independently rechecks all terms.
+        self.c.check()
+    }
+}
+
+fn let_erased(t: ast.Ty) -> bool {
+    match t.kind { Path(p, _) => p.len() == 1 && p[0] == "erased", _ => false }
+}
+
+pub fn compile(
+    a: load.Ast,
+    tgt: target.Target,
+    library: bool,
+    codegen: target.Codegen
+) -> Result(mir.Program, diag.Diag) {
+    let module = a.modules[a.root as i64].ast
+    for attr in module.attrs {
+        if attr != "dependent_core" { return Err(error(
+            diag.Span.new(module.file, 0, 0),
+            "dependent_core supports only the native profile"
+        )) }
+    }
+    var e = Elaborator {
+        c: core.Core.new(),
+        names: Vec(String).new(),
+        ctx: Vec(core.Binding).new(),
+        arities: Vec(i64).new()
+    }
+    for item in module.items { e.definition(item, !library)? }
+    var p = core_lower.compile(mem.replace(&e.c, core.Core.new()), tgt)?
+    p.codegen = codegen
+    if !library {
+        for i in 0..p.fns.len() {
+            if p.fns[i].name == "main" {
+                p.fns[i].symbol = "__jihoo_dependent_main".to_string()
+                p.fns[i].linkage = mir.Linkage.Internal
+                p.entry = Some(i as u32)
+            }
+        }
+        if p.entry.is_none() { return Err(error(
+            diag.Span.new(module.file, 0, 0),
+            "missing fn main() -> i64; use --lib for exports"
+        )) }
+    }
+    Ok(p)
+}

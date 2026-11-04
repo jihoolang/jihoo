@@ -66,6 +66,14 @@ program and its proofs. `core emit-mir`, `core emit-llvm` and
 core syntax, separate from ordinary `.jh` source. Checking always runs;
 `--no-verify` is not a core option.
 
+Ordinary `.jh` files can opt into the
+[dependent source subset](../internals/dependent-core.md#ordinary-source-subset)
+with `#![dependent_core]`. Use ordinary `check`, `build`, `run` and
+`emit-*` code generation commands; `--lib` emits only explicit exports.
+The native core always checks their proofs, including with `--no-verify`.
+Legacy verification/export commands and `test` are unsupported for these
+marked files. Imports and other runtime profiles are outside this subset.
+
 ## Source formatting
 
 ```sh

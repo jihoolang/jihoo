@@ -254,6 +254,19 @@ fn drive() {
         }
     }
     timer.lap("load")
+    let dependent = load.dependent_core(a)
+    if dependent {
+        if cmd == "verify" || cmd == "emit-horn" || cmd == "emit-obligations" {
+            source_error(
+                sources,
+                diag.Diag.new(diag.Span.new(a.modules[a.root as i64].ast.file, 0, 0),
+                    "core: legacy verification commands do not apply to dependent_core"),
+                json_errors
+            )
+        }
+        // The kernel always checks proofs, including with --no-verify.
+        verifying = false
+    }
     if library && (cmd == "build" || cmd == "run" || cmd == "test") {
         usage("use `emit-obj --lib` to build a C-linkable library object")
     }

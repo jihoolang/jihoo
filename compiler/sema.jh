@@ -9,6 +9,7 @@
 
 import std.mem
 import check
+import core_elab
 import interp
 import ast
 import diag
@@ -3373,6 +3374,7 @@ pub fn compile(
     profile: bool,
     inout reports: Vec(interp.Report)
 ) -> Result(mir.Program, Diag) {
+    if load.dependent_core(a) { return core_elab.compile(a, tgt, library, codegen) }
     var s = Sema.new(a, tgt, checked)
     s.profile_comptime = profile
     let result = compile_inner(&s, a, tgt, checked, library, codegen)

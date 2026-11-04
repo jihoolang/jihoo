@@ -175,12 +175,13 @@ allocator and pointer/borrow behavior remains required.
 
 The replacement direction is a [native dependent core](docs/internals/dependent-core.md)
 that checks programs and proofs together and emits MIR directly from the
-checked terms. The experimental `jihoo core` frontend compiles
-[`examples/core_index.jhc`](examples/core_index.jhc): a runtime array
-lookup whose proof is erased before code generation, without Horn or
-Agda in that compilation path. Ordinary `.jh` elaboration, general
-induction, mutable memory and proofs of the new kernel and lowering
-remain required before this replaces the existing verifier.
+checked terms. The experimental `#![dependent_core]` source subset
+compiles [`examples/core_index.jh`](examples/core_index.jh) through the
+ordinary AST into the same core as [`core_index.jhc`](examples/core_index.jhc):
+a runtime array lookup whose proof is erased before code generation,
+without Horn, Agda or legacy VC generation. General `.jh` coverage,
+induction, mutable memory and proofs of the new kernel, elaboration and
+lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

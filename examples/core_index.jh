@@ -1,0 +1,18 @@
+// Native dependent-core source: the proof argument is symbolic and erased.
+// `lookup` has the same C ABI and behavior as core_index.jhc. Build a
+// library with `jihoo emit-obj --lib examples/core_index.jh -o lookup.o`,
+// or run the small entry point with `jihoo run examples/core_index.jh`.
+#![dependent_core]
+
+fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 {
+    index(xs, i, p)
+}
+
+export fn lookup(i: u64) -> i64 {
+    if_lt(i, 3, fn(p) { get(3, [11, 22, 33], i, p) }, -1)
+}
+
+fn main() -> i64 {
+    lookup(3)
+}
+// exit: 255

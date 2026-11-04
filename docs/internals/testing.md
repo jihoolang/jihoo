@@ -71,7 +71,9 @@ the runner. Its suites:
   contract): it is compiled with `emit-llvm`, and checked with
   `check --verify`.
 - **core**: `tests/core.py` checks the dependent core's proofs, erasure and
-  direct MIR lowering on both targets, compares native objects with an
+  direct MIR lowering from both `.jhc` and marked `.jh` source on both
+  targets, compares their MIR, exercises ordinary `run` and source
+  diagnostics, and compares native objects with an
   independent evaluator at `-O0` and `-O2`, and requires rejection of bad
   evidence, types, scopes and ABI preconditions. Kernel unit tests also
   bypass the parser to check malformed term graphs and false evidence.

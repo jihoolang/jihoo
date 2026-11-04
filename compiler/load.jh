@@ -47,6 +47,16 @@ pub struct Ast {
     pub tests: Vec(String)
 }
 
+// The explicit source subset uses the native dependent checker/lowering.
+pub fn dependent_core(a: Ast) -> bool {
+    has_dependent_core(a.modules[a.root as i64].ast)
+}
+
+fn has_dependent_core(m: ast.Module) -> bool {
+    for a in m.attrs { if a == "dependent_core" { return true } }
+    false
+}
+
 // The name of the harness `jihoo test` adds to the root module.
 pub const TEST_ENTRY = "__jihoo_tests"
 
@@ -177,7 +187,12 @@ fn load_all(
     let name = l.root_name(root)
     let root_idx = l.load_file(root, name.as_str(), Span.new(0, 0, 0), &sources, overlay)?
     var prelude: Option(u32) = None
-    if !no_prelude {
+    let dependent = has_dependent_core(l.modules[root_idx as i64].ast)
+    if tests && dependent { return Err(Diag.new(
+        Span.new(0, 0, 0),
+        "core: test harnesses are unsupported in dependent_core"
+    )) }
+    if !no_prelude && !dependent {
         var p = Vec(String).new()
         p.push("std".to_string())
         p.push("prelude".to_string())
@@ -196,7 +211,7 @@ fn load_all(
         }
     }
     var derive: Option(u32) = None
-    if !no_prelude && l.any_derive() {
+    if !no_prelude && !dependent && l.any_derive() {
         var p = Vec(String).new()
         p.push("std".to_string())
         p.push("derive".to_string())
@@ -448,6 +463,13 @@ impl Loader {
         let file = sources.add(path.to_string(), text)
         let toks = lex.lex(file, sources.files[file as i64].text.as_str())?
         let module = parse.parse_module(file, toks)?
+        let dependent = has_dependent_core(module)
+        if dependent && self.modules.len() != 0 {
+            return Err(Diag.new(
+                at,
+                "core: dependent_core modules cannot be imported by the legacy frontend"
+            ))
+        }
         let idx = self.modules.len() as u32
         self.by_path.insert(key, idx)
         var wanted = Vec(Wanted).new()
@@ -461,6 +483,9 @@ impl Loader {
                 })
                 _ => {}
             }
+        }
+        if dependent && wanted.len() != 0 {
+            return Err(Diag.new(wanted[0].span, "core: imports are unsupported in dependent_core"))
         }
         self.modules.push(ModuleAst {
             name: name.to_string(),

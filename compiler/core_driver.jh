@@ -1,5 +1,5 @@
-// The experimental core frontend. Ordinary .jh compilation remains a
-// separate frontend; this path checks and lowers core terms directly.
+// The textual core frontend. Marked .jh files use core_elab instead;
+// both frontends check and lower the same core terms directly.
 import core_parse
 import core_lower
 import diag
