@@ -641,6 +641,37 @@ relation required by `Certified.check-sound`. Differential testing remains
 a regression check, and this partial bridge does not complete the 0.5.0
 execution-correspondence release gate.
 
+### Typed backing storage and list refinement
+
+[`agda/VecMemory.agda`](../../agda/VecMemory.agda) gives the list bridge
+a typed backing-store specification. Its descriptor carries length and
+capacity; backing cells can be initialized or uninitialized. A
+representation relation identifies the initialized prefix with a list,
+without treating spare cells as elements. It also permits zero-capacity
+borrowed storage with a nonzero length, as used by `String.from_static`.
+
+Reads coincide with list lookup. An in-place push can succeed only when
+its write is inside capacity and reaches an existing cell; it appends the
+element and preserves every other backing cell. Relocation copies the
+initialized prefix into storage of the requested capacity. Short sources
+or destinations cannot succeed, and constructive theorems give successful
+relocation and push executions for every prefix with sufficient capacity.
+`VecHornExecution.agda` composes these operations with the actual generated
+`len`, `nth` and `snoc` rules for the checker's three list sorts.
+
+The `vec-memory` Nix check regenerates the theory for both targets. It
+checks the examples and requires proof rejection when reads expose spare
+storage, pushes use a wrong position/capacity/length, or relocation loses
+a prefix element or invents capacity.
+
+The actual `std.Vec` implementation and the checker's list-processing MIR
+loops still need a simulation into this specification. Allocation success,
+byte/pointer layout, separation between allocations, borrow enforcement,
+growth policy and bounded machine arithmetic remain explicit obligations.
+The model's `reserve-to` describes a successful copying relocation, not
+all branches of the library's `reserve` or allocator failure. This does
+not complete the whole-checker execution correspondence.
+
 ### Execution bridge for scalar helpers
 
 [`agda/ScalarExecution.agda`](../../agda/ScalarExecution.agda) defines

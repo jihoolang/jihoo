@@ -522,6 +522,18 @@ and moves into the compiler once its trust boundary is stated.
       Connecting `std.Vec`'s memory and capacity semantics to finite lists,
       MIR arithmetic and overflow, calls and the path-to-rule translation
       remains required before composing a whole checker run with step 4.
+      Started: [`agda/VecMemory.agda`](../../agda/VecMemory.agda) specifies
+      typed backing cells, initialized prefixes, length and capacity,
+      including zero-capacity borrowed buffers. Reads match list lookup;
+      successful pushes append without changing other backing cells, and
+      relocation preserves the prefix. Constructive theorems give copying
+      and push executions with sufficient capacity. `VecHornExecution.agda`
+      composes these operations with the generated list rules for terms,
+      facts and weights. Nix checks both targets and rejects six wrong
+      memory operations. This is a backing-store specification: actual
+      `std.Vec` MIR and checker loops, byte/pointer layout, allocator and
+      borrow semantics, growth policy and machine-width arithmetic still
+      need their connections; step 5 remains incomplete.
       Started: [`agda/ScalarExecution.agda`](../../agda/ScalarExecution.agda)
       defines executable bounded addition and multiplication and proves
       that the exact/overflow flag projection used by `linear.add` and

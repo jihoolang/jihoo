@@ -81,6 +81,45 @@ MIR integer overflow, calls and path-to-rule translation also remain
 separate requirements before an execution of the whole checker can be
 composed with `Certified.check-sound`.
 
+## Typed Vec backing storage
+
+`nix build .#checks.x86_64-linux.vec-memory` runs `check-vec.sh`.
+`VecMemory.agda` specifies a typed allocation as cells that may be
+initialized or uninitialized, with a descriptor's length and capacity.
+`Represents` connects its initialized prefix to a finite list; spare cells
+may contain arbitrary old values. Zero-capacity borrowed storage can have
+a nonzero length, matching the convention used by `String.from_static`.
+
+- Every bounded read equals the represented list's lookup, including
+  rejection outside length even if a spare cell contains a value.
+- An in-place push requires an existing cell strictly inside capacity,
+  appends the supplied element, preserves the represented prefix and
+  length/capacity relation, and leaves every other backing cell unchanged.
+  It cannot write into zero-capacity borrowed storage.
+- Successful relocation copies the initialized prefix and supplies spare
+  cells at the requested capacity. A short source or destination cannot
+  succeed. Constructive theorems supply relocation and subsequent push
+  executions for every represented prefix and sufficient new capacity.
+- `VecHornExecution.agda` composes these proofs with `ListExecution`:
+  reads, lengths and successful pushes derive the current generated Horn
+  `nth`, `len` and `snoc` relations for terms, facts and weights. Index
+  expressions can have any ground spelling with the correct value.
+
+The check regenerates the theory for both targets and checks examples of
+borrowed buffers, growth, spare cells, uninitialized reads and rejected
+writes/copies. Six mutations expose a spare cell, change the write
+position or capacity bound, omit the length increment, lose a copied
+element or invent capacity. Each must cause a type mismatch in the general
+memory proof; syntax errors and missing imports do not count as rejection.
+
+This is a backing-store specification composed with the Horn list model.
+It does not yet connect the actual `std.Vec` MIR or the checker's loops to
+that specification. Byte layout, pointer provenance, allocator success
+and noninterference between allocations, ownership/borrow enforcement,
+capacity growth policy and bounded machine arithmetic remain obligations.
+`reserve-to` describes the copying part of a successful relocation; it
+does not model all branches of `std.Vec.reserve` or allocation failure.
+
 ## Scalar execution and overflow
 
 `nix build .#checks.x86_64-linux.scalar-execution` runs `check-scalars.sh`.
@@ -216,7 +255,7 @@ retargeting are not proved by this core. They must be connected before the
 0.5.0 release gate is met. Source-to-MIR and MIR-to-LLVM preservation also
 remain separate compiler-correctness obligations, with LLVM trusted.
 
-Use the matching system attribute on aarch64. All six proof checks are part of
+Use the matching system attribute on aarch64. All seven proof checks are part of
 `nix flake check`. For all proof tools and the pinned Horn source:
 
 ```sh
@@ -225,6 +264,7 @@ jihoo build -O2 compiler/main.jh -o out/jihoo
 JIHOO=out/jihoo bash agda/check.sh
 bash agda/check-removal.sh
 JIHOO=out/jihoo bash agda/check-lists.sh
+JIHOO=out/jihoo bash agda/check-vec.sh
 JIHOO=out/jihoo bash agda/check-scalars.sh
 JIHOO=out/jihoo bash agda/check-mir.sh
 ```

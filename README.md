@@ -168,6 +168,10 @@ into rules is still trusted, and the composed proof of the verifier
 Agda currently connects exported scalar helpers, direct callers and an
 [accumulator loop](agda/MirLoopCorrespondence.agda) to their generated Horn
 relations, with inductive invariants for arbitrary finite loop executions.
+A [typed Vec backing-store specification](agda/VecMemory.agda) also
+connects initialized prefixes, capacity-checked pushes and copying
+relocation to the list relations; connecting the library's actual MIR,
+allocator and pointer/borrow behavior remains required.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

@@ -207,6 +207,20 @@
             touch $out
           '';
 
+          # Typed backing storage, initialized prefixes, capacity and
+          # relocation, composed with the three generated list relations.
+          vec-memory = pkgs.runCommand "jihoo-vec-memory" {
+            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
+          } ''
+            cp -R ${src}/. src
+            chmod -R u+w src
+            cp -R ${./agda} src/agda
+            cd src
+            export JIHOO_PATH=$PWD/lib LC_ALL=C.UTF-8
+            HORN=${horn} bash agda/check-vec.sh
+            touch $out
+          '';
+
           scalar-execution = pkgs.runCommand "jihoo-scalar-execution" {
             nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
           } ''
