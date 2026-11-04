@@ -534,6 +534,20 @@ and moves into the compiler once its trust boundary is stated.
       both targets. The raw wrapped bits and the LLVM intrinsic
       implementation, general MIR paths/calls and `Vec`'s memory model
       still need correspondence proofs; step 5 remains incomplete.
+      Started: [`agda/MirExecution.agda`](../../agda/MirExecution.agda)
+      gives scalar MIR frame, statement, branch and call semantics, with
+      direct calls running the selected callee's graph. A
+      serializer exports the actual helper/caller MIR after sema and
+      borrow/drop checking. `MirCorrespondence.agda` proves returning
+      executions of `add`, `mul` and two direct callers have numerical
+      representations in their generated Horn relations, and constructs
+      executions for every permitted intrinsic outcome. Nix checks both
+      targets and rejects incorrect operations, returns, callees,
+      lifetimes and caller rules, plus unsupported wrapping arithmetic.
+      The serializer/frontend remain trusted; general MIR operations,
+      loop invariants, borrow/pointer and `Vec` memory semantics, and the
+      backend still need their connections. This covers these four
+      exported graphs, not the entire checker or all MIR paths/calls.
    6. Required before 0.5.0: prove verification-condition generation and
       check removal sound. For `obligations.jh`, `vc.jh` and `verify.jh`,
       show that valid generated obligations imply that removed checks

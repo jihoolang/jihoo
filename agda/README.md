@@ -31,8 +31,8 @@ certificate-validity premise: when the Horn relation for `check` returns
   preserve the next invariant. The checker's acceptance is still a Horn
   relation; execution-to-Horn correspondence is not assumed proved.
 
-What remains trusted here: Agda, Horn's Agda development, and the
-translation of MIR into the rules (`compiler/horn.jh`) with `std`'s `Vec`
+What remains trusted here for the whole checker: Agda, Horn's Agda
+development, and the translation of MIR into the rules (`compiler/horn.jh`) with `std`'s `Vec`
 as the rules' lists. jihoo's own Horn checker (`lib/proof/schematic.jh`)
 and the Rust one are not: the certificate is checked by Agda.
 
@@ -118,6 +118,51 @@ and upper-half `u128` constants were read as negative i128 bit patterns.
 The compiler now constructs the minimum's ring expression without that
 overflow and interprets integer bits in their source type.
 
+## Exported MIR execution and direct calls
+
+`nix build .#checks.x86_64-linux.mir-execution` runs `check-mir.sh`.
+`export-mir.jh` uses the compiler's loader, sema and borrow/drop checker to
+export the actual MIR objects of `linear.add`, `linear.mul` and two direct
+callers appended from `mir-callers.jh`. It retains every basic block,
+statement, lifetime marker, branch, call and return in the supported
+fragment. It checks signatures, frame/graph bounds and integer types,
+and rejects unsupported operations rather than approximating them.
+
+`MirExecution.agda` defines execution with local frames and tuple/Option
+values. Lifetime markers clear locals, and an undefined read or invalid
+projection cannot return a value. A direct call runs the selected
+function's actual graph in a fresh frame, then resumes the caller.
+`Run` and `Calls` describe arbitrary finite executions, including recursive
+calls. `wp-sound` proves a finite symbolic execution certificate sound;
+its fuel bounds the proof computation, not the execution semantics.
+
+`MirCorrespondence.agda` checks the signatures and evaluates the exported
+graphs to prove that every helper return is the corresponding intrinsic
+flag projection. It also constructs a graph execution for every permitted
+intrinsic result, so this connection is not vacuous. Direct callers use
+the callee's `Run` derivation, rather than an assumed contract. The
+returned values have numerical Horn representations, and Agda checks
+the actual helper/caller Horn rules used to compose the correspondence.
+`InI128` instantiates the intrinsic contract with signed i128 bounds.
+
+Nix regenerates and checks the MIR and Horn theory for both targets.
+Five negative cases change the operation, overflow return, direct callee,
+local lifetime or caller Horn rule. Each must fail with a type mismatch
+in the correspondence proof. A wrapping arithmetic operation must be
+rejected by the exporter. Positive examples contain actual returning
+callee/caller executions, overflow rejection and stale-read checks.
+Small-bound examples test control flow; they do not claim that the
+native i128 operation overflows at those small bounds.
+
+The output retains `GeneratedMir.agda`, `Theory.agda` and `program.horn`
+under `x86_64/` and `aarch64/` for review. The MIR serializer
+(`export-mir.jh`) and compiler frontend are still trusted to supply faithful
+data; the proof is about those exported graphs. MIR semantics for other
+operations, loop invariants, pointer/borrow and `Vec` memory behavior,
+observable wrapped bits, and the LLVM intrinsic implementation remain
+release requirements. This does not prove the full checker's execution
+correspondence or the source-to-MIR/MIR-to-LLVM translations.
+
 ## Semantic check removal
 
 `nix build .#checks.x86_64-linux.check-removal` runs `check-removal.sh`:
@@ -151,7 +196,7 @@ retargeting are not proved by this core. They must be connected before the
 0.5.0 release gate is met. Source-to-MIR and MIR-to-LLVM preservation also
 remain separate compiler-correctness obligations, with LLVM trusted.
 
-Use the matching system attribute on aarch64. All five proof checks are part of
+Use the matching system attribute on aarch64. All six proof checks are part of
 `nix flake check`. For all proof tools and the pinned Horn source:
 
 ```sh
@@ -161,6 +206,7 @@ JIHOO=out/jihoo bash agda/check.sh
 bash agda/check-removal.sh
 JIHOO=out/jihoo bash agda/check-lists.sh
 JIHOO=out/jihoo bash agda/check-scalars.sh
+JIHOO=out/jihoo bash agda/check-mir.sh
 ```
 
 `check.sh` uses Horn's `schematic-kernel` on `PATH` (or

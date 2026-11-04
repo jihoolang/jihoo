@@ -1,0 +1,306 @@
+// FILE TARGET. Export the checked MIR of add, mul, mir_add and mir_mul
+// as GeneratedMir.agda. This is a trusted serializer, not a proof search:
+// every statement and terminator in the selected bodies must be supported.
+// Every block is serialized, including unreachable blocks. Agda checks the
+// execution correspondence from each selected function's entry.
+import std.env
+import std.sys
+import check
+import body
+import builtins
+import diag
+import interp
+import lex
+import load
+import mir
+import pat
+import sema
+import target
+import timing
+import types
+
+fn list(xs: [String]) -> String {
+    var out = String.from("(")
+    for x in xs { out.push_str(x.as_str() + " ∷ ") }
+    out.push_str("[])")
+    out
+}
+
+fn fail(message: str) -> never {
+    eprintln("MIR export: " + message)
+    sys.exit(1)
+}
+
+fn integer(t: types.Types, ty: u32) -> bool {
+    match t.int(ty) {
+        Some(i) => i.signed && i.bits == 128
+        None => false
+    }
+}
+
+fn value_type(t: types.Types, ty: u32) -> Result(String, String) {
+    if integer(t, ty) { return Ok("int-type".to_string()) }
+    if ty == types.BOOL { return Ok("bool-type".to_string()) }
+    match t.kind(ty) {
+        Tuple(ts) => if ts.len() == 2 && integer(t, ts[0]) && ts[1] == types.BOOL {
+            return Ok("pair-type".to_string())
+        }
+        _ => {}
+    }
+    if t.show(ty) == "Option(i128)" {
+        let Some(vs) = t.variants(ty) else { return Err("Option is not an enum".to_string()) }
+        var some = false
+        var none = false
+        for v in vs {
+            if v.name == "Some" && v.fields.len() == 1 && integer(t, v.fields[0]) { some = true }
+            else if v.name == "None" && v.fields.len() == 0 { none = true }
+            else { return Err("unsupported Option variant".to_string()) }
+        }
+        if some && none && vs.len() == 2 { return Ok("option-type".to_string()) }
+    }
+    Err("unsupported type: " + t.show(ty).as_str())
+}
+
+fn operand_type(t: types.Types, b: mir.Body, o: mir.Operand) -> Result(u32, String) {
+    let Copy(p) = o else { return Err("only plain copies are supported".to_string()) }
+    if p.local as i64 >= b.locals.len() { return Err("local outside the frame".to_string()) }
+    var ty = b.locals[p.local as i64].ty
+    for pr in p.proj {
+        let Field(i) = pr else { return Err("only tuple fields are supported".to_string()) }
+        let Tuple(ts) = t.kind(ty) else { return Err("field of a non-tuple".to_string()) }
+        if i as i64 >= ts.len() { return Err("tuple field outside its type".to_string()) }
+        ty = ts[i as i64]
+    }
+    Ok(ty)
+}
+
+fn operand(t: types.Types, b: mir.Body, o: mir.Operand) -> Result(String, String) {
+    let _ = operand_type(t, b, o)?
+    let Copy(p) = o else { return Err("only plain copies are supported".to_string()) }
+    var fields = Vec(String).new()
+    for pr in p.proj {
+        let Field(i) = pr else { return Err("only tuple fields are supported".to_string()) }
+        if i > 1 { return Err("tuple field past the second".to_string()) }
+        fields.push(i.to_string())
+    }
+    Ok("(local " + p.local.to_string().as_str() + " " + list(fields.as_slice()).as_str() + ")")
+}
+
+fn rvalue(t: types.Types, b: mir.Body, rv: mir.Rvalue) -> Result(String, String) {
+    match rv {
+        Use(o) => Ok("(use " + operand(t, b, o)?.as_str() + ")")
+        Aggregate(agg, args) => {
+            let Variant(ty, vi) = agg else { return Err(
+                "only Option aggregates are supported".to_string()
+            ) }
+            if value_type(t, ty)? != "option-type" { return Err("not Option(i128)".to_string()) }
+            let Some(vs) = t.variants(ty) else { return Err("not an enum".to_string()) }
+            if vi as i64 >= vs.len() { return Err("invalid variant".to_string()) }
+            if vs[vi as i64].name == "None" && args.len() == 0 { return Ok(
+                "option-none".to_string()
+            ) }
+            if vs[vi as i64].name == "Some" && args.len() == 1 {
+                return Ok("(option-some " + operand(t, b, args[0])?.as_str() + ")")
+            }
+            Err("invalid Option aggregate".to_string())
+        }
+        _ => Err("unsupported rvalue".to_string())
+    }
+}
+
+fn statement(t: types.Types, b: mir.Body, st: mir.Stmt) -> Result(String, String) {
+    match st {
+        StorageLive(n) | StorageDead(n) => {
+            if n as i64 >= b.locals.len() { return Err(
+                "lifetime marker outside the frame".to_string()
+            ) }
+            let name = match st { StorageLive(_) => "live", _ => "dead" }
+            Ok("(" + name + " " + n.to_string().as_str() + ")")
+        }
+        Nop => Ok("nop".to_string())
+        Assign(p, rv, _) => {
+            if p.proj.len() != 0 { return Err("projected assignments are unsupported".to_string()) }
+            if p.local as i64 >= b.locals.len() { return Err(
+                "assignment outside the frame".to_string()
+            ) }
+            Ok("(assign " + p.local.to_string().as_str() + " " + rvalue(t, b, rv)?.as_str() + ")")
+        }
+        _ => Err("drops, moves and forget markers are unsupported".to_string())
+    }
+}
+
+fn callee(p: mir.Program, ids: [u32], c: mir.Callee) -> Result(String, String) {
+    match c {
+        Fn(g) => {
+            for i, id in ids {
+                if id == g { return Ok("(direct " + i.to_string().as_str() + ")") }
+            }
+            Err("call outside the exported program: " + p.fns[g as i64].name.as_str())
+        }
+        Intrinsic(i) => {
+            let Overflowing(op, ty) = i else { return Err("unsupported intrinsic".to_string()) }
+            if !integer(p.types, ty) { return Err(
+                "only signed i128 intrinsics are supported".to_string()
+            ) }
+            let name = match op {
+                Add => "addition"
+                Mul => "multiplication"
+                _ => return Err("unsupported overflowing operation".to_string())
+            }
+            Ok("(overflowing " + name + ")")
+        }
+        _ => Err("indirect calls are unsupported".to_string())
+    }
+}
+
+fn terminator(p: mir.Program, b: mir.Body, ids: [u32], term: mir.Term) -> Result(String, String) {
+    match term {
+        Return => Ok("return".to_string())
+        Pending | Unreachable => Ok("stop".to_string())
+        Goto(bb) => {
+            if bb as i64 >= b.blocks.len() { return Err("jump outside the graph".to_string()) }
+            Ok("(goto " + bb.to_string().as_str() + ")")
+        }
+        Switch(o, cases, otherwise) => {
+            if cases.len() != 1 || cases[0].value != 0 { return Err(
+                "only boolean zero switches are supported".to_string()
+            ) }
+            if operand_type(p.types, b, o)? != types.BOOL { return Err(
+                "switch operand is not boolean".to_string()
+            ) }
+            if cases[0].block as i64 >= b.blocks.len() || otherwise as i64 >= b.blocks.len() {
+                return Err("switch outside the graph".to_string())
+            }
+            Ok(
+                "(switch " + operand(p.types, b, o)?.as_str() + " " + cases[0].block.to_string().as_str() +
+                    " " + otherwise.to_string().as_str() + ")"
+            )
+        }
+        Call(c, args, dest, next, _) => {
+            if dest.proj.len() != 0 { return Err(
+                "projected call destinations are unsupported".to_string()
+            ) }
+            if dest.local as i64 >= b.locals.len() || next as i64 >= b.blocks.len() {
+                return Err("call destination outside the frame or graph".to_string())
+            }
+            match c {
+                Fn(g) => {
+                    let f = p.fns[g as i64]
+                    if args.len() != f.sig.params.len() || b.locals[dest.local as i64].ty != f.sig.ret {
+                        return Err("call signature mismatch".to_string())
+                    }
+                    for i, a in args {
+                        if operand_type(p.types, b, a)? != f.sig.params[i] {
+                            return Err("call argument type mismatch".to_string())
+                        }
+                    }
+                }
+                Intrinsic(_) => {
+                    if args.len() != 2 || value_type(p.types, b.locals[dest.local as i64].ty)? != "pair-type" {
+                        return Err("overflowing call signature mismatch".to_string())
+                    }
+                    for a in args {
+                        if !integer(p.types, operand_type(p.types, b, a)?) {
+                            return Err("overflowing argument is not i128".to_string())
+                        }
+                    }
+                }
+                _ => {}
+            }
+            var os = Vec(String).new()
+            for o in args { os.push(operand(p.types, b, o)?) }
+            Ok("(call " + callee(p, ids, c)?.as_str() + " " + list(os.as_slice()).as_str() +
+                " " + dest.local.to_string().as_str() + " " + next.to_string().as_str() + ")")
+        }
+        _ => Err("unsupported terminator".to_string())
+    }
+}
+
+fn function(p: mir.Program, ids: [u32], id: u32) -> Result(String, String) {
+    let f = p.fns[id as i64]
+    let Some(b) = f.body else { return Err("an exported function has no body".to_string()) }
+    if f.variadic || f.returns_ref { return Err("unsupported function convention".to_string()) }
+    if f.pass.len() != f.sig.params.len() || b.arg_count != f.sig.params.len() ||
+        b.locals.len() < b.arg_count + 1 || b.locals[0].ty != f.sig.ret {
+        return Err("inconsistent frame or signature".to_string())
+    }
+    for pass in f.pass {
+        let Value = pass else { return Err("only value parameters are supported".to_string()) }
+    }
+    for i, ty in f.sig.params {
+        if b.locals[i + 1].ty != ty { return Err("inconsistent argument local".to_string()) }
+    }
+    var args = Vec(String).new()
+    for ty in f.sig.params { args.push(value_type(p.types, ty)?) }
+    var locals = Vec(String).new()
+    for l in b.locals { locals.push(value_type(p.types, l.ty)?) }
+    var blocks = Vec(String).new()
+    for bl in b.blocks {
+        var ss = Vec(String).new()
+        for st in bl.stmts { ss.push(statement(p.types, b, st)?) }
+        blocks.push("(block " + list(ss.as_slice()).as_str() + " " + terminator(
+            p,
+            b,
+            ids,
+            bl.term
+        )?.as_str() + ")")
+    }
+    Ok(
+        "function " + list(args.as_slice()).as_str() + " " + value_type(
+            p.types,
+            f.sig.ret
+        )?.as_str() +
+            " " + list(locals.as_slice()).as_str() + "\n  " + list(blocks.as_slice()).as_str()
+    )
+}
+
+fn emit(p: mir.Program) -> Result(String, String) {
+    let names = ["add", "mul", "mir_add", "mir_mul"]
+    let aliases = ["helper-add", "helper-mul", "caller-add", "caller-mul"]
+    var ids = Vec(u32).new()
+    for name in names {
+        var found: Option(u32) = None
+        for i, f in p.fns {
+            if f.name == name {
+                if found.is_some() { return Err("ambiguous function: " + name) }
+                found = Some(i as u32)
+            }
+        }
+        let Some(id) = found else { return Err("missing function: " + name) }
+        ids.push(id)
+    }
+    var out = String.from("{-# OPTIONS --safe --without-K #-}\nmodule GeneratedMir where\nopen import Schematic using (List; []; _∷_)\nopen import ScalarExecution using (addition; multiplication)\nopen import MirExecution\n\n")
+    for i in 0..ids.len() {
+        let text = function(p, ids.as_slice(), ids[i])?
+        out.push_str(aliases[i] + " : Function\n" + aliases[i] + " = " + text.as_str() + "\n\n")
+    }
+    out.push_str("program : Program\nprogram = helper-add ∷ helper-mul ∷ caller-add ∷ caller-mul ∷ []\n")
+    Ok(out)
+}
+
+fn main() {
+    let args = env.args()
+    if args.len() != 3 { fail("usage: export-mir FILE TARGET") }
+    let Some(tgt) = target.Target.parse(args[2]) else { fail("unknown target") }
+    var sources = diag.Sources.new()
+    var search = Vec(String).new()
+    search.push("compiler".to_string())
+    let a = match load.load(args[1], load.default_search(search), tgt.name(), &sources, false) {
+        Ok(a) => a
+        Err(d) => fail(sources.render(d).as_str())
+    }
+    var reports = Vec(interp.Report).new()
+    var p = match sema.compile(a, tgt, true, true, target.Codegen.default(), false, &reports) {
+        Ok(p) => p
+        Err(d) => fail(sources.render(d).as_str())
+    }
+    var timer = timing.Timer.start()
+    match check.program(&p, &timer) {
+        Ok(_) => {}
+        Err(d) => fail(sources.render(d).as_str())
+    }
+    match emit(p) {
+        Ok(text) => print(text)
+        Err(e) => fail(e.as_str())
+    }
+}

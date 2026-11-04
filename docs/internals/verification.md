@@ -677,6 +677,51 @@ whole execution-to-Horn theorem can be composed with its checked
 soundness certificate. The source-to-MIR and MIR-to-LLVM boundaries remain
 as stated in the roadmap.
 
+### Execution of exported MIR graphs
+
+[`agda/MirExecution.agda`](../../agda/MirExecution.agda) defines scalar
+MIR execution over local frames, with copies, tuple fields, Option
+construction, lifetime markers, jumps, boolean switches, overflowing
+intrinsics and direct calls. Invalid reads/projections and stopped blocks
+have no returning execution. Direct calls run the selected function's
+graph in a fresh frame and resume with its result; the call relation
+contains that execution derivation. It can describe arbitrary finite
+executions and recursive calls. `wp-sound` proves finite symbolic
+execution sound, with its fuel limiting the proof rather than the
+execution relation. Loop invariants and proofs for recursive programs
+remain further work.
+
+[`agda/export-mir.jh`](../../agda/export-mir.jh) loads and compiles the
+current `linear.jh` with two appended direct callers, performs borrow/drop
+checking and serializes the actual MIR objects. It preserves every block,
+statement and terminator of the selected functions, checks frame/graph
+bounds, signatures and supported types, and rejects unsupported operations.
+It is a trusted data serializer, not a certified translation of the
+compiler frontend or an untrusted certificate producer.
+
+`MirCorrespondence.agda` checks metadata and evaluates these exported
+graphs in Agda. It proves every helper return has the intrinsic's flag
+projection and constructs executions for all permitted intrinsic outcomes.
+Callers compose their actual callee's execution proof. Those results have
+numerical representations in the actual generated helper and caller Horn
+rules, whose complete schemas and variable sorts Agda checks. `InI128`
+specializes the intrinsic contract to signed i128. The wrapped result
+still need not be modeled bit for bit because the helpers discard it on
+overflow, which is now established by their exported control flow.
+
+The `mir-execution` Nix check regenerates data for both targets, checks
+positive returning executions, and rejects changes to the operation,
+overflow return, direct callee, local lifetime and caller rule. It also
+requires an unsupported wrapping operation to fail export. Its output
+retains each target's MIR data, theory and Horn rules for review.
+
+The proof depends on the serializer faithfully reading MIR and on the
+stated MIR intrinsic contract. Other MIR operations, loop invariants,
+borrow/pointer and `Vec` memory semantics, observable wrapping and the LLVM
+intrinsic implementation remain separate obligations. This does not
+establish execution correspondence for the whole checker or preservation
+from source to MIR and from MIR to LLVM.
+
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,

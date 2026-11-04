@@ -219,6 +219,19 @@
             touch $out
           '';
 
+          # Retain both targets' exported MIR and Horn theory for review.
+          # The proof runs the actual callee graphs for direct calls.
+          mir-execution = pkgs.runCommand "jihoo-mir-execution" {
+            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
+          } ''
+            cp -R ${src}/. src
+            chmod -R u+w src
+            cp -R ${./agda} src/agda
+            cd src
+            export JIHOO_PATH=$PWD/lib LC_ALL=C.UTF-8
+            HORN=${horn} MIR_PROOF_OUT="$out" bash agda/check-mir.sh
+          '';
+
           # Retain the actual proof for independent consumers: the theory,
           # goals and certificate, checked again by Horn's Rust checker, and
           # their Agda export, which the `adequacy` check has Agda check.
