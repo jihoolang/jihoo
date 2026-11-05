@@ -711,6 +711,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(drop F v rest)` | free heap data `v` of type `F` and every node it owns, then `rest` |
 | `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` |
 | `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
+| `(borrow x)` | a borrow of the owned `x`, in types and evidence only |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -911,6 +912,16 @@ owner, freeing or owning a borrowed field, and wrong arities; and five whole pro
 variable or a continuation's closure would otherwise make unsound, while
 a polymorphic identity on i64 is still accepted. Kernel unit tests check
 that no borrow outlives its lend and that views give borrowed fields.
+`tests/core_borrow_proof.py` adds borrows in types and evidence: both
+frontends' MIR and native execution against the evaluator, which
+evaluates evidence and `(borrow x)` without consuming or freeing memory;
+counted allocations and frees; proofs by computation through views and
+lends and by induction, lemmas applied to temporaries and preconditions
+on consumed values. It rejects false computations, unproved
+preconditions and a proof that needs induction; in `.jhc`, a borrow in
+code that runs, of a scalar or of a borrow. Kernel unit tests check
+that views and lends compute in the pure model only, and that a
+`Borrow` is evidence only.
 
 ## Owned memory plan
 
@@ -1213,11 +1224,10 @@ could hold those values and run twice. So such a result is not a
 function type. The first and the closures of loads and cases predate
 borrows.
 
-Not yet supported: borrows in types and evidence (normalization does
-not compute through a lend or a view, so a proof cannot mention
-`length(xs)` with `xs: ref List`), lending more than one owner in an
-expression, lending a temporary, mutable borrows, and returning a borrow
-from a function, which source cannot write.
+Not yet supported: lending more than one owner in an expression,
+lending a temporary, mutable borrows, and returning a borrow from a
+function, which source cannot write. Types and evidence may borrow any
+value: see [borrows in types and evidence](#borrows-in-types-and-evidence).
 
 Not yet supported for heap data: mutual recursion, recursion depth
 beyond the machine stack, and heap data in exports.
@@ -1227,6 +1237,72 @@ types, exports and arrays. A data value
 whose fields touch memory cannot yet be passed to a function: the
 argument is bound once, and data has no runtime representation, so
 lowering reports an error rather than evaluating it twice.
+
+## Borrows in types and evidence
+
+A function that reads a borrow applies in types and proofs to any value
+of its type, as `length` does to an owned list here:
+
+```jihoo
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn doubled_length(xs: List) -> Eq(length(doubled(xs)), length(xs)) {
+    induct(fn(t) { Eq(length(doubled(t)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(length(doubled(rest)) + 1, k + 1) }, ih,
+            refl(length(doubled(rest)) + 1))
+    }, xs)
+}
+
+fn head(xs: List, p: erased(Lt(0, length(xs)))) -> i64 { ... }   // consumes xs
+```
+
+Nothing in a type or in evidence runs, so nothing there is lent: the
+kernel term `Borrow(x)` (in `.jhc`, `(borrow x)`) is a borrow of an owned
+x : T, of type `Ref(T)`, and is allowed only where `infer` checks a
+type or evidence. It is neither a use of x nor a lend, so x may be a
+temporary such as `doubled(xs)`, a value moved or freed meanwhile (as in
+`head`'s precondition) or a recursion's erased field. The elaborator,
+untrusted, borrows in place wherever it elaborates a type or evidence:
+types, the expressions of a proposition, erased arguments and the
+evidence arguments of `refl`, `transport`, `index`, `decide_lt` and the
+other rules. In code that runs, a borrow is still of a named value and
+lent.
+
+Conversion computes in the pure model, where a borrow reads the value it
+borrows:
+
+- `View(rec, F, T, cases, Borrow(v))` with v a known node applies the
+  node's case to its fields, those on the heap as `Borrow` of them, and,
+  in a recursion, to the view of each recursive field. A view of a
+  branch is the branch of the views; `Strict` keeps its traps first.
+- `Lend(x, f, g)` is `g(f(Borrow(x)), x)`.
+
+Both reductions keep types: `f` expects a `Ref(T)`, and a view's case
+receives exactly the `Borrow` of each heap field. Code to run keeps
+lends and views, which read memory, and lowering never sees a `Borrow`,
+since only types and evidence hold one. So `length(pair(x))` is 2 by
+`refl(2)`, and so is `count_pair(x)`, which lends a local list to
+`length` and frees it; `doubled_length` holds by induction on the owned
+list, since a view of a constructor computes like the recursion that
+built it.
+
+[`examples/core_borrow_proof.jh`](../../examples/core_borrow_proof.jh)
+and its [core equivalent](../../examples/core_borrow_proof.jhc) compile
+to the same MIR, from which the proofs and preconditions are erased: the
+only recursion left is `doubled`'s. `tests/core_borrow_proof.py` runs
+both against the independent evaluator, which evaluates evidence without
+consuming or freeing memory, and checks counted allocations and frees
+and 8 source and 6 core rejections: false computations through views and
+lends, a proof that needs induction, unproved preconditions, and a
+`Borrow` in code that runs or of a scalar or a borrow. An independent
+review found no unsound case.
+
+Not yet supported: a proof by induction over a borrow (a view's result
+is runtime data, not a motive), and evidence about a borrow that a lend
+made: inside a lend, its borrow `r` is a variable, not `Borrow(x)`, so a
+fact about the owner does not apply to `r`, nor can a lend's result type
+depend on `r`. A dependent lend, whose `f` knows that `r` reads `x`,
+would allow both.
 
 The next stages of the replacement are:
 

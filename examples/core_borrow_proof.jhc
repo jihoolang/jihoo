@@ -1,0 +1,74 @@
+; Borrows in types and evidence, written out: core_borrow_proof.jh compiles
+; to the same MIR. (borrow x) is a borrow of the owned value x : T, of type
+; (Ref T), allowed only in types and evidence, which never run. Conversion
+; reads a borrowed node through a view and computes a lend as its
+; continuations applied to a borrow of the owner.
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def length
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+
+(def doubled
+  (pi xs List List)
+  (lam xs List (induct List (lam t List List) Nil
+    (lam x I64 (lam0 rest List (lam ih List (Cons (mul x (int 2)) ih)))) xs)))
+
+(def doubled_length
+  (pi xs List (Eq (app length (borrow (app doubled xs))) (app length (borrow xs))))
+  (lam xs List
+    (induct List (lam t List (Eq (app length (borrow (app doubled t))) (app length (borrow t))))
+      (refl 0)
+      (lam x I64 (lam0 rest List
+        (lam0 ih (Eq (app length (borrow (app doubled rest))) (app length (borrow rest)))
+          (transport (lam k U64 (Eq (uadd (app length (borrow (app doubled rest))) 1) (uadd k 1))) ih
+            (refl (uadd (app length (borrow (app doubled rest))) 1))))))
+      xs)))
+
+(def pair
+  (pi x I64 List)
+  (lam x I64 (Cons x (Cons x Nil))))
+
+(def pair_length
+  (pi x I64 (Eq (app length (borrow (app pair x))) 2))
+  (lam x I64 (refl 2)))
+
+(def count_pair
+  (pi x I64 U64)
+  (lam x I64
+    (app (lam xs List
+      (lend xs (lam r (Ref List) (app length r)) (lam a U64 (lam xs List (drop List xs a)))))
+      (app pair x))))
+
+(def count_pair_two
+  (pi x I64 (Eq (app count_pair x) 2))
+  (lam x I64 (refl 2)))
+
+(def head
+  (pi xs List (pi0 p (Lt 0 (app length (borrow xs))) I64))
+  (lam xs List (lam0 p (Lt 0 (app length (borrow xs)))
+    (case List (lam t List I64) (int 0)
+      (lam x I64 (lam rest List (drop List rest x))) xs))))
+
+(def head_doubled
+  (pi xs List (pi0 p (Lt 0 (app length (borrow xs))) I64))
+  (lam xs List (lam0 p (Lt 0 (app length (borrow xs)))
+    (app head (app doubled xs)
+      (transport (lam k U64 (Lt 0 k))
+        (transport (lam k U64 (Eq k (app length (borrow (app doubled xs)))))
+          (app doubled_length xs)
+          (refl (app length (borrow (app doubled xs)))))
+        p)))))
+
+(export demo
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (add (app head (app pair x) (decide-lt 0 2))
+      (app head_doubled (Cons x (app repeat n x)) (zero-le (app length (borrow (app repeat n x)))))))))

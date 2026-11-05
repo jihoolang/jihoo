@@ -211,6 +211,9 @@ impl Parser {
             core.Term.Case(f, motive, arguments, value)
         } else if kind == "Ref" {
             core.Term.Ref(self.expr(depth - 1)?)
+        } else if kind == "borrow" {
+            // (borrow x): a borrow of x in types and evidence only.
+            core.Term.Borrow(self.expr(depth - 1)?)
         } else if kind == "lend" {
             // (lend x f g): f reads x through a borrow; g gets the result and x.
             let x = self.expr(depth - 1)?

@@ -1,0 +1,60 @@
+// Borrows in types and evidence. A function that reads a borrow, such as
+// length(xs: ref List), applies in types and proofs to any list: one that
+// is moved or freed meanwhile, or one built in place, since nothing there
+// runs and nothing is lent. Conversion reads known nodes through views and
+// lends: pair_length and count_pair_two hold by computation, and
+// doubled_length by induction. head's precondition mentions the list it
+// consumes; head_doubled passes its own on through the lemma, and demo
+// proves it for lists it builds. main returns 15.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn doubled(xs: List) -> List {
+    induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(x * 2, ih) }, xs)
+}
+
+fn doubled_length(xs: List) -> Eq(length(doubled(xs)), length(xs)) {
+    induct(fn(t) { Eq(length(doubled(t)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(length(doubled(rest)) + 1, k + 1) }, ih,
+            refl(length(doubled(rest)) + 1))
+    }, xs)
+}
+
+fn pair(x: i64) -> List { List.Cons(x, List.Cons(x, List.Nil)) }
+
+fn pair_length(x: i64) -> Eq(length(pair(x)), 2) { refl(2) }
+
+fn count_pair(x: i64) -> u64 {
+    let xs = pair(x)
+    length(xs)
+}
+
+fn count_pair_two(x: i64) -> Eq(count_pair(x), 2) { refl(2) }
+
+fn head(xs: List, p: erased(Lt(0, length(xs)))) -> i64 {
+    match xs {
+        Nil => 0
+        Cons(x, rest) => x
+    }
+}
+
+fn head_doubled(xs: List, p: erased(Lt(0, length(xs)))) -> i64 {
+    head(doubled(xs), transport(fn(k) { Lt(0, k) },
+        transport(fn(k) { Eq(k, length(doubled(xs))) }, doubled_length(xs),
+            refl(length(doubled(xs)))), p))
+}
+
+export fn demo(n: u64, x: i64) -> i64 {
+    head(pair(x), decide_lt(0, 2)) +
+        head_doubled(List.Cons(x, repeat(n, x)), zero_le(length(repeat(n, x))))
+}
+
+fn main() -> i64 { demo(3, 5) }

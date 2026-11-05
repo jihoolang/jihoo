@@ -102,6 +102,10 @@ pub enum Term {
     // borrow, then g receives f's result and x back. A holds no borrow and
     // is not a function, so no borrow outlives f.
     Lend(u32, u32, u32)
+    // A borrow of an owned value x : T, of type Ref(T), in types and
+    // evidence only: nothing is lent at run time. Conversion reads it
+    // through views, and a lend computes to its continuations on one.
+    Borrow(u32)
     // Reading borrowed heap data of a family with no true indices: whether
     // it is a recursion, the family, the result type, one case per
     // constructor and the borrow. Nothing is freed; each case receives the
@@ -353,6 +357,7 @@ impl Core {
                 self.transform(rest, cutoff, delta, replacement, depth - 1)?
             )
             Ref(t) => Term.Ref(self.transform(t, cutoff, delta, replacement, depth - 1)?)
+            Borrow(x) => Term.Borrow(self.transform(x, cutoff, delta, replacement, depth - 1)?)
             Lend(x, f, g) => Term.Lend(self.transform(x, cutoff, delta, replacement, depth - 1)?,
                 self.transform(f, cutoff, delta, replacement, depth - 1)?,
                 self.transform(g, cutoff, delta, replacement, depth - 1)?)
@@ -734,12 +739,34 @@ impl Core {
                 self.normal(x, depth - 1)?,
                 self.normal(rest, depth - 1)?
             )
-            // Borrows are not computed yet, in either mode.
             Ref(t) => Term.Ref(self.normal(t, depth - 1)?)
+            Borrow(x) => Term.Borrow(self.normal(x, depth - 1)?)
+            // In the pure model a lend is g(f(borrow of x), x): the borrow
+            // reads the value x has. Code to run keeps it.
+            Lend(x, f, g) if !self.runtime => {
+                let borrow = self.add(Term.Borrow(x), sp)?
+                let read = self.add(Term.App(f, borrow), sp)?
+                let rest = self.add(Term.App(g, read), sp)?
+                let rest = self.add(Term.App(rest, x), sp)?
+                return self.normal(rest, depth - 1)
+            }
             Lend(x, f, g) => Term.Lend(self.normal(x, depth - 1)?, self.normal(f, depth - 1)?,
                 self.normal(g, depth - 1)?)
-            View(r, f, t, cases, x) => Term.View(r, f, self.normal(t, depth - 1)?,
-                self.normal_all(cases.as_slice(), depth)?, self.normal(x, depth - 1)?)
+            View(r, f, t, cases, x) => {
+                let t = self.normal(t, depth - 1)?
+                let cases = self.normal_all(cases.as_slice(), depth)?
+                let x = self.normal(x, depth - 1)?
+                if !self.runtime {
+                    match self.term(x) {
+                        Borrow(v) => match self.view_value(r, f, t, cases, v, sp, depth)? {
+                            Some(result) => return Ok(result)
+                            None => {}
+                        }
+                        _ => {}
+                    }
+                }
+                Term.View(r, f, t, cases, x)
+            }
             Pack(p, a, q) => Term.Pack(self.normal(p, depth - 1)?, self.normal(a, depth - 1)?,
                 self.normal(q, depth - 1)?)
             Witness(s) => {
@@ -768,6 +795,100 @@ impl Core {
             t => return Ok(id)
         }
         self.add(term, sp)
+    }
+
+    // A view of a borrow of v, normal, in the pure model: a known node is
+    // read without being taken apart. Its case receives the fields, those
+    // on the heap borrowed, then, in a recursion, the view of each recursive
+    // field; a branch is the branch of the views, and Strict keeps its
+    // traps first. None when v is neutral.
+    fn view_value(
+        inout self,
+        recursion: bool,
+        f: u32,
+        t: u32,
+        cases: Vec(u32),
+        v: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(Option(u32), diag.Diag) {
+        if depth == 0 { return Err(self.error(v, "nesting limit reached")) }
+        match self.term(v) {
+            Con(g, k, fields) => {
+                if g != f || !self.is_boxed(f) || f as i64 >= self.signatures.len() ||
+                    k as i64 >= cases.len() || cases.len() != self.signatures[f as i64].len() {
+                    return Ok(None)
+                }
+                let params = self.families[f as i64].params as i64
+                let shape = self.view_shape(f, k, depth - 1)?
+                if fields.len() != params + shape.len() { return Ok(None) }
+                var result = cases[k as i64]
+                for j, entry in shape {
+                    let (heap, _) = entry
+                    let field = fields[params + j]
+                    let arg = if heap { self.add(Term.Borrow(field), sp)? } else { field }
+                    result = self.add(Term.App(result, arg), sp)?
+                }
+                if recursion {
+                    for j, entry in shape {
+                        let (_, own) = entry
+                        if !own { continue }
+                        let borrow = self.add(Term.Borrow(fields[params + j]), sp)?
+                        let ih = self.add(
+                            Term.View(true, f, t, cases.clone(), borrow),
+                            sp
+                        )?
+                        result = self.add(Term.App(result, ih), sp)?
+                    }
+                }
+                Ok(Some(self.normal(result, depth - 1)?))
+            }
+            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                let equality = match self.term(v) { IfEq(_, _, _, _) => true, _ => false }
+                // The true branch has the evidence binder.
+                let inner = self.shift(t, 1, 0, depth - 1)?
+                var shifted = Vec(u32).new()
+                for c in cases { shifted.push(self.shift(c, 1, 0, depth - 1)?) }
+                let y = self.add(Term.Borrow(yes), sp)?
+                let y = self.add(Term.View(recursion, f, inner, shifted, y), sp)?
+                let n = self.add(Term.Borrow(no), sp)?
+                let n = self.add(Term.View(recursion, f, t, cases.clone(), n), sp)?
+                let branch = if equality { Term.IfEq(a, b, y, n) } else { Term.IfLt(a, b, y, n) }
+                let branch = self.add(branch, sp)?
+                Ok(Some(self.normal(branch, depth - 1)?))
+            }
+            Strict(trap, y) => {
+                let y = self.add(Term.Borrow(y), sp)?
+                let view = self.add(Term.View(recursion, f, t, cases.clone(), y), sp)?
+                let view = self.normal(view, depth - 1)?
+                Ok(Some(self.add(Term.Strict(trap, view), sp)?))
+            }
+            _ => Ok(None)
+        }
+    }
+
+    // The fields of constructor k of a boxed family f, its parameters
+    // left out, as a view reads them: whether each is on the heap (a
+    // runtime field of heap data, read through a borrow) and whether it
+    // is recursive (of f itself).
+    fn view_shape(inout self, f: u32, k: u32, depth: u32) -> Result(Vec((bool, bool)), diag.Diag) {
+        var ty = self.families[f as i64].constructors[k as i64].ty
+        for _ in 0..self.families[f as i64].params {
+            let Pi(_, _, rest) = self.term(ty) else { break }
+            ty = rest
+        }
+        var shape = Vec((bool, bool)).new()
+        loop {
+            let Pi(erased, domain, rest) = self.term(ty) else { break }
+            let normal = self.normal(domain, depth)?
+            let (heap, own) = match self.term(normal) {
+                Ind(g, _) => (g == f || self.is_boxed(g), g == f)
+                _ => (false, false)
+            }
+            shape.push((heap && !erased, own && !erased))
+            ty = rest
+        }
+        Ok(shape)
     }
 
     // The U64 of a normal refinement: a packed value is its witness, and
@@ -1036,7 +1157,7 @@ impl Core {
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Drop(f, a, b), Drop(g, c, d)) =>
                 f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
-            (Ref(a), Ref(b)) => self.identical(a, b, depth - 1)
+            (Ref(a), Ref(b)) | (Borrow(a), Borrow(b)) => self.identical(a, b, depth - 1)
             (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
                 self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
             (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
@@ -1830,6 +1951,15 @@ impl Core {
                 }
                 Term.Universe(0)
             }
+            // Only in types and evidence, which never run: nothing is lent.
+            Borrow(x) => {
+                if !ghost { return Err(self.error(id, "a borrow of a value is evidence only")) }
+                let t = self.infer(x, ctx, true, depth - 1)?
+                if !self.owned(t, depth - 1)? {
+                    return Err(self.error(x, "a borrow is of a buffer or heap data"))
+                }
+                Term.Ref(t)
+            }
             Lend(x, f, g) => {
                 let t = self.infer(x, ctx, ghost, depth - 1)?
                 if !self.owned(t, depth - 1)? {
@@ -2589,7 +2719,8 @@ fn rank(term: Term) -> u32 {
         Free(_, _) => 31, Case(_, _, _, _) => 32, Pi(_, _, _) => 33, Lam(_, _, _) => 34,
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
-        Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46
+        Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46,
+        Borrow(_) => 47
     }
 }
 
@@ -2629,7 +2760,7 @@ pub fn children(term: Term) -> Vec(u32) {
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
         ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) | Buffer(a) => out.push(a)
         Alloc(a, b) | Free(a, b) | Drop(_, a, b) => { out.push(a); out.push(b) }
-        Ref(a) => out.push(a)
+        Ref(a) | Borrow(a) => out.push(a)
         Lend(a, b, c) => { out.push(a); out.push(b); out.push(c) }
         View(_, _, t, cases, x) => {
             out.push(t)
@@ -3781,4 +3912,126 @@ fn views_read_borrows_and_give_borrowed_fields() {
     assert(c.check().is_err(), "a view does not take an owner")
     var c = viewing(true, false)
     assert(c.check().is_err(), "a view's heap fields are borrowed")
+}
+
+// B with count: Ref(B) -> U64, the number of Yes nodes, by a recursive
+// view, and a definition of type ty with value value from the given terms.
+fn counting(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    bit_family(&c, 0, true)
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let borrow = c.add(Term.Ref(b), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let ih = c.add(Term.Var(0), sp).unwrap()
+    let more = c.add(Term.UAdd(ih, one), sp).unwrap()
+    let more = c.add(Term.Lam(false, u, more), sp).unwrap()
+    let yes = c.add(Term.Lam(false, borrow, more), sp).unwrap()
+    var cases = Vec(u32).new()
+    cases.push(zero)
+    cases.push(yes)
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let view = c.add(Term.View(true, 0, u, cases, x), sp).unwrap()
+    let value = c.add(Term.Lam(false, borrow, view), sp).unwrap()
+    let ty = c.add(Term.Pi(false, borrow, u), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "count".to_string(),
+        ty,
+        value,
+        exported: false,
+        span: sp
+    })
+    c.add(Term.Global(0), sp).unwrap()
+}
+
+// Yes(Yes(No)), a value of B built in place.
+fn two_yes(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    let no = c.add(Term.Con(0, 0, Vec(u32).new()), sp).unwrap()
+    var one = Vec(u32).new()
+    one.push(no)
+    let one = c.add(Term.Con(0, 1, one), sp).unwrap()
+    var two = Vec(u32).new()
+    two.push(one)
+    c.add(Term.Con(0, 1, two), sp).unwrap()
+}
+
+#[test]
+fn borrows_compute_in_the_pure_model() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let count = counting(&c)
+    assert(c.check().is_ok(), "a recursive view counts")
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    // count(borrow(Yes(Yes(No)))) is 2: the view reads the known nodes.
+    let value = two_yes(&c)
+    let borrow = c.add(Term.Borrow(value), sp).unwrap()
+    let counted = c.add(Term.App(count, borrow), sp).unwrap()
+    assert(c.equal(counted, two, DEPTH).unwrap(), "a view of a known node computes")
+    // lend(v, fn(r) { count(r) }, fn(a, y) { drop(y, a) }) is 2 as well.
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let r = c.add(Term.Ref(b), sp).unwrap()
+    let global = c.add(Term.Global(0), sp).unwrap()
+    let v0 = c.add(Term.Var(0), sp).unwrap()
+    let v1 = c.add(Term.Var(1), sp).unwrap()
+    let read = c.add(Term.App(global, v0), sp).unwrap()
+    let f = c.add(Term.Lam(false, r, read), sp).unwrap()
+    let dropped = c.add(Term.Drop(0, v0, v1), sp).unwrap()
+    let g = c.add(Term.Lam(false, b, dropped), sp).unwrap()
+    let g = c.add(Term.Lam(false, u, g), sp).unwrap()
+    let value = two_yes(&c)
+    let lend = c.add(Term.Lend(value, f, g), sp).unwrap()
+    assert(c.equal(lend, two, DEPTH).unwrap(), "a lend computes to its continuations")
+    // Code to run keeps both: they read memory.
+    c.runtime = true
+    let kept = c.normal(lend, DEPTH).unwrap()
+    let Lend(_, _, _) = c.term(kept) else { panic("code to run keeps the lend") }
+    let kept = c.normal(counted, DEPTH).unwrap()
+    assert(c.term(kept) != Term.Natural(2), "code to run does not compute views")
+    // A neutral borrow stays a view.
+    c.runtime = false
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let neutral = c.add(Term.App(count, x), sp).unwrap()
+    let normal = c.normal(neutral, DEPTH).unwrap()
+    let View(true, _, _, _, _) = c.term(normal) else { panic("a neutral borrow is not read") }
+}
+
+#[test]
+fn borrows_of_values_are_evidence_only() {
+    let sp = diag.Span.nowhere()
+    for (proof, claimed) in [(true, 2), (true, 1), (false, 2)] {
+        var c = Core.new()
+        let count = counting(&c)
+        let value = two_yes(&c)
+        let borrow = c.add(Term.Borrow(value), sp).unwrap()
+        let counted = c.add(Term.App(count, borrow), sp).unwrap()
+        let n = c.add(Term.Natural(claimed as u64), sp).unwrap()
+        // Eq(count(borrow(v)), n) by refl(n), or count(borrow(v)) at run time.
+        let (ty, value) = if proof {
+            (c.add(Term.Eq(counted, n), sp).unwrap(), c.add(Term.Refl(n), sp).unwrap())
+        } else { (c.add(Term.U64, sp).unwrap(), counted) }
+        c.definitions.push(Definition {
+            name: "p".to_string(),
+            ty,
+            value,
+            exported: false,
+            span: sp
+        })
+        let ok = c.check().is_ok()
+        assert(ok == (proof && claimed == 2), "evidence of the count, never a runtime borrow")
+    }
+    // Only an owned value is borrowed.
+    var c = Core.new()
+    let count = counting(&c)
+    let n = c.add(Term.Natural(0), sp).unwrap()
+    let borrow = c.add(Term.Borrow(n), sp).unwrap()
+    let counted = c.add(Term.App(count, borrow), sp).unwrap()
+    let ty = c.add(Term.Eq(counted, n), sp).unwrap()
+    let value = c.add(Term.Refl(n), sp).unwrap()
+    c.definitions.push(Definition { name: "p".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "a borrow is of a buffer or heap data")
 }

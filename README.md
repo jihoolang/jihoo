@@ -210,9 +210,13 @@ recursion, with proofs by induction. An owned value is
 [freed where its scope ends](examples/core_scope.jh) without a written
 `free`, and the kernel checks those frees too, and a `ref List`
 parameter [borrows](examples/core_borrow.jh) a value without consuming
-it. General `.jh` coverage, borrows in proofs and proofs of the new
-kernel, elaboration and
-lowering remain required before this replaces the existing verifier.
+it. Types and proofs may [borrow any value](examples/core_borrow_proof.jh),
+so a proof by induction can be about `length(xs: ref List)` and a
+precondition about the list its function consumes. Wider `.jh` coverage
+and mechanized proofs of the kernel, erasure and lowering remain
+required before this replaces the existing verifier; the
+[roadmap](docs/internals/roadmap.md#the-050-release-gate-for-the-native-core)
+states the 0.5.0 gate.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

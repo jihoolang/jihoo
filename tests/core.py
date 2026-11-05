@@ -57,6 +57,28 @@ class Buffer:
 # apart exactly once.
 BOXED = set()
 NODES = []
+# Above zero while evaluating evidence (an erased argument or a borrow
+# made by (borrow x)), which never runs: its nodes and buffers are not
+# program memory, and it neither consumes nor frees any.
+GHOST = [0]
+
+
+def ghostly(thunk):
+    GHOST[0] += 1
+    try:
+        return thunk()
+    finally:
+        GHOST[0] -= 1
+
+
+class Erased:
+    """A (lam0 ...) function: its argument is evidence."""
+
+    def __init__(self, function):
+        self.function = function
+
+    def __call__(self, value):
+        return self.function(value)
 
 
 class Node:
@@ -65,6 +87,8 @@ class Node:
         self.alive = True
 
     def take(self):
+        if GHOST[0]:
+            return ("con", self.family, self.k, self.fields)
         assert self.alive, "node used twice"
         self.alive = False
         return ("con", self.family, self.k, self.fields)
@@ -76,10 +100,14 @@ class Borrow:
     def __init__(self, value, parent=None):
         self.value = value
         self.live = True
+        # Evidence reads the value it had, even after it was freed.
+        self.ghost = GHOST[0] > 0 or (parent is not None and parent.ghost)
         # A field read through a borrow lives as long as that borrow.
         self.parent = parent
 
     def read(self):
+        if self.ghost:
+            return self.value
         assert self.live, "a borrow outlived its lend"
         if self.parent is not None:
             self.parent.read()
@@ -135,7 +163,8 @@ def constructor(name, fields):
     assert len(fields) == count
     if family in BOXED:
         node = Node(family, k, tuple(fields))
-        NODES.append(node)
+        if not GHOST[0]:
+            NODES.append(node)
         return node
     return ("con", family, k, tuple(fields))
 
@@ -160,11 +189,15 @@ def evaluate(term, env):
     head, *args = term
     if head in ("lam", "lam0"):
         name, _, body = args
-        return lambda value: evaluate(body, {**env, name: value})
+        function = lambda value: evaluate(body, {**env, name: value})
+        return Erased(function) if head == "lam0" else function
     if head == "app":
         value = evaluate(args[0], env)
         for argument in args[1:]:
-            value = value(evaluate(argument, env))
+            if isinstance(value, Erased):
+                value = value(ghostly(lambda: evaluate(argument, env)))
+            else:
+                value = value(evaluate(argument, env))
         return value
     if head == "int":
         return int(args[0])
@@ -234,7 +267,8 @@ def evaluate(term, env):
         n, x = (evaluate(v, env) for v in args)
         assert n < (1 << 20), ("test buffers are small", n)
         buffer = Buffer([x] * n)
-        BUFFERS.append(buffer)
+        if not GHOST[0]:
+            BUFFERS.append(buffer)
         return buffer
     if head in ("load", "store"):
         buffer, index, *rest = (evaluate(v, env) for v in args)
@@ -250,6 +284,8 @@ def evaluate(term, env):
         return buffer
     if head == "free":
         buffer = evaluate(args[0], env)
+        if GHOST[0]:
+            return evaluate(args[1], env)
         assert buffer.alive, "double free"
         buffer.alive = False
         return evaluate(args[1], env)
@@ -257,6 +293,8 @@ def evaluate(term, env):
         family, value, rest = args
         released = evaluate(value, env)
         assert isinstance(released, Node) and released.family == family, ("drop", family)
+        if GHOST[0]:
+            return evaluate(rest, env)
 
         def release(node):
             # Every node the value owns is taken apart once.
@@ -302,6 +340,9 @@ def evaluate(term, env):
             array = array.read().values
         assert proof == (index, len(array)) and 0 <= index < len(array)
         return array[index]
+    if head == "borrow":
+        # Evidence only: a borrow of a value built for the type, never freed.
+        return ghostly(lambda: Borrow(evaluate(args[0], env)))
     if head == "lend":
         owner = evaluate(args[0], env)
         assert isinstance(owner, (Buffer, Node)) and owner.alive, ("lend", owner)
@@ -609,6 +650,9 @@ def main():
         from core_borrow import validate_borrow
         validate_borrow(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                         NODES)
+        from core_borrow_proof import validate_borrow_proof
+        validate_borrow_proof(compiler, root, temporary, environment, run, definitions, evaluate,
+                              BUFFERS, NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

@@ -458,7 +458,7 @@ compile error rather than a leak or a double free. The steps: (1) the
 kernel's linearity check, owned heap buffers and explicit `free`;
 (2) recursive data types as heap nodes; (3) structural recursion that
 consumes them; (4) frees inserted in source where ownership ends;
-(5) borrows, reading without consuming. Broader lemma libraries;
+(5) borrows, reading without consuming.
 
 Implemented step (1), owned buffers: `buffer(n)` is n i64 values on the
 heap, made by `alloc(n, x)` and read, written and freed with `load`,
@@ -518,11 +518,80 @@ and 15 core rejections, five whole programs and kernel tests run in the
 for a borrow or an owned type, and that a continuation given owned
 values could return a closure holding them (the latter since step 1);
 type arguments at run time are now first order and such continuations
-return no function. This
-completes the memory plan; next are borrows in proofs (computing through
-lends and views in conversion) and the remaining 0.5 items below.
-establish the kernel's soundness and elaboration/erasure/lowering
-preservation.
+return no function. This completes the memory plan.
+
+Implemented borrows in types and evidence
+([design](dependent-core.md#borrows-in-types-and-evidence)): a function
+that reads a borrow, such as `length(xs: ref List)`, applies in types
+and proofs to any value, including a temporary or a value moved or
+freed meanwhile. One kernel term, `Borrow(x)`, borrows an owned value
+in types and evidence only, where nothing runs or is lent; conversion
+computes a view of a known node and a lend as its continuations applied
+to such a borrow, while code to run keeps both. `doubled_length` is
+proved by induction about a borrowing `length`, `length(pair(x)) = 2` and
+a function that lends a local list compute by `refl`, and preconditions
+mention the lists their functions consume. `examples/core_borrow_proof.jh`
+compiles to the same MIR as its `.jhc`, with every proof erased; native
+execution against the evaluator, counted allocations, valgrind, 8 source
+and 6 core rejections and kernel tests run in the `core` suite. An
+independent review (Codex) found no unsound case and one evidence
+position the elaborator missed, now fixed.
+
+#### The 0.5.0 release gate for the native core
+
+The direction changed after the gate in step 6 below was written: that
+gate proves a Horn translation of the existing verifier sound. With the
+native core, what must be trusted is the kernel (`compiler/core.jh`),
+erasure and lowering (`core_lower.jh`), not a translation into Horn, so
+the gate is restated for them. Step 6's items 3–7 are no longer release
+requirements; their Agda proofs stay checked in CI as background, and
+the existing verifier keeps verifying unmarked programs and the
+compiler's own source until the core replaces it. 0.5.0 requires:
+
+1. **Coverage.** The 0.5 promise, that the checks code needs cannot fail
+   and functions meet their contracts, holds for programs in the core:
+   indexing without bounds checks (done: arrays, buffers, borrowed
+   buffers), contracts as types (`requires` as erased evidence, `ensures`
+   as refined or equality results), loops whose invariants are types,
+   and enough ownership for ordinary code. Remaining, in order:
+   (a) dependent lends, whose reader knows that its borrow reads the
+   owner, so evidence about the owner applies to the borrow and a lend's
+   result type may depend on it; (b) proofs by induction over a borrow;
+   (c) loops with a dependent accumulator (an invariant); (d) mutable
+   borrows and in-place updates of heap data; (e) a `std` slice in the
+   core (a vector as an owned buffer with its length and capacity),
+   with its contracts stated as types.
+2. **Specification.** One normative description of the core: its terms,
+   typing with quantities (erased, owned, scalar) and the ghost position,
+   the pure model's reductions (including views, lends and `Borrow`) and
+   erasure, with every rule of `infer` and `normal` listed against it.
+   Today each slice's rules are described in
+   [dependent-core.md](dependent-core.md), not consolidated.
+3. **Kernel soundness, mechanized.** A proof in Agda, checked in CI, of
+   the specified rules: logical consistency (no closed evidence of
+   `Lt(0, 0)`), preservation of types by the pure model's reductions, and
+   quantity soundness: in the erased program every owned value is used
+   exactly once and no borrow outlives its lend. The kernel's
+   implementation is tested against the specification (independent
+   evaluator, rejection suites, independent reviews), and remains
+   trusted to implement it.
+4. **Erasure and lowering.** A proof that the erased program computes
+   the pure model's value, and a statement of lowering to MIR against
+   the MIR semantics of [`agda/MirExecution.agda`](../../agda/MirExecution.agda),
+   proved for the core's runtime fragment (scalars, arrays, buffers,
+   heap nodes, cases, recursions, views, lends, frees). Differential
+   tests remain regression checks, not this proof.
+5. **The published theorem.** What an accepted core program is
+   guaranteed to do, under which semantics, and what stays trusted: the
+   kernel's implementation, lowering where not proved, MIR to LLVM, LLVM
+   and the runtime. The elaborator is untrusted, since the kernel checks
+   its output. Until source-to-MIR and MIR-to-LLVM preservation are
+   proved, this is not described as verification of whole executables.
+
+Self-verification moves after 0.5.0: the compiler verifying its own
+source with the existing verifier continues in CI, and the compiler's
+code moves into the core only once the core covers it (item 1).
+
 The `.jhc` prototype does not complete the 0.5 release gate. The existing
 verifier and its gaps described below remain applicable to unmarked `.jh`
 programs until their supported operations and guarantees move to the core.
@@ -622,7 +691,9 @@ and moves into the compiler once its trust boundary is stated.
    ([design](verification.md#slices)): its checks compare `hi <= len` and
    `lo <= hi` without a `+ 1` that could overflow, and a slice's length
    keeps a length's range, so slicing after a length test keeps no check.
-6. Self-verification, before 0.5.0: jihoo verifies jihoo, as lean4lean
+6. Self-verification, before 0.5.0 (superseded as a release requirement
+   by [the native core's gate](#the-050-release-gate-for-the-native-core);
+   items 3–7 below describe the Horn path): jihoo verifies jihoo, as lean4lean
    checks Lean with a kernel written in Lean and proves that kernel's
    properties in Lean. First, the compiler verifies its own source:
    `jihoo verify compiler/main.jh` runs in CI and every check it keeps is
@@ -819,11 +890,10 @@ and moves into the compiler once its trust boundary is stated.
    jihoo can verify its own compiler, and the seed moving to it lets the
    compiler state contracts itself. 0.4.6 verifies every build and makes
    an unproved contract an error, so with it as the seed, stage 1 is
-   verified too. 0.5.0 waits for all of step 6, including independent
-   certificate checking, execution-to-model correspondence and the
-   soundness of verification-condition generation and check removal.
-   The existing conditional adequacy proof and passing self-verification
-   tests alone do not satisfy this release gate.
+   verified too. 0.5.0 waits for
+   [the native core's gate](#the-050-release-gate-for-the-native-core),
+   which replaces step 6's Horn items as the release requirement.
+   Passing self-verification tests alone do not satisfy it.
 
 Status of the completion criteria: the `verify` suite runs `tests/run`
 with and without verification, and checks that the proved checks of

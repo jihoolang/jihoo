@@ -15,7 +15,8 @@
 // Owned values are freed where their scope ends: a buffer or heap data
 // that a scope or one of its alternatives does not use is freed there.
 // `ref T` parameters borrow: an owned local passed where a borrow is
-// expected is lent for the expression or `let` value that borrows it.
+// expected is lent for the expression or `let` value that borrows it,
+// while types and evidence, which never run, borrow any value in place.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -56,6 +57,9 @@ struct Elaborator {
     ctx: Vec(core.Binding)
     arities: Vec(i64)
     frames: Vec(Frame)
+    // Above zero while elaborating types and evidence, which never run:
+    // an owned value there is borrowed in place rather than lent.
+    ghost: u32
 }
 
 impl Elaborator {
@@ -748,7 +752,15 @@ impl Elaborator {
         self.c.add(core.Term.U64, sp)
     }
 
+    // A type or proposition: evidence, which never runs.
     fn type_expr(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
+        self.ghost += 1
+        let result = self.proposition_expr(e, depth)
+        self.ghost -= 1
+        result
+    }
+
+    fn proposition_expr(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         match e.kind {
             Name(n) if n == "u64" => self.u64(e.span)
@@ -785,6 +797,13 @@ impl Elaborator {
     }
 
     fn ty(inout self, t: ast.Ty, depth: u32) -> Result(u32, diag.Diag) {
+        self.ghost += 1
+        let result = self.type_of(t, depth)
+        self.ghost -= 1
+        result
+    }
+
+    fn type_of(inout self, t: ast.Ty, depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(t.span, "elaboration nesting limit reached")) }
         match t.kind {
             Path(path, args) if path.len() == 1 => {
@@ -951,7 +970,43 @@ impl Elaborator {
         Ok(value)
     }
 
+    // An expression of a proposition is evidence, which never runs.
     fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
+        let evidence = self.ghost == 0 && match expected {
+            Some(t) => self.proposition(t)
+            None => false
+        }
+        if !evidence { return self.value(e, expected, depth) }
+        self.evidence(e, expected, depth)
+    }
+
+    fn evidence(
+        inout self,
+        e: ast.Expr,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.ghost += 1
+        let result = self.value(e, expected, depth)
+        self.ghost -= 1
+        result
+    }
+
+    // In types and evidence, an argument where a borrow is expected: a
+    // borrow is passed on, and any other value of the owned type is
+    // borrowed in place, since nothing there runs. The kernel checks that
+    // such a borrow occurs only in types and evidence.
+    fn borrowed(inout self, e: ast.Expr, inner: u32, depth: u32) -> Result(u32, diag.Diag) {
+        let v = self.evidence(e, Some(inner), depth)?
+        let ty = self.c.infer(v, self.ctx.as_slice(), true, core.DEPTH)?
+        let ty = self.c.normal(ty, core.DEPTH)?
+        match self.c.term(ty) {
+            Ref(_) => Ok(v)
+            _ => self.c.add(core.Term.Borrow(v), e.span)
+        }
+    }
+
+    fn value(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         let sp = e.span
         match e.kind {
@@ -1114,7 +1169,7 @@ impl Elaborator {
                     let a = self.expr(args[0], None, depth - 1)?
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.expr(args[2], None, depth - 1)?
+                    let p = self.evidence(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
                 }
                 if n == "sub" {
@@ -1125,7 +1180,7 @@ impl Elaborator {
                     let u = self.u64(sp)?
                     let a = self.expr(args[0], Some(u), depth - 1)?
                     let b = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.expr(args[2], None, depth - 1)?
+                    let p = self.evidence(args[2], None, depth - 1)?
                     return self.c.add(core.Term.USub(a, b, p), sp)
                 }
                 if n == "pack" {
@@ -1144,7 +1199,7 @@ impl Elaborator {
                     }
                     let u = self.u64(sp)?
                     let a = self.expr(args[0], Some(u), depth - 1)?
-                    let q = self.expr(args[1], None, depth - 1)?
+                    let q = self.evidence(args[1], None, depth - 1)?
                     return self.c.add(core.Term.Pack(p, a, q), sp)
                 }
                 if n == "alloc" {
@@ -1168,7 +1223,7 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let t = self.c.add(core.Term.I64, sp)?
                     let v = self.expr(args[2], Some(t), depth - 1)?
-                    let p = self.expr(args[3], None, depth - 1)?
+                    let p = self.evidence(args[3], None, depth - 1)?
                     return self.c.add(core.Term.Store(b, i, v, p), sp)
                 }
                 if n == "free" {
@@ -1206,7 +1261,7 @@ impl Elaborator {
                     }
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.expr(args[2], None, depth - 1)?
+                    let p = self.evidence(args[2], None, depth - 1)?
                     // fn(x: i64, b: buffer(n)) -> T
                     let i64 = self.c.add(core.Term.I64, sp)?
                     let length = self.c.shift(length, 1, 0, core.DEPTH)?
@@ -1222,14 +1277,15 @@ impl Elaborator {
                         sp,
                         (n.as_str() + " requires one refinement").as_str()
                     )) }
-                    let s = self.expr(args[0], None, depth - 1)?
+                    let s = if n == "proof" { self.evidence(args[0], None, depth - 1)? }
+                    else { self.expr(args[0], None, depth - 1)? }
                     let term = if n == "witness" { core.Term.Witness(s) } else { core.Term.Proof(s) }
                     return self.c.add(term, sp)
                 }
                 if n == "zero_le" {
                     if args.len() != 1 { return Err(error(sp, "zero_le requires one u64 value")) }
                     let u = self.u64(sp)?
-                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let a = self.evidence(args[0], Some(u), depth - 1)?
                     return self.c.add(core.Term.ZeroLe(a), sp)
                 }
                 if n == "lt_add" || n == "lt_cancel" || n == "lt_le" {
@@ -1240,8 +1296,8 @@ impl Elaborator {
                     )) }
                     let u = self.u64(sp)?
                     var xs = Vec(u32).new()
-                    for k in 0..3 { xs.push(self.expr(args[k], Some(u), depth - 1)?) }
-                    for k in 3..count { xs.push(self.expr(args[k], None, depth - 1)?) }
+                    for k in 0..3 { xs.push(self.evidence(args[k], Some(u), depth - 1)?) }
+                    for k in 3..count { xs.push(self.evidence(args[k], None, depth - 1)?) }
                     let rule = if n == "lt_add" { core.Term.LtAdd(xs[0], xs[1], xs[2], xs[3]) }
                     else if n == "lt_cancel" { core.Term.LtCancel(xs[0], xs[1], xs[2], xs[3]) }
                     else { core.Term.LtLe(xs[0], xs[1], xs[2], xs[3], xs[4]) }
@@ -1348,7 +1404,7 @@ impl Elaborator {
                 if n == "refl" {
                     if args.len() != 1 { return Err(error(sp, "refl requires one U64 argument")) }
                     let u = self.u64(sp)?
-                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let a = self.evidence(args[0], Some(u), depth - 1)?
                     return self.c.add(core.Term.Refl(a), sp)
                 }
                 if n == "transport" {
@@ -1357,15 +1413,15 @@ impl Elaborator {
                         "transport requires family, equality and proof"
                     )) }
                     let family = self.family(args[0], 1, depth - 1)?
-                    let equality = self.expr(args[1], None, depth - 1)?
-                    let proof = self.expr(args[2], None, depth - 1)?
+                    let equality = self.evidence(args[1], None, depth - 1)?
+                    let proof = self.evidence(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Transport(family, equality, proof), sp)
                 }
                 if n == "decide_lt" {
                     if args.len() != 2 { return Err(error(sp, "decide_lt requires two arguments")) }
                     let u = self.u64(sp)?
-                    let a = self.expr(args[0], Some(u), depth - 1)?
-                    let b = self.expr(args[1], Some(u), depth - 1)?
+                    let a = self.evidence(args[0], Some(u), depth - 1)?
+                    let b = self.evidence(args[1], Some(u), depth - 1)?
                     return self.c.add(core.Term.Decide(a, b), sp)
                 }
                 let mut_f = self.name(n.as_str(), f.span)?
@@ -1380,19 +1436,24 @@ impl Elaborator {
                 var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
                 for a in args {
                     let normal = self.c.normal(ty, core.DEPTH)?
-                    let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
+                    let core.Term.Pi(erased, domain, result) = self.c.term(normal) else {
                         return Err(error(sp, "application requires a dependent function"))
                     }
                     let lent = self.c.normal(domain, core.DEPTH)?
                     let named = match a.kind { Name(_) => true, _ => false }
-                    match self.c.term(lent) {
+                    let arg = match self.c.term(lent) {
+                        Ref(inner) if self.ghost > 0 || erased => self.borrowed(
+                            a,
+                            inner,
+                            depth - 1
+                        )?
                         Ref(_) if !named => return Err(error(
                             a.span,
                             "a borrow is of a named value: bind this one with let first"
                         ))
-                        _ => {}
+                        _ if erased => self.evidence(a, Some(domain), depth - 1)?
+                        _ => self.expr(a, Some(domain), depth - 1)?
                     }
-                    let arg = self.expr(a, Some(domain), depth - 1)?
                     function = self.c.add(core.Term.App(function, arg), sp)?
                     ty = self.c.substitute(result, arg, core.DEPTH)?
                 }
@@ -1683,7 +1744,8 @@ pub fn compile(
         names: Vec(String).new(),
         ctx: Vec(core.Binding).new(),
         arities: Vec(i64).new(),
-        frames: Vec(Frame).new()
+        frames: Vec(Frame).new(),
+        ghost: 0
     }
     for item in module.items { e.definition(item, !library)? }
     var p = core_lower.compile(mem.replace(&e.c, core.Core.new()), tgt)?
