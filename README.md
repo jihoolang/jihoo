@@ -208,8 +208,10 @@ and stores at proved indices, and [recursive data](examples/core_list.jh)
 lives on the heap, taken apart by `match` or consumed by structural
 recursion, with proofs by induction. An owned value is
 [freed where its scope ends](examples/core_scope.jh) without a written
-`free`, and the kernel checks those frees too. General `.jh` coverage,
-borrows and proofs of the new kernel, elaboration and
+`free`, and the kernel checks those frees too, and a `ref List`
+parameter [borrows](examples/core_borrow.jh) a value without consuming
+it. General `.jh` coverage, borrows in proofs and proofs of the new
+kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and

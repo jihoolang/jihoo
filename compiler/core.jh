@@ -6,7 +6,8 @@
 // immutable I64 arrays indexed by U64 lengths, Lt, U64 equality and
 // declared U64-indexed inductive propositions, and refinements {x : U64 |
 // P x}, a U64 with erased evidence, data types, and owned heap buffers,
-// which the kernel checks are used exactly once. Equality and structural
+// which the kernel checks are used exactly once, and borrows of them,
+// which cannot outlive the lend that made them. Equality and structural
 // induction eliminate only into Prop. Runtime code has I64 arithmetic,
 // which traps on overflow, and bounded loops whose body has evidence of
 // its index's bound. U64 terms denote natural numbers: their addition
@@ -94,6 +95,19 @@ pub enum Term {
     // Family, a value of that boxed data type and the rest: the value and
     // every node it owns are freed, then the rest runs.
     Drop(u32, u32, u32)
+    // A borrow of an owned value of type T: read any number of times, never
+    // consumed or freed. It is the owner's pointer at run time.
+    Ref(u32)
+    // Owner x : T, f : Ref(T) -> A and g : A -> T -> R: f reads x through a
+    // borrow, then g receives f's result and x back. A holds no borrow and
+    // is not a function, so no borrow outlives f.
+    Lend(u32, u32, u32)
+    // Reading borrowed heap data of a family with no true indices: whether
+    // it is a recursion, the family, the result type, one case per
+    // constructor and the borrow. Nothing is freed; each case receives the
+    // fields, those on the heap as borrows, then, in a recursion, the
+    // result for each recursive field.
+    View(bool, u32, u32, Vec(u32), u32)
     // Family, motive, one case per constructor and a value of a boxed data
     // type: one level of case analysis. The node is freed and each case
     // receives all of its fields, recursive ones as owned values. Elim on a
@@ -338,6 +352,14 @@ impl Core {
                 self.transform(x, cutoff, delta, replacement, depth - 1)?,
                 self.transform(rest, cutoff, delta, replacement, depth - 1)?
             )
+            Ref(t) => Term.Ref(self.transform(t, cutoff, delta, replacement, depth - 1)?)
+            Lend(x, f, g) => Term.Lend(self.transform(x, cutoff, delta, replacement, depth - 1)?,
+                self.transform(f, cutoff, delta, replacement, depth - 1)?,
+                self.transform(g, cutoff, delta, replacement, depth - 1)?)
+            View(r, f, t, cases, x) => Term.View(r, f,
+                self.transform(t, cutoff, delta, replacement, depth - 1)?,
+                self.transform_all(cases.as_slice(), cutoff, delta, replacement, depth)?,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?)
             LtAdd(a, b, c, p) => Term.LtAdd(
                 self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
@@ -712,6 +734,12 @@ impl Core {
                 self.normal(x, depth - 1)?,
                 self.normal(rest, depth - 1)?
             )
+            // Borrows are not computed yet, in either mode.
+            Ref(t) => Term.Ref(self.normal(t, depth - 1)?)
+            Lend(x, f, g) => Term.Lend(self.normal(x, depth - 1)?, self.normal(f, depth - 1)?,
+                self.normal(g, depth - 1)?)
+            View(r, f, t, cases, x) => Term.View(r, f, self.normal(t, depth - 1)?,
+                self.normal_all(cases.as_slice(), depth)?, self.normal(x, depth - 1)?)
             Pack(p, a, q) => Term.Pack(self.normal(p, depth - 1)?, self.normal(a, depth - 1)?,
                 self.normal(q, depth - 1)?)
             Witness(s) => {
@@ -1008,6 +1036,13 @@ impl Core {
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Drop(f, a, b), Drop(g, c, d)) =>
                 f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Ref(a), Ref(b)) => self.identical(a, b, depth - 1)
+            (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
+                self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
+            (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
+                self.identical(t, u, depth - 1) &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth) &&
+                self.identical(a, b, depth - 1)
             (Load(a, b, c, d), Load(w, x, y, z)) | (Store(a, b, c, d), Store(w, x, y, z)) =>
                 self.identical(a, w, depth - 1) && self.identical(b, x, depth - 1) &&
                 self.identical(c, y, depth - 1) && self.identical(d, z, depth - 1)
@@ -1263,6 +1298,65 @@ impl Core {
         while j > 0 {
             j -= 1
             let (erased, domain) = fields[j]
+            result = self.add(Term.Pi(erased, domain, result), sp)?
+        }
+        Ok(result)
+    }
+
+    // The case for constructor k of a view of borrowed data with parameters
+    // ps: (fields..., heap ones borrowed) -> [in a recursion, (ih : T) per
+    // recursive field] -> T.
+    pub fn view_case_type(
+        inout self,
+        f: u32,
+        k: u32,
+        ps: [u32],
+        t: u32,
+        recursion: bool,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if !self.is_boxed(f) || f as i64 >= self.signatures.len() ||
+            k as i64 >= self.signatures[f as i64].len() {
+            return Err(diag.Diag.new(sp, "core: unchecked data type or constructor"))
+        }
+        let params = self.families[f as i64].params as i64
+        if ps.len != params { return Err(diag.Diag.new(sp, "core: wrong number of parameters")) }
+        var ty = self.families[f as i64].constructors[k as i64].ty
+        for q in ps {
+            let Pi(_, _, rest) = self.term(ty) else {
+                return Err(diag.Diag.new(sp, "core: malformed constructor"))
+            }
+            ty = self.substitute(rest, q, depth)?
+        }
+        var fields = Vec((bool, u32)).new()
+        var recursive: i64 = 0
+        loop {
+            let Pi(erased, domain, rest) = self.term(ty) else { break }
+            let normal = self.normal(domain, depth)?
+            let (heap, own) = match self.term(normal) {
+                Ind(g, _) => (g == f || self.is_boxed(g), g == f)
+                _ => (false, false)
+            }
+            if heap && !erased {
+                if own { recursive += 1 }
+                fields.push((false, self.add(Term.Ref(domain), sp)?))
+            } else { fields.push((erased, domain)) }
+            ty = rest
+        }
+        let m = fields.len()
+        let extra = if recursion { recursive } else { 0 }
+        var result = self.shift(t, m + extra, 0, depth)?
+        var j = extra
+        while j > 0 {
+            j -= 1
+            let ih = self.shift(t, m + j, 0, depth)?
+            result = self.add(Term.Pi(false, ih, result), sp)?
+        }
+        var i = m
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = fields[i]
             result = self.add(Term.Pi(erased, domain, result), sp)?
         }
         Ok(result)
@@ -1710,7 +1804,9 @@ impl Core {
                     return Err(self.error(k, "load continues with the value and the same buffer"))
                 }
                 let result = self.normal(result, depth - 1)?
-                return self.shift(result, -2, 0, depth - 1)
+                let result = self.shift(result, -2, 0, depth - 1)?
+                self.not_function(k, result, depth - 1)?
+                return Ok(result)
             }
             Free(b, rest) => {
                 self.buffer_length(b, ctx, ghost, depth)?
@@ -1726,6 +1822,96 @@ impl Core {
                 }
                 if g != f { return Err(self.error(x, "drop requires a value of its type")) }
                 return self.infer(rest, ctx, ghost, depth - 1)
+            }
+            Ref(t) => {
+                let sort = self.infer(t, ctx, true, depth - 1)?
+                if self.sort(sort, depth - 1)? != 0 || !self.owned(t, depth - 1)? {
+                    return Err(self.error(id, "a borrow is of a buffer or heap data"))
+                }
+                Term.Universe(0)
+            }
+            Lend(x, f, g) => {
+                let t = self.infer(x, ctx, ghost, depth - 1)?
+                if !self.owned(t, depth - 1)? {
+                    return Err(self.error(x, "only an owned value is lent"))
+                }
+                // f : Ref(T) -> A, A independent of the borrow.
+                let ty = self.infer(f, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Pi(false, domain, a) = self.term(ty) else {
+                    return Err(self.error(f, "a lend reads with fn(r) { ... }"))
+                }
+                let borrow = self.add(Term.Ref(t), sp)?
+                if !self.equal(domain, borrow, depth - 1)? {
+                    return Err(self.error(f, "a lend reads through a borrow of its owner"))
+                }
+                let a = self.shift(a, -1, 0, depth - 1)?
+                let a = self.normal(a, depth - 1)?
+                // No borrow outlives f: its result is a scalar, a
+                // refinement, an array, a buffer or data, none of which
+                // holds a borrow; not a borrow, a function or a type
+                // variable, which could stand for either.
+                let known = match self.term(a) {
+                    U64 | I64 | Refine(_) | Array(_) | Buffer(_) => true
+                    Ind(g, _) => self.is_data(g)
+                    _ => false
+                }
+                if !known { return Err(self.error(f, "a borrow cannot outlive its lend")) }
+                // g : A -> T -> R, R independent of both.
+                let ty = self.infer(g, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Pi(false, first, rest) = self.term(ty) else {
+                    return Err(self.error(g, "a lend continues with fn(a, x) { ... }"))
+                }
+                let Pi(false, again, result) = self.term(rest) else {
+                    return Err(self.error(g, "a lend continues with fn(a, x) { ... }"))
+                }
+                let back = self.shift(t, 1, 0, depth - 1)?
+                if !self.equal(first, a, depth - 1)? || !self.equal(again, back, depth - 1)? {
+                    return Err(self.error(g, "a lend continues with the result and the owner"))
+                }
+                let result = self.normal(result, depth - 1)?
+                let result = self.shift(result, -2, 0, depth - 1)?
+                self.not_function(g, result, depth - 1)?
+                return Ok(result)
+            }
+            View(recursion, f, t, cases, x) => {
+                self.family_ref(id, f)?
+                if !self.is_boxed(f) ||
+                    self.families[f as i64].arity != self.families[f as i64].params {
+                    return Err(self.error(id, "a view reads heap data without indices"))
+                }
+                if cases.len() != self.families[f as i64].constructors.len() {
+                    return Err(self.error(id, "a view needs one case per constructor"))
+                }
+                let ty = self.infer(x, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Ref(inner) = self.term(ty) else {
+                    return Err(self.error(x, "a view reads a borrow"))
+                }
+                let inner = self.normal(inner, depth - 1)?
+                let Ind(g, xs) = self.term(inner) else {
+                    return Err(self.error(x, "a view reads a borrow of its type"))
+                }
+                if g != f { return Err(self.error(x, "a view reads a borrow of its type")) }
+                let sort = self.infer(t, ctx, true, depth - 1)?
+                if self.sort(sort, depth - 1)? != 0 {
+                    return Err(self.error(t, "a view's result is runtime data"))
+                }
+                self.not_function(t, t, depth - 1)?
+                for k, case in cases {
+                    let expected = self.view_case_type(
+                        f,
+                        k as u32,
+                        xs.as_slice(),
+                        t,
+                        recursion,
+                        sp,
+                        depth - 1
+                    )?
+                    self.require(case, expected, ctx, ghost, depth - 1)?
+                }
+                return Ok(t)
             }
             Witness(s) | Proof(s) => {
                 let proof = match self.term(id) { Proof(_) => true, _ => false }
@@ -1839,6 +2025,16 @@ impl Core {
                     return Err(self.error(f, "application needs a dependent function"))
                 }
                 self.require(a, domain, ctx, ghost || erased, depth - 1)?
+                // A type argument at run time is first order: a type
+                // variable is used without linearity and may be returned
+                // from a lend, so it cannot stand for an owned type, a
+                // borrow or a function.
+                if !ghost && self.kind_of(domain, depth - 1)? && !self.first_order(a, depth - 1)? {
+                    return Err(self.error(
+                        a,
+                        "a type argument holds no buffer, heap data, borrow or function"
+                    ))
+                }
                 let result = self.substitute(result, a, depth - 1)?
                 // The top of a spine whose value is still a function is a
                 // partial application, a function value that could run any
@@ -1861,10 +2057,19 @@ impl Core {
             Index(array, index, proof) => {
                 let ty = self.infer(array, ctx, ghost, depth - 1)?
                 let ty = self.normal(ty, depth - 1)?
-                let Array(n) = self.term(ty) else { return Err(self.error(
-                    array,
-                    "index needs an indexed array"
-                )) }
+                // An array, or a borrowed buffer, which is read in place.
+                let n = match self.term(ty) {
+                    Array(n) => n
+                    Ref(t) => {
+                        let t = self.normal(t, depth - 1)?
+                        let Buffer(n) = self.term(t) else { return Err(self.error(
+                            array,
+                            "index needs an indexed array or a borrowed buffer"
+                        )) }
+                        n
+                    }
+                    _ => return Err(self.error(array, "index needs an indexed array"))
+                }
                 let u = self.add(Term.U64, sp)?
                 self.require(index, u, ctx, ghost, depth - 1)?
                 let p = self.add(Term.Lt(index, n), sp)?
@@ -1902,6 +2107,52 @@ impl Core {
             }
         }
         self.add(ty, sp)
+    }
+
+    // Whether a type's values are types or type families: an argument of
+    // that type is a type argument.
+    fn kind_of(inout self, domain: u32, depth: u32) -> Result(bool, diag.Diag) {
+        var t = self.normal(domain, depth)?
+        loop {
+            match self.term(t) {
+                Pi(_, _, rest) => t = rest
+                Universe(_) => return Ok(true)
+                _ => return Ok(false)
+            }
+        }
+    }
+
+    // Whether a type (or type family) is first order: it mentions no
+    // buffer, heap data, borrow or function type anywhere.
+    fn first_order(inout self, t: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let t = self.normal(t, depth)?
+        self.plain(t, depth)
+    }
+
+    fn plain(inout self, t: u32, depth: u32) -> Result(bool, diag.Diag) {
+        self.tick(t, depth)?
+        match self.term(t) {
+            Buffer(_) | Ref(_) | Pi(_, _, _) => return Ok(false)
+            Ind(g, _) if self.is_boxed(g) => return Ok(false)
+            // A type family's binders are its indices, not its values.
+            Lam(_, _, body) => return self.plain(body, depth - 1)
+            _ => {}
+        }
+        for child in children(self.term(t)) {
+            if !self.plain(child, depth - 1)? { return Ok(false) }
+        }
+        Ok(true)
+    }
+
+    // A continuation that receives owned values (a load's, a lend's, a
+    // case's) runs once with the arguments it is given: if its result were
+    // a function, it could hold those values and run any number of times.
+    fn not_function(inout self, at: u32, ty: u32, depth: u32) -> Result((), diag.Diag) {
+        let t = self.normal(ty, depth)?
+        match self.term(t) {
+            Pi(_, _, _) => Err(self.error(at, "a continuation's result is not a function")),
+            _ => Ok(())
+        }
     }
 
     // The length n of a buffer b : Buffer(n), a runtime term.
@@ -2045,6 +2296,38 @@ impl Core {
             Load(b, i, _, k) => {
                 let first = self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)?
                 Ok(first + self.uses_case(k, 2, v, ctx, depth)?)
+            }
+            // f and g each run once.
+            Lend(x, f, g) => Ok(
+                self.uses(x, v, ctx, depth - 1)? + self.uses_case(f, 1, v, ctx, depth)? +
+                    self.uses_case(g, 2, v, ctx, depth)?
+            )
+            View(recursion, f, _, cases, x) => {
+                let total = self.uses(x, v, ctx, depth - 1)?
+                // One case runs, or, in a recursion, each once per node.
+                var common: Option(u32) = None
+                for k, case in cases {
+                    var count = self.signatures[f as i64][k].fields.len() -
+                        self.families[f as i64].params as i64
+                    if recursion {
+                        for field in self.signatures[f as i64][k].fields {
+                            if field.recursive.is_some() { count += 1 }
+                        }
+                    }
+                    let n = self.uses_case(case, count, v, ctx, depth)?
+                    if recursion && n > 0 { return Err(self.error(
+                        id,
+                        "a recursion's cases run once per node: they cannot use an outer owned value"
+                    )) }
+                    match common {
+                        Some(m) => if m != n { return Err(self.error(
+                            id,
+                            "every case must use an owned value alike"
+                        )) }
+                        None => common = Some(n)
+                    }
+                }
+                match common { Some(m) => Ok(total + m), None => Ok(total) }
             }
             Fold(n, init, body) => {
                 let first = self.uses(n, v, ctx, depth - 1)? + self.uses(init, v, ctx, depth - 1)?
@@ -2245,7 +2528,9 @@ impl Core {
         self.infer(x, ctx, ghost || proof, depth - 1)?
         var result = p
         for j in params..xs.len() { result = self.add(Term.App(result, xs[j]), sp)? }
-        self.add(Term.App(result, x), sp)
+        let result = self.add(Term.App(result, x), sp)?
+        if !proof { self.not_function(p, result, depth - 1)? }
+        Ok(result)
     }
 
     // Check graph integrity independently of the parser. Definitions are
@@ -2304,7 +2589,7 @@ fn rank(term: Term) -> u32 {
         Free(_, _) => 31, Case(_, _, _, _) => 32, Pi(_, _, _) => 33, Lam(_, _, _) => 34,
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
-        Drop(_, _, _) => 43
+        Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46
     }
 }
 
@@ -2322,6 +2607,7 @@ fn payload(term: Term) -> Vec(i128) {
         Con(f, k, _) => { out.push(f as i128); out.push(k as i128) }
         Arith(op, _, _) => out.push(match op { Add => 0, Sub => 1, Mul => 2 })
         Pi(e, _, _) | Lam(e, _, _) => out.push(if e { 1 } else { 0 })
+        View(r, f, _, _, _) => { out.push(if r { 1 } else { 0 }); out.push(f as i128) }
         _ => {}
     }
     out
@@ -2343,6 +2629,13 @@ pub fn children(term: Term) -> Vec(u32) {
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
         ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) | Buffer(a) => out.push(a)
         Alloc(a, b) | Free(a, b) | Drop(_, a, b) => { out.push(a); out.push(b) }
+        Ref(a) => out.push(a)
+        Lend(a, b, c) => { out.push(a); out.push(b); out.push(c) }
+        View(_, _, t, cases, x) => {
+            out.push(t)
+            for c in cases { out.push(c) }
+            out.push(x)
+        }
         Load(a, b, c, d) | Store(a, b, c, d) => { out.push(a); out.push(b); out.push(c); out.push(d) }
         Pack(p, a, q) => { out.push(p); out.push(a); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
@@ -3410,4 +3703,82 @@ fn freeing_is_no_computation_in_the_pure_model() {
     let Free(_, _) = c.term(kept) else { panic("code to run keeps the free") }
     let kept = c.normal(dropped, DEPTH).unwrap()
     let Drop(_, _, _) = c.term(kept) else { panic("code to run keeps the drop") }
+}
+
+// fn(x: B) -> U64 { lend(x, fn(r) { f }, fn(a, y) { drop(y, a) }) }, B a
+// heap type, f either 0 or the borrow itself.
+fn lending(escape: bool) -> Core {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    bit_family(&c, 0, true)
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let borrow = c.add(Term.Ref(b), sp).unwrap()
+    let read = if escape { c.add(Term.Var(0), sp).unwrap() } else { c.add(
+        Term.Natural(0),
+        sp
+    ).unwrap() }
+    let f = c.add(Term.Lam(false, borrow, read), sp).unwrap()
+    let a = if escape { borrow } else { u }
+    let y = c.add(Term.Var(0), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let result = if escape { zero } else { c.add(Term.Var(1), sp).unwrap() }
+    let dropped = c.add(Term.Drop(0, y, result), sp).unwrap()
+    let inner = c.add(Term.Lam(false, b, dropped), sp).unwrap()
+    let g = c.add(Term.Lam(false, a, inner), sp).unwrap()
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let lend = c.add(Term.Lend(x, f, g), sp).unwrap()
+    let value = c.add(Term.Lam(false, b, lend), sp).unwrap()
+    let ty = c.add(Term.Pi(false, b, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    c
+}
+
+#[test]
+fn no_borrow_outlives_its_lend() {
+    var c = lending(false)
+    assert(c.check().is_ok(), "a lend reads, then gives the owner back")
+    var c = lending(true)
+    assert(c.check().is_err(), "a lend's result holds no borrow")
+    for term in [Term.Ref(0), Term.Lend(0, 0, 0), Term.View(false, 0, 0, Vec(u32).new(), 0)] {
+        var c = Core.new()
+        c.add(term.clone(), diag.Span.nowhere()).unwrap()
+        assert(c.check().is_err(), "borrow terms obey graph integrity")
+    }
+}
+
+// fn(x: Ref(B) or B) -> U64 { view(B, U64, 0, fn(rest) { 1 }, x) }.
+fn viewing(borrowed: bool, field: bool) -> Core {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    bit_family(&c, 0, true)
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let borrow = c.add(Term.Ref(b), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    // Yes's field arrives borrowed; an owned binder does not match.
+    let yes = c.add(Term.Lam(false, if field { borrow } else { b }, one), sp).unwrap()
+    var cases = Vec(u32).new()
+    cases.push(zero)
+    cases.push(yes)
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let view = c.add(Term.View(false, 0, u, cases, x), sp).unwrap()
+    let domain = if borrowed { borrow } else { b }
+    let value = c.add(Term.Lam(false, domain, view), sp).unwrap()
+    let ty = c.add(Term.Pi(false, domain, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    c
+}
+
+#[test]
+fn views_read_borrows_and_give_borrowed_fields() {
+    var c = viewing(true, true)
+    assert(c.check().is_ok(), "a view reads a borrow")
+    var c = viewing(false, true)
+    assert(c.check().is_err(), "a view does not take an owner")
+    var c = viewing(true, false)
+    assert(c.check().is_err(), "a view's heap fields are borrowed")
 }

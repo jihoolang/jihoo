@@ -14,6 +14,8 @@
 // { ... })`, `store(b, i, v, p)` and `free(b, rest)`, each used once.
 // Owned values are freed where their scope ends: a buffer or heap data
 // that a scope or one of its alternatives does not use is freed there.
+// `ref T` parameters borrow: an owned local passed where a borrow is
+// expected is lent for the expression or `let` value that borrows it.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -40,11 +42,20 @@ fn reserved(name: str) -> bool {
         name == "__jihoo_dependent_main"
 }
 
+// An expression that may borrow the owned values of its context: while it
+// is elaborated, a borrow binder for each follows the context at `base`.
+struct Frame {
+    base: i64
+    owners: Vec(i64)
+    used: Vec(bool)
+}
+
 struct Elaborator {
     c: core.Core
     names: Vec(String)
     ctx: Vec(core.Binding)
     arities: Vec(i64)
+    frames: Vec(Frame)
 }
 
 impl Elaborator {
@@ -136,6 +147,266 @@ impl Elaborator {
             }
         }
         Ok(out)
+    }
+
+    // The type of context entry i, valid at the end of the context.
+    fn type_at(inout self, i: i64) -> Result(u32, diag.Diag) {
+        let ty = self.ctx[i].ty
+        self.c.shift(ty, self.ctx.len() - i, 0, core.DEPTH)
+    }
+
+    // A borrow of the owned local `name`, through the innermost frame that
+    // lends it; None if `name` is not an owned local.
+    fn borrow(inout self, name: str, sp: diag.Span) -> Result(Option(u32), diag.Diag) {
+        var i = self.names.len()
+        var found: Option(i64) = None
+        while i > 0 {
+            i -= 1
+            if self.names[i] == name { found = Some(i); break }
+        }
+        let Some(i) = found else { return Ok(None) }
+        if self.owner(i).is_none() { return Ok(None) }
+        var f = self.frames.len()
+        while f > 0 {
+            f -= 1
+            for j, o in self.frames[f].owners {
+                if o == i {
+                    self.frames[f].used[j] = true
+                    let at = self.frames[f].base + j
+                    return Ok(Some(self.c.add(
+                        core.Term.Var((self.ctx.len() - 1 - at) as u32),
+                        sp
+                    )?))
+                }
+            }
+        }
+        Err(error(sp, ("cannot borrow " + name + " here").as_str()))
+    }
+
+    // Elaborate e where it may borrow an owned value of the context: e
+    // sees a borrow binder for each, and those it does not use are
+    // removed. Returns e, and if it borrows, the owner and e's type (e then
+    // has the borrow at de Bruijn 0); it borrows at most one owner.
+    fn frame(
+        inout self,
+        e: ast.Expr,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result((u32, Option((i64, u32))), diag.Diag) {
+        let base = self.ctx.len()
+        var owners = Vec(i64).new()
+        for i in 0..base { if self.owner(i).is_some() { owners.push(i) } }
+        if owners.len() == 0 { return Ok((self.expr(e, expected, depth)?, None)) }
+        let k = owners.len()
+        for o in owners {
+            let ty = self.type_at(o)?
+            let r = self.c.add(core.Term.Ref(ty), e.span)?
+            self.push("&", r, false)
+        }
+        var used = Vec(bool).new()
+        for _ in 0..k { used.push(false) }
+        self.frames.push(Frame { base, owners: owners.clone(), used })
+        let inner = match expected {
+            Some(t) => Some(self.c.shift(t, k, 0, core.DEPTH)?)
+            None => None
+        }
+        let result = self.expr(e, inner, depth)
+        let Some(frame) = self.frames.pop() else { return Err(error(e.span, "unreachable")) }
+        // The type of a borrowing e, inferred under its borrows.
+        var a: Option(u32) = expected
+        let value = match result {
+            Ok(v) => v
+            Err(d) => {
+                for _ in 0..k { self.pop() }
+                return Err(d)
+            }
+        }
+        if a.is_none() {
+            a = match self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH) {
+                Ok(t) => Some(t)
+                Err(_) => None
+            }
+        }
+        for _ in 0..k { self.pop() }
+        var value = value
+        var count = 0
+        for u in frame.used { if u { count += 1 } }
+        if count > 1 { return Err(error(
+            e.span,
+            "an expression borrows one owned value; borrow the others in a let before it"
+        )) }
+        // Remove the unused borrow binders, innermost first.
+        var kept: u32 = 0
+        var owner: Option(i64) = None
+        var j = k
+        while j > 0 {
+            j -= 1
+            if frame.used[j] { kept += 1; owner = Some(frame.owners[j]); continue }
+            value = self.c.shift(value, -1, kept, core.DEPTH)?
+        }
+        let Some(o) = owner else { return Ok((value, None)) }
+        let a = match (expected, a) {
+            (Some(t), _) => t
+            (None, Some(t)) => {
+                // Inferred under every borrow binder; it depends on none.
+                var t = t
+                for _ in 0..k { t = self.c.shift(t, -1, 0, core.DEPTH)? }
+                t
+            }
+            _ => return Err(error(e.span, "a borrowing expression needs a known type"))
+        }
+        Ok((value, Some((o, a))))
+    }
+
+    // An expression whose borrow, if any, ends with it: lent, then the
+    // owner, given back, is freed.
+    fn scope_expr(
+        inout self,
+        e: ast.Expr,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let (value, info) = self.frame(e, expected, depth)?
+        let Some((o, a)) = info else { return Ok(value) }
+        let sp = e.span
+        let t = self.type_at(o)?
+        let r = self.c.add(core.Term.Ref(t), sp)?
+        let f = self.c.add(core.Term.Lam(false, r, value), sp)?
+        let back = self.c.shift(t, 1, 0, core.DEPTH)?
+        let result = self.c.add(core.Term.Var(1), sp)?
+        let freed = self.release(0, back, result)?
+        let inner = self.c.add(core.Term.Lam(false, back, freed), sp)?
+        let g = self.c.add(core.Term.Lam(false, a, inner), sp)?
+        let x = self.c.add(core.Term.Var((self.ctx.len() - 1 - o) as u32), sp)?
+        self.c.add(core.Term.Lend(x, f, g), sp)
+    }
+
+    // `let name = v` statements, then the tail. A let whose value borrows
+    // an owned local lends it, and the rest sees the owner again.
+    fn lets(
+        inout self,
+        stmts: [ast.Stmt],
+        tail: ast.Expr,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(tail.span, "elaboration nesting limit reached")) }
+        if stmts.len == 0 { return self.scope_expr(tail, expected, depth) }
+        let stmt = stmts[0]
+        let ast.StmtKind.Let(l) = stmt.kind else { return Err(error(
+            stmt.span,
+            "dependent_core blocks contain let statements and a value"
+        )) }
+        let plain = match l.kind { Let => true, _ => false }
+        if l.els.is_some() || !plain { return Err(error(
+            stmt.span,
+            "dependent_core has plain let statements"
+        )) }
+        let name = match l.pat.kind {
+            Name(n, false) if !reserved(n.as_str()) => n.clone()
+            Wild => "_".to_string()
+            _ => return Err(error(l.pat.span, "a let binds a name"))
+        }
+        let annotation = match l.ty {
+            Some(t) => Some(self.ty(t, core.DEPTH)?)
+            None => None
+        }
+        let sp = stmt.span
+        let ghost = match expected { Some(t) => self.proposition(t), None => false }
+        let (value, info) = self.frame(l.value, annotation, depth - 1)?
+        match info {
+            None => {
+                let a = match annotation {
+                    Some(t) => t
+                    None => self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+                }
+                let erased = self.proposition(a)
+                self.push(name.as_str(), a, erased)
+                let inner = match expected {
+                    Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
+                    None => None
+                }
+                let rest = self.lets(stmts[1..], tail, inner, depth - 1)
+                let rest: Result(u32, diag.Diag) = match rest {
+                    Ok(r) => if ghost { Ok(r) } else { self.settle(r, 1) }
+                    Err(d) => Err(d)
+                }
+                self.pop()
+                let f = self.c.add(core.Term.Lam(erased, a, rest?), sp)?
+                self.c.add(core.Term.App(f, value), sp)
+            }
+            Some((o, a)) => {
+                let t = self.type_at(o)?
+                let r = self.c.add(core.Term.Ref(t), sp)?
+                let f = self.c.add(core.Term.Lam(false, r, value), sp)?
+                let owner = self.names[o].clone()
+                let back = self.c.shift(t, 1, 0, core.DEPTH)?
+                self.push(name.as_str(), a, false)
+                self.push(owner.as_str(), back, false)
+                let inner = match expected {
+                    Some(t) => Some(self.c.shift(t, 2, 0, core.DEPTH)?)
+                    None => None
+                }
+                let rest = self.lets(stmts[1..], tail, inner, depth - 1)
+                let rest: Result(u32, diag.Diag) = match rest {
+                    Ok(r) => if ghost { Ok(r) } else { self.settle(r, 2) }
+                    Err(d) => Err(d)
+                }
+                self.pop()
+                self.pop()
+                let g = self.c.add(core.Term.Lam(false, back, rest?), sp)?
+                let g = self.c.add(core.Term.Lam(false, a, g), sp)?
+                let x = self.c.add(core.Term.Var((self.ctx.len() - 1 - o) as u32), sp)?
+                self.c.add(core.Term.Lend(x, f, g), sp)
+            }
+        }
+    }
+
+    // induct(fn(t) { T }, case..., r) on a borrow: structural recursion
+    // that frees nothing. Each case receives the fields, heap ones
+    // borrowed, then the result for each recursive field.
+    fn borrowed_recursion(
+        inout self,
+        args: [ast.Expr],
+        evidence: u32,
+        inner: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let inner = self.c.normal(inner, core.DEPTH)?
+        let core.Term.Ind(f, xs) = self.c.term(inner) else {
+            return Err(error(sp, "induct on a borrow requires heap data"))
+        }
+        let count = self.c.families[f as i64].constructors.len()
+        if args.len != count + 2 { return Err(error(sp, "induct requires one case per constructor")) }
+        var ps = Vec(u32).new()
+        for j in 0..self.c.families[f as i64].params as i64 { ps.push(xs[j]) }
+        let p = self.data_motive(args[0], f, ps.as_slice(), depth - 1)?
+        let core.Term.Lam(_, _, body) = self.c.term(p) else { return Err(error(sp, "unreachable")) }
+        let Ok(t) = self.c.shift(body, -1, 0, core.DEPTH) else {
+            return Err(error(args[0].span, "a recursion on a borrow has a result type of its own"))
+        }
+        var cases = Vec(u32).new()
+        for k in 0..count {
+            let expected = self.c.view_case_type(
+                f,
+                k as u32,
+                ps.as_slice(),
+                t,
+                true,
+                sp,
+                core.DEPTH
+            )?
+            var arity = 0
+            var rest = self.c.normal(expected, core.DEPTH)?
+            loop {
+                let core.Term.Pi(_, _, inner) = self.c.term(rest) else { break }
+                arity += 1
+                rest = inner
+            }
+            cases.push(self.proof_case(args[k + 1], expected, arity, depth - 1)?)
+        }
+        self.c.add(core.Term.View(true, f, t, cases, evidence), sp)
     }
 
     // Lambdas (erased, domain) around a body.
@@ -277,7 +548,15 @@ impl Elaborator {
         let Some(t) = expected else { return Err(error(sp, "match needs an expected type")) }
         let x = self.expr(scrutinee, None, depth - 1)?
         let ty = self.c.infer(x, self.ctx.as_slice(), true, core.DEPTH)?
-        let ty = self.c.normal(ty, core.DEPTH)?
+        var ty = self.c.normal(ty, core.DEPTH)?
+        // A borrow is read without being consumed.
+        let borrowed = match self.c.term(ty) {
+            Ref(inner) => {
+                ty = self.c.normal(inner, core.DEPTH)?
+                true
+            }
+            _ => false
+        }
         let core.Term.Ind(f, _) = self.c.term(ty) else {
             return Err(error(scrutinee.span, "match requires a value of a data type"))
         }
@@ -312,7 +591,9 @@ impl Elaborator {
                 Variant(_, pats) => pats.clone()
                 _ => Vec(ast.Pat).new()
             }
-            var result = self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)?
+            var result = if borrowed {
+                self.c.view_case_type(f, k as u32, ps.as_slice(), t, false, sp, core.DEPTH)?
+            } else { self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)? }
             var domains = Vec((bool, u32)).new()
             for b in binders {
                 let binder = match b.kind {
@@ -336,7 +617,7 @@ impl Elaborator {
                 }
                 _ => {}
             }
-            var value = self.expr(arm.body, Some(result), depth - 1)?
+            var value = self.scope_expr(arm.body, Some(result), depth - 1)?
             // A field the arm does not use is freed.
             if !ghost { value = self.settle(value, domains.len())? }
             arities.push(domains.len())
@@ -351,6 +632,7 @@ impl Elaborator {
         }
         // One arm runs: what one uses, the others free.
         if !ghost { cases = self.balance_cases(cases.as_slice(), arities.as_slice())? }
+        if borrowed { return self.c.add(core.Term.View(false, f, t, cases, x), sp) }
         // On heap data, one level: the node is freed, its fields are given.
         if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, p, cases, x), sp) }
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
@@ -546,6 +828,11 @@ impl Elaborator {
                 }
                 Err(error(t.span, "unsupported type in dependent_core"))
             }
+            // `ref T`: a borrow of a buffer or heap data.
+            Ref(inner, false) => {
+                let inner = self.ty(inner.deref(), depth - 1)?
+                self.c.add(core.Term.Ref(inner), t.span)
+            }
             Array(element, length) => {
                 let element = self.ty(element.deref(), depth - 1)?
                 if self.c.term(element) != core.Term.I64 { return Err(error(
@@ -578,15 +865,11 @@ impl Elaborator {
         expected: Option(u32),
         depth: u32
     ) -> Result(u32, diag.Diag) {
-        if b.stmts.len() != 0 { return Err(error(
-            b.span,
-            "dependent_core blocks require a single value expression"
-        )) }
         let Some(tail) = b.tail else { return Err(error(
             b.span,
             "dependent_core blocks require a value"
         )) }
-        self.expr(tail.deref(), expected, depth)
+        self.lets(b.stmts.as_slice(), tail.deref(), expected, depth)
     }
 
     fn family(inout self, e: ast.Expr, arity: i64, depth: u32) -> Result(u32, diag.Diag) {
@@ -672,7 +955,23 @@ impl Elaborator {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         let sp = e.span
         match e.kind {
-            Name(n) => self.name(n.as_str(), sp)
+            Name(n) => {
+                // An owned local where a borrow is expected is lent.
+                match expected {
+                    Some(t) => {
+                        let t = self.c.normal(t, core.DEPTH)?
+                        match self.c.term(t) {
+                            Ref(_) => match self.borrow(n.as_str(), sp)? {
+                                Some(r) => return Ok(r)
+                                None => {}
+                            }
+                            _ => {}
+                        }
+                    }
+                    None => {}
+                }
+                self.name(n.as_str(), sp)
+            }
             Int(n) => {
                 var unsigned = false
                 match expected {
@@ -791,7 +1090,7 @@ impl Elaborator {
                     self.push(ps[0].name.as_str(), p, true)
                     let yes = self.block(yes, inner_expected, depth - 1)?
                     self.pop()
-                    let no = self.expr(args[3], expected, depth - 1)?
+                    let no = self.scope_expr(args[3], expected, depth - 1)?
                     // One branch runs: what one uses, the other frees.
                     var binders = Vec(Vec((bool, u32))).new()
                     var evidence = Vec((bool, u32)).new()
@@ -974,6 +1273,16 @@ impl Elaborator {
                     let evidence = self.expr(args[args.len() - 1], None, depth - 1)?
                     let ty = self.c.infer(evidence, self.ctx.as_slice(), true, core.DEPTH)?
                     let ty = self.c.normal(ty, core.DEPTH)?
+                    match self.c.term(ty) {
+                        Ref(inner) => return self.borrowed_recursion(
+                            args.as_slice(),
+                            evidence,
+                            inner,
+                            sp,
+                            depth
+                        )
+                        _ => {}
+                    }
                     let core.Term.Ind(f, xs) = self.c.term(ty) else {
                         return Err(error(
                             args[args.len() - 1].span,
@@ -1073,6 +1382,15 @@ impl Elaborator {
                     let normal = self.c.normal(ty, core.DEPTH)?
                     let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
                         return Err(error(sp, "application requires a dependent function"))
+                    }
+                    let lent = self.c.normal(domain, core.DEPTH)?
+                    let named = match a.kind { Name(_) => true, _ => false }
+                    match self.c.term(lent) {
+                        Ref(_) if !named => return Err(error(
+                            a.span,
+                            "a borrow is of a named value: bind this one with let first"
+                        ))
+                        _ => {}
                     }
                     let arg = self.expr(a, Some(domain), depth - 1)?
                     function = self.c.add(core.Term.App(function, arg), sp)?
@@ -1364,7 +1682,8 @@ pub fn compile(
         c: core.Core.new(),
         names: Vec(String).new(),
         ctx: Vec(core.Binding).new(),
-        arities: Vec(i64).new()
+        arities: Vec(i64).new(),
+        frames: Vec(Frame).new()
     }
     for item in module.items { e.definition(item, !library)? }
     var p = core_lower.compile(mem.replace(&e.c, core.Core.new()), tgt)?

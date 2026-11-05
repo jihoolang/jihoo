@@ -70,6 +70,23 @@ class Node:
         return ("con", self.family, self.k, self.fields)
 
 
+class Borrow:
+    """A borrow of a buffer or node; it expires when its lend ends."""
+
+    def __init__(self, value, parent=None):
+        self.value = value
+        self.live = True
+        # A field read through a borrow lives as long as that borrow.
+        self.parent = parent
+
+    def read(self):
+        assert self.live, "a borrow outlived its lend"
+        if self.parent is not None:
+            self.parent.read()
+        assert self.value.alive, "a borrow of a freed value"
+        return self.value
+
+
 def definitions(text):
     """Return (kind, name, type, body) tuples, registering inductives for evaluate.
 
@@ -281,8 +298,40 @@ def evaluate(term, env):
         return evaluate(args[3], {**env, args[2]: (a, b)}) if a < b else evaluate(args[4], env)
     if head == "index":
         array, index, proof = (evaluate(x, env) for x in args)
+        if isinstance(array, Borrow):
+            array = array.read().values
         assert proof == (index, len(array)) and 0 <= index < len(array)
         return array[index]
+    if head == "lend":
+        owner = evaluate(args[0], env)
+        assert isinstance(owner, (Buffer, Node)) and owner.alive, ("lend", owner)
+        borrow = Borrow(owner)
+        result = evaluate(args[1], env)(borrow)
+        borrow.live = False
+        assert not isinstance(result, Borrow), "a borrow escaped its lend"
+        assert owner.alive, "a lent value was freed"
+        return evaluate(args[2], env)(result)(owner)
+    if head in ("view", "view-rec"):
+        family, _, *branches, value = args
+        cases = [evaluate(case, env) for case in branches]
+        metadata = {k: (count, recursive)
+                    for f, k, count, recursive in CONSTRUCTORS.values() if f == family}
+
+        def read(borrow):
+            node = borrow.read()
+            assert isinstance(node, Node) and node.family == family, ("view", family)
+            count, recursive = metadata[node.k]
+            # Heap fields arrive borrowed, under the same lend.
+            fields = [Borrow(x, borrow) if isinstance(x, Node) else x for x in node.fields]
+            result = cases[node.k]
+            for field in fields[PARAMS.get(family, 0):]:
+                result = result(field)
+            if head == "view-rec":
+                for position in recursive:
+                    result = result(read(fields[position]))
+            return result
+
+        return read(evaluate(value, env))
     if head in CONSTRUCTORS:
         return constructor(head, [evaluate(x, env) for x in args])
     if head in FAMILIES:
@@ -557,6 +606,9 @@ def main():
         from core_scope import validate_scope
         validate_scope(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                        NODES)
+        from core_borrow import validate_borrow
+        validate_borrow(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
+                        NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

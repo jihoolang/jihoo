@@ -105,6 +105,8 @@ the runner. Its suites:
   `tests/core_scope.py` adds frees inserted where ownership ends: each
   implicit program must compile to the same MIR as the one with those
   frees written out, and free what it allocates.
+  `tests/core_borrow.py` adds borrows: lends and views against an
+  evaluator whose borrows expire with their lend.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

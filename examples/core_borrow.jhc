@@ -1,0 +1,66 @@
+; Borrows, written out: core_borrow.jh compiles to the same MIR. (Ref T) is
+; a borrow of an owned T. (lend x f g) runs f on a borrow of x, whose
+; result holds no borrow, then g on that result and x. (view F T case... r)
+; takes borrowed heap data apart one level and (view-rec F T case... r)
+; recurses over it; neither frees, and heap fields arrive borrowed.
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def sum
+  (pi xs List I64)
+  (lam xs List (induct List (lam t List I64) (int 0)
+    (lam x I64 (lam0 rest List (lam ih I64 (add x ih)))) xs)))
+
+(def length
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+
+(def total
+  (pi xs (Ref List) I64)
+  (lam xs (Ref List) (view-rec List I64 (int 0)
+    (lam x I64 (lam rest (Ref List) (lam ih I64 (add x ih)))) xs)))
+
+(def head_or
+  (pi xs (Ref List) (pi missing I64 I64))
+  (lam xs (Ref List) (lam missing I64
+    (view List I64 missing (lam x I64 (lam rest (Ref List) x)) xs))))
+
+(def second_or
+  (pi xs (Ref List) (pi missing I64 I64))
+  (lam xs (Ref List) (lam missing I64
+    (view List I64 missing (lam x I64 (lam rest (Ref List) (app head_or rest missing))) xs))))
+
+(def at
+  (pi b (Ref (Buffer 3)) (pi i U64 I64))
+  (lam b (Ref (Buffer 3)) (lam i U64 (if-lt i 3 p (index b i p) (int -1)))))
+
+(export stats
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (app (lam xs List
+      (lend xs (lam r (Ref List) (app total r)) (lam s I64 (lam xs List
+        (lend xs (lam r (Ref List) (app second_or r (int -1))) (lam second I64 (lam xs List
+          (add (add s second) (app sum xs)))))))))
+      (app repeat n x)))))
+
+(export count
+  (pi n U64 U64)
+  (lam n U64
+    (app (lam xs List
+      (lend xs (lam r (Ref List) (app length r)) (lam a U64 (lam xs List (drop List xs a)))))
+      (app repeat n (int 7)))))
+
+(export pick
+  (pi i U64 (pi x I64 I64))
+  (lam i U64 (lam x I64
+    (app (lam b (Buffer 3)
+      (lend b (lam r (Ref (Buffer 3)) (app at r 0)) (lam first I64 (lam b (Buffer 3)
+        (lend b (lam r (Ref (Buffer 3)) (add (app at r i) first))
+          (lam a I64 (lam b (Buffer 3) (free b a))))))))
+      (store (alloc 3 x) 2 (int 40) (decide-lt 2 3))))))

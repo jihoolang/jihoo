@@ -1,0 +1,58 @@
+// Borrows. A parameter `xs: ref List` reads a list without consuming it:
+// passing an owned list where a borrow is expected lends it for that
+// expression, and the owner is usable again after it. `let` ends a borrow
+// before the owner is used again: `stats` reads the list twice, then sums
+// it, consuming it. `match` and `induct` on a borrow read the nodes in
+// place and free nothing; `index` reads a borrowed buffer. A borrow
+// cannot outlive its expression, and an expression that borrows a value
+// cannot also consume it; the kernel checks both. main returns 59.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn sum(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs) }
+
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn total(xs: ref List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs) }
+
+fn head_or(xs: ref List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x
+    }
+}
+
+fn second_or(xs: ref List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => head_or(rest, missing)
+    }
+}
+
+fn at(b: ref buffer(3), i: u64) -> i64 { if_lt(i, 3, fn(p) { index(b, i, p) }, -1) }
+
+export fn stats(n: u64, x: i64) -> i64 {
+    let xs = repeat(n, x)
+    let s = total(xs)
+    let second = second_or(xs, -1)
+    s + second + sum(xs)
+}
+
+export fn count(n: u64) -> u64 {
+    let xs = repeat(n, 7)
+    length(xs)
+}
+
+export fn pick(i: u64, x: i64) -> i64 {
+    let b = store(alloc(3, x), 2, 40, decide_lt(2, 3))
+    let first = at(b, 0)
+    at(b, i) + first
+}
+
+fn main() -> i64 { stats(3, 2) + pick(2, 5) }

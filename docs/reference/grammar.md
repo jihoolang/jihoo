@@ -80,7 +80,8 @@ alias    = "type" name [ "=" type ]
   [owned buffers](../internals/dependent-core.md#owned-buffers); a
   recursive `enum` is [heap data](../internals/dependent-core.md#recursive-data-on-the-heap),
   and owned values a scope does not use are
-  [freed where it ends](../internals/dependent-core.md#frees-where-ownership-ends),
+  [freed where it ends](../internals/dependent-core.md#frees-where-ownership-ends);
+  `ref T` parameters and `let` statements [borrow](../internals/dependent-core.md#borrows),
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)

@@ -121,6 +121,7 @@ in the existing grammar, not global keywords or standard-library types:
 | `n: erased(u64)` | an [erased index](#erased-indices-and-parameters): a u64 for types and evidence only |
 | `buffer(n)`, `alloc(n, x)` | an [owned buffer](#owned-buffers) of n i64 values; a new one, each x |
 | `load(b, i, p, fn(x, b) { k })`, `store(b, i, v, p)`, `free(b, rest)` | read b[i] and continue with b; write in place; free a buffer or heap data, then `rest` |
+| `xs: ref T`, `let x = v` | a [borrow](#borrows) of a buffer or heap data; a local, which may end a borrow |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
 | `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
@@ -708,6 +709,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(case F P case ... v)` | one level of case analysis of heap data: the node is freed |
 | `(load b i p k)`, `(store b i v p)`, `(free b rest)` | read and continue with `k x b`; write in place; free, then `rest` |
 | `(drop F v rest)` | free heap data `v` of type `F` and every node it owns, then `rest` |
+| `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` |
+| `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -892,6 +895,22 @@ free in one branch and again after it, frees of scalars and flat data,
 captures, and, in `.jhc`, leaks and drops of flat data, of another type,
 of a buffer or twice. Kernel unit tests check that heap data is dropped
 exactly once and that freeing is no computation in conversion.
+`tests/core_borrow.py` adds borrows: both frontends' MIR and native
+execution against the evaluator, whose borrows expire with their lend
+and fail any later read; recursions over borrows free nothing; trees and
+lists read through borrowed fields, a borrow in one branch and in a
+match arm; counted allocations and frees. It rejects borrowing and
+consuming in one expression (either order), uses after a move, escaping
+or returned borrows, consuming, freeing, storing to or loading from a
+borrow, unchecked indices, two owners in one expression, temporaries,
+borrows in exports, of scalars or flat data and in data fields, and
+captures by a recursion over a borrow; in `.jhc`, lends whose result is
+a borrow, a function or of the wrong type, of a scalar or through
+another type's borrow, that also use or leak the owner, views of an
+owner, freeing or owning a borrowed field, and wrong arities; and five whole programs that a type
+variable or a continuation's closure would otherwise make unsound, while
+a polymorphic identity on i64 is still accepted. Kernel unit tests check
+that no borrow outlives its lend and that views give borrowed fields.
 
 ## Owned memory plan
 
@@ -927,9 +946,8 @@ The steps, each an ordinary slice with its tests:
    Implemented with step 2.
 4. Frees inserted by the source elaborator where an owner's scope ends.
    Implemented: see [frees where ownership ends](#frees-where-ownership-ends).
-5. Borrows: reading a value without consuming it, as in `length(&xs)`.
-   Until then a function that reads an owned value takes it and gives it
-   back.
+5. Borrows: reading a value without consuming it, as in `length(xs)`
+   with `xs: ref List`. Implemented: see [borrows](#borrows).
 
 ## Owned buffers
 
@@ -1129,12 +1147,82 @@ valgrind finds every node and buffer freed. `tests/core_scope.py` checks
 twelve more such pairs, from unused parameters to nested branches and
 trees with a list inside.
 
-Not yet supported for heap data: borrows (reading a list without
-consuming it), mutual recursion, recursion depth beyond the machine
-stack, and heap data in exports.
+## Borrows
 
-Not yet supported: borrows (a function that reads a buffer takes it and
-gives it back), buffers of other element types, and buffers in data
+Step 5 of the [plan](#owned-memory-plan). A parameter `xs: ref List` (or
+`b: ref buffer(n)`) reads an owned value without consuming it. Passing
+an owned local where a borrow is expected lends it, and the owner is
+usable again after the expression that borrows it:
+
+```jihoo
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+export fn stats(n: u64, x: i64) -> i64 {
+    let xs = repeat(n, x)
+    let s = total(xs)                 // borrows xs
+    let second = second_or(xs, -1)    // borrows it again
+    s + second + sum(xs)              // consumes it
+}
+```
+
+`match` and `induct` on a borrow read the nodes in place and free
+nothing; the fields on the heap arrive borrowed, so `second_or` can call
+`head_or(rest, missing)` on the tail. `index(b, i, p)` reads a borrowed
+buffer. A borrow is copied freely; it cannot be freed, consumed, stored
+or loaded from, and data, buffers and arrays cannot hold one.
+
+The kernel has one rule that ends borrows, `Lend(x, f, g)`: f receives
+`Ref(T)`, a borrow of the owned x : T, and its result A can hold no
+borrow and is no function; g then receives that result and x itself. A
+borrow is made only by a lend or by reading a field through another
+borrow, so none outlives the lend that made it, and the owner, used once
+by the lend, cannot be consumed while it is lent. The result type must
+be known to hold no borrow: a scalar, a refinement, an array, a buffer
+or data, not a type variable. `View(rec, F, T,
+cases, r)` reads borrowed heap data: one level, or a structural
+recursion whose cases receive the fields and the results for the
+recursive ones. At run time a borrow is the owner's pointer, a lend runs
+f and then g, and a view is the same switch and recursion as for owned
+data without the frees.
+
+The elaborator, which is not trusted, finds the lends. A block's value,
+a `let` value, a match arm and an `else` value may each borrow one owned
+local of their context: they are elaborated with a borrow binder for
+each, and the one they use becomes a lend around them. After a `let`,
+the rest of the block sees the owner again; after the others, the owner
+is freed. So an expression that borrows a value cannot also consume it
+(`total(xs) + sum(xs)` is a double use): bind the borrowing part with
+`let` first. Only a named value is lent: `length(repeat(2, 1))` asks for
+a `let`.
+
+[`examples/core_borrow.jh`](../../examples/core_borrow.jh) and its
+[core equivalent](../../examples/core_borrow.jhc), which writes out the
+lends and views, compile to the same MIR: the recursions over borrows
+call no `free`, and valgrind finds every node and buffer freed.
+
+An independent review of this step found two ways around these rules,
+which the kernel now rejects, and which `tests/core_borrow.py` keeps as
+whole programs. First, a type variable is used without linearity: had it
+been instantiated with a buffer, a function could use its argument
+twice, and as a lend's result it could stand for a borrow. A type
+argument at run time is therefore first order: no buffer, heap data,
+borrow or function type occurs in it. Second, a continuation that
+receives owned values (a load's, a lend's, a case's) runs once with the
+arguments it is given; had its result been a function, that function
+could hold those values and run twice. So such a result is not a
+function type. The first and the closures of loads and cases predate
+borrows.
+
+Not yet supported: borrows in types and evidence (normalization does
+not compute through a lend or a view, so a proof cannot mention
+`length(xs)` with `xs: ref List`), lending more than one owner in an
+expression, lending a temporary, mutable borrows, and returning a borrow
+from a function, which source cannot write.
+
+Not yet supported for heap data: mutual recursion, recursion depth
+beyond the machine stack, and heap data in exports.
+
+Not yet supported: buffers of other element types, and buffers in data
 types, exports and arrays. A data value
 whose fields touch memory cannot yet be passed to a function: the
 argument is bound once, and data has no runtime representation, so

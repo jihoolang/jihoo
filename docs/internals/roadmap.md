@@ -500,7 +500,27 @@ the elaborator stays untrusted. `examples/core_scope.jh` writes no
 writes them out, as do twelve more implicit/explicit pairs; native
 execution counts allocations and frees, valgrind finds none left, and
 10 source and 8 core rejections and kernel tests run in the `core`
-suite. Next: step (5), borrows.
+suite.
+
+Implemented step (5), borrows: a `ref T` parameter reads a buffer or
+heap data without consuming it, passing an owned local lends it for the
+expression or `let` value that borrows it, and `match`, `induct` and
+`index` read borrows in place. The kernel adds `Ref(T)`, `Lend(x, f,
+g)`, whose f reads x through a borrow and returns no borrow or function
+before g gets x back, and `View`, one-level or recursive reading that
+frees nothing; the elaborator, untrusted, finds the lends.
+`examples/core_borrow.jh` compiles to the same MIR as the hand-written
+`examples/core_borrow.jhc`; its recursions over borrows call no `free`.
+Native execution counts allocations and frees against an evaluator whose
+borrows expire with their lend, valgrind finds none left, and 21 source
+and 15 core rejections, five whole programs and kernel tests run in the
+`core` suite. A review by Codex found that a type variable could stand
+for a borrow or an owned type, and that a continuation given owned
+values could return a closure holding them (the latter since step 1);
+type arguments at run time are now first order and such continuations
+return no function. This
+completes the memory plan; next are borrows in proofs (computing through
+lends and views in conversion) and the remaining 0.5 items below.
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing
