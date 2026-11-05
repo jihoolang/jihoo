@@ -712,6 +712,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` (of a variable: [dependent](#dependent-lends)) |
 | `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
 | `(borrow x)` | a borrow of the owned `x`, in types and evidence, or in the reader of a lend of `x` |
+| `(deref r)` | the value a borrow `r` reads, in types and evidence only |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -930,6 +931,12 @@ rejections of evidence about the wrong list, owners used in a reader,
 before a lend, twice or never after it, and borrows by name outside
 their lend. Kernel unit tests check that the owner given back is used
 exactly once, by either name.
+`tests/core_borrow_induct.py` adds proofs by induction over borrows:
+both frontends' MIR, from which the induction is erased, and native
+execution against the evaluator, which reads `(deref r)` as the value r
+borrows; a lemma over a borrowed tree used at run time; and 6 source and
+5 core rejections. Kernel unit tests check both of `Deref`'s reductions
+and that it is evidence only.
 
 ## Owned memory plan
 
@@ -1300,14 +1307,15 @@ to the same MIR, from which the proofs and preconditions are erased: the
 only recursion left is `doubled`'s. `tests/core_borrow_proof.py` runs
 both against the independent evaluator, which evaluates evidence without
 consuming or freeing memory, and checks counted allocations and frees
-and 8 source and 6 core rejections: false computations through views and
+and 7 source and 6 core rejections: false computations through views and
 lends, a proof that needs induction, unproved preconditions, and a
 `Borrow` in code that runs or of a scalar or a borrow. An independent
 review found no unsound case.
 
-Not yet supported: a proof by induction over a borrow (a view's result
-is runtime data, not a motive). Evidence about an owner applies to the
-borrow a lend makes of it: see [dependent lends](#dependent-lends).
+A proof by induction over a borrow is one over the value it reads:
+see [induction over a borrow](#induction-over-a-borrow). Evidence about
+an owner applies to the borrow a lend makes of it: see
+[dependent lends](#dependent-lends).
 
 ## Dependent lends
 
@@ -1374,6 +1382,50 @@ one, a false size, a use after moving, the owner used in the reader,
 unused or used twice after the lend, consumed before it or by a nested
 lend, a borrow by name after the lend, of another owner or as the
 reader's result, and a continuation that returns a closure.
+
+## Induction over a borrow
+
+`induct` into a proposition on a borrow is a proof by induction over
+the list or tree the borrow reads:
+
+```jihoo
+fn twice(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 2 }, xs) }
+
+fn twice_length(xs: ref List) -> Eq(twice(xs), length(xs) + length(xs)) {
+    induct(fn(t) { Eq(twice(t), length(t) + length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(twice(rest) + 2, k + 2) }, ih, refl(twice(rest) + 2))
+    }, xs)
+}
+```
+
+A view's result is runtime data, not a motive, so the proof is not a
+view. One kernel term, `Deref(r)` (in `.jhc`, `(deref r)`), is the value
+a borrow `r : Ref(T)` reads, of type T, allowed only in types and
+evidence. In the pure model a borrow is the value it reads, so
+`Deref(Borrow(x))` is x and `Borrow(Deref(r))` is r. The elaborator
+makes the proof an ordinary induction over `Deref(xs)`, whose motive
+reads each value `t` through `Borrow(t)`: its cases receive the fields,
+the recursive ones erased, and the hypotheses. Its result, the motive at
+`Deref(xs)`, is the claim about `xs`, since `Borrow(Deref(xs))` is `xs`.
+Such a proof is evidence and never runs, so it neither reads nor
+consumes the list.
+
+[`examples/core_borrow_induct.jh`](../../examples/core_borrow_induct.jh)
+and its [core equivalent](../../examples/core_borrow_induct.jhc)
+compile to the same MIR: the induction is erased, and a precondition
+about `length(xs) + length(xs)` justifies a load at `twice(xs)` without
+a bounds check, the list's length checked once through a
+[dependent lend](#dependent-lends). `tests/core_borrow_induct.py` runs
+both against the evaluator with counted allocations, proves a tree
+lemma by induction over a borrowed tree and uses it at run time, and
+checks 6 source and 5 core rejections: false steps and bases, a claim
+proved by `refl` that needs induction or by a hypothesis alone, evidence
+about another borrow, and a `Deref` in code that runs or of a value that
+is not a borrow.
+
+Not yet supported: case analysis (`match`) of a borrow in a proof, and
+runtime recursion over a borrow whose result type depends on it, such as
+reading the i-th element with evidence that i is below the length.
 
 The next stages of the replacement are:
 

@@ -106,6 +106,10 @@ pub enum Term {
     // evidence only: nothing is lent at run time. Conversion reads it
     // through views, and a lend computes to its continuations on one.
     Borrow(u32)
+    // The value a borrow r : Ref(T) reads, of type T, in types and evidence
+    // only: a proof by induction over a borrow is one over this value.
+    // Deref(Borrow(x)) is x and Borrow(Deref(r)) is r.
+    Deref(u32)
     // Reading borrowed heap data of a family with no true indices: whether
     // it is a recursion, the family, the result type, one case per
     // constructor and the borrow. Nothing is freed; each case receives the
@@ -363,6 +367,7 @@ impl Core {
             )
             Ref(t) => Term.Ref(self.transform(t, cutoff, delta, replacement, depth - 1)?)
             Borrow(x) => Term.Borrow(self.transform(x, cutoff, delta, replacement, depth - 1)?)
+            Deref(r) => Term.Deref(self.transform(r, cutoff, delta, replacement, depth - 1)?)
             Lend(x, f, g) => Term.Lend(self.transform(x, cutoff, delta, replacement, depth - 1)?,
                 self.transform(f, cutoff, delta, replacement, depth - 1)?,
                 self.transform(g, cutoff, delta, replacement, depth - 1)?)
@@ -745,7 +750,14 @@ impl Core {
                 self.normal(rest, depth - 1)?
             )
             Ref(t) => Term.Ref(self.normal(t, depth - 1)?)
-            Borrow(x) => Term.Borrow(self.normal(x, depth - 1)?)
+            Borrow(x) => {
+                let x = self.normal(x, depth - 1)?
+                match self.term(x) { Deref(r) => return Ok(r), _ => Term.Borrow(x) }
+            }
+            Deref(r) => {
+                let r = self.normal(r, depth - 1)?
+                match self.term(r) { Borrow(x) => return Ok(x), _ => Term.Deref(r) }
+            }
             // In the pure model a lend is g(f(borrow of x), x): the borrow
             // reads the value x has. Code to run keeps it.
             Lend(x, f, g) if !self.runtime => {
@@ -1162,7 +1174,8 @@ impl Core {
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Drop(f, a, b), Drop(g, c, d)) =>
                 f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
-            (Ref(a), Ref(b)) | (Borrow(a), Borrow(b)) => self.identical(a, b, depth - 1)
+            (Ref(a), Ref(b)) | (Borrow(a), Borrow(b)) | (Deref(a), Deref(b)) =>
+                self.identical(a, b, depth - 1)
             (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
                 self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
             (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
@@ -1967,6 +1980,14 @@ impl Core {
                     return Err(self.error(x, "a borrow is of a buffer or heap data"))
                 }
                 Term.Ref(t)
+            }
+            // Only in types and evidence: the value a borrow reads.
+            Deref(r) => {
+                if !ghost { return Err(self.error(id, "a borrow's value is evidence only")) }
+                let ty = self.infer(r, ctx, true, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Ref(t) = self.term(ty) else { return Err(self.error(r, "expected a borrow")) }
+                return Ok(t)
             }
             Lend(x, f, g) => {
                 let t = self.infer(x, ctx, ghost, depth - 1)?
@@ -2852,7 +2873,7 @@ fn rank(term: Term) -> u32 {
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
         Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46,
-        Borrow(_) => 47
+        Borrow(_) => 47, Deref(_) => 48
     }
 }
 
@@ -2892,7 +2913,7 @@ pub fn children(term: Term) -> Vec(u32) {
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
         ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) | Buffer(a) => out.push(a)
         Alloc(a, b) | Free(a, b) | Drop(_, a, b) => { out.push(a); out.push(b) }
-        Ref(a) | Borrow(a) => out.push(a)
+        Ref(a) | Borrow(a) | Deref(a) => out.push(a)
         Lend(a, b, c) => { out.push(a); out.push(b); out.push(c) }
         View(_, _, t, cases, x) => {
             out.push(t)
@@ -4210,4 +4231,37 @@ fn a_dependent_lend_gives_back_its_owner_itself() {
             assert(ok == (back != 2), "the owner is used exactly once after its lend")
         }
     }
+}
+
+#[test]
+fn derefs_are_the_values_borrows_read() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let count = counting(&c)
+    assert(c.check().is_ok(), "a recursive view counts")
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let borrow = c.add(Term.Borrow(x), sp).unwrap()
+    let deref = c.add(Term.Deref(borrow), sp).unwrap()
+    assert(c.equal(deref, x, DEPTH).unwrap(), "deref(borrow(x)) is x")
+    let r = c.add(Term.Deref(x), sp).unwrap()
+    let back = c.add(Term.Borrow(r), sp).unwrap()
+    assert(c.equal(back, x, DEPTH).unwrap(), "borrow(deref(r)) is r")
+    // count(borrow(deref(borrow(Yes(Yes(No)))))) computes to 2.
+    let value = two_yes(&c)
+    let b = c.add(Term.Borrow(value), sp).unwrap()
+    let d = c.add(Term.Deref(b), sp).unwrap()
+    let b = c.add(Term.Borrow(d), sp).unwrap()
+    let counted = c.add(Term.App(count, b), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    assert(c.equal(counted, two, DEPTH).unwrap(), "through a deref")
+    // In code that runs, a deref is rejected: fn(r: Ref(B)) -> B { deref(r) }.
+    let none = Vec(u32).new()
+    let ty_b = c.add(Term.Ind(0, none), sp).unwrap()
+    let ref_b = c.add(Term.Ref(ty_b), sp).unwrap()
+    let v0 = c.add(Term.Var(0), sp).unwrap()
+    let body = c.add(Term.Deref(v0), sp).unwrap()
+    let value = c.add(Term.Lam(false, ref_b, body), sp).unwrap()
+    let ty = c.add(Term.Pi(false, ref_b, ty_b), sp).unwrap()
+    c.definitions.push(Definition { name: "d".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "a borrow's value is evidence only")
 }

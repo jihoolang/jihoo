@@ -24,7 +24,6 @@ SOURCE_INVALID = {
     "missing-precondition": "fn bad(xs: List) -> i64 { head(xs, decide_lt(0, 1)) }",
     "unproved-doubled": "fn bad(xs: List, p: erased(Lt(0, length(xs)))) -> i64 { head(doubled(xs), p) }",
     "runtime-temporary": "fn bad(x: i64) -> u64 { length(pair(x)) }",
-    "proof-over-borrow": "fn bad(xs: ref List) -> Eq(length(xs), length(xs)) { induct(fn(t) { Eq(length(t), length(t)) }, refl(0), fn(x, rest, ih) { refl(length(rest) + 1) }, xs) }",
 }
 
 CORE_INVALID = {

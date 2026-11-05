@@ -343,6 +343,10 @@ def evaluate(term, env):
     if head == "borrow":
         # Evidence only: a borrow of a value built for the type, never freed.
         return ghostly(lambda: Borrow(evaluate(args[0], env)))
+    if head == "deref":
+        # Evidence only: the value a borrow reads.
+        borrowed = ghostly(lambda: evaluate(args[0], env))
+        return borrowed.value if isinstance(borrowed, Borrow) else borrowed
     if head == "lend":
         owner = evaluate(args[0], env)
         assert isinstance(owner, (Buffer, Node)) and owner.alive, ("lend", owner)
@@ -656,6 +660,9 @@ def main():
         from core_lend import validate_lend
         validate_lend(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                       NODES)
+        from core_borrow_induct import validate_borrow_induct
+        validate_borrow_induct(compiler, root, temporary, environment, run, definitions, evaluate,
+                               BUFFERS, NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

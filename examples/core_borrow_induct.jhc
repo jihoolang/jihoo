@@ -1,0 +1,64 @@
+; Proofs by induction over a borrow, written out: core_borrow_induct.jh
+; compiles to the same MIR. (deref r) is the value a borrow r : (Ref T)
+; reads, of type T, in types and evidence only; (deref (borrow x)) is x
+; and (borrow (deref r)) is r. A proof by induction over a borrow is an
+; induction over (deref r), whose motive reads each value through
+; (borrow t).
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def length
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+
+(def twice
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 2)))) xs)))
+
+(def twice_length
+  (pi xs (Ref List) (Eq (app twice xs) (uadd (app length xs) (app length xs))))
+  (lam xs (Ref List)
+    (induct List
+      (lam t List (Eq (app twice (borrow t)) (uadd (app length (borrow t)) (app length (borrow t)))))
+      (refl 0)
+      (lam x I64 (lam0 rest List
+        (lam0 ih (Eq (app twice (borrow rest))
+                     (uadd (app length (borrow rest)) (app length (borrow rest))))
+          (transport (lam k U64 (Eq (uadd (app twice (borrow rest)) 2) (uadd k 2))) ih
+            (refl (uadd (app twice (borrow rest)) 2))))))
+      (deref xs))))
+
+(def size
+  (pi xs (Ref List) (Refine (lam k U64 (Eq k (app length xs)))))
+  (lam xs (Ref List)
+    (pack (lam k U64 (Eq k (app length xs))) (app length xs) (refl (app length xs)))))
+
+(def at_twice
+  (pi xs (Ref List) (pi b (Buffer 9) (pi0 p (Lt (uadd (app length xs) (app length xs)) 9) I64)))
+  (lam xs (Ref List) (lam b (Buffer 9) (lam0 p (Lt (uadd (app length xs) (app length xs)) 9)
+    (app (lam0 e (Eq (uadd (app length xs) (app length xs)) (app twice xs))
+      (load b (app twice xs) (transport (lam k U64 (Lt k 9)) e p)
+        (lam v I64 (lam b (Buffer 9) (free b v)))))
+      (transport (lam k U64 (Eq k (app twice xs))) (app twice_length xs) (refl (app twice xs))))))))
+
+(export demo
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (app (lam xs List
+      (lend xs (lam r (Ref List) (app size r))
+        (lam k (Refine (lam m U64 (Eq m (app length (borrow xs))))) (lam y List
+          (if-lt (uadd (witness k) (witness k)) 9 q
+            (lend xs
+              (lam r (Ref List)
+                (app at_twice r (store (alloc 9 (int 0)) 4 x (decide-lt 4 9))
+                  (transport (lam m U64 (Lt (uadd m m) 9)) (proof k) q)))
+              (lam a I64 (lam xs List (drop List xs a))))
+            (drop List xs (int -1)))))))
+      (app repeat n x)))))

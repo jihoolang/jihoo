@@ -397,6 +397,32 @@ impl Elaborator {
         var ps = Vec(u32).new()
         for j in 0..self.c.families[f as i64].params as i64 { ps.push(xs[j]) }
         let p = self.data_motive(args[0], f, ps.as_slice(), depth - 1)?
+        // Into a proposition: a proof by induction over the value the borrow
+        // reads, Deref(r), as over an owned value. Evidence never runs.
+        if self.proposition_motive(p)? {
+            let value = self.c.add(core.Term.Deref(evidence), sp)?
+            var cases = Vec(u32).new()
+            for k in 0..count {
+                let expected = self.c.recursion_case_type(
+                    f,
+                    k as u32,
+                    p,
+                    ps.as_slice(),
+                    true,
+                    sp,
+                    core.DEPTH
+                )?
+                var arity = 0
+                var rest = self.c.normal(expected, core.DEPTH)?
+                loop {
+                    let core.Term.Pi(_, _, inner) = self.c.term(rest) else { break }
+                    arity += 1
+                    rest = inner
+                }
+                cases.push(self.evidence_case(args[k + 1], expected, arity, depth - 1)?)
+            }
+            return self.c.add(core.Term.Elim(f, p, cases, value), sp)
+        }
         let core.Term.Lam(_, _, body) = self.c.term(p) else { return Err(error(sp, "unreachable")) }
         let Ok(t) = self.c.shift(body, -1, 0, core.DEPTH) else {
             return Err(error(args[0].span, "a recursion on a borrow has a result type of its own"))
@@ -934,6 +960,20 @@ impl Elaborator {
             proposition = self.c.add(core.Term.Lam(false, u, proposition), e.span)?
         }
         Ok(proposition)
+    }
+
+    // A case of a proof: evidence, which never runs.
+    fn evidence_case(
+        inout self,
+        e: ast.Expr,
+        expected: u32,
+        arity: i64,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.ghost += 1
+        let result = self.proof_case(e, expected, arity, depth)
+        self.ghost -= 1
+        result
     }
 
     fn proof_case(

@@ -1,0 +1,46 @@
+// Proofs by induction over a borrow. induct into a proposition on a
+// borrow `xs: ref List` is a proof about the list it reads, case by case,
+// with an induction hypothesis for the rest: twice_length proves that one
+// borrowing function equals another. at_twice's caller proves its
+// precondition about lengths; it reads the buffer at twice(xs), which
+// walks the list once, and the lemma turns one into the other. main
+// returns 9.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn twice(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 2 }, xs) }
+
+fn twice_length(xs: ref List) -> Eq(twice(xs), length(xs) + length(xs)) {
+    induct(fn(t) { Eq(twice(t), length(t) + length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(twice(rest) + 2, k + 2) }, ih, refl(twice(rest) + 2))
+    }, xs)
+}
+
+fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) { pack(length(xs), refl(length(xs))) }
+
+fn at_twice(xs: ref List, b: buffer(9), p: erased(Lt(length(xs) + length(xs), 9))) -> i64 {
+    let e = transport(fn(k) { Eq(k, twice(xs)) }, twice_length(xs), refl(twice(xs)))
+    load(b, twice(xs), transport(fn(k) { Lt(k, 9) }, e, p), fn(v, b) { v })
+}
+
+export fn demo(n: u64, x: i64) -> i64 {
+    let xs = repeat(n, x)
+    let k = size(xs)
+    if_lt(witness(k) + witness(k), 9, fn(q) {
+        at_twice(
+            xs,
+            store(alloc(9, 0), 4, x, decide_lt(4, 9)),
+            transport(fn(m) { Lt(m + m, 9) }, proof(k), q)
+        )
+    }, -1)
+}
+
+fn main() -> i64 { demo(2, 9) }

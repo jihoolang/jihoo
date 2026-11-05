@@ -532,7 +532,7 @@ proved by induction about a borrowing `length`, `length(pair(x)) = 2` and
 a function that lends a local list compute by `refl`, and preconditions
 mention the lists their functions consume. `examples/core_borrow_proof.jh`
 compiles to the same MIR as its `.jhc`, with every proof erased; native
-execution against the evaluator, counted allocations, valgrind, 8 source
+execution against the evaluator, counted allocations, valgrind, 7 source
 and 6 core rejections and kernel tests run in the `core` suite. An
 independent review (Codex) found no unsound case and one evidence
 position the elaborator missed, now fixed.
@@ -547,6 +547,17 @@ without a bounds check, from a precondition about the owner or from a
 size whose type mentions it; its MIR equals the `.jhc`'s, and native
 execution against the evaluator, counted allocations, 6 source and 10
 core rejections and kernel tests run in the `core` suite.
+
+Implemented induction over a borrow
+([design](dependent-core.md#induction-over-a-borrow)): `induct` into a
+proposition on a borrow proves by induction about the value it reads.
+One kernel term, `Deref(r)`, is that value, in types and evidence only,
+with `Deref(Borrow(x)) = x` and `Borrow(Deref(r)) = r`.
+`examples/core_borrow_induct.jh` proves `twice(xs) = length(xs) +
+length(xs)` for a borrowed list and uses it to read a buffer at
+`twice(xs)` without a bounds check; its MIR equals the `.jhc`'s, and
+native execution against the evaluator, a lemma about borrowed trees, 6
+source and 5 core rejections and kernel tests run in the `core` suite.
 
 #### The 0.5.0 release gate for the native core
 
@@ -569,11 +580,16 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    is checked with its borrow reading the owner and the owner given back
    as itself, so evidence about the owner holds of the borrow and after
    the lend, and a borrowing call's result type may mention the owner.
-   Remaining, in order: (b) proofs by induction over a borrow;
-   (c) loops with a dependent accumulator (an invariant); (d) mutable
-   borrows and in-place updates of heap data; (e) a `std` slice in the
-   core (a vector as an owned buffer with its length and capacity),
-   with its contracts stated as types.
+   Done: (b) proofs by induction over a borrow
+   ([design](dependent-core.md#induction-over-a-borrow)), an induction
+   over the value the borrow reads. Remaining, in order:
+   (c) case analysis and recursion over a borrow at run time whose
+   result type depends on it, such as reading the i-th element with
+   evidence that i is below the length; (d) loops with a dependent
+   accumulator (an invariant); (e) mutable borrows and in-place updates
+   of heap data; (f) a `std` slice in the core (a vector as an owned
+   buffer with its length and capacity), with its contracts stated as
+   types.
 2. **Specification.** One normative description of the core: its terms,
    typing with quantities (erased, owned, scalar) and the ghost position,
    the pure model's reductions (including views, lends and `Borrow`) and
