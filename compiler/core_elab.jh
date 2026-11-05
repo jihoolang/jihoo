@@ -3,7 +3,8 @@
 // fn(p) { yes }, no), index(xs, i, p), decide_lt(a, b), Eq, refl,
 // if_eq, proposition-only transport, inductive propositions declared as
 // `trait Name(i: u64, ...) { fn ctor(...) -> Name(...) }` and their
-// structural induction, `induct(P, case..., evidence)`.
+// structural induction, `induct(P, case..., evidence)`, i64 `+ - *` and
+// bounded loops, `fold(n, init, fn(i, p, acc) { body })`.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -19,7 +20,8 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 }
 
 fn reserved(name: str) -> bool {
-    name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "if_lt" ||
+    name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "fold" ||
+        name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
         name == "__jihoo_dependent_main"
@@ -248,20 +250,20 @@ impl Elaborator {
         }
         if ps.len() != arity || ret.is_some() { return Err(error(
             e.span,
-            "wrong induction case arity"
+            "wrong number of lambda parameters"
         )) }
         var domains = Vec((bool, u32)).new()
         var result = expected
         for i, p in ps {
             if p.ty.is_some() || reserved(p.name.as_str()) {
-                return Err(error(p.span, "induction case requires untyped binders"))
+                return Err(error(p.span, "contextual lambda parameters are untyped"))
             }
             for j in 0..i {
-                if ps[j].name == p.name { return Err(error(p.span, "duplicate induction parameter")) }
+                if ps[j].name == p.name { return Err(error(p.span, "duplicate lambda parameter")) }
             }
             let normal = self.c.normal(result, core.DEPTH)?
             let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else {
-                return Err(error(p.span, "invalid induction case signature"))
+                return Err(error(p.span, "too many lambda parameters"))
             }
             self.push(p.name.as_str(), domain, erased)
             domains.push((erased, domain))
@@ -313,6 +315,20 @@ impl Elaborator {
                 self.c.add(core.Term.Elements(xs), sp)
             }
             Block(b) => self.block(b, expected, depth - 1)
+            Binary(op, a, b) => {
+                let arith = match op {
+                    Add => core.Arith.Add
+                    Sub => core.Arith.Sub
+                    Mul => core.Arith.Mul
+                    _ => return Err(error(sp, "dependent_core supports only i64 + - and *"))
+                }
+                // Only i64 arithmetic: u64 values appear in propositions,
+                // whose meaning machine wrapping would change.
+                let i = self.c.add(core.Term.I64, sp)?
+                let a = self.expr(a.deref(), Some(i), depth - 1)?
+                let b = self.expr(b.deref(), Some(i), depth - 1)?
+                self.c.add(core.Term.Arith(arith, a, b), sp)
+            }
             Call(f, args) => {
                 let ast.ExprKind.Name(n) = f.kind else { return Err(error(
                     f.span,
@@ -364,6 +380,19 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
+                }
+                if n == "fold" {
+                    if args.len() != 3 { return Err(error(
+                        sp,
+                        "fold requires a count, an initial value and fn(i, p, acc) { body }"
+                    )) }
+                    let u = self.u64(sp)?
+                    let count = self.expr(args[0], Some(u), depth - 1)?
+                    let i = self.c.add(core.Term.I64, sp)?
+                    let init = self.expr(args[1], Some(i), depth - 1)?
+                    let ty = self.c.fold_body_type(count, sp, core.DEPTH)?
+                    let body = self.proof_case(args[2], ty, 3, depth - 1)?
+                    return self.c.add(core.Term.Fold(count, init, body), sp)
                 }
                 if n == "induct" {
                     if args.len() < 2 { return Err(error(

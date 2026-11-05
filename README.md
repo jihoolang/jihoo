@@ -188,7 +188,9 @@ strictly positive inductive propositions: the
 that every node reachable along its declared edges is in bounds, and the
 [chain example](examples/core_chain.jh) declares equality chains, which
 were built into the kernel before. The recursive proofs are erased before
-the array loads are emitted. General `.jh` coverage,
+the array loads are emitted. The [loop example](examples/core_loop.jh)
+sums arrays of any length with `fold`, whose body has a proof of its
+index's bound, so the loads have no bounds checks. General `.jh` coverage,
 dependent motives, inductive data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 

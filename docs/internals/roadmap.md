@@ -386,7 +386,19 @@ Both frontends, both targets at `-O0`/`-O2`, native differential
 execution, 52 source and 21 core rejections and raw kernel tests of
 positivity, ordering and elimination run in the `core` suite.
 
-Next: dependent motives, inductive data types, arithmetic on indices,
+Implemented loops and arithmetic: i64 `+ - *`, trapping on overflow and
+folded only when that cannot happen, and `fold(n, init, fn(i, p, acc) {
+body })`, a loop whose body has erased evidence of `Lt(i, n)`.
+`examples/core_loop.jh` sums and multiplies arrays of symbolic length
+with no bounds checks, its MIR one real loop per export; the normalizer
+never unrolls loops, and keeps the overflow traps of arguments that
+substitution would discard, so calls stay call-by-value. Both frontends,
+both targets, native differential execution, overflow traps, 18 source
+and 8 core rejections and kernel tests run in the `core` suite.
+
+Next: u64 arithmetic with overflow evidence and inequality lemmas (for
+loops over prefixes and `i + 1` indices), dependent motives, inductive
+data types,
 erased indices and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering

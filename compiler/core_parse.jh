@@ -48,7 +48,8 @@ fn form_head(s: str) -> bool {
         s == "Array" || s == "refl" || s == "transport" || s == "Eq" || s == "Lt" ||
         s == "Type" || s == "int" || s == "array" || s == "index" || s == "induct" ||
         s == "inductive" || s == "def" || s == "export" || s == "if-lt" ||
-        s == "if-eq" || s == "decide-lt"
+        s == "if-eq" || s == "decide-lt" || s == "add" || s == "sub" || s == "mul" ||
+        s == "fold"
 }
 
 struct Parser {
@@ -191,6 +192,17 @@ impl Parser {
                 return Err(self.error("induct needs evidence"))
             }
             core.Term.Elim(f, motive, arguments, evidence)
+        } else if kind == "add" || kind == "sub" || kind == "mul" {
+            let a = self.expr(depth - 1)?
+            let b = self.expr(depth - 1)?
+            let op = if kind == "add" { core.Arith.Add }
+            else if kind == "sub" { core.Arith.Sub } else { core.Arith.Mul }
+            core.Term.Arith(op, a, b)
+        } else if kind == "fold" {
+            let n = self.expr(depth - 1)?
+            let init = self.expr(depth - 1)?
+            let body = self.expr(depth - 1)?
+            core.Term.Fold(n, init, body)
         } else if kind == "refl" {
             core.Term.Refl(self.expr(depth - 1)?)
         } else if kind == "transport" {

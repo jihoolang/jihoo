@@ -1,6 +1,6 @@
 // Erase and lower the checked core itself to MIR. The executable fragment
-// is pure: scalar exports, immutable local arrays, beta-reduced helpers
-// and proof-carrying indexing. Array values and erased preconditions cannot
+// is pure: scalar exports, immutable local arrays, beta-reduced helpers,
+// proof-carrying indexing, I64 arithmetic and bounded loops. Array values and erased preconditions cannot
 // cross the C ABI. No independent source/model translation is used.
 import core
 import diag
@@ -133,6 +133,69 @@ impl Lower {
                 self.term(mir.Term.Goto(join))
                 self.block = join
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(result)), ty: y.ty })
+            }
+            Strict(a, b) => {
+                // Evaluated for its traps only, before the rest.
+                self.expr(c, a, env, depth - 1)?
+                self.expr(c, b, env, depth - 1)
+            }
+            Arith(op, a, b) => {
+                let a = self.expr(c, a, env, depth - 1)?
+                let b = self.expr(c, b, env, depth - 1)?
+                let op = match op { Add => lex.Op.Add, Sub => lex.Op.Sub, Mul => lex.Op.Mul }
+                // The program is `checked`: overflow traps, as in the kernel.
+                Ok(self.value(types.I64, mir.Rvalue.Bin(op, a.op.clone(), b.op.clone()), sp))
+            }
+            Fold(n, init, body) => {
+                let n = self.expr(c, n, env, depth - 1)?
+                let init = self.expr(c, init, env, depth - 1)?
+                let core.Term.Lam(false, _, body) = c.term(body) else { return Err(c.error(
+                    id,
+                    "loop body needs an index binder"
+                )) }
+                let core.Term.Lam(true, _, body) = c.term(body) else { return Err(c.error(
+                    id,
+                    "loop body needs an erased bound"
+                )) }
+                let core.Term.Lam(false, _, body) = c.term(body) else { return Err(c.error(
+                    id,
+                    "loop body needs an accumulator"
+                )) }
+                let i = self.local(types.U64, mir.LocalKind.Temp, sp)
+                let acc = self.local(types.I64, mir.LocalKind.Temp, sp)
+                self.assign(i, mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(0, types.U64))), sp)
+                self.assign(acc, mir.Rvalue.Use(init.op.clone()), sp)
+                let head = self.block()
+                let step = self.block()
+                let exit = self.block()
+                self.term(mir.Term.Goto(head))
+                self.block = head
+                let condition = self.value(types.BOOL, mir.Rvalue.Bin(lex.Op.Lt,
+                    mir.Operand.Copy(mir.Place.local(i)), n.op.clone()), sp)
+                var cases = Vec(mir.SwitchTarget).new()
+                cases.push(mir.SwitchTarget { value: 0, block: exit })
+                self.term(mir.Term.Switch(condition.op.clone(), cases, step))
+                self.block = step
+                // The body sees the index, no evidence and the accumulator.
+                var inner = Vec(Option(Value)).new()
+                for x in env {
+                    inner.push(match x { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None })
+                }
+                inner.push(Some(Value { op: mir.Operand.Copy(mir.Place.local(i)), ty: types.U64 }))
+                inner.push(None)
+                inner.push(Some(Value {
+                    op: mir.Operand.Copy(mir.Place.local(acc)),
+                    ty: types.I64
+                }))
+                let v = self.expr(c, body, inner.as_slice(), depth - 1)?
+                if v.ty != types.I64 { return Err(c.error(id, "loop layout mismatch")) }
+                self.assign(acc, mir.Rvalue.Use(v.op.clone()), sp)
+                // i < n, so the increment cannot overflow.
+                self.assign(i, mir.Rvalue.Bin(lex.Op.Add, mir.Operand.Copy(mir.Place.local(i)),
+                    mir.Operand.Const(mir.Const.Int(1, types.U64))), sp)
+                self.term(mir.Term.Goto(head))
+                self.block = exit
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(acc)), ty: types.I64 })
             }
             _ => Err(c.error(id, "term has no runtime representation in this core fragment"))
         }

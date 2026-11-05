@@ -1,0 +1,28 @@
+; Bounded loops whose bodies have erased evidence of their index bound,
+; and i64 arithmetic that traps on overflow.
+(def get
+  (pi n U64 (pi xs (Array n) (pi i U64 (pi0 p (Lt i n) I64))))
+  (lam n U64 (lam xs (Array n) (lam i U64 (lam0 p (Lt i n) (index xs i p))))))
+
+(def sum
+  (pi n U64 (pi xs (Array n) I64))
+  (lam n U64 (lam xs (Array n)
+    (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64
+      (add acc (app get n xs i p)))))))))
+
+(def dot
+  (pi n U64 (pi xs (Array n) (pi ys (Array n) I64)))
+  (lam n U64 (lam xs (Array n) (lam ys (Array n)
+    (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64
+      (add acc (mul (index xs i p) (index ys i p)))))))))))
+
+(export weighted
+  (pi x I64 I64)
+  (lam x I64
+    (app dot 4 (array (int 1) (int 2) (int 3) (int 4))
+      (array x (sub x (int 1)) (mul x (int 2)) (sub (int 0) x)))))
+
+(export repeat
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64 (add acc x))))))))

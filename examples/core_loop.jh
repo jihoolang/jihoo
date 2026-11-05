@@ -1,0 +1,23 @@
+// Bounded loops in the dependent core. `fold(n, init, fn(i, p, acc) {
+// body })` runs the body for each i below n, and the body has erased
+// evidence p of Lt(i, n), so `sum` and `dot` load from arrays of any
+// length n with no bounds checks. They are checked once for symbolic n.
+// Arithmetic is on i64 and traps on overflow. It exports weighted(x) and
+// repeat(n, x), and main returns 97.
+#![dependent_core]
+
+fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 { index(xs, i, p) }
+
+fn sum(n: u64, xs: [i64; n]) -> i64 { fold(n, 0, fn(i, p, acc) { acc + get(n, xs, i, p) }) }
+
+fn dot(n: u64, xs: [i64; n], ys: [i64; n]) -> i64 {
+    fold(n, 0, fn(i, p, acc) { acc + index(xs, i, p) * index(ys, i, p) })
+}
+
+export fn weighted(x: i64) -> i64 { dot(4, [1, 2, 3, 4], [x, x - 1, x * 2, 0 - x]) }
+
+// A runtime count: n additions of x.
+export fn repeat(n: u64, x: i64) -> i64 { fold(n, 0, fn(i, p, acc) { acc + x }) }
+
+fn main() -> i64 { sum(4, [10, 20, 30, 40]) - weighted(1) }
+// exit: 97

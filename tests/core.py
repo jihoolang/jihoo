@@ -137,6 +137,17 @@ def evaluate(term, env):
             return value
 
         return fold(evaluate(evidence, env))
+    if head in ("add", "sub", "mul"):
+        a, b = (evaluate(x, env) for x in args)
+        value = a + b if head == "add" else a - b if head == "sub" else a * b
+        # The compiled program traps here; callers avoid overflowing inputs.
+        assert -(1 << 63) <= value < (1 << 63), ("overflow", head, a, b)
+        return value
+    if head == "fold":
+        n, acc, body = (evaluate(x, env) for x in args)
+        for i in range(n):
+            acc = body(i)((i, n))(acc)
+        return acc
     if head == "decide-lt":
         a, b = (evaluate(x, env) for x in args)
         assert a < b
@@ -403,6 +414,8 @@ def main():
         validate_chain(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_inductive import validate_inductive
         validate_inductive(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_loop import validate_loop
+        validate_loop(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

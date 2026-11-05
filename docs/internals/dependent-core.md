@@ -125,6 +125,8 @@ in the existing grammar, not global keywords or standard-library types:
 | `refl(a)` | reflexivity evidence of `Eq(a, a)` |
 | `transport(fn(k) { P(k) }, e, p)` | move evidence from `P(a)` to `P(b)` using `e: Eq(a, b)` |
 | `induct(P, case, ..., evidence)` | structural induction: one case per constructor, into a proposition |
+| `a + b`, `a - b`, `a * b` | [i64 arithmetic](#loops-and-arithmetic); overflow traps |
+| `fold(n, init, fn(i, p, acc) { body })` | loop for `i` below `n`, with erased `p: Lt(i, n)` |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -145,7 +147,7 @@ blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
-`index`, `decide_lt`, `u64`, `i64` and the entry symbol
+`fold`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
 `__jihoo_dependent_main` are reserved in marked modules. Functions,
 propositions and constructors share one namespace. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
@@ -161,7 +163,8 @@ without LLVM or a linker.
 
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
-arithmetic, general runtime closures/recursion, data (non-`Prop`)
+u64 arithmetic, division and comparison operators, general runtime
+closures/recursion, data (non-`Prop`)
 inductive types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
 only one execution path. `fmt`, AST dumps and source diagnostics use the
@@ -341,6 +344,61 @@ indexed by values other than `u64` or parameterized by propositions,
 infinitary (arrow-typed) recursive fields, mutual families and erased
 data indices.
 
+## Loops and arithmetic
+
+Runtime code has i64 `+`, `-` and `*` and one loop form:
+
+```text
+fold(n, init, body) : I64
+    where n : U64, init : I64,
+          body : (i : U64) -> (erased p : Lt(i, n)) -> (acc : I64) -> I64
+```
+
+It starts with `init` and replaces the accumulator by `body(i, p, acc)`
+for each `i` from 0 to `n - 1`. In `.jh` the body is a contextual lambda
+`fn(i, p, acc) { ... }` whose parameter types come from that signature.
+Because `p` proves `Lt(i, n)`, a body loads from an array of length `n`
+with `index(xs, i, p)` and no bounds check. A helper over arrays of any
+length is checked once, for symbolic `n`:
+
+```jihoo
+fn dot(n: u64, xs: [i64; n], ys: [i64; n]) -> i64 {
+    fold(n, 0, fn(i, p, acc) { acc + index(xs, i, p) * index(ys, i, p) })
+}
+```
+
+The loop always terminates: its count is fixed before it starts. The
+normalizer does not unroll loops, except that a loop of count 0 is its
+initial value, so checking cost does not grow with the count. Arithmetic
+on two literals is computed unless it overflows. An overflowing operation
+is never folded or wrapped; it stays in the program, which traps at run
+time as ordinary jihoo's checked arithmetic does. No proposition mentions
+an i64 value, so arithmetic cannot change what a proof means. U64 values
+appear in propositions and have no arithmetic yet: machine wrapping
+would make `Lt(i, n)` and `Lt(i + 1, n + 1)` disagree at the top of the
+range, so u64 arithmetic needs overflow evidence.
+
+Calls evaluate their arguments first, as ordinary jihoo does, although
+the normalizer substitutes helpers into their callers. When beta
+reduction substitutes a runtime argument that can trap (one containing
+arithmetic), the result is a kernel-internal `Strict(argument, result)`:
+evaluate the argument, then the result. So `ignore(MAX + 1)` traps even
+though `ignore` does not use its parameter, and an argument used in one
+branch traps before the branch is chosen. Normalization drops `Strict`
+when its first term cannot trap. Applying an `if_lt`/`if_eq` applies both
+alternatives, and a loop body is eta-expanded, so any body of the loop
+type lowers, including a branch that chooses between two lambdas.
+
+[`examples/core_loop.jh`](../../examples/core_loop.jh) and its
+[core equivalent](../../examples/core_loop.jhc) define `sum` and `dot`
+and export `weighted(x)`, a dot product with runtime elements, and
+`repeat(n, x)`, a loop of runtime count. Each export's MIR is one loop:
+a comparison, the body's loads without bounds assertions, checked
+arithmetic and the index increment, which cannot overflow because
+`i < n`. Both frontends emit the same MIR. In `.jhc` the forms are
+`(add a b)`, `(sub a b)`, `(mul a b)` and `(fold n init body)`, with a
+body `(lam i U64 (lam0 p (Lt i n) (lam acc I64 ...)))`.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -361,6 +419,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(inductive F n (c type) ...)` | top-level declaration of an inductive proposition |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
+| `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
+| `(fold n init body)` | bounded loop; `body : (i : U64) -> Lt i n -> I64 -> I64`, erased bound |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -375,7 +435,7 @@ object's runtime entry points; helpers are normalized at their uses.
 compute their universe levels; a function ending in a proposition is a
 proposition. Type-level functions and higher-order beta reduction work,
 but the executable ABI is restricted to U64/I64 arguments and results.
-There are no axioms, casts, general recursion, unsafe memory operations
+There are no axioms, casts, unbounded loops or recursion, unsafe memory operations
 or eliminators that inspect evidence to produce runtime data.
 
 Erased binders must bind propositions; proof binders must be erased.
@@ -447,6 +507,14 @@ motives, runtime evidence and deep evidence that exhausts limits. Kernel
 unit tests construct families without either frontend and reject
 non-positive fields, misordered declarations, missing cases and data
 motives.
+`tests/core_loop.py` adds the loop example: both frontends' MIR and
+native execution against the evaluator, overflow traps at `-O0` and
+`-O2` (from literals, products and inside loops), constant folding and
+the empty loop, and rejection of u64 arithmetic, other operators, loop
+bounds above an array's length, a wrong index or bound, runtime uses of
+the bound, wrong body arities or types and array exports. Kernel unit
+tests check that overflow is not folded, that loops are not unrolled
+and that a body needs exactly its erased bound.
 
 The next stages of the replacement are:
 
@@ -454,7 +522,8 @@ The next stages of the replacement are:
    and their guarantees are supported by this same core.
 2. Extend the logical foundations beyond U64 equality and declared
    propositions: dependent motives, inductive data types, erased indices,
-   arithmetic on indices, equality of other types and reusable lemma
+   u64 arithmetic on indices with overflow evidence and inequality
+   lemmas, equality of other types and reusable lemma
    libraries. Specify normalization, universe
    and erasure rules before enabling them.
 3. Add runtime operations with explicit ownership/effect rules, including

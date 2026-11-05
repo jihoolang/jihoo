@@ -72,7 +72,7 @@ alias    = "type" name [ "=" type ]
   `#![uefi]` select runtime profiles; experimental `#![dependent_core]`
   selects a [restricted source subset](../internals/dependent-core.md#ordinary-source-subset)
   using contextual `erased(P)`, `if_lt`, `if_eq`, `index`, `decide_lt`,
-  `refl`, `transport` and `induct` forms
+  `refl`, `transport`, `induct` and `fold` forms
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)
