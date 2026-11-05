@@ -116,6 +116,9 @@ pub struct Constructor {
 // `globals` definitions and may use them and earlier families.
 pub struct Family {
     pub name: String
+    // A data type, of Type 0, rather than a proposition. Data types have
+    // no indices and no recursive fields yet.
+    pub data: bool
     pub arity: u32
     pub constructors: Vec(Constructor)
     pub globals: u32
@@ -400,6 +403,32 @@ impl Core {
                 // fields, then to induction on each recursive field: the
                 // strictly positive subterms. User code chooses no recursion.
                 // Ill-formed terms stay neutral; infer rejects them.
+                if self.is_data(f) {
+                    // A case on a branch is the branch of the cases, and a
+                    // case on Strict(t, y) evaluates t, then the case on y.
+                    // Evaluation still goes the scrutinee, then the case.
+                    match self.term(x) {
+                        IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                            let equality = match self.term(x) { IfEq(_, _, _, _) => true, _ => false }
+                            // The true branch has the evidence binder.
+                            let inner = self.shift(p, 1, 0, depth - 1)?
+                            var shifted = Vec(u32).new()
+                            for c in cases { shifted.push(self.shift(c, 1, 0, depth - 1)?) }
+                            let yes = self.add(Term.Elim(f, inner, shifted, yes), sp)?
+                            let no = self.add(Term.Elim(f, p, cases.clone(), no), sp)?
+                            let branch = if equality { Term.IfEq(a, b, yes, no) }
+                            else { Term.IfLt(a, b, yes, no) }
+                            let branch = self.add(branch, sp)?
+                            return self.normal(branch, depth - 1)
+                        }
+                        Strict(t, y) => {
+                            let e = self.add(Term.Elim(f, p, cases.clone(), y), sp)?
+                            let e = self.normal(e, depth - 1)?
+                            return self.add(Term.Strict(t, e), sp)
+                        }
+                        _ => {}
+                    }
+                }
                 let Con(g, k, fields) = self.term(x) else { return self.add(
                     Term.Elim(f, p, cases, x),
                     sp
@@ -876,6 +905,10 @@ impl Core {
 
     // U64 -> ... -> Prop, one binder per index: elimination is into
     // propositions only, so evidence never determines runtime data.
+    pub fn is_data(self, f: u32) -> bool {
+        f as i64 < self.families.len() && self.families[f as i64].data
+    }
+
     pub fn motive_type(inout self, f: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
         let u = self.add(Term.U64, sp)?
         var ty = self.add(Term.Prop, sp)?
@@ -915,6 +948,13 @@ impl Core {
         let m = domains.len()
         let r = positions.len()
         var result = self.shift(p, m + r, 0, depth)?
+        if self.is_data(f) {
+            // A data motive depends on the value: P(c(x...)).
+            var xs = Vec(u32).new()
+            for j in 0..m { xs.push(self.add(Term.Var((m - 1 - j) as u32), sp)?) }
+            let value = self.add(Term.Con(f, k, xs), sp)?
+            result = self.add(Term.App(result, value), sp)?
+        }
         for x in indices {
             let x = self.shift(x, r, 0, depth)?
             result = self.add(Term.App(result, x), sp)?
@@ -982,6 +1022,10 @@ impl Core {
                         _ => None
                     }
                     let recursive = match recursive {
+                        Some(_) if self.is_data(f) => return Err(self.error(
+                            domain,
+                            "recursive data types are not supported yet"
+                        ))
                         Some(xs) => {
                             if !erased { return Err(self.error(
                                 domain,
@@ -996,9 +1040,19 @@ impl Core {
                         }
                     }
                     let domain = self.normal(domain, DEPTH)?
-                    if !erased && self.term(domain) != Term.U64 { return Err(self.error(
+                    if !erased && !self.is_data(f) && self.term(domain) != Term.U64 {
+                        return Err(self.error(domain, "constructor data fields must be u64"))
+                    }
+                    // Data types hold first-order values: scalars,
+                    // refinements and earlier data types.
+                    let first_order = match self.term(domain) {
+                        U64 | I64 | Refine(_) => true
+                        Ind(g, _) => self.is_data(g)
+                        _ => false
+                    }
+                    if !erased && !first_order { return Err(self.error(
                         domain,
-                        "constructor data fields must be u64"
+                        "data fields are u64, i64, refinements or data types"
                     )) }
                     fields.push(Field { erased, domain, recursive })
                     ctx.push(Binding { ty: domain, erased })
@@ -1021,6 +1075,9 @@ impl Core {
         let sp = self.families[f as i64].span
         if self.families[f as i64].arity > 16 {
             return Err(diag.Diag.new(sp, "core: inductive families have at most 16 indices"))
+        }
+        if self.families[f as i64].data && self.families[f as i64].arity != 0 {
+            return Err(diag.Diag.new(sp, "core: data types have no indices yet"))
         }
         var signatures = Vec(Signature).new()
         for k in 0..self.families[f as i64].constructors.len() {
@@ -1081,7 +1138,7 @@ impl Core {
             Ind(f, xs) => {
                 self.family_ref(id, f)?
                 self.indices(xs.as_slice(), f, ctx, id)?
-                Term.Prop
+                if self.is_data(f) { Term.Universe(0) } else { Term.Prop }
             }
             Con(f, k, xs) => {
                 self.family_ref(id, f)?
@@ -1093,10 +1150,12 @@ impl Core {
                 var ty = self.shift(closed, ctx.len, 0, depth - 1)?
                 for x in xs {
                     let normal = self.normal(ty, depth - 1)?
-                    let Pi(_, domain, result) = self.term(normal) else {
+                    let Pi(erased, domain, result) = self.term(normal) else {
                         return Err(self.error(x, "too many constructor fields"))
                     }
-                    self.require(x, domain, ctx, true, depth - 1)?
+                    // Data fields of a data value are runtime data.
+                    let relevant = self.is_data(f) && !erased
+                    self.require(x, domain, ctx, ghost || !relevant, depth - 1)?
                     ty = self.substitute(result, x, depth - 1)?
                 }
                 let ty = self.normal(ty, depth - 1)?
@@ -1111,6 +1170,16 @@ impl Core {
                 if cases.len() != self.families[f as i64].constructors.len() {
                     return Err(self.error(id, "induction needs one case per constructor"))
                 }
+                if self.is_data(f) { return self.eliminate(
+                    id,
+                    f,
+                    p,
+                    cases.as_slice(),
+                    x,
+                    ctx,
+                    ghost,
+                    depth
+                ) }
                 let motive = self.motive_type(f, sp)?
                 self.require(p, motive, ctx, true, depth - 1)?
                 for k, case in cases {
@@ -1314,6 +1383,50 @@ impl Core {
         self.add(ty, sp)
     }
 
+    // Case analysis of a data value. The motive P : F -> Prop or F -> Type 0
+    // depends on the value; each case gives P(c(x...)) from c's fields. Into
+    // Prop the whole elimination is evidence; into Type 0 it is runtime
+    // code, the cases functions of the fields and the value runtime data.
+    fn eliminate(
+        inout self,
+        id: u32,
+        f: u32,
+        p: u32,
+        cases: [u32],
+        x: u32,
+        ctx: [Binding],
+        ghost: bool,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let sp = self.nodes[id as i64].span
+        let ty = self.infer(p, ctx, true, depth - 1)?
+        let ty = self.normal(ty, depth - 1)?
+        let Pi(false, domain, sort) = self.term(ty) else {
+            return Err(self.error(p, "a data motive is a function of the value"))
+        }
+        let family = self.add(Term.Ind(f, Vec(u32).new()), sp)?
+        if !self.equal(domain, family, depth - 1)? {
+            return Err(self.error(p, "a data motive is a function of the value"))
+        }
+        let sort = self.normal(sort, depth - 1)?
+        let proof = match self.term(sort) {
+            Prop => true
+            Universe(0) => false
+            _ => return Err(self.error(p, "data elimination is into Prop or Type 0"))
+        }
+        for k, case in cases {
+            let expected = self.case_type(f, k as u32, p, sp, depth - 1)?
+            self.require(case, expected, ctx, ghost || proof, depth - 1)?
+        }
+        let ty = self.infer(x, ctx, ghost || proof, depth - 1)?
+        let ty = self.normal(ty, depth - 1)?
+        let Ind(g, _) = self.term(ty) else {
+            return Err(self.error(x, "case analysis requires a value of its type"))
+        }
+        if g != f { return Err(self.error(x, "case analysis requires a value of its type")) }
+        self.add(Term.App(p, x), sp)
+    }
+
     // Check graph integrity independently of the parser. Definitions are
     // checked in order; no definition can use itself or a later one.
     pub fn check(inout self) -> Result((), diag.Diag) {
@@ -1510,7 +1623,7 @@ fn chain_family(inout c: Core) {
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "refl".to_string(), ty: refl })
     constructors.push(Constructor { name: "step".to_string(), ty: step })
-    c.families.push(Family { name: "EqChain".to_string(), arity: 2, constructors,
+    c.families.push(Family { name: "EqChain".to_string(), data: false, arity: 2, constructors,
         globals: c.definitions.len() as u32, span: sp })
 }
 
@@ -1620,7 +1733,7 @@ fn rejects_cycles_in_inductive_graphs() {
 fn single(inout c: Core, ty: u32) {
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "make".to_string(), ty })
-    c.families.push(Family { name: "F".to_string(), arity: 1, constructors,
+    c.families.push(Family { name: "F".to_string(), data: false, arity: 1, constructors,
         globals: c.definitions.len() as u32, span: diag.Span.nowhere() })
 }
 
@@ -1679,7 +1792,14 @@ fn families_are_ordered_with_definitions() {
         exported: false, span: sp })
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "make".to_string(), ty: f0 })
-    c.families.push(Family { name: "F".to_string(), arity: 1, constructors, globals: 1, span: sp })
+    c.families.push(Family {
+        name: "F".to_string(),
+        data: false,
+        arity: 1,
+        constructors,
+        globals: 1,
+        span: sp
+    })
     assert(c.check().is_err(), "families are not visible to earlier definitions")
     c.families[0].globals = 0
     c.check().unwrap()
@@ -2106,4 +2226,92 @@ fn the_witness_of_a_branch_is_a_branch() {
     let normal = c.normal(witness, DEPTH).unwrap()
     let IfLt(_, _, y, n) = c.term(normal) else { panic("a branch of witnesses") }
     assert(c.term(y) == Term.Var(1) && c.term(n) == Term.Natural(0), "each alternative's witness")
+}
+
+// data B { No, Yes(U64) }, declared without either frontend.
+fn bit_family(inout c: Core, arity: u32, recursive: bool) {
+    let sp = diag.Span.nowhere()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none.clone()), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let field = if recursive { b } else { u }
+    let shifted = c.add(Term.Ind(0, none), sp).unwrap()
+    let yes = c.add(Term.Pi(false, field, shifted), sp).unwrap()
+    var constructors = Vec(Constructor).new()
+    constructors.push(Constructor { name: "No".to_string(), ty: b })
+    constructors.push(Constructor { name: "Yes".to_string(), ty: yes })
+    c.families.push(Family { name: "B".to_string(), data: true, arity, constructors,
+        globals: 0, span: sp })
+}
+
+#[test]
+fn data_types_are_flat_and_unindexed() {
+    var c = Core.new()
+    bit_family(&c, 0, false)
+    c.check().unwrap()
+    var c = Core.new()
+    bit_family(&c, 0, true)
+    assert(c.check().is_err(), "no recursive data yet")
+    var c = Core.new()
+    bit_family(&c, 1, false)
+    assert(c.check().is_err(), "no indexed data yet")
+}
+
+#[test]
+fn case_analysis_of_a_branch_is_a_branch() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    bit_family(&c, 0, false)
+    c.check().unwrap()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none.clone()), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let p = c.add(Term.Lam(false, b, u), sp).unwrap()
+    let seven = c.add(Term.Natural(7), sp).unwrap()
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let yes_case = c.add(Term.Lam(false, u, x), sp).unwrap()
+    let i = c.add(Term.Var(0), sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let inner = c.add(Term.Var(1), sp).unwrap()
+    var fields = Vec(u32).new()
+    fields.push(inner)
+    let yes = c.add(Term.Con(0, 1, fields), sp).unwrap()
+    let no = c.add(Term.Con(0, 0, none), sp).unwrap()
+    let branch = c.add(Term.IfLt(i, three, yes, no), sp).unwrap()
+    var cases = Vec(u32).new()
+    cases.push(seven)
+    cases.push(yes_case)
+    let elim = c.add(Term.Elim(0, p, cases, branch), sp).unwrap()
+    let normal = c.normal(elim, DEPTH).unwrap()
+    let IfLt(_, _, y, n) = c.term(normal) else { panic("a branch of cases") }
+    assert(c.term(y) == Term.Var(1) && c.term(n) == Term.Natural(7), "each case on its value")
+}
+
+#[test]
+fn data_motives_are_small_and_depend_on_the_value() {
+    let sp = diag.Span.nowhere()
+    // P : U64 -> Type 0 is not a motive of B, and P : B -> Type 1 is large.
+    for wrong_domain in [true, false] {
+        var c = Core.new()
+        bit_family(&c, 0, false)
+        let none = Vec(u32).new()
+        let b = c.add(Term.Ind(0, none.clone()), sp).unwrap()
+        let u = c.add(Term.U64, sp).unwrap()
+        let ty0 = c.add(Term.Universe(0), sp).unwrap()
+        let motive = if wrong_domain { c.add(Term.Lam(false, u, u), sp).unwrap() }
+        else { c.add(Term.Lam(false, b, ty0), sp).unwrap() }
+        let zero = c.add(Term.Natural(0), sp).unwrap()
+        let x = c.add(Term.Var(0), sp).unwrap()
+        let case = c.add(Term.Lam(false, u, if wrong_domain { x } else { u }), sp).unwrap()
+        let first = if wrong_domain { zero } else { u }
+        let value = c.add(Term.Con(0, 0, none), sp).unwrap()
+        var cases = Vec(u32).new()
+        cases.push(first)
+        cases.push(case)
+        let elim = c.add(Term.Elim(0, motive, cases, value), sp).unwrap()
+        let ty = if wrong_domain { u } else { ty0 }
+        c.definitions.push(Definition { name: "m".to_string(), ty, value: elim, exported: false,
+            span: sp })
+        assert(c.check().is_err(), "data motives are B -> Prop or B -> Type 0")
+    }
 }

@@ -197,8 +197,10 @@ justify loads at `i + 1` and over prefixes, and the
 [subtraction example](examples/core_sub.jh) reads arrays backwards with
 `sub(n, i + 1, p)`, whose evidence shows it cannot underflow. A
 [refinement](examples/core_refine.jh) `refine(fn(j) { Lt(j, n) })` is a
-u64 returned together with its evidence, and is the u64 alone at run time. General `.jh` coverage,
-dependent motives, inductive data, mutable memory and proofs of the new kernel, elaboration and
+u64 returned together with its evidence, and is the u64 alone at run time.
+[Data types](examples/core_data.jh) declared as `enum` are taken apart
+with `match`, or proved about by cases, and compile to no tag at all. General `.jh` coverage,
+recursive and indexed data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and

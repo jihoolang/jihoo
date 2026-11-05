@@ -54,12 +54,17 @@ def definitions(text):
     FAMILIES.clear()
     result = []
     for form in read_terms(text):
-        if form[0] != "inductive":
+        if form[0] not in ("inductive", "data"):
             kind, name, ty, body = form
             assert kind in ("def", "export")
             result.append((kind, name, ty, body))
             continue
-        _, family, arity, *constructors = form
+        if form[0] == "data":
+            # A data type: no indices; its values are constructor tuples.
+            _, family, *constructors = form
+            arity = 0
+        else:
+            _, family, arity, *constructors = form
         FAMILIES[family] = int(arity)
         for k, (name, ty) in enumerate(constructors):
             fields, recursive = 0, []
@@ -452,6 +457,8 @@ def main():
         validate_sub(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_refine import validate_refine
         validate_refine(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_data import validate_data
+        validate_data(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

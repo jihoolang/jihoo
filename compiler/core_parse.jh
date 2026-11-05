@@ -51,7 +51,7 @@ fn form_head(s: str) -> bool {
         s == "if-eq" || s == "decide-lt" || s == "add" || s == "sub" || s == "mul" ||
         s == "fold" || s == "uadd" || s == "lt-add" || s == "lt-cancel" || s == "lt-le" ||
         s == "usub" || s == "zero-le" || s == "Refine" || s == "pack" || s == "witness" ||
-        s == "proof"
+        s == "proof" || s == "data"
 }
 
 struct Parser {
@@ -303,18 +303,24 @@ impl Parser {
     fn definition(inout self) -> Result((), diag.Diag) {
         self.expect("(")?
         let mode = self.take()?
-        if mode.text == "inductive" {
+        if mode.text == "inductive" || mode.text == "data" {
+            // (data F (c TYPE) ...) declares a data type, without indices.
+            let data = mode.text == "data"
             let name = self.declaration_name()?
-            let arity = self.take()?
-            let Some(n) = natural(arity.text.as_str()) else {
-                return Err(diag.Diag.new(arity.span, "core: invalid inductive arity"))
+            var n: u64 = 0
+            if !data {
+                let arity = self.take()?
+                let Some(count) = natural(arity.text.as_str()) else {
+                    return Err(diag.Diag.new(arity.span, "core: invalid inductive arity"))
+                }
+                if count > 0xffffffff { return Err(diag.Diag.new(
+                    arity.span,
+                    "core: invalid inductive arity"
+                )) }
+                n = count
             }
-            if n > 0xffffffff { return Err(diag.Diag.new(
-                arity.span,
-                "core: invalid inductive arity"
-            )) }
             let f = self.core.families.len()
-            self.core.families.push(core.Family { name, arity: n as u32,
+            self.core.families.push(core.Family { name, data, arity: n as u32,
                 constructors: Vec(core.Constructor).new(),
                 globals: self.core.definitions.len() as u32, span: mode.span })
             while !self.at(")") {
@@ -330,7 +336,7 @@ impl Parser {
         let exported = mode.text == "export"
         if !exported && mode.text != "def" { return Err(diag.Diag.new(
             mode.span,
-            "core: expected def, export or inductive"
+            "core: expected def, export, inductive or data"
         )) }
         let name = self.name()?
         self.unique(name.as_str(), mode.span)?

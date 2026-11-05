@@ -424,8 +424,19 @@ bounds checks. Both frontends, both targets, native differential
 execution, kept witness traps, 18 source and 7 core rejections and
 kernel tests run in the `core` suite.
 
-Next: dependent motives, inductive data types,
-erased indices and broader lemma libraries;
+Implemented non-recursive data types: in a marked module, `enum E { V(T,
+...) }` declares a data type whose fields are u64, i64, refinements,
+earlier data types or erased propositions; `E.V(...)` builds a value,
+`match` takes it apart into the expected type and `induct(fn(x) {
+P(x) }, case..., v)` proves `P` by cases, with a motive that depends
+on the value. Data values have no runtime representation: case analysis
+of a branch is the branch of the cases, so `examples/core_data.jh`
+compiles to comparisons and loads with no tag or bounds check. Both
+frontends, both targets, native differential execution, kept field
+traps, 25 source and 12 core rejections and kernel tests run in the
+`core` suite.
+
+Next: recursive and indexed data types, erased indices and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.

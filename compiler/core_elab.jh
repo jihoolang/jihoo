@@ -5,7 +5,9 @@
 // `trait Name(i: u64, ...) { fn ctor(...) -> Name(...) }` and their
 // structural induction, `induct(P, case..., evidence)`, i64 `+ - *` and
 // bounded loops, `fold(n, init, fn(i, p, acc) { body })`, and refinements
-// `refine(fn(x) { P })` with `pack(a, p)`, `witness(s)` and `proof(s)`.
+// `refine(fn(x) { P })` with `pack(a, p)`, `witness(s)` and `proof(s)`,
+// and data types declared as `enum`, built with `E.V(...)` and taken apart
+// with `match` or, into a proposition, `induct(fn(x) { P(x) }, ..., v)`.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -65,11 +67,158 @@ impl Elaborator {
         None
     }
 
+    // A proposition's constructor; data constructors are qualified.
     fn find_constructor(self, name: str) -> Option((u32, u32)) {
         for i, f in self.c.families {
+            if f.data { continue }
             for k, c in f.constructors { if c.name == name { return Some((i as u32, k as u32)) } }
         }
         None
+    }
+
+    // `E.V` for a data type E.
+    fn find_variant(self, e: ast.Expr) -> Option((u32, u32)) {
+        let ast.ExprKind.Field(base, variant) = e.kind else { return None }
+        let ast.ExprKind.Name(name) = base.kind else { return None }
+        let Some(f) = self.find_family(name.as_str()) else { return None }
+        if !self.c.families[f as i64].data { return None }
+        for k, c in self.c.families[f as i64].constructors {
+            if c.name == variant { return Some((f, k as u32)) }
+        }
+        None
+    }
+
+    // A constructor, fully applied; each field is elaborated against the
+    // telescope instantiated so far.
+    fn construct(
+        inout self,
+        f: u32,
+        k: u32,
+        args: [ast.Expr],
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        var ty = self.c.families[f as i64].constructors[k as i64].ty
+        var fields = Vec(u32).new()
+        for a in args {
+            let normal = self.c.normal(ty, core.DEPTH)?
+            let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
+                return Err(error(sp, "too many constructor arguments"))
+            }
+            let field = self.expr(a, Some(domain), depth - 1)?
+            fields.push(field)
+            ty = self.c.substitute(result, field, core.DEPTH)?
+        }
+        let normal = self.c.normal(ty, core.DEPTH)?
+        let core.Term.Ind(_, _) = self.c.term(normal) else {
+            return Err(error(sp, "a constructor requires all of its fields"))
+        }
+        self.c.add(core.Term.Con(f, k, fields), sp)
+    }
+
+    // `match v { V(x, ...) => e, ... }` on a data value, one arm per
+    // variant, into the expected type: case analysis with a motive that
+    // does not depend on the value.
+    fn case_analysis(
+        inout self,
+        scrutinee: ast.Expr,
+        arms: [ast.Arm],
+        expected: Option(u32),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let Some(t) = expected else { return Err(error(sp, "match needs an expected type")) }
+        let x = self.expr(scrutinee, None, depth - 1)?
+        let ty = self.c.infer(x, self.ctx.as_slice(), true, core.DEPTH)?
+        let ty = self.c.normal(ty, core.DEPTH)?
+        let core.Term.Ind(f, _) = self.c.term(ty) else {
+            return Err(error(scrutinee.span, "match requires a value of a data type"))
+        }
+        if !self.c.families[f as i64].data {
+            return Err(error(scrutinee.span, "match requires a value of a data type; use induct"))
+        }
+        let family = self.c.add(core.Term.Ind(f, Vec(u32).new()), sp)?
+        let body = self.c.shift(t, 1, 0, core.DEPTH)?
+        let p = self.c.add(core.Term.Lam(false, family, body), sp)?
+        let count = self.c.families[f as i64].constructors.len()
+        if arms.len != count { return Err(error(sp, "match requires one arm per variant")) }
+        var cases = Vec(u32).new()
+        for k in 0..count {
+            let name = self.c.families[f as i64].constructors[k].name.clone()
+            var found: Option(i64) = None
+            for i, arm in arms {
+                if variant_name(arm.pat, self.c.families[f as i64].name.as_str()) == Some(
+                    name.clone()
+                ) {
+                    if found.is_some() { return Err(error(arm.span, "duplicate match arm")) }
+                    found = Some(i)
+                }
+            }
+            let Some(i) = found else { return Err(error(
+                sp,
+                ("match has no arm for " + name.as_str()).as_str()
+            )) }
+            let arm = arms[i]
+            if arm.guard.is_some() { return Err(error(arm.span, "match guards are unsupported")) }
+            let binders = match arm.pat.kind {
+                Variant(_, pats) => pats.clone()
+                _ => Vec(ast.Pat).new()
+            }
+            var result = self.c.case_type(f, k as u32, p, sp, core.DEPTH)?
+            var domains = Vec((bool, u32)).new()
+            for b in binders {
+                let binder = match b.kind {
+                    Name(n, false) if !reserved(n.as_str()) => n.clone()
+                    Wild => "_".to_string()
+                    _ => return Err(error(b.span, "variant fields bind names or _"))
+                }
+                let normal = self.c.normal(result, core.DEPTH)?
+                let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else {
+                    return Err(error(b.span, "too many variant fields"))
+                }
+                self.push(binder.as_str(), domain, erased)
+                domains.push((erased, domain))
+                result = rest
+            }
+            let normal = self.c.normal(result, core.DEPTH)?
+            match self.c.term(normal) {
+                Pi(_, _, _) => {
+                    for _ in 0..domains.len() { self.pop() }
+                    return Err(error(arm.span, "a match arm binds every field"))
+                }
+                _ => {}
+            }
+            var value = self.expr(arm.body, Some(result), depth - 1)?
+            var j = domains.len()
+            while j > 0 {
+                j -= 1
+                let (erased, domain) = domains[j]
+                self.pop()
+                value = self.c.add(core.Term.Lam(erased, domain, value), arm.span)?
+            }
+            cases.push(value)
+        }
+        self.c.add(core.Term.Elim(f, p, cases, x), sp)
+    }
+
+    // fn(x) { P(x) }, a proposition about a value of data type f.
+    fn data_motive(inout self, e: ast.Expr, f: u32, depth: u32) -> Result(u32, diag.Diag) {
+        let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
+            return Err(error(e.span, "a data motive requires fn(x) { proposition }"))
+        }
+        if ps.len() != 1 || ret.is_some() || ps[0].ty.is_some() || reserved(ps[0].name.as_str()) {
+            return Err(error(e.span, "a data motive has one untyped binder"))
+        }
+        if body.stmts.len() != 0 { return Err(error(body.span, "a data motive is one proposition")) }
+        let Some(tail) = body.tail else { return Err(error(
+            body.span,
+            "a data motive is one proposition"
+        )) }
+        let family = self.c.add(core.Term.Ind(f, Vec(u32).new()), e.span)?
+        self.push(ps[0].name.as_str(), family, false)
+        let proposition = self.type_expr(tail.deref(), depth - 1)
+        self.pop()
+        self.c.add(core.Term.Lam(false, family, proposition?), e.span)
     }
 
     fn taken(self, name: str) -> bool {
@@ -344,6 +493,20 @@ impl Elaborator {
                 self.c.add(core.Term.Elements(xs), sp)
             }
             Block(b) => self.block(b, expected, depth - 1)
+            Field(_, _) => {
+                let Some((f, k)) = self.find_variant(e) else { return Err(error(
+                    sp,
+                    "unsupported expression in dependent_core"
+                )) }
+                self.construct(f, k, [], sp, depth)
+            }
+            Match(scrutinee, arms) => self.case_analysis(
+                scrutinee.deref(),
+                arms.as_slice(),
+                expected,
+                sp,
+                depth
+            )
             Binary(op, a, b) => {
                 let plus = match op { Add => true, _ => false }
                 let unsigned = self.is_u64(e, expected)?
@@ -372,6 +535,16 @@ impl Elaborator {
                 self.c.add(core.Term.Arith(arith, a, b), sp)
             }
             Call(f, args) => {
+                match self.find_variant(f.deref()) {
+                    Some((family, k)) => return self.construct(
+                        family,
+                        k,
+                        args.as_slice(),
+                        sp,
+                        depth
+                    )
+                    None => {}
+                }
                 let ast.ExprKind.Name(n) = f.kind else { return Err(error(
                     f.span,
                     "calls require a named function"
@@ -515,7 +688,12 @@ impl Elaborator {
                         sp,
                         "induct requires one case per constructor"
                     )) }
-                    let p = self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)?
+                    let p = if self.c.families[f as i64].data { self.data_motive(
+                        args[0],
+                        f,
+                        depth - 1
+                    )? }
+                    else { self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)? }
                     var cases = Vec(u32).new()
                     for k in 0..count {
                         let expected = self.c.case_type(f, k as u32, p, sp, core.DEPTH)?
@@ -532,26 +710,7 @@ impl Elaborator {
                     return self.c.add(core.Term.Elim(f, p, cases, evidence), sp)
                 }
                 match self.find_constructor(n.as_str()) {
-                    Some((f, k)) => {
-                        // Constructors are fully applied; each field is
-                        // elaborated against the telescope instantiated so far.
-                        var ty = self.c.families[f as i64].constructors[k as i64].ty
-                        var fields = Vec(u32).new()
-                        for a in args {
-                            let normal = self.c.normal(ty, core.DEPTH)?
-                            let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
-                                return Err(error(sp, "too many constructor arguments"))
-                            }
-                            let field = self.expr(a, Some(domain), depth - 1)?
-                            fields.push(field)
-                            ty = self.c.substitute(result, field, core.DEPTH)?
-                        }
-                        let normal = self.c.normal(ty, core.DEPTH)?
-                        let core.Term.Ind(_, _) = self.c.term(normal) else {
-                            return Err(error(sp, "a constructor requires all of its fields"))
-                        }
-                        return self.c.add(core.Term.Con(f, k, fields), sp)
-                    }
+                    Some((f, k)) => return self.construct(f, k, args.as_slice(), sp, depth)
                     None => {}
                 }
                 if n == "refl" {
@@ -630,6 +789,7 @@ impl Elaborator {
         let f = self.c.families.len() as u32
         self.c.families.push(core.Family {
             name: t.name.clone(),
+            data: false,
             arity: t.params.len() as u32,
             constructors: Vec(core.Constructor).new(),
             globals: self.c.definitions.len() as u32,
@@ -682,9 +842,55 @@ impl Elaborator {
         self.c.check()
     }
 
+    // `enum E { V(T, ...) ... }` declares a data type. Its variants'
+    // fields are positional: u64, i64, refinements, earlier data types or
+    // erased(P), and cannot name each other; a refinement field carries
+    // what is known about a value. The kernel checks the declaration.
+    fn data_type(inout self, item: ast.Item, e: ast.EnumDecl) -> Result((), diag.Diag) {
+        if item.attrs.len() != 0 || e.params.len() != 0 { return Err(error(
+            item.span,
+            "data types have no attributes or parameters"
+        )) }
+        if reserved(e.name.as_str()) || self.taken(e.name.as_str()) {
+            return Err(error(item.span, "duplicate or reserved data type name"))
+        }
+        let f = self.c.families.len() as u32
+        self.c.families.push(core.Family {
+            name: e.name.clone(),
+            data: true,
+            arity: 0,
+            constructors: Vec(core.Constructor).new(),
+            globals: self.c.definitions.len() as u32,
+            span: item.span
+        })
+        for i, v in e.variants {
+            if reserved(v.name.as_str()) { return Err(error(v.span, "reserved variant name")) }
+            for j in 0..i {
+                if e.variants[j].name == v.name { return Err(error(v.span, "duplicate variant")) }
+            }
+            var domains = Vec((bool, u32)).new()
+            for t in v.fields { domains.push(self.domain(t)?) }
+            var ty = self.c.add(core.Term.Ind(f, Vec(u32).new()), v.span)?
+            var j = domains.len()
+            while j > 0 {
+                j -= 1
+                let (erased, domain) = domains[j]
+                // The fields are closed: they do not refer to each other.
+                let domain = self.c.shift(domain, j, 0, core.DEPTH)?
+                ty = self.c.add(core.Term.Pi(erased, domain, ty), v.span)?
+            }
+            self.c.families[f as i64].constructors.push(core.Constructor {
+                name: v.name.clone(),
+                ty
+            })
+        }
+        self.c.check()
+    }
+
     fn definition(inout self, item: ast.Item, entry: bool) -> Result((), diag.Diag) {
         match item.kind {
             Trait(t) => return self.inductive(item, t)
+            Enum(e) => return self.data_type(item, e)
             _ => {}
         }
         let ast.ItemKind.Fn(f) = item.kind else { return Err(error(
@@ -762,6 +968,19 @@ impl Elaborator {
         // Make previously checked definitions available for type-directed
         // application elaboration. Lowering independently rechecks all terms.
         self.c.check()
+    }
+}
+
+// The variant a match arm's pattern names: `V`, `V(x, ...)` or `E.V(...)`.
+fn variant_name(p: ast.Pat, family: str) -> Option(String) {
+    match p.kind {
+        Name(n, false) => Some(n.clone())
+        Variant(path, _) => {
+            if path.len() == 1 { return Some(path[0].clone()) }
+            if path.len() == 2 && path[0] == family { return Some(path[1].clone()) }
+            None
+        }
+        _ => None
     }
 }
 

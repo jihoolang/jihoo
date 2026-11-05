@@ -92,6 +92,8 @@ the runner. Its suites:
   `tests/core_sub.py` adds subtraction with evidence and its cancellation.
   `tests/core_refine.py` adds refinements: projections, kept witness traps,
   false or mismatched evidence and the export ABI.
+  `tests/core_data.py` adds data types: `match`, proofs by cases, kept
+  field traps, positivity of fields and motives.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

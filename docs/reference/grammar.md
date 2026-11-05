@@ -73,7 +73,8 @@ alias    = "type" name [ "=" type ]
   selects a [restricted source subset](../internals/dependent-core.md#ordinary-source-subset)
   using contextual `erased(P)`, `if_lt`, `if_eq`, `index`, `decide_lt`,
   `refl`, `transport`, `induct`, `fold`, `lt_add`, `lt_cancel`, `lt_le`,
-  `sub`, `zero_le`, `refine`, `pack`, `witness` and `proof` forms
+  `sub`, `zero_le`, `refine`, `pack`, `witness` and `proof` forms, and
+  `enum` declarations with `match` for [data types](../internals/dependent-core.md#data-types),
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)

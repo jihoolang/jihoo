@@ -142,7 +142,7 @@ impl Lower {
             }
             Strict(a, b) => {
                 // Evaluated for its traps only, before the rest.
-                self.expr(c, a, env, depth - 1)?
+                self.effect(c, a, env, depth - 1)?
                 self.expr(c, b, env, depth - 1)
             }
             USub(a, b, _) => {
@@ -224,6 +224,73 @@ impl Lower {
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(acc)), ty: types.I64 })
             }
             _ => Err(c.error(id, "term has no runtime representation in this core fragment"))
+        }
+    }
+}
+
+impl Lower {
+    // Evaluate a term only for its traps. A data value has no runtime
+    // representation: normalization removes every case analysis of one,
+    // and what remains is evaluated field by field. Erased fields are not.
+    fn effect(
+        inout self,
+        c: core.Core,
+        id: u32,
+        env: [Option(Value)],
+        depth: u32
+    ) -> Result((), diag.Diag) {
+        if depth == 0 { return Err(c.error(id, "lowering nesting limit reached")) }
+        let sp = c.nodes[id as i64].span
+        match c.term(id) {
+            Con(f, k, fields) => {
+                var ty = c.families[f as i64].constructors[k as i64].ty
+                for x in fields {
+                    let core.Term.Pi(erased, _, rest) = c.term(ty) else {
+                        return Err(c.error(id, "constructor layout mismatch"))
+                    }
+                    if !erased { self.effect(c, x, env, depth - 1)? }
+                    ty = rest
+                }
+                Ok(())
+            }
+            Pack(_, a, _) => self.effect(c, a, env, depth - 1)
+            Strict(a, b) => {
+                self.effect(c, a, env, depth - 1)?
+                self.effect(c, b, env, depth - 1)
+            }
+            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                let op = match c.term(id) { IfEq(_, _, _, _) => lex.Op.Eq, _ => lex.Op.Lt }
+                let a = self.expr(c, a, env, depth - 1)?
+                let b = self.expr(c, b, env, depth - 1)?
+                let condition = self.value(
+                    types.BOOL,
+                    mir.Rvalue.Bin(op, a.op.clone(), b.op.clone()),
+                    sp
+                )
+                let yes_block = self.block()
+                let no_block = self.block()
+                let join = self.block()
+                var cases = Vec(mir.SwitchTarget).new()
+                cases.push(mir.SwitchTarget { value: 0, block: no_block })
+                self.term(mir.Term.Switch(condition.op.clone(), cases, yes_block))
+                self.block = yes_block
+                var inner = Vec(Option(Value)).new()
+                for x in env {
+                    inner.push(match x { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None })
+                }
+                inner.push(None)
+                self.effect(c, yes, inner.as_slice(), depth - 1)?
+                self.term(mir.Term.Goto(join))
+                self.block = no_block
+                self.effect(c, no, env, depth - 1)?
+                self.term(mir.Term.Goto(join))
+                self.block = join
+                Ok(())
+            }
+            _ => {
+                self.expr(c, id, env, depth - 1)?
+                Ok(())
+            }
         }
     }
 }

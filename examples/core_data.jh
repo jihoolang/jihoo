@@ -1,0 +1,72 @@
+// Data types. An `enum` declares one; its variants hold u64 and i64
+// values, refinements and earlier data types, and are built as
+// `Slot.Full(s)`. `match` takes a value apart into the expected type,
+// and `induct(fn(x) { P(x) }, case..., v)` proves P of any value, one
+// case per variant. A data value has no runtime representation: case
+// analysis of a branch is the branch of the cases, so `lookup` compiles
+// to one comparison and one load, with no tag, no bounds check and no
+// evidence. main returns 64.
+#![dependent_core]
+
+// A slot of a four-element table: empty, or an index proved in range.
+enum Slot {
+    Empty
+    Full(refine(fn(j) { Lt(j, 4) }))
+}
+
+fn slot(i: u64) -> Slot { if_lt(i, 4, fn(p) { Slot.Full(pack(i, p)) }, Slot.Empty) }
+
+fn read(xs: [i64; 4], s: Slot, missing: i64) -> i64 {
+    match s {
+        Empty => missing
+        Full(j) => index(xs, witness(j), proof(j))
+    }
+}
+
+export fn lookup(i: u64) -> i64 { read([10, 20, 30, 40], slot(i), -1) }
+
+// The index of a slot, 0 when empty, and a proof by cases that it is in
+// range, for every slot.
+fn position(s: Slot) -> u64 {
+    match s {
+        Empty => 0
+        Full(j) => witness(j)
+    }
+}
+
+fn position_bound(s: Slot) -> Lt(position(s), 4) {
+    induct(fn(t) { Lt(position(t), 4) }, decide_lt(0, 4), fn(j) { proof(j) }, s)
+}
+
+export fn first(i: u64) -> i64 { index([5, 6, 7, 8], position(slot(i)), position_bound(slot(i))) }
+
+// Variants with several i64 fields, and a data type inside another.
+enum Reading {
+    Missing
+    Value(i64)
+    Scaled(i64, i64)
+}
+
+enum Sample {
+    Taken(Reading, Slot)
+}
+
+fn total(r: Reading) -> i64 {
+    match r {
+        Missing => 0
+        Value(x) => x
+        Scaled(x, k) => x * k
+    }
+}
+
+fn weigh(s: Sample) -> i64 {
+    match s {
+        Taken(r, at) => total(r) + read([1, 2, 3, 4], at, 0)
+    }
+}
+
+export fn measure(i: u64, x: i64) -> i64 {
+    weigh(Sample.Taken(if_lt(i, 2, fn(p) { Reading.Value(x) }, Reading.Scaled(x, 3)), slot(i)))
+}
+
+fn main() -> i64 { lookup(2) + lookup(9) + first(3) + measure(1, 4) + measure(5, 7) }

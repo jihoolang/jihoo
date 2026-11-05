@@ -114,6 +114,8 @@ in the existing grammar, not global keywords or standard-library types:
 |--------|-------------|
 | `u64`, `i64`, `[i64; n]`, `Lt(i, n)`, `Eq(a, b)` | scalar/array types and propositions |
 | `trait F(a: u64, ...) { fn c(...) -> F(...) }` | [declared inductive proposition](#inductive-propositions) `F` with constructors `c` |
+| `enum E { V(T, ...) ... }`, `E.V(x, ...)` | a [data type](#data-types) and a value of it |
+| `match v { V(x, ...) => e, ... }` | case analysis into the expected type |
 | `F(a, ...)`, `c(x, ...)` | a declared proposition; its constructor, fully applied |
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
@@ -169,8 +171,8 @@ without LLVM or a linker.
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
 u64 products, the `-` operator on u64 (use `sub`), division and comparison operators, general runtime
-closures/recursion, data (non-`Prop`)
-inductive types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
+closures/recursion, recursive or indexed data
+types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
 only one execution path. `fmt`, AST dumps and source diagnostics use the
 ordinary parser; checking errors retain `.jh` byte ranges. Source parsing
@@ -345,8 +347,7 @@ with constructors `c` whose types are core telescopes; `(F a ...)` and
 family explicitly. Kernel terms are `Ind(F, indices)`, `Con(F, k,
 fields)` and `Elim(F, P, cases, evidence)`.
 
-Not yet supported: data (non-`Prop`) inductive types and their
-elimination into data, motives depending on the evidence, families
+Not yet supported for propositions: motives depending on the evidence, families
 indexed by values other than `u64` or parameterized by propositions,
 infinitary (arrow-typed) recursive fields, mutual families and erased
 data indices.
@@ -543,6 +544,76 @@ evidence or bounds assertions. In `.jhc` the forms are `(Refine P)`,
 Refinements carry U64 values only; dependent pairs of other types, and
 refinements as loop accumulators, are future work.
 
+## Data types
+
+An `enum` in a marked module declares a data type, of `Type 0`. Its
+variants' fields are positional and are `u64`, `i64`, refinements,
+earlier data types or `erased(P)`; a field cannot name another, so a
+refinement field carries what is known about a value. `E.V(x, ...)`
+builds a value, with every field, and `E.V` one without fields; variants
+are always qualified when built and bare (or qualified) in patterns.
+
+```jihoo
+enum Slot {
+    Empty
+    Full(refine(fn(j) { Lt(j, 4) }))
+}
+
+fn read(xs: [i64; 4], s: Slot, missing: i64) -> i64 {
+    match s {
+        Empty => missing
+        Full(j) => index(xs, witness(j), proof(j))
+    }
+}
+```
+
+`match v { ... }` has one arm per variant, in any order, binding every
+field by name or `_`, without guards; its type is the expected type,
+which every arm has. `induct(fn(x) { P(x) }, case..., v)` proves a
+proposition about any value by cases, one per variant in declaration
+order, as for inductive propositions:
+
+```jihoo
+fn position_bound(s: Slot) -> Lt(position(s), 4) {
+    induct(fn(t) { Lt(position(t), 4) }, decide_lt(0, 4), fn(j) { proof(j) }, s)
+}
+```
+
+In the kernel both are `Elim(F, P, cases, v)`, whose motive `P : F ->
+Prop` or `P : F -> Type 0` depends on the value: the case for a variant
+with fields `x...` has type `(x...) -> P(V(x...))`, and the elimination
+has type `P(v)`. `match` is the motive that ignores the value. Into
+`Prop` it is evidence and erased; into `Type 0` it is runtime code, and
+its value and cases are runtime terms. A larger motive, returning types,
+is rejected. The kernel checks a declaration as for propositions: the
+type is not visible to its own fields, so it is not recursive, and
+runtime fields are first-order.
+
+A data value has no runtime representation. Case analysis of a variant
+reduces to the case applied to the fields; of a branch, to the branch of
+the cases (the true branch's binder is shifted over the cases); of
+`Strict(t, y)`, to `t` then the case of `y`. Evaluation still goes the
+value, then the case. Since an export cannot take or return data, and a
+loop accumulator is an i64, every case analysis in an export reduces
+away. A data value that is passed but not used is evaluated field by
+field for its traps; erased fields are not evaluated. The cost is that a
+case on a branch duplicates the cases in each alternative, bounded by
+the kernel's limits.
+
+[`examples/core_data.jh`](../../examples/core_data.jh) and its
+[core equivalent](../../examples/core_data.jhc) read a table through a
+`Slot`, prove the slot's position in range by cases, and nest a
+`Reading` with i64 fields in a `Sample`. `measure(i, x)` builds a
+sample from two branches and takes it apart in two matches; its MIR
+has the two comparisons, a product, a sum and a load. In `.jhc`,
+`(data E (V TYPE) ...)` declares a data type whose constructor types are
+telescopes ending in `E`, and `(induct E P case ... v)` with
+`P = (lam x E T)` takes a value apart.
+
+Not yet supported: recursive data types and structural recursion,
+indexed data types (`Vec(n)`), parameters, data in exports and loop
+accumulators, and runtime representations of data.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -561,6 +632,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(Eq a b)`, `(refl a)` | U64 equality proposition and reflexivity evidence |
 | `(transport family e p)` | equality elimination into a proposition family |
 | `(inductive F n (c type) ...)` | top-level declaration of an inductive proposition |
+| `(data E (c type) ...)` | top-level declaration of a data type, without indices |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -585,12 +657,13 @@ compute their universe levels; a function ending in a proposition is a
 proposition. Type-level functions and higher-order beta reduction work,
 but the executable ABI is restricted to U64/I64 arguments and results.
 There are no axioms, casts, unbounded loops or recursion, unsafe memory operations
-or eliminators that inspect evidence to produce runtime data.
+or eliminators that inspect evidence to produce runtime data. Data
+types are eliminated into `Prop` or `Type 0`, never into types.
 
 Erased binders must bind propositions; proof binders must be erased.
 Evidence can be used in types and proof arguments, but not as runtime
-data. Erased data/type parameters, inductive data types, equality beyond
-U64 and dependent motives are future work.
+data. Erased data/type parameters, recursive and indexed data types,
+equality beyond U64 and motives depending on evidence are future work.
 U64 terms denote natural numbers; runtime U64 addition traps instead of
 wrapping, so computed values are those numbers.
 
@@ -687,13 +760,25 @@ projections of u64 values, untyped packs, data predicates, erased
 refinements and refinement arguments of exports. Kernel unit tests
 check evidence at the witness, projection, erasure and the witness of a
 branch.
+`tests/core_data.py` adds data types: both frontends' MIR and native
+execution, `match` with qualified, bare and `_` patterns, nested data,
+proofs by cases (including nested induction) and closed computation.
+Unused values are evaluated field by field for their traps, and erased
+fields are not. It rejects missing, duplicate or guarded arms, wrong
+field counts, matches without an expected type or on non-data, recursive
+and higher-order fields, unqualified or unknown variants, false proofs
+by cases, data in exports, erased data, large motives, motives of other
+types and evidence fields used at run time. Kernel unit tests reject
+recursive and indexed data and large or mistyped motives, and check that
+a case on a branch is a branch.
 
 The next stages of the replacement are:
 
 1. Extend ordinary `.jh` elaboration only as additional program operations
    and their guarantees are supported by this same core.
-2. Extend the logical foundations beyond U64 equality and declared
-   propositions: dependent motives, inductive data types, erased indices,
+2. Extend the logical foundations beyond U64 equality, declared
+   propositions and flat data types: recursive and indexed data types,
+   structural recursion, erased indices,
    products, equality of other types and
    reusable lemma
    libraries. Specify normalization, universe

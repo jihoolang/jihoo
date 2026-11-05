@@ -1,0 +1,70 @@
+; Data types: (data F (c TYPE) ...) declares one without indices, and
+; (induct F P case ... v) is case analysis with a motive P : F -> Type 0
+; or F -> Prop that depends on the value. No data value reaches run time.
+(data Slot
+  (Empty Slot)
+  (Full (pi s (Refine (lam j U64 (Lt j 4))) Slot)))
+
+(def slot
+  (pi i U64 Slot)
+  (lam i U64 (if-lt i 4 p (Full (pack (lam j U64 (Lt j 4)) i p)) Empty)))
+
+(def read
+  (pi xs (Array 4) (pi s Slot (pi missing I64 I64)))
+  (lam xs (Array 4) (lam s Slot (lam missing I64
+    (induct Slot (lam t Slot I64)
+      missing
+      (lam j (Refine (lam j U64 (Lt j 4))) (index xs (witness j) (proof j)))
+      s)))))
+
+(export lookup
+  (pi i U64 I64)
+  (lam i U64 (app read (array (int 10) (int 20) (int 30) (int 40)) (app slot i) (int -1))))
+
+(def position
+  (pi s Slot U64)
+  (lam s Slot (induct Slot (lam t Slot U64) 0 (lam j (Refine (lam j U64 (Lt j 4))) (witness j)) s)))
+
+(def position_bound
+  (pi s Slot (Lt (app position s) 4))
+  (lam s Slot
+    (induct Slot (lam t Slot (Lt (app position t) 4))
+      (decide-lt 0 4)
+      (lam j (Refine (lam j U64 (Lt j 4))) (proof j))
+      s)))
+
+(export first
+  (pi i U64 I64)
+  (lam i U64
+    (index (array (int 5) (int 6) (int 7) (int 8)) (app position (app slot i))
+      (app position_bound (app slot i)))))
+
+(data Reading
+  (Missing Reading)
+  (Value (pi x I64 Reading))
+  (Scaled (pi x I64 (pi k I64 Reading))))
+
+(data Sample
+  (Taken (pi r Reading (pi at Slot Sample))))
+
+(def total
+  (pi r Reading I64)
+  (lam r Reading
+    (induct Reading (lam t Reading I64)
+      (int 0)
+      (lam x I64 x)
+      (lam x I64 (lam k I64 (mul x k)))
+      r)))
+
+(def weigh
+  (pi s Sample I64)
+  (lam s Sample
+    (induct Sample (lam t Sample I64)
+      (lam r Reading (lam at Slot
+        (add (app total r) (app read (array (int 1) (int 2) (int 3) (int 4)) at (int 0)))))
+      s)))
+
+(export measure
+  (pi i U64 (pi x I64 I64))
+  (lam i U64 (lam x I64
+    (app weigh (Taken (if-lt i 2 p (Value x) (Scaled x (int 3))) (app slot i))))))
