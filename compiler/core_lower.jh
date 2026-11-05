@@ -28,6 +28,8 @@ struct Lower {
     // Recursive functions made for structural recursion on heap data,
     // declared after malloc and free; ids start at `free + 1`.
     generated: Vec(mir.Function)
+    // Per boxed family, the generated function that frees a value of it.
+    drops: Map(u32, u32)
 }
 
 impl Lower {
@@ -276,6 +278,23 @@ impl Lower {
                 let slot = self.slot(at, i.op.clone(), sp)
                 self.store(slot, v.op.clone(), sp)
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(at)), ty: b.ty })
+            }
+            Drop(f, x, rest) => {
+                let x = self.expr(c, x, env, depth - 1)?
+                let function = self.drop_glue(c, f, sp)?
+                let unit = self.local(types.UNIT, mir.LocalKind.Temp, sp)
+                let next = self.block()
+                var args = Vec(mir.Operand).new()
+                args.push(x.op.clone())
+                self.term(mir.Term.Call(
+                    mir.Callee.Fn(function),
+                    args,
+                    mir.Place.local(unit),
+                    next,
+                    sp
+                ))
+                self.block = next
+                self.expr(c, rest, env, depth - 1)
             }
             Free(b, rest) => {
                 let b = self.expr(c, b, env, depth - 1)?
@@ -690,6 +709,106 @@ impl Lower {
         Ok(Value { op: mir.Operand.Copy(mir.Place.local(r)), ty: ret })
     }
 
+    // The function that frees a value of boxed family f: it switches on the
+    // tag, loads the fields on the heap, frees the node and then frees
+    // each of them. Made once per family; its depth is the data's.
+    fn drop_glue(inout self, c: core.Core, f: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
+        match self.drops.get(f) { Some(function) => return Ok(function), None => {} }
+        let function = self.free + 1 + self.generated.len() as u32
+        self.drops.insert(f, function)
+        let name = c.families[f as i64].name.clone()
+        self.generated.push(mir.Function {
+            name: ("drop." + name.as_str()).to_string(),
+            symbol: ("__jihoo_core_drop_" + function.to_string().as_str()).to_string()
+            sig: types.Sig {
+                c_abi: false,
+                variadic: false,
+                params: Vec(u32).new(),
+                ret: types.UNIT
+            }
+            pass: Vec(mir.ParamPass).new(), body: None, linkage: mir.Linkage.Internal,
+            variadic: false, returns_ref: false, span: sp
+        })
+        let outer = mem.replace(&self.body, mir.Body { locals: Vec(mir.LocalDecl).new(),
+            blocks: Vec(mir.Block).new(), arg_count: 0, contract: mir.Contract.new() })
+        let outer_block = self.block
+        self.local(types.UNIT, mir.LocalKind.Ret, sp)
+        self.block = self.block()
+        let ptr = self.pointer()
+        let node = self.local(ptr, mir.LocalKind.Arg, sp)
+        self.body.arg_count = 1
+        let count = c.families[f as i64].constructors.len()
+        let join = self.block()
+        if count > 0 {
+            let tag = self.get(node, 0, types.I64, sp)
+            var blocks = Vec(u32).new()
+            for _ in 0..count { blocks.push(self.block()) }
+            var targets = Vec(mir.SwitchTarget).new()
+            for k in 0..count - 1 { targets.push(mir.SwitchTarget {
+                value: k as i128,
+                block: blocks[k]
+            }) }
+            self.term(mir.Term.Switch(tag.op.clone(), targets, blocks[count - 1]))
+            for k in 0..count {
+                self.block = blocks[k]
+                var owned = Vec((u32, Value)).new()
+                var slot: u64 = 1
+                var ty = c.families[f as i64].constructors[k].ty
+                var j = 0
+                loop {
+                    let core.Term.Pi(erased, domain, rest) = c.term(ty) else { break }
+                    if j >= c.families[f as i64].params as i64 && !erased {
+                        match c.term(domain) {
+                            Ind(g, _) if c.is_boxed(g) => {
+                                let v = self.get(node, slot, ptr, sp)
+                                owned.push((g, v))
+                            }
+                            _ => {}
+                        }
+                        slot += 1
+                    }
+                    j += 1
+                    ty = rest
+                }
+                self.release(node, sp)
+                for (g, v) in owned {
+                    let inner = self.drop_glue(c, g, sp)?
+                    let unit = self.local(types.UNIT, mir.LocalKind.Temp, sp)
+                    let next = self.block()
+                    var args = Vec(mir.Operand).new()
+                    args.push(v.op.clone())
+                    self.term(mir.Term.Call(
+                        mir.Callee.Fn(inner),
+                        args,
+                        mir.Place.local(unit),
+                        next,
+                        sp
+                    ))
+                    self.block = next
+                }
+                self.term(mir.Term.Goto(join))
+            }
+        } else { self.term(mir.Term.Goto(join)) }
+        self.block = join
+        self.term(mir.Term.Return)
+        let body = mem.replace(&self.body, outer)
+        self.block = outer_block
+        let index = (function - self.free - 1) as i64
+        var params = Vec(u32).new()
+        params.push(ptr)
+        var pass = Vec(mir.ParamPass).new()
+        pass.push(mir.ParamPass.Value)
+        self.generated[index].sig = types.Sig {
+            c_abi: false,
+            variadic: false,
+            params,
+            ret: types.UNIT
+        }
+        self.generated[index].pass = pass
+        self.generated[index].body = Some(body)
+        Ok(function)
+    }
+
     fn store(inout self, slot: u32, sink v: mir.Operand, sp: diag.Span) {
         self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
             mir.Place.local(slot).with(mir.Proj.Deref),
@@ -827,6 +946,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
     for d in c.definitions { if d.exported { exports += 1 } }
     var heap = false
     var generated = Vec(mir.Function).new()
+    var drops = Map(u32, u32).new()
     for i in 0..count {
         if !c.definitions[i].exported { continue }
         let sp = c.definitions[i].span
@@ -846,6 +966,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
             free: exports + 1
             heap: false
             generated: mem.take(&generated)
+            drops: mem.take(&drops)
         }
         lower.local(types.UNIT, mir.LocalKind.Ret, sp)
         lower.block()
@@ -878,9 +999,10 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
         lower.assign(0, mir.Rvalue.Use(value.op.clone()), sp)
         lower.term(mir.Term.Return)
         if lower.heap { heap = true }
-        let Lower { body, types: next_types, generated: made, .. } = move lower
+        let Lower { body, types: next_types, generated: made, drops: known, .. } = move lower
         runtime_types = next_types
         generated = made
+        drops = known
         out.push(mir.Function {
             name: c.definitions[i].name.clone(), symbol: c.definitions[i].name.clone()
             sig: types.Sig { c_abi: true, variadic: false, params, ret }

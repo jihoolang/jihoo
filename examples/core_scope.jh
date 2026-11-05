@@ -1,0 +1,44 @@
+// Owned values are freed where their scope ends. A buffer or heap value
+// that a function, a match arm, a branch or a continuation does not use
+// is freed there by the compiler, so `free` need not be written; the
+// kernel still checks that every owned value is used exactly once, so a
+// wrong free would be a compile error, not a leak or a double free.
+// `head_or` frees the tail it does not use, `sum_if` frees the list in the
+// branch that does not sum it, `at` frees the buffer after its load, and
+// `firsts` frees the results of the recursion it ignores. main returns 28.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn sum(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs) }
+
+fn head_or(xs: List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x
+    }
+}
+
+fn sum_if(i: u64, xs: List) -> i64 { if_lt(i, 10, fn(p) { sum(xs) }, 0) }
+
+fn at(i: u64, b: buffer(3)) -> i64 { if_lt(i, 3, fn(p) { load(b, i, p, fn(x, b) { x }) }, -1) }
+
+// The first element alone, as a list.
+fn firsts(xs: List) -> List {
+    induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(x, List.Nil) }, xs)
+}
+
+fn second(xs: List, ys: List) -> List { ys }
+
+export fn first(n: u64, x: i64) -> i64 { head_or(repeat(n, x), -1) }
+
+export fn total(n: u64, x: i64, i: u64) -> i64 {
+    sum_if(i, repeat(n, x)) + at(i, alloc(3, x)) + sum(firsts(second(repeat(n, x), repeat(n, 1))))
+}
+
+fn main() -> i64 { first(2, 7) + total(3, 5, 1) + total(3, 5, 20) }

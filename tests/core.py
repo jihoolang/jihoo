@@ -236,6 +236,19 @@ def evaluate(term, env):
         assert buffer.alive, "double free"
         buffer.alive = False
         return evaluate(args[1], env)
+    if head == "drop":
+        family, value, rest = args
+        released = evaluate(value, env)
+        assert isinstance(released, Node) and released.family == family, ("drop", family)
+
+        def release(node):
+            # Every node the value owns is taken apart once.
+            for field in node.take()[3]:
+                if isinstance(field, Node):
+                    release(field)
+
+        release(released)
+        return evaluate(rest, env)
     if head == "pack":
         family, a, proof = (evaluate(x, env) for x in args)
         # The evidence must be of the predicate at the witness.
@@ -541,6 +554,9 @@ def main():
         validate_buffer(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS)
         from core_list import validate_list
         validate_list(compiler, root, temporary, environment, run, definitions, evaluate, NODES)
+        from core_scope import validate_scope
+        validate_scope(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
+                       NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

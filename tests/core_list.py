@@ -114,12 +114,9 @@ export fn mixed(n: u64, x: i64, i: u64) -> i64 {
     command("check", valid_path, "--lib")
 
     source_invalid = {
-        "leak-tail": "fn bad(xs: List) -> i64 { match xs { Nil => 0, Cons(x, rest) => x } }",
         "used-twice": "fn bad(xs: List) -> i64 { sum(xs) + sum(xs) }",
         "rest-at-runtime": "fn bad(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { sum(rest) }, xs) }",
         "recursion-capture": "fn bad(xs: List, ys: List) -> i64 { induct(fn(t) { i64 }, sum(ys), fn(x, rest, ih) { ih + drop(ys) }, xs) }",
-        "unequal-arms": "fn bad(xs: List, ys: List) -> i64 { match xs { Nil => sum(ys), Cons(x, rest) => x + drop(rest) } }",
-        "unused-result": "fn bad(xs: List) -> List { induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Nil }, xs) }",
         "export-result": "export fn bad(n: u64) -> List { repeat(n, 0) }",
         "export-argument": "export fn bad(xs: List) -> i64 { sum(xs) }",
         "erased-at-runtime": "fn bad(xs: erased(List)) -> i64 { sum(xs) }",

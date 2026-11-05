@@ -52,7 +52,7 @@ fn form_head(s: str) -> bool {
         s == "fold" || s == "uadd" || s == "lt-add" || s == "lt-cancel" || s == "lt-le" ||
         s == "usub" || s == "zero-le" || s == "Refine" || s == "pack" || s == "witness" ||
         s == "proof" || s == "data" || s == "Buffer" || s == "alloc" || s == "load" ||
-        s == "store" || s == "free" || s == "case"
+        s == "store" || s == "free" || s == "case" || s == "drop"
 }
 
 struct Parser {
@@ -208,6 +208,17 @@ impl Parser {
             while !self.at(")") { arguments.push(self.expr(depth - 1)?) }
             let Some(value) = arguments.pop() else { return Err(self.error("case needs a value")) }
             core.Term.Case(f, motive, arguments, value)
+        } else if kind == "drop" {
+            // (drop F v rest): free heap data v of type F, then the rest.
+            let name = self.name()?
+            var family: Option(u32) = None
+            for f, declared in self.core.families {
+                if declared.name == name { family = Some(f as u32); break }
+            }
+            let Some(f) = family else { return Err(self.error("unknown data type")) }
+            let value = self.expr(depth - 1)?
+            let rest = self.expr(depth - 1)?
+            core.Term.Drop(f, value, rest)
         } else if kind == "add" || kind == "sub" || kind == "mul" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?

@@ -206,8 +206,10 @@ evidence. [Owned buffers](examples/core_buffer.jh) are allocated
 explicitly and freed exactly once, which the kernel checks, with loads
 and stores at proved indices, and [recursive data](examples/core_list.jh)
 lives on the heap, taken apart by `match` or consumed by structural
-recursion, with proofs by induction. General `.jh` coverage,
-borrows, frees inserted by the compiler and proofs of the new kernel, elaboration and
+recursion, with proofs by induction. An owned value is
+[freed where its scope ends](examples/core_scope.jh) without a written
+`free`, and the kernel checks those frees too. General `.jh` coverage,
+borrows and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and

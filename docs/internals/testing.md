@@ -102,6 +102,9 @@ the runner. Its suites:
   `tests/core_list.py` adds recursive data on the heap: `match`,
   structural recursion, trees and parameterized lists, proofs by
   induction, and counted nodes.
+  `tests/core_scope.py` adds frees inserted where ownership ends: each
+  implicit program must compile to the same MIR as the one with those
+  frees written out, and free what it allocates.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

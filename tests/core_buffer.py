@@ -108,16 +108,10 @@ export fn calls(x: i64, i: u64) -> i64 {
     command("check", valid_path, "--lib")
 
     source_invalid = {
-        "leak": "fn bad(b: buffer(3)) -> i64 { 0 }",
-        "leak-later": "fn bad(b: buffer(3), x: i64) -> i64 { x }",
-        "leak-continuation": "fn bad() -> i64 { load(alloc(3, 0), 0, decide_lt(0, 3), fn(x, b) { x }) }",
         "double-free": "fn bad(b: buffer(3)) -> i64 { free(b, free(b, 0)) }",
         "use-after-free": "fn bad(b: buffer(3)) -> i64 { free(b, load(b, 0, decide_lt(0, 3), fn(x, c) { free(c, x) })) }",
         "two-calls": "fn give(b: buffer(3)) -> i64 { free(b, 0) }\nfn bad(b: buffer(3)) -> i64 { give(b) + give(b) }",
-        "one-branch": "fn bad(i: u64, b: buffer(3)) -> i64 { if_lt(i, 3, fn(p) { free(b, 1) }, 0) }",
-        "one-case": "enum Two {\n    A\n    B\n}\nfn bad(t: Two, b: buffer(3)) -> i64 { match t { A => free(b, 1), B => 0 } }",
         "loop-capture": "fn bad(b: buffer(3)) -> i64 { fold(3, 0, fn(i, p, acc) { load(b, i, p, fn(x, c) { free(c, x) }) }) }",
-        "loop-leak": "fn bad() -> i64 { fold(3, 0, fn(i, p, acc) { load(alloc(1, 0), 0, decide_lt(0, 1), fn(x, b) { acc + x }) }) }",
         "out-of-bounds": "fn bad(b: buffer(3)) -> i64 { load(b, 3, decide_lt(3, 4), fn(x, c) { free(c, x) }) }",
         "unchecked-store": "fn bad(b: buffer(3), i: u64) -> buffer(3) { store(b, i, 0, decide_lt(0, 3)) }",
         "wrong-length": "fn bad(b: buffer(3)) -> buffer(4) { b }",

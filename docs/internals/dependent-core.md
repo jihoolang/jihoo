@@ -120,7 +120,7 @@ in the existing grammar, not global keywords or standard-library types:
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
 | `n: erased(u64)` | an [erased index](#erased-indices-and-parameters): a u64 for types and evidence only |
 | `buffer(n)`, `alloc(n, x)` | an [owned buffer](#owned-buffers) of n i64 values; a new one, each x |
-| `load(b, i, p, fn(x, b) { k })`, `store(b, i, v, p)`, `free(b, rest)` | read b[i] and continue with b; write in place; free, then `rest` |
+| `load(b, i, p, fn(x, b) { k })`, `store(b, i, v, p)`, `free(b, rest)` | read b[i] and continue with b; write in place; free a buffer or heap data, then `rest` |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
 | `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
@@ -707,6 +707,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(Buffer n)`, `(alloc n x)` | an owned buffer of n I64 values; a new one |
 | `(case F P case ... v)` | one level of case analysis of heap data: the node is freed |
 | `(load b i p k)`, `(store b i v p)`, `(free b rest)` | read and continue with `k x b`; write in place; free, then `rest` |
+| `(drop F v rest)` | free heap data `v` of type `F` and every node it owns, then `rest` |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -863,9 +864,9 @@ native execution against the evaluator, which tracks every buffer it
 allocates; native objects are linked with counting `malloc`/`free`
 wrappers, and every call must free exactly what it allocates, including
 a u64 that touches memory inside a cancelled subtraction. Size overflow
-traps and a failed allocation stops the program. It rejects leaks (also
-in a load's continuation or a loop body), double frees, uses after
-free, two calls, unequal branches or cases, captures by loop bodies,
+traps and a failed allocation stops the program. It rejects leaks and
+unequal branches in `.jhc`, where no free is inserted, double frees,
+uses after free, two calls, captures by loop bodies,
 lambdas and partial applications (also of a fresh buffer), out-of-bounds
 or unchecked indices, wrong lengths, lost stores, erased buffers,
 buffers in exports, data and arrays, and malformed continuations.
@@ -876,12 +877,21 @@ execution against the evaluator, which takes every node apart once;
 native objects count `malloc` and `free`, and every call frees what it
 allocates. Valid programs include `tail` by `match`, binary trees with
 a proof by induction that mirroring keeps the leaves, and a
-parameterized list of checked indices. It rejects unused tails, double
+parameterized list of checked indices. It rejects double
 uses, runtime uses of a recursion's rest, captures by recursion cases,
-unequal arms, heap data in exports, false inductions, changed
+heap data in exports, false inductions, changed
 parameters, flat fields of heap data and loop captures. Kernel unit
 tests check boxing, one-level analysis and that sums convert in any
 order but run in theirs.
+`tests/core_scope.py` adds frees inserted where ownership ends: both
+frontends' MIR and native execution of the example against the
+evaluator, counting every node and buffer; twelve implicit programs that
+must compile to the same MIR as their explicitly freed versions and free
+what they allocate; and rejection of double uses, uses after free, a
+free in one branch and again after it, frees of scalars and flat data,
+captures, and, in `.jhc`, leaks and drops of flat data, of another type,
+of a buffer or twice. Kernel unit tests check that heap data is dropped
+exactly once and that freeing is no computation in conversion.
 
 ## Owned memory plan
 
@@ -916,6 +926,7 @@ The steps, each an ordinary slice with its tests:
    lowering emits a recursive function; termination is structural.
    Implemented with step 2.
 4. Frees inserted by the source elaborator where an owner's scope ends.
+   Implemented: see [frees where ownership ends](#frees-where-ownership-ends).
 5. Borrows: reading a value without consuming it, as in `length(&xs)`.
    Until then a function that reads an owned value takes it and gives it
    back.
@@ -959,9 +970,9 @@ owned value: not a lambda, a loop body (which runs many times), nor a
 partial application, which also cannot take a fresh buffer. A load's
 continuation and a match's cases run once and may use one. So the
 kernel rejects a buffer that is never freed, freed twice, used after it
-is freed or passed to two calls. In source, frees are still written
-explicitly; the elaborator will insert them in a later step, checked by
-this same count.
+is freed or passed to two calls. In source, the elaborator
+[inserts the frees](#frees-where-ownership-ends) a scope needs, checked
+by this same count.
 
 Memory operations are not computed by normalization. When beta
 reduction would substitute an argument that touches memory, the redex
@@ -1062,14 +1073,69 @@ doubling keeps the length. valgrind finds every node freed. In `.jhc`, a
 case... v)` is the recursion and `(case F P case... v)` the one-level
 analysis.
 
+## Frees where ownership ends
+
+Step 4 of the [plan](#owned-memory-plan). In source, an owned value (a
+buffer or heap data) need not be freed by hand: the elaborator inserts a
+free where it is no longer owned, and the kernel checks the result with
+the same exactly-once count, so a wrong free is a compile error.
+
+```jihoo
+fn head_or(xs: List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x          // rest is freed
+    }
+}
+
+fn sum_if(i: u64, xs: List) -> i64 { if_lt(i, 10, fn(p) { sum(xs) }, 0) }   // freed in the else branch
+
+fn at(i: u64, b: buffer(3)) -> i64 {
+    if_lt(i, 3, fn(p) { load(b, i, p, fn(x, b) { x }) }, -1)   // b freed after the load, and in the else branch
+}
+```
+
+The elaborator applies two rules, innermost first:
+
+- **Scopes.** A function's parameters, a match arm's fields, a load's
+  continuation and the binders of a loop body or a recursion case each
+  own their owned values. One that the scope's body does not use at run
+  time is freed before the body: `free(rest, x)`.
+- **Alternatives.** Exactly one branch of `if_lt` and `if_eq`, one arm of a
+  `match` and one case of a flat data type's `induct` runs. An owned value
+  of the enclosing scope that some alternative uses is freed at the start
+  of each alternative that does not. So `sum_if` frees `xs` in its else
+  branch, and a nested branch is balanced before the one around it.
+
+Freeing at the start of a scope is the same program as freeing at its
+end, since freeing has no other effect, and holds the memory for less
+time. A value that a body uses twice or that a function captures is not
+repaired: the kernel reports it. Proofs are left alone, since evidence
+owns nothing at run time. Uses are counted by the kernel's own function,
+but the elaborator's answer is not trusted: the whole result is checked.
+
+`free(v, rest)` also frees heap data: the kernel term `Drop(F, v, rest)`
+(in `.jhc`, `(drop F v rest)`) frees v, a value of boxed type F, and
+every node it owns, then runs `rest`. Lowering makes one function per
+type that switches on a node's tag, loads its fields on the heap, frees
+the node and then frees each of them; its depth is the data's. In the
+pure model of conversion, `free` and `drop` are their rest, since nodes
+are values there; code to run keeps them.
+
+[`examples/core_scope.jh`](../../examples/core_scope.jh) writes no
+`free`, and its [core equivalent](../../examples/core_scope.jhc) writes
+out the frees the elaborator inserts; both compile to the same MIR, and
+valgrind finds every node and buffer freed. `tests/core_scope.py` checks
+twelve more such pairs, from unused parameters to nested branches and
+trees with a list inside.
+
 Not yet supported for heap data: borrows (reading a list without
-consuming it), frees inserted by the elaborator (`drop` is written by
-hand), mutual recursion, recursion depth beyond the machine stack, and
-heap data in exports.
+consuming it), mutual recursion, recursion depth beyond the machine
+stack, and heap data in exports.
 
 Not yet supported: borrows (a function that reads a buffer takes it and
-gives it back), buffers of other element types, frees inserted by the
-elaborator, and buffers in data types, exports and arrays. A data value
+gives it back), buffers of other element types, and buffers in data
+types, exports and arrays. A data value
 whose fields touch memory cannot yet be passed to a function: the
 argument is bound once, and data has no runtime representation, so
 lowering reports an error rather than evaluating it twice.

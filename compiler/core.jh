@@ -91,6 +91,9 @@ pub enum Term {
     Store(u32, u32, u32, u32)
     // Free b, then the rest.
     Free(u32, u32)
+    // Family, a value of that boxed data type and the rest: the value and
+    // every node it owns are freed, then the rest runs.
+    Drop(u32, u32, u32)
     // Family, motive, one case per constructor and a value of a boxed data
     // type: one level of case analysis. The node is freed and each case
     // receives all of its fields, recursive ones as owned values. Elim on a
@@ -330,6 +333,11 @@ impl Core {
             )
             Free(b, rest) => Term.Free(self.transform(b, cutoff, delta, replacement, depth - 1)?,
                 self.transform(rest, cutoff, delta, replacement, depth - 1)?)
+            Drop(f, x, rest) => Term.Drop(
+                f,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?,
+                self.transform(rest, cutoff, delta, replacement, depth - 1)?
+            )
             LtAdd(a, b, c, p) => Term.LtAdd(
                 self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
@@ -696,7 +704,14 @@ impl Core {
                 self.normal(p, depth - 1)?, self.normal(k, depth - 1)?)
             Store(b, i, v, p) => Term.Store(self.normal(b, depth - 1)?, self.normal(i, depth - 1)?,
                 self.normal(v, depth - 1)?, self.normal(p, depth - 1)?)
+            // In the pure model freeing is no computation: the rest's value.
+            Free(_, rest) | Drop(_, _, rest) if !self.runtime => return self.normal(rest, depth - 1)
             Free(b, rest) => Term.Free(self.normal(b, depth - 1)?, self.normal(rest, depth - 1)?)
+            Drop(f, x, rest) => Term.Drop(
+                f,
+                self.normal(x, depth - 1)?,
+                self.normal(rest, depth - 1)?
+            )
             Pack(p, a, q) => Term.Pack(self.normal(p, depth - 1)?, self.normal(a, depth - 1)?,
                 self.normal(q, depth - 1)?)
             Witness(s) => {
@@ -918,7 +933,12 @@ impl Core {
         match self.term(id) {
             Arith(_, _, _) | Strict(_, _) | UAdd(_, _) => true
             // Allocation can fail; memory effects are kept like traps.
-            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Case(_, _, _, _) => true
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Drop(_, _, _) | Case(
+                _,
+                _,
+                _,
+                _
+            ) => true
             Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
             // Only a refinement's witness is evaluated; its predicate and
             // evidence are erased.
@@ -936,7 +956,12 @@ impl Core {
     fn effectful(self, id: u32, depth: u32) -> bool {
         if depth == 0 { return true }
         match self.term(id) {
-            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Case(_, _, _, _) => true
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Drop(_, _, _) | Case(
+                _,
+                _,
+                _,
+                _
+            ) => true
             // Building a heap node allocates; recursion over one frees it.
             Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
             t => {
@@ -981,6 +1006,8 @@ impl Core {
             (Buffer(a), Buffer(b)) => self.identical(a, b, depth - 1)
             (Alloc(a, b), Alloc(c, d)) | (Free(a, b), Free(c, d)) =>
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Drop(f, a, b), Drop(g, c, d)) =>
+                f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Load(a, b, c, d), Load(w, x, y, z)) | (Store(a, b, c, d), Store(w, x, y, z)) =>
                 self.identical(a, w, depth - 1) && self.identical(b, x, depth - 1) &&
                 self.identical(c, y, depth - 1) && self.identical(d, z, depth - 1)
@@ -1689,6 +1716,17 @@ impl Core {
                 self.buffer_length(b, ctx, ghost, depth)?
                 return self.infer(rest, ctx, ghost, depth - 1)
             }
+            Drop(f, x, rest) => {
+                self.family_ref(id, f)?
+                if !self.is_boxed(f) { return Err(self.error(id, "drop frees heap data")) }
+                let ty = self.infer(x, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Ind(g, _) = self.term(ty) else {
+                    return Err(self.error(x, "drop requires a value of its type"))
+                }
+                if g != f { return Err(self.error(x, "drop requires a value of its type")) }
+                return self.infer(rest, ctx, ghost, depth - 1)
+            }
             Witness(s) | Proof(s) => {
                 let proof = match self.term(id) { Proof(_) => true, _ => false }
                 // The evidence is erased: only the witness is runtime data.
@@ -2030,7 +2068,7 @@ impl Core {
             Index(a, b, _) | USub(a, b, _) | Arith(_, a, b) | UAdd(a, b) | Strict(a, b) | Alloc(
                 a,
                 b
-            ) | Free(a, b) => Ok(
+            ) | Free(a, b) | Drop(_, a, b) => Ok(
                 self.uses(a, v, ctx, depth - 1)? + self.uses(b, v, ctx, depth - 1)?
             )
             Store(b, i, x, _) => Ok(
@@ -2096,6 +2134,20 @@ impl Core {
         for x in ctx { inner.push(x) }
         for (ty, erased) in binders { inner.push(Binding { ty, erased }) }
         self.uses(body, v + binders.len as u32, inner.as_slice(), depth - 1)
+    }
+
+    // Uses at run time of variable v in a term under new binders
+    // (outermost first), for the source elaborator, which inserts the frees
+    // that are missing. Like every elaborator query, the answer is not
+    // trusted: the kernel checks the result.
+    pub fn runtime_uses(
+        inout self,
+        body: u32,
+        v: u32,
+        ctx: [Binding],
+        binders: [(u32, bool)]
+    ) -> Result(u32, diag.Diag) {
+        self.uses_under(body, v, ctx, binders, DEPTH)
     }
 
     // Uses of v in a function that runs once, given `count` arguments: a
@@ -2251,7 +2303,8 @@ fn rank(term: Term) -> u32 {
         Buffer(_) => 27, Alloc(_, _) => 28, Load(_, _, _, _) => 29, Store(_, _, _, _) => 30,
         Free(_, _) => 31, Case(_, _, _, _) => 32, Pi(_, _, _) => 33, Lam(_, _, _) => 34,
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
-        Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42
+        Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
+        Drop(_, _, _) => 43
     }
 }
 
@@ -2259,8 +2312,11 @@ fn rank(term: Term) -> u32 {
 fn payload(term: Term) -> Vec(i128) {
     var out = Vec(i128).new()
     match term {
-        Var(k) | Global(k) | Universe(k) | Ind(k, _) | Elim(k, _, _, _) | Case(k, _, _, _) =>
-            out.push(k as i128)
+        Var(k) | Global(k) | Universe(k) | Ind(k, _) | Elim(k, _, _, _) | Case(k, _, _, _) | Drop(
+            k,
+            _,
+            _
+        ) => out.push(k as i128)
         Natural(n) => out.push(n as i128)
         Integer(n) => out.push(n as i128)
         Con(f, k, _) => { out.push(f as i128); out.push(k as i128) }
@@ -2286,7 +2342,7 @@ pub fn children(term: Term) -> Vec(u32) {
         LtLe(a, b, c, p, q) => { out.push(a); out.push(b); out.push(c); out.push(p); out.push(q) }
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
         ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) | Buffer(a) => out.push(a)
-        Alloc(a, b) | Free(a, b) => { out.push(a); out.push(b) }
+        Alloc(a, b) | Free(a, b) | Drop(_, a, b) => { out.push(a); out.push(b) }
         Load(a, b, c, d) | Store(a, b, c, d) => { out.push(a); out.push(b); out.push(c); out.push(d) }
         Pack(p, a, q) => { out.push(p); out.push(a); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
@@ -3303,4 +3359,55 @@ fn one_level_case_analysis_is_for_heap_data() {
         })
         assert(c.check().is_ok() == recursive, "flat data is taken apart by Elim")
     }
+}
+
+// fn(x: B) -> U64 { body }: body drops x `drops` times, as family `of`.
+fn dropper(recursive: bool, drops: u32, of: u32) -> Core {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    bit_family(&c, 0, recursive)
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let x = c.add(Term.Var(0), sp).unwrap()
+    var value = c.add(Term.Natural(0), sp).unwrap()
+    for _ in 0..drops { value = c.add(Term.Drop(of, x, value), sp).unwrap() }
+    let value = c.add(Term.Lam(false, b, value), sp).unwrap()
+    let ty = c.add(Term.Pi(false, b, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    c
+}
+
+#[test]
+fn drops_free_heap_data_of_their_family_once() {
+    for drops in [0 as u32, 1, 2] {
+        var c = dropper(true, drops, 0)
+        assert(c.check().is_ok() == (drops == 1), "heap data is dropped exactly once")
+    }
+    // Flat data has no node to free, and a drop names its value's family.
+    var flat = dropper(false, 1, 0)
+    assert(flat.check().is_err(), "flat data is not dropped")
+    var other = dropper(true, 1, 1)
+    assert(other.check().is_err(), "a drop names a declared family")
+    var c = Core.new()
+    c.add(Term.Drop(0, 0, 0), diag.Span.nowhere()).unwrap()
+    assert(c.check().is_err(), "drops obey graph integrity")
+}
+
+#[test]
+fn freeing_is_no_computation_in_the_pure_model() {
+    // free(b, 1) converts with 1, but code to run keeps the free.
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let b = c.add(Term.Var(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let freed = c.add(Term.Free(b, one), sp).unwrap()
+    let dropped = c.add(Term.Drop(0, b, one), sp).unwrap()
+    assert(c.equal(freed, one, DEPTH).unwrap(), "free is its rest in conversion")
+    assert(c.equal(dropped, one, DEPTH).unwrap(), "drop is its rest in conversion")
+    c.runtime = true
+    let kept = c.normal(freed, DEPTH).unwrap()
+    let Free(_, _) = c.term(kept) else { panic("code to run keeps the free") }
+    let kept = c.normal(dropped, DEPTH).unwrap()
+    let Drop(_, _, _) = c.term(kept) else { panic("code to run keeps the drop") }
 }

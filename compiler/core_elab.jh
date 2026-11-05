@@ -12,6 +12,8 @@
 // apart and `induct(fn(x) { T }, case..., v)` is structural recursion,
 // and owned buffers `buffer(n)`: `alloc(n, x)`, `load(b, i, p, fn(x, b)
 // { ... })`, `store(b, i, v, p)` and `free(b, rest)`, each used once.
+// Owned values are freed where their scope ends: a buffer or heap data
+// that a scope or one of its alternatives does not use is freed there.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -52,6 +54,128 @@ impl Elaborator {
     }
 
     fn pop(inout self) { self.names.pop(); self.ctx.pop() }
+
+    // Whether t, a type in the current context, is a proposition: its
+    // values are evidence, which owns nothing at run time.
+    fn proposition(inout self, t: u32) -> bool {
+        let Ok(sort) = self.c.infer(t, self.ctx.as_slice(), true, core.DEPTH) else { return false }
+        let Ok(sort) = self.c.normal(sort, core.DEPTH) else { return false }
+        self.c.term(sort) == core.Term.Prop
+    }
+
+    // The type of context entry i, if it is an owned runtime value: a
+    // buffer or heap data.
+    fn owner(inout self, i: i64) -> Option(u32) {
+        if self.ctx[i].erased { return None }
+        let ty = self.ctx[i].ty
+        match self.c.owned(ty, core.DEPTH) { Ok(true) => Some(ty), _ => None }
+    }
+
+    // free(Var(v), body): a buffer is freed, heap data with every node it owns.
+    fn release(inout self, v: u32, ty: u32, body: u32) -> Result(u32, diag.Diag) {
+        let sp = self.c.nodes[body as i64].span
+        let x = self.c.add(core.Term.Var(v), sp)?
+        let ty = self.c.normal(ty, core.DEPTH)?
+        match self.c.term(ty) {
+            Buffer(_) => self.c.add(core.Term.Free(x, body), sp)
+            Ind(f, _) => self.c.add(core.Term.Drop(f, x, body), sp)
+            _ => Err(error(sp, "free requires a buffer or heap data"))
+        }
+    }
+
+    // The scope of the last n context entries ends after body: each owned
+    // one that body does not use at run time is freed before it. This is
+    // the same program as freeing at the scope's end, since freeing has no
+    // other effect, and holds the memory for less time. A use the kernel
+    // rejects (such as a capture) is left for the kernel to report.
+    fn settle(inout self, body: u32, n: i64) -> Result(u32, diag.Diag) {
+        var value = body
+        for j in 0..n {
+            let i = self.ctx.len() - n + j
+            let Some(ty) = self.owner(i) else { continue }
+            let v = (self.ctx.len() - 1 - i) as u32
+            match self.c.runtime_uses(value, v, self.ctx.as_slice(), []) {
+                Ok(0) => value = self.release(v, ty, value)?
+                _ => {}
+            }
+        }
+        Ok(value)
+    }
+
+    // Alternatives of which exactly one runs, each a body under its own
+    // binders (erased, domain): an owned value of the context that some
+    // use is freed at the start of those that do not.
+    fn balance(
+        inout self,
+        binders: [Vec((bool, u32))],
+        bodies: [u32]
+    ) -> Result(Vec(u32), diag.Diag) {
+        var out = Vec(u32).new()
+        for b in bodies { out.push(b) }
+        for i in 0..self.ctx.len() {
+            let Some(ty) = self.owner(i) else { continue }
+            let v = (self.ctx.len() - 1 - i) as u32
+            var counts = Vec(u32).new()
+            var known = true
+            for k, body in out {
+                var inner = Vec((u32, bool)).new()
+                for (erased, domain) in binders[k] { inner.push((domain, erased)) }
+                match self.c.runtime_uses(body, v, self.ctx.as_slice(), inner.as_slice()) {
+                    Ok(n) => counts.push(n)
+                    Err(_) => known = false
+                }
+            }
+            if !known { continue }
+            var used = false
+            for n in counts { if n > 0 { used = true } }
+            if !used { continue }
+            for k in 0..out.len() {
+                if counts[k] == 0 {
+                    out[k] = self.release(v + binders[k].len() as u32, ty, out[k])?
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    // Lambdas (erased, domain) around a body.
+    fn wrap(inout self, binders: [(bool, u32)], body: u32) -> Result(u32, diag.Diag) {
+        let sp = self.c.nodes[body as i64].span
+        var value = body
+        var i = binders.len
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = binders[i]
+            value = self.c.add(core.Term.Lam(erased, domain, value), sp)?
+        }
+        Ok(value)
+    }
+
+    // balance over cases that are each `arity` lambdas around a body.
+    fn balance_cases(inout self, cases: [u32], arities: [i64]) -> Result(Vec(u32), diag.Diag) {
+        var binders = Vec(Vec((bool, u32))).new()
+        var bodies = Vec(u32).new()
+        var peeled = Vec(u32).new()
+        for k, case in cases {
+            var bs = Vec((bool, u32)).new()
+            var body = case
+            for _ in 0..arities[k] {
+                let core.Term.Lam(erased, domain, rest) = self.c.term(body) else { break }
+                bs.push((erased, domain))
+                body = rest
+            }
+            binders.push(bs)
+            bodies.push(body)
+            peeled.push(body)
+        }
+        let bodies = self.balance(binders.as_slice(), bodies.as_slice())?
+        var out = Vec(u32).new()
+        for k, body in bodies {
+            if body == peeled[k] { out.push(cases[k]); continue }
+            out.push(self.wrap(binders[k].as_slice(), body)?)
+        }
+        Ok(out)
+    }
 
     fn name(inout self, name: str, sp: diag.Span) -> Result(u32, diag.Diag) {
         var i = self.names.len()
@@ -164,7 +288,9 @@ impl Elaborator {
         let (p, ps) = self.constant_motive(f, xs.as_slice(), t, sp)?
         let count = self.c.families[f as i64].constructors.len()
         if arms.len != count { return Err(error(sp, "match requires one arm per variant")) }
+        let ghost = self.proposition(t)
         var cases = Vec(u32).new()
+        var arities = Vec(i64).new()
         for k in 0..count {
             let name = self.c.families[f as i64].constructors[k].name.clone()
             var found: Option(i64) = None
@@ -211,6 +337,9 @@ impl Elaborator {
                 _ => {}
             }
             var value = self.expr(arm.body, Some(result), depth - 1)?
+            // A field the arm does not use is freed.
+            if !ghost { value = self.settle(value, domains.len())? }
+            arities.push(domains.len())
             var j = domains.len()
             while j > 0 {
                 j -= 1
@@ -220,6 +349,8 @@ impl Elaborator {
             }
             cases.push(value)
         }
+        // One arm runs: what one uses, the others free.
+        if !ghost { cases = self.balance_cases(cases.as_slice(), arities.as_slice())? }
         // On heap data, one level: the node is freed, its fields are given.
         if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, p, cases, x), sp) }
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
@@ -525,6 +656,8 @@ impl Elaborator {
             result = rest
         }
         var value = self.block(body, Some(result), depth - 1)?
+        // A binder the body does not use is freed.
+        if !self.proposition(result) { value = self.settle(value, domains.len())? }
         var i = domains.len()
         while i > 0 {
             i -= 1
@@ -659,6 +792,17 @@ impl Elaborator {
                     let yes = self.block(yes, inner_expected, depth - 1)?
                     self.pop()
                     let no = self.expr(args[3], expected, depth - 1)?
+                    // One branch runs: what one uses, the other frees.
+                    var binders = Vec(Vec((bool, u32))).new()
+                    var evidence = Vec((bool, u32)).new()
+                    evidence.push((true, p))
+                    binders.push(evidence)
+                    binders.push(Vec((bool, u32)).new())
+                    let ghost = match expected { Some(t) => self.proposition(t), None => false }
+                    let (yes, no) = if ghost { (yes, no) } else {
+                        let both = self.balance(binders.as_slice(), [yes, no])?
+                        (both[0], both[1])
+                    }
                     let branch = if n == "if_eq" { core.Term.IfEq(a, b, yes, no) }
                     else { core.Term.IfLt(a, b, yes, no) }
                     return self.c.add(branch, sp)
@@ -731,11 +875,20 @@ impl Elaborator {
                 if n == "free" {
                     if args.len() != 2 { return Err(error(
                         sp,
-                        "free requires a buffer and the rest"
+                        "free requires an owned value and the rest"
                     )) }
                     let b = self.expr(args[0], None, depth - 1)?
+                    let ty = self.c.infer(b, self.ctx.as_slice(), true, core.DEPTH)?
+                    let ty = self.c.normal(ty, core.DEPTH)?
                     let rest = self.expr(args[1], expected, depth - 1)?
-                    return self.c.add(core.Term.Free(b, rest), sp)
+                    // A buffer, or heap data with every node it owns.
+                    return match self.c.term(ty) {
+                        Ind(f, _) if self.c.is_boxed(f) => self.c.add(
+                            core.Term.Drop(f, b, rest),
+                            sp
+                        )
+                        _ => self.c.add(core.Term.Free(b, rest), sp)
+                    }
                 }
                 if n == "load" {
                     if args.len() != 4 { return Err(error(
@@ -838,6 +991,7 @@ impl Elaborator {
                     let p = if data { self.data_motive(args[0], f, ps.as_slice(), depth - 1)? }
                     else { self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)? }
                     var cases = Vec(u32).new()
+                    var arities = Vec(i64).new()
                     for k in 0..count {
                         let expected = if data && self.c.is_boxed(f) {
                             // Structural recursion: results for recursive fields.
@@ -863,6 +1017,11 @@ impl Elaborator {
                             rest = inner
                         }
                         cases.push(self.proof_case(args[k + 1], expected, arity, depth - 1)?)
+                        arities.push(arity)
+                    }
+                    // Case analysis of flat data into a type runs one case.
+                    if data && !self.c.is_boxed(f) && !self.proposition_motive(p)? {
+                        cases = self.balance_cases(cases.as_slice(), arities.as_slice())?
                     }
                     return self.c.add(core.Term.Elim(f, p, cases, evidence), sp)
                 }
@@ -1141,7 +1300,9 @@ impl Elaborator {
         let Some(ret) = f.ret else { return Err(error(item.span, "result needs an explicit type")) }
         let mut_ret = self.ty(ret, core.DEPTH)?
         let Some(body) = f.body else { return Err(error(item.span, "function needs a body")) }
-        let mut_body = self.block(body, Some(mut_ret), core.DEPTH)?
+        var mut_body = self.block(body, Some(mut_ret), core.DEPTH)?
+        // A parameter the body does not use is freed.
+        if !self.proposition(mut_ret) { mut_body = self.settle(mut_body, domains.len())? }
         var ty = mut_ret
         var value = mut_body
         var i = domains.len()

@@ -1,0 +1,50 @@
+; Owned values freed where their scope ends, written out: the source
+; elaborator inserts exactly these frees into core_scope.jh, which compiles
+; to the same MIR. (drop F v rest) frees heap data v of type F and every
+; node it owns, then runs the rest; (free b rest) frees a buffer.
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def sum
+  (pi xs List I64)
+  (lam xs List (induct List (lam t List I64) (int 0)
+    (lam x I64 (lam0 rest List (lam ih I64 (add x ih)))) xs)))
+
+(def head_or
+  (pi xs List (pi missing I64 I64))
+  (lam xs List (lam missing I64
+    (case List (lam t List I64) missing
+      (lam x I64 (lam rest List (drop List rest x))) xs))))
+
+(def sum_if
+  (pi i U64 (pi xs List I64))
+  (lam i U64 (lam xs List (if-lt i 10 p (app sum xs) (drop List xs (int 0))))))
+
+(def at
+  (pi i U64 (pi b (Buffer 3) I64))
+  (lam i U64 (lam b (Buffer 3)
+    (if-lt i 3 p (load b i p (lam x I64 (lam b (Buffer 3) (free b x)))) (free b (int -1))))))
+
+(def firsts
+  (pi xs List List)
+  (lam xs List (induct List (lam t List List) Nil
+    (lam x I64 (lam0 rest List (lam ih List (drop List ih (Cons x Nil))))) xs)))
+
+(def second
+  (pi xs List (pi ys List List))
+  (lam xs List (lam ys List (drop List xs ys))))
+
+(export first
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64 (app head_or (app repeat n x) (int -1)))))
+
+(export total
+  (pi n U64 (pi x I64 (pi i U64 I64)))
+  (lam n U64 (lam x I64 (lam i U64
+    (add (add (app sum_if i (app repeat n x)) (app at i (alloc 3 x)))
+      (app sum (app firsts (app second (app repeat n x) (app repeat n (int 1))))))))))

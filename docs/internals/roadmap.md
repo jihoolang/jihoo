@@ -486,6 +486,21 @@ measures and takes apart lists and proves that doubling keeps the
 length. Both frontends, both targets, native execution counting
 allocations and frees, valgrind on the example, 17 source and 8 core
 rejections and kernel tests run in the `core` suite.
+
+Implemented step (4), frees where ownership ends: in source, an owned
+value that a scope (a function, a match arm, a load's continuation, a
+loop body or a recursion case) does not use is freed there, and an
+owned value that one alternative of a branch, `match` or flat `induct`
+uses is freed at the start of the others. `free(v, rest)` also frees
+heap data, through one new kernel term, `Drop(F, v, rest)`, which frees v
+and every node it owns; lowering makes one drop function per type. The
+kernel checks the inserted frees with the same exactly-once count, so
+the elaborator stays untrusted. `examples/core_scope.jh` writes no
+`free` and compiles to the same MIR as `examples/core_scope.jhc`, which
+writes them out, as do twelve more implicit/explicit pairs; native
+execution counts allocations and frees, valgrind finds none left, and
+10 source and 8 core rejections and kernel tests run in the `core`
+suite. Next: step (5), borrows.
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing
