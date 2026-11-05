@@ -41,6 +41,8 @@ def read_terms(text):
 # Constructor name -> (family name, case index, field count, recursive positions).
 CONSTRUCTORS = {}
 FAMILIES = {}
+# Data type name -> number of parameters, which cases do not receive.
+PARAMS = {}
 
 
 def definitions(text):
@@ -52,6 +54,7 @@ def definitions(text):
     """
     CONSTRUCTORS.clear()
     FAMILIES.clear()
+    PARAMS.clear()
     result = []
     for form in read_terms(text):
         if form[0] not in ("inductive", "data"):
@@ -60,9 +63,13 @@ def definitions(text):
             result.append((kind, name, ty, body))
             continue
         if form[0] == "data":
-            # A data type: no indices; its values are constructor tuples.
+            # A data type; its values are constructor tuples. With counts,
+            # (data F N P ...) has N indices, the first P parameters.
             _, family, *constructors = form
-            arity = 0
+            arity = params = 0
+            if isinstance(constructors[0], str):
+                arity, params, *constructors = constructors
+            PARAMS[family] = int(params)
         else:
             _, family, arity, *constructors = form
         FAMILIES[family] = int(arity)
@@ -135,7 +142,7 @@ def evaluate(term, env):
             count, recursive = metadata[k]
             assert len(fields) == count
             value = cases[k]
-            for field in fields:
+            for field in fields[PARAMS.get(family, 0):]:
                 value = value(field)
             for position in recursive:
                 value = value(fold(fields[position]))
@@ -459,6 +466,8 @@ def main():
         validate_refine(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_data import validate_data
         validate_data(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_indexed import validate_indexed
+        validate_indexed(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

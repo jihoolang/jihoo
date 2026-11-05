@@ -1,0 +1,58 @@
+// Parameterized data types and erased indices. `enum Slot(n: u64)` is a
+// data type for each u64 n: a value of Slot(n) is empty or holds an index
+// proved below n, and matching on one of Slot(n) knows its n. A parameter
+// `n: erased(u64)` exists only for types and evidence; it is never passed
+// at run time, so `read`, `widen` and `head` work for any length without
+// taking it. main returns 33.
+#![dependent_core]
+
+enum Slot(n: u64) {
+    Empty
+    Full(refine(fn(j) { Lt(j, n) }))
+}
+
+fn slot(n: u64, i: u64) -> Slot(n) { if_lt(i, n, fn(p) { Slot.Full(pack(i, p)) }, Slot.Empty) }
+
+fn read(n: erased(u64), xs: [i64; n], s: Slot(n), missing: i64) -> i64 {
+    match s {
+        Empty => missing
+        Full(j) => index(xs, witness(j), proof(j))
+    }
+}
+
+export fn lookup(i: u64) -> i64 { read(3, [10, 20, 30], slot(3, i), -1) }
+
+// A slot of a table is a slot of any larger table.
+fn widen(n: erased(u64), m: erased(u64), le: erased(Lt(n, m + 1)), s: Slot(n)) -> Slot(m) {
+    match s {
+        Empty => Slot.Empty
+        Full(j) => Slot.Full(pack(witness(j), lt_le(witness(j), n, m, proof(j), le)))
+    }
+}
+
+export fn spread(i: u64) -> i64 {
+    read(5, [1, 2, 3, 4, 5], widen(3, 5, decide_lt(3, 6), slot(3, i)), 0)
+}
+
+// The first element of any nonempty array.
+fn head(n: erased(u64), xs: [i64; n + 1]) -> i64 { index(xs, 0, zero_le(n)) }
+
+export fn front(x: i64) -> i64 { head(2, [x, 5, 6]) }
+
+// A slot's position, 0 when empty, is below n for every slot of Slot(n).
+fn position(n: erased(u64), s: Slot(n)) -> u64 {
+    match s {
+        Empty => 0
+        Full(j) => witness(j)
+    }
+}
+
+fn position_bound(n: u64, nz: erased(Lt(0, n)), s: Slot(n)) -> Lt(position(n, s), n) {
+    induct(fn(t) { Lt(position(n, t), n) }, nz, fn(j) { proof(j) }, s)
+}
+
+export fn first(i: u64) -> i64 {
+    index([5, 6, 7, 8], position(4, slot(4, i)), position_bound(4, decide_lt(0, 4), slot(4, i)))
+}
+
+fn main() -> i64 { lookup(1) + lookup(7) + spread(2) + spread(9) + front(4) + first(2) }

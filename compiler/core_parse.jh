@@ -304,10 +304,26 @@ impl Parser {
         self.expect("(")?
         let mode = self.take()?
         if mode.text == "inductive" || mode.text == "data" {
-            // (data F (c TYPE) ...) declares a data type, without indices.
+            // (data F (c TYPE) ...) declares a data type without indices;
+            // (data F N P (c TYPE) ...) one with N indices, the first P of
+            // them parameters.
             let data = mode.text == "data"
             let name = self.declaration_name()?
             var n: u64 = 0
+            var params: u64 = 0
+            if data && !self.at("(") {
+                for i in 0..2 {
+                    let count = self.take()?
+                    let Some(value) = natural(count.text.as_str()) else {
+                        return Err(diag.Diag.new(count.span, "core: invalid data arity"))
+                    }
+                    if value > 16 { return Err(diag.Diag.new(
+                        count.span,
+                        "core: invalid data arity"
+                    )) }
+                    if i == 0 { n = value } else { params = value }
+                }
+            }
             if !data {
                 let arity = self.take()?
                 let Some(count) = natural(arity.text.as_str()) else {
@@ -320,9 +336,15 @@ impl Parser {
                 n = count
             }
             let f = self.core.families.len()
-            self.core.families.push(core.Family { name, data, arity: n as u32,
+            self.core.families.push(core.Family {
+                name,
+                data,
+                params: params as u32,
+                arity: n as u32,
                 constructors: Vec(core.Constructor).new(),
-                globals: self.core.definitions.len() as u32, span: mode.span })
+                globals: self.core.definitions.len() as u32,
+                span: mode.span
+            })
             while !self.at(")") {
                 self.expect("(")?
                 let name = self.declaration_name()?

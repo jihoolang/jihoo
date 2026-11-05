@@ -1,0 +1,64 @@
+; Parameterized data types and erased indices. (data F N P ...) has N
+; indices, the first P of them parameters, which each constructor binds
+; first, erased, and returns; (pi0 n U64 ...) is an erased u64.
+(data Slot 1 1
+  (Empty (pi0 n U64 (Slot n)))
+  (Full (pi0 n U64 (pi s (Refine (lam j U64 (Lt j n))) (Slot n)))))
+
+(def slot
+  (pi n U64 (pi i U64 (Slot n)))
+  (lam n U64 (lam i U64 (if-lt i n p (Full n (pack (lam j U64 (Lt j n)) i p)) (Empty n)))))
+
+(def read
+  (pi0 n U64 (pi xs (Array n) (pi s (Slot n) (pi missing I64 I64))))
+  (lam0 n U64 (lam xs (Array n) (lam s (Slot n) (lam missing I64
+    (induct Slot (lam t (Slot n) I64)
+      missing
+      (lam j (Refine (lam j U64 (Lt j n))) (index xs (witness j) (proof j)))
+      s))))))
+
+(export lookup
+  (pi i U64 I64)
+  (lam i U64 (app read 3 (array (int 10) (int 20) (int 30)) (app slot 3 i) (int -1))))
+
+(def widen
+  (pi0 n U64 (pi0 m U64 (pi0 le (Lt n (uadd m 1)) (pi s (Slot n) (Slot m)))))
+  (lam0 n U64 (lam0 m U64 (lam0 le (Lt n (uadd m 1)) (lam s (Slot n)
+    (induct Slot (lam t (Slot n) (Slot m))
+      (Empty m)
+      (lam j (Refine (lam j U64 (Lt j n)))
+        (Full m (pack (lam k U64 (Lt k m)) (witness j) (lt-le (witness j) n m (proof j) le))))
+      s))))))
+
+(export spread
+  (pi i U64 I64)
+  (lam i U64
+    (app read 5 (array (int 1) (int 2) (int 3) (int 4) (int 5))
+      (app widen 3 5 (decide-lt 3 6) (app slot 3 i)) (int 0))))
+
+(def head
+  (pi0 n U64 (pi xs (Array (uadd n 1)) I64))
+  (lam0 n U64 (lam xs (Array (uadd n 1)) (index xs 0 (zero-le n)))))
+
+(export front
+  (pi x I64 I64)
+  (lam x I64 (app head 2 (array x (int 5) (int 6)))))
+
+(def position
+  (pi0 n U64 (pi s (Slot n) U64))
+  (lam0 n U64 (lam s (Slot n)
+    (induct Slot (lam t (Slot n) U64) 0 (lam j (Refine (lam j U64 (Lt j n))) (witness j)) s))))
+
+(def position_bound
+  (pi n U64 (pi0 nz (Lt 0 n) (pi s (Slot n) (Lt (app position n s) n))))
+  (lam n U64 (lam0 nz (Lt 0 n) (lam s (Slot n)
+    (induct Slot (lam t (Slot n) (Lt (app position n t) n))
+      nz
+      (lam j (Refine (lam j U64 (Lt j n))) (proof j))
+      s)))))
+
+(export first
+  (pi i U64 I64)
+  (lam i U64
+    (index (array (int 5) (int 6) (int 7) (int 8)) (app position 4 (app slot 4 i))
+      (app position_bound 4 (decide-lt 0 4) (app slot 4 i)))))

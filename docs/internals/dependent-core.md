@@ -118,6 +118,7 @@ in the existing grammar, not global keywords or standard-library types:
 | `match v { V(x, ...) => e, ... }` | case analysis into the expected type |
 | `F(a, ...)`, `c(x, ...)` | a declared proposition; its constructor, fully applied |
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
+| `n: erased(u64)` | an [erased index](#erased-indices-and-parameters): a u64 for types and evidence only |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
 | `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
@@ -171,8 +172,8 @@ without LLVM or a linker.
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
 u64 products, the `-` operator on u64 (use `sub`), division and comparison operators, general runtime
-closures/recursion, recursive or indexed data
-types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
+closures/recursion, recursive data types and mutable memory are outside
+this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
 only one execution path. `fmt`, AST dumps and source diagnostics use the
 ordinary parser; checking errors retain `.jh` byte ranges. Source parsing
@@ -610,9 +611,76 @@ has the two comparisons, a product, a sum and a load. In `.jhc`,
 telescopes ending in `E`, and `(induct E P case ... v)` with
 `P = (lam x E T)` takes a value apart.
 
-Not yet supported: recursive data types and structural recursion,
-indexed data types (`Vec(n)`), parameters, data in exports and loop
-accumulators, and runtime representations of data.
+Not yet supported: recursive data types and structural recursion, data
+in exports and loop accumulators, and runtime representations of data.
+
+## Erased indices and parameters
+
+A parameter `n: erased(u64)` is an erased index: a u64 that types and
+evidence may use, but no runtime term. It is never passed or evaluated,
+so an argument that would trap does not, and an export cannot have one.
+A helper over arrays of any length need not take the length at run time:
+
+```jihoo
+fn head(n: erased(u64), xs: [i64; n + 1]) -> i64 { index(xs, 0, zero_le(n)) }
+```
+
+An erased index denotes a natural number like any u64 term in a type;
+the array's actual length is the length its type states, because the
+array was built with that length or passed with that type. Erased
+binders are otherwise propositions: an erased `i64` is rejected.
+
+A data type can have u64 parameters, `enum Slot(n: u64) { ... }`, which
+its variants' fields may use:
+
+```jihoo
+enum Slot(n: u64) {
+    Empty
+    Full(refine(fn(j) { Lt(j, n) }))
+}
+
+fn read(n: erased(u64), xs: [i64; n], s: Slot(n), missing: i64) -> i64 {
+    match s {
+        Empty => missing
+        Full(j) => index(xs, witness(j), proof(j))
+    }
+}
+```
+
+`Slot(4)` and `Slot(5)` are different types. In the kernel each
+constructor binds the parameters first, as erased u64 fields, and returns
+them unchanged, which the kernel checks; case analysis of a `Slot(n)`
+substitutes the `n` of the value's type into each case, so the `Full`
+arm knows `j < n` for that `n`. Patterns bind only the variant's own
+fields, and `Slot.Full(s)` takes its parameter from the expected type:
+a function's result, a parameter or an arm. A parameter is a field of
+the value, erased, so it is never evaluated.
+
+In `.jhc`, `(data E N P (c TYPE) ...)` declares a data type with `N`
+indices, the first `P` of them parameters; constructors take the
+parameters explicitly, `(Full n s)`. The other indices are true indices,
+which a constructor may return as any u64 terms, and the motive of a
+case analysis is a function of them and the value:
+`P : (indices) -> E(params, indices) -> Prop or Type 0`. Each case has
+type `(fields) -> P(its result's indices, c(params, fields))`, so it
+learns the indices. `tests/core_indexed.py` defines
+
+```text
+(data View 1 0
+  (Zero (View 0))
+  (Succ (pi k U64 (View (uadd k 1)))))
+```
+
+and returns, for any `v : View n`, a refinement below `n + 1`, by a case
+on `v` whose motive depends on `n`. Source `enum` declarations have
+parameters but no other indices.
+
+[`examples/core_indexed.jh`](../../examples/core_indexed.jh) and its
+[core equivalent](../../examples/core_indexed.jhc) read tables of
+lengths 3 and 5 through slots, widen a `Slot(3)` to a `Slot(5)` with
+evidence of `3 <= 5`, prove a slot's position below its `n` by cases and
+read the head of a nonempty array. Each export takes only its runtime
+arguments; the MIR has no length, tag, evidence or bounds assertion.
 
 ## Core syntax
 
@@ -633,6 +701,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(transport family e p)` | equality elimination into a proposition family |
 | `(inductive F n (c type) ...)` | top-level declaration of an inductive proposition |
 | `(data E (c type) ...)` | top-level declaration of a data type, without indices |
+| `(data E n p (c type) ...)` | a data type with `n` u64 indices, the first `p` parameters |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -660,10 +729,11 @@ There are no axioms, casts, unbounded loops or recursion, unsafe memory operatio
 or eliminators that inspect evidence to produce runtime data. Data
 types are eliminated into `Prop` or `Type 0`, never into types.
 
-Erased binders must bind propositions; proof binders must be erased.
-Evidence can be used in types and proof arguments, but not as runtime
-data. Erased data/type parameters, recursive and indexed data types,
-equality beyond U64 and motives depending on evidence are future work.
+Erased binders must bind propositions or U64 indices; proof binders
+must be erased. Evidence and erased indices can be used in types and
+proof arguments, but not as runtime data. Erased type parameters,
+recursive data types, equality beyond U64 and motives depending on
+evidence are future work.
 U64 terms denote natural numbers; runtime U64 addition traps instead of
 wrapping, so computed values are those numbers.
 
@@ -771,14 +841,26 @@ by cases, data in exports, erased data, large motives, motives of other
 types and evidence fields used at run time. Kernel unit tests reject
 recursive and indexed data and large or mistyped motives, and check that
 a case on a branch is a branch.
+`tests/core_indexed.py` adds erased indices and parameterized and
+indexed data: both frontends' MIR and native execution, exports without
+erased arguments, unevaluated erased arguments and kept parameterized
+value traps, widening and closed computation, and a `.jhc` view whose
+cases learn their index. It rejects erased values in runtime terms
+(results, arguments, branches, loops, witnesses, fields, sums), erased
+i64, wrong parameters or lengths, values without an expected type,
+unparameterized uses, false proofs by cases, unwidened slots, erased
+exports and parameter binders in patterns; in `.jhc`, parameters bound
+late, relevant or changed, motives without their indices or with other
+parameters, and wrong index cases. Kernel unit tests check parameter
+binding and erased indices in runtime terms.
 
 The next stages of the replacement are:
 
 1. Extend ordinary `.jh` elaboration only as additional program operations
    and their guarantees are supported by this same core.
 2. Extend the logical foundations beyond U64 equality, declared
-   propositions and flat data types: recursive and indexed data types,
-   structural recursion, erased indices,
+   propositions and flat, indexed data types: recursive data types,
+   structural recursion,
    products, equality of other types and
    reusable lemma
    libraries. Specify normalization, universe

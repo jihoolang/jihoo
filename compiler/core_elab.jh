@@ -95,11 +95,29 @@ impl Elaborator {
         f: u32,
         k: u32,
         args: [ast.Expr],
+        expected: Option(u32),
         sp: diag.Span,
         depth: u32
     ) -> Result(u32, diag.Diag) {
         var ty = self.c.families[f as i64].constructors[k as i64].ty
         var fields = Vec(u32).new()
+        // A data type's parameters come from the expected type.
+        let params = self.c.families[f as i64].params as i64
+        if params > 0 {
+            let message = "a value of a parameterized type needs its expected type"
+            let Some(t) = expected else { return Err(error(sp, message)) }
+            let t = self.c.normal(t, core.DEPTH)?
+            let core.Term.Ind(g, xs) = self.c.term(t) else { return Err(error(sp, message)) }
+            if g != f { return Err(error(sp, "a value of another type was expected")) }
+            for j in 0..params {
+                let normal = self.c.normal(ty, core.DEPTH)?
+                let core.Term.Pi(_, _, result) = self.c.term(normal) else {
+                    return Err(error(sp, "malformed constructor"))
+                }
+                fields.push(xs[j])
+                ty = self.c.substitute(result, xs[j], core.DEPTH)?
+            }
+        }
         for a in args {
             let normal = self.c.normal(ty, core.DEPTH)?
             let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
@@ -137,9 +155,8 @@ impl Elaborator {
         if !self.c.families[f as i64].data {
             return Err(error(scrutinee.span, "match requires a value of a data type; use induct"))
         }
-        let family = self.c.add(core.Term.Ind(f, Vec(u32).new()), sp)?
-        let body = self.c.shift(t, 1, 0, core.DEPTH)?
-        let p = self.c.add(core.Term.Lam(false, family, body), sp)?
+        let core.Term.Ind(_, xs) = self.c.term(ty) else { return Err(error(sp, "unreachable")) }
+        let (p, ps) = self.constant_motive(f, xs.as_slice(), t, sp)?
         let count = self.c.families[f as i64].constructors.len()
         if arms.len != count { return Err(error(sp, "match requires one arm per variant")) }
         var cases = Vec(u32).new()
@@ -164,7 +181,7 @@ impl Elaborator {
                 Variant(_, pats) => pats.clone()
                 _ => Vec(ast.Pat).new()
             }
-            var result = self.c.case_type(f, k as u32, p, sp, core.DEPTH)?
+            var result = self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)?
             var domains = Vec((bool, u32)).new()
             for b in binders {
                 let binder = match b.kind {
@@ -201,8 +218,39 @@ impl Elaborator {
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
     }
 
-    // fn(x) { P(x) }, a proposition about a value of data type f.
-    fn data_motive(inout self, e: ast.Expr, f: u32, depth: u32) -> Result(u32, diag.Diag) {
+    // The motive of a match, fn(indices..., x) { t }, which ignores the
+    // value, and the parameters of the scrutinee's type xs.
+    fn constant_motive(
+        inout self,
+        f: u32,
+        xs: [u32],
+        t: u32,
+        sp: diag.Span
+    ) -> Result((u32, Vec(u32)), diag.Diag) {
+        let params = self.c.families[f as i64].params as i64
+        let r = xs.len - params
+        var ps = Vec(u32).new()
+        for j in 0..params { ps.push(xs[j]) }
+        var indices = Vec(u32).new()
+        for q in ps { indices.push(self.c.shift(q, r, 0, core.DEPTH)?) }
+        for j in 0..r { indices.push(self.c.add(core.Term.Var((r - 1 - j) as u32), sp)?) }
+        let family = self.c.add(core.Term.Ind(f, indices), sp)?
+        let body = self.c.shift(t, r + 1, 0, core.DEPTH)?
+        var p = self.c.add(core.Term.Lam(false, family, body), sp)?
+        let u = self.u64(sp)?
+        for _ in 0..r { p = self.c.add(core.Term.Lam(false, u, p), sp)? }
+        Ok((p, ps))
+    }
+
+    // fn(x) { P(x) }, a proposition about a value of data type f with
+    // parameters ps; source data types have no other indices.
+    fn data_motive(
+        inout self,
+        e: ast.Expr,
+        f: u32,
+        params: [u32],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
         let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
             return Err(error(e.span, "a data motive requires fn(x) { proposition }"))
         }
@@ -214,7 +262,12 @@ impl Elaborator {
             body.span,
             "a data motive is one proposition"
         )) }
-        let family = self.c.add(core.Term.Ind(f, Vec(u32).new()), e.span)?
+        if self.c.families[f as i64].arity as i64 != params.len {
+            return Err(error(e.span, "induct on an indexed data type needs a .jhc motive"))
+        }
+        var indices = Vec(u32).new()
+        for q in params { indices.push(q) }
+        let family = self.c.add(core.Term.Ind(f, indices), e.span)?
         self.push(ps[0].name.as_str(), family, false)
         let proposition = self.type_expr(tail.deref(), depth - 1)
         self.pop()
@@ -498,7 +551,7 @@ impl Elaborator {
                     sp,
                     "unsupported expression in dependent_core"
                 )) }
-                self.construct(f, k, [], sp, depth)
+                self.construct(f, k, [], expected, sp, depth)
             }
             Match(scrutinee, arms) => self.case_analysis(
                 scrutinee.deref(),
@@ -540,6 +593,7 @@ impl Elaborator {
                         family,
                         k,
                         args.as_slice(),
+                        expected,
                         sp,
                         depth
                     )
@@ -677,26 +731,27 @@ impl Elaborator {
                     let evidence = self.expr(args[args.len() - 1], None, depth - 1)?
                     let ty = self.c.infer(evidence, self.ctx.as_slice(), true, core.DEPTH)?
                     let ty = self.c.normal(ty, core.DEPTH)?
-                    let core.Term.Ind(f, _) = self.c.term(ty) else {
+                    let core.Term.Ind(f, xs) = self.c.term(ty) else {
                         return Err(error(
                             args[args.len() - 1].span,
                             "induct requires evidence of a declared proposition"
                         ))
                     }
+                    let data = self.c.families[f as i64].data
+                    var ps = Vec(u32).new()
+                    for j in 0..self.c.families[f as i64].params as i64 { ps.push(xs[j]) }
                     let count = self.c.families[f as i64].constructors.len()
                     if args.len() != count + 2 { return Err(error(
                         sp,
                         "induct requires one case per constructor"
                     )) }
-                    let p = if self.c.families[f as i64].data { self.data_motive(
-                        args[0],
-                        f,
-                        depth - 1
-                    )? }
+                    let p = if data { self.data_motive(args[0], f, ps.as_slice(), depth - 1)? }
                     else { self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)? }
                     var cases = Vec(u32).new()
                     for k in 0..count {
-                        let expected = self.c.case_type(f, k as u32, p, sp, core.DEPTH)?
+                        let expected = if data {
+                            self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)?
+                        } else { self.c.case_type(f, k as u32, p, sp, core.DEPTH)? }
                         // Fields, then one hypothesis per recursive field.
                         var arity = 0
                         var rest = self.c.normal(expected, core.DEPTH)?
@@ -710,7 +765,14 @@ impl Elaborator {
                     return self.c.add(core.Term.Elim(f, p, cases, evidence), sp)
                 }
                 match self.find_constructor(n.as_str()) {
-                    Some((f, k)) => return self.construct(f, k, args.as_slice(), sp, depth)
+                    Some((f, k)) => return self.construct(
+                        f,
+                        k,
+                        args.as_slice(),
+                        expected,
+                        sp,
+                        depth
+                    )
                     None => {}
                 }
                 if n == "refl" {
@@ -790,6 +852,7 @@ impl Elaborator {
         self.c.families.push(core.Family {
             name: t.name.clone(),
             data: false,
+            params: 0,
             arity: t.params.len() as u32,
             constructors: Vec(core.Constructor).new(),
             globals: self.c.definitions.len() as u32,
@@ -847,22 +910,47 @@ impl Elaborator {
     // erased(P), and cannot name each other; a refinement field carries
     // what is known about a value. The kernel checks the declaration.
     fn data_type(inout self, item: ast.Item, e: ast.EnumDecl) -> Result((), diag.Diag) {
-        if item.attrs.len() != 0 || e.params.len() != 0 { return Err(error(
-            item.span,
-            "data types have no attributes or parameters"
-        )) }
+        if item.attrs.len() != 0 { return Err(error(item.span, "data types have no attributes")) }
         if reserved(e.name.as_str()) || self.taken(e.name.as_str()) {
             return Err(error(item.span, "duplicate or reserved data type name"))
         }
+        // `enum E(n: u64, ...)`: u64 parameters, which the variants' fields
+        // may use. Each constructor binds them first, erased.
+        for i, p in e.params {
+            let valid = match p.ty {
+                Some(ty) => match ty.kind { Path(path, None) => path.len() == 1 && path[0] == "u64", _ => false }
+                None => false
+            }
+            let mode = p.mode == ast.Mode.Let || p.mode == ast.Mode.Comptime
+            if !mode || p.bounds.len() != 0 || !valid || reserved(p.name.as_str()) {
+                return Err(error(p.span, "data types are parameterized by u64 values"))
+            }
+            for j in 0..i {
+                if e.params[j].name == p.name { return Err(error(p.span, "duplicate parameter")) }
+            }
+        }
+        let params = e.params.len()
         let f = self.c.families.len() as u32
         self.c.families.push(core.Family {
             name: e.name.clone(),
             data: true,
-            arity: 0,
+            params: params as u32,
+            arity: params as u32,
             constructors: Vec(core.Constructor).new(),
             globals: self.c.definitions.len() as u32,
             span: item.span
         })
+        let u = self.u64(item.span)?
+        for p in e.params { self.push(p.name.as_str(), u, true) }
+        let result = self.variants(f, e, params)
+        for _ in 0..params { self.pop() }
+        result?
+        self.c.check()
+    }
+
+    // Each variant's constructor: (erased params...) -> (fields...) ->
+    // E(params...). Fields are elaborated with only the parameters in scope.
+    fn variants(inout self, f: u32, e: ast.EnumDecl, params: i64) -> Result((), diag.Diag) {
         for i, v in e.variants {
             if reserved(v.name.as_str()) { return Err(error(v.span, "reserved variant name")) }
             for j in 0..i {
@@ -870,21 +958,29 @@ impl Elaborator {
             }
             var domains = Vec((bool, u32)).new()
             for t in v.fields { domains.push(self.domain(t)?) }
-            var ty = self.c.add(core.Term.Ind(f, Vec(u32).new()), v.span)?
+            let m = params + domains.len()
+            var indices = Vec(u32).new()
+            for j in 0..params { indices.push(self.c.add(
+                core.Term.Var((m - 1 - j) as u32),
+                v.span
+            )?) }
+            var ty = self.c.add(core.Term.Ind(f, indices), v.span)?
             var j = domains.len()
             while j > 0 {
                 j -= 1
                 let (erased, domain) = domains[j]
-                // The fields are closed: they do not refer to each other.
+                // A field sees the parameters, not the fields before it.
                 let domain = self.c.shift(domain, j, 0, core.DEPTH)?
                 ty = self.c.add(core.Term.Pi(erased, domain, ty), v.span)?
             }
+            let u = self.u64(v.span)?
+            for _ in 0..params { ty = self.c.add(core.Term.Pi(true, u, ty), v.span)? }
             self.c.families[f as i64].constructors.push(core.Constructor {
                 name: v.name.clone(),
                 ty
             })
         }
-        self.c.check()
+        Ok(())
     }
 
     fn definition(inout self, item: ast.Item, entry: bool) -> Result((), diag.Diag) {

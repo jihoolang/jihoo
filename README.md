@@ -199,8 +199,11 @@ justify loads at `i + 1` and over prefixes, and the
 [refinement](examples/core_refine.jh) `refine(fn(j) { Lt(j, n) })` is a
 u64 returned together with its evidence, and is the u64 alone at run time.
 [Data types](examples/core_data.jh) declared as `enum` are taken apart
-with `match`, or proved about by cases, and compile to no tag at all. General `.jh` coverage,
-recursive and indexed data, mutable memory and proofs of the new kernel, elaboration and
+with `match`, or proved about by cases, and compile to no tag at all;
+they can be [parameterized](examples/core_indexed.jh) by u64 values such
+as a table's length, which `n: erased(u64)` passes only to types and
+evidence. General `.jh` coverage,
+recursive data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and

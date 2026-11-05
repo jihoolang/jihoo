@@ -436,7 +436,21 @@ frontends, both targets, native differential execution, kept field
 traps, 25 source and 12 core rejections and kernel tests run in the
 `core` suite.
 
-Next: recursive and indexed data types, erased indices and broader lemma libraries;
+Implemented erased indices and indexed data: `n: erased(u64)` is a u64
+used only in types and evidence, never passed or evaluated at run time.
+`enum Slot(n: u64)` declares a data type for each `n`; each constructor
+binds the parameter first, erased, and returns it, so matching on a
+`Slot(n)` knows its `n`, and a value takes its parameter from the
+expected type. In the kernel and `.jhc`, data types also have true
+indices, which each case learns through a motive over the indices and
+the value. `examples/core_indexed.jh` reads tables of any length
+through slots, widens a slot to a larger table and reads the head of a
+nonempty array, with exports that take no erased length. Both
+frontends, both targets, native differential execution, 19 source and
+11 core rejections and kernel tests run in the `core` suite.
+
+Next: recursive data types with a runtime representation and structural
+recursion, and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.

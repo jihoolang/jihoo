@@ -94,6 +94,8 @@ the runner. Its suites:
   false or mismatched evidence and the export ABI.
   `tests/core_data.py` adds data types: `match`, proofs by cases, kept
   field traps, positivity of fields and motives.
+  `tests/core_indexed.py` adds erased u64 indices, parameterized data
+  types and, in `.jhc`, a true index.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

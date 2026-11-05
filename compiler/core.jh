@@ -117,8 +117,12 @@ pub struct Constructor {
 pub struct Family {
     pub name: String
     // A data type, of Type 0, rather than a proposition. Data types have
-    // no indices and no recursive fields yet.
+    // no recursive fields yet.
     pub data: bool
+    // The first `params` of a data type's indices are parameters: each
+    // constructor binds them first, erased, and returns them unchanged, so
+    // case analysis fixes them from the value's type. Propositions have none.
+    pub params: u32
     pub arity: u32
     pub constructors: Vec(Constructor)
     pub globals: u32
@@ -440,7 +444,11 @@ impl Core {
                 let count = self.signatures[f as i64][k as i64].fields.len()
                 if fields.len() != count { return self.add(Term.Elim(f, p, cases, x), sp) }
                 var result = cases[k as i64]
-                for field in fields { result = self.add(Term.App(result, field), sp)? }
+                // A data type's parameters are fixed, not given to the case.
+                let skip = if self.is_data(f) { self.families[f as i64].params as i64 } else { 0 }
+                for j, field in fields {
+                    if j >= skip { result = self.add(Term.App(result, field), sp)? }
+                }
                 for j in 0..count {
                     if self.signatures[f as i64][k as i64].fields[j].recursive.is_none() { continue }
                     let ih = self.add(Term.Elim(f, p, cases.clone(), fields[j]), sp)?
@@ -863,10 +871,14 @@ impl Core {
     ) -> Result(i64, diag.Diag) {
         let ty = self.infer(domain, ctx, true, depth)?
         let level = self.sort(ty, depth)?
-        if erased && level != -1 { return Err(self.error(
-            domain,
-            "erased binders must be propositions"
-        )) }
+        // An erased u64 is an index: used in types and evidence only.
+        if erased && level != -1 {
+            let d = self.normal(domain, depth)?
+            if self.term(d) != Term.U64 { return Err(self.error(
+                domain,
+                "erased binders must be propositions or u64"
+            )) }
+        }
         if !erased && level == -1 { return Err(self.error(domain, "proof binders must be erased")) }
         Ok(level)
     }
@@ -948,13 +960,6 @@ impl Core {
         let m = domains.len()
         let r = positions.len()
         var result = self.shift(p, m + r, 0, depth)?
-        if self.is_data(f) {
-            // A data motive depends on the value: P(c(x...)).
-            var xs = Vec(u32).new()
-            for j in 0..m { xs.push(self.add(Term.Var((m - 1 - j) as u32), sp)?) }
-            let value = self.add(Term.Con(f, k, xs), sp)?
-            result = self.add(Term.App(result, value), sp)?
-        }
         for x in indices {
             let x = self.shift(x, r, 0, depth)?
             result = self.add(Term.App(result, x), sp)?
@@ -974,6 +979,59 @@ impl Core {
         while j > 0 {
             j -= 1
             result = self.add(Term.Pi(erased[j], domains[j], result), sp)?
+        }
+        Ok(result)
+    }
+
+    // The case for constructor k of a data type, its parameters ps from
+    // the outer context: (fields...) -> P(indices..., c(ps, fields...)),
+    // with the parameters substituted into the fields and the indices.
+    pub fn data_case_type(
+        inout self,
+        f: u32,
+        k: u32,
+        p: u32,
+        ps: [u32],
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if !self.is_data(f) || f as i64 >= self.signatures.len() ||
+            k as i64 >= self.signatures[f as i64].len() {
+            return Err(diag.Diag.new(sp, "core: unchecked data type or constructor"))
+        }
+        let params = self.families[f as i64].params as i64
+        if ps.len != params { return Err(diag.Diag.new(sp, "core: wrong number of parameters")) }
+        // The constructor's closed telescope, as the kernel checked it.
+        var ty = self.families[f as i64].constructors[k as i64].ty
+        for q in ps {
+            let Pi(_, _, rest) = self.term(ty) else {
+                return Err(diag.Diag.new(sp, "core: malformed constructor"))
+            }
+            ty = self.substitute(rest, q, depth)?
+        }
+        var fields = Vec((bool, u32)).new()
+        loop {
+            match self.term(ty) {
+                Pi(erased, domain, rest) => { fields.push((erased, domain)); ty = rest }
+                _ => break
+            }
+        }
+        let Ind(_, indices) = self.term(ty) else {
+            return Err(diag.Diag.new(sp, "core: malformed constructor"))
+        }
+        let m = fields.len()
+        var result = self.shift(p, m, 0, depth)?
+        for j in params..indices.len() { result = self.add(Term.App(result, indices[j]), sp)? }
+        var xs = Vec(u32).new()
+        for q in ps { xs.push(self.shift(q, m, 0, depth)?) }
+        for j in 0..m { xs.push(self.add(Term.Var((m - 1 - j) as u32), sp)?) }
+        let value = self.add(Term.Con(f, k, xs), sp)?
+        result = self.add(Term.App(result, value), sp)?
+        var j = m
+        while j > 0 {
+            j -= 1
+            let (erased, domain) = fields[j]
+            result = self.add(Term.Pi(erased, domain, result), sp)?
         }
         Ok(result)
     }
@@ -1060,6 +1118,21 @@ impl Core {
                 }
                 Ind(g, xs) if g == f => {
                     self.indices(xs.as_slice(), f, ctx.as_slice(), ty)?
+                    // Parameters are bound first, erased u64, and returned
+                    // unchanged, as written.
+                    let params = self.families[f as i64].params as i64
+                    let m = fields.len()
+                    for j in 0..params {
+                        let bound = j < m && fields[j].erased && fields[j].recursive.is_none() &&
+                            self.term(fields[j].domain) == Term.U64
+                        if !bound || xs.len() <= j ||
+                            self.term(xs[j]) != Term.Var((m - 1 - j) as u32) {
+                            return Err(self.error(
+                                ty,
+                                "a constructor binds its type's parameters first and returns them"
+                            ))
+                        }
+                    }
                     let result = self.normal_all(xs.as_slice(), DEPTH)?
                     return Ok(Signature { fields, result })
                 }
@@ -1076,8 +1149,9 @@ impl Core {
         if self.families[f as i64].arity > 16 {
             return Err(diag.Diag.new(sp, "core: inductive families have at most 16 indices"))
         }
-        if self.families[f as i64].data && self.families[f as i64].arity != 0 {
-            return Err(diag.Diag.new(sp, "core: data types have no indices yet"))
+        let params = self.families[f as i64].params
+        if params > self.families[f as i64].arity || (params != 0 && !self.families[f as i64].data) {
+            return Err(diag.Diag.new(sp, "core: parameters are leading indices of a data type"))
         }
         var signatures = Vec(Signature).new()
         for k in 0..self.families[f as i64].constructors.len() {
@@ -1103,7 +1177,7 @@ impl Core {
                 let b = ctx[ctx.len - 1 - k as i64]
                 if b.erased && !ghost { return Err(self.error(
                     id,
-                    "erased evidence used at runtime"
+                    "erased value used at runtime"
                 )) }
                 return self.shift(b.ty, k as i64 + 1, 0, depth - 1)
             }
@@ -1399,14 +1473,44 @@ impl Core {
         depth: u32
     ) -> Result(u32, diag.Diag) {
         let sp = self.nodes[id as i64].span
-        let ty = self.infer(p, ctx, true, depth - 1)?
+        // The value's type gives the parameters and the indices.
+        let ty = self.infer(x, ctx, true, depth - 1)?
         let ty = self.normal(ty, depth - 1)?
-        let Pi(false, domain, sort) = self.term(ty) else {
-            return Err(self.error(p, "a data motive is a function of the value"))
+        let Ind(g, xs) = self.term(ty) else {
+            return Err(self.error(x, "case analysis requires a value of its type"))
         }
-        let family = self.add(Term.Ind(f, Vec(u32).new()), sp)?
+        if g != f { return Err(self.error(x, "case analysis requires a value of its type")) }
+        let params = self.families[f as i64].params as i64
+        let r = self.families[f as i64].arity as i64 - params
+        var ps = Vec(u32).new()
+        for j in 0..params { ps.push(xs[j]) }
+        // P : (indices) -> F(ps, indices) -> Prop or Type 0.
+        let ty = self.infer(p, ctx, true, depth - 1)?
+        var t = self.normal(ty, depth - 1)?
+        for _ in 0..r {
+            let Pi(false, index, rest) = self.term(t) else {
+                return Err(self.error(
+                    p,
+                    "a data motive is a function of the indices and the value"
+                ))
+            }
+            if self.term(index) != Term.U64 {
+                return Err(self.error(
+                    p,
+                    "a data motive is a function of the indices and the value"
+                ))
+            }
+            t = rest
+        }
+        let Pi(false, domain, sort) = self.term(t) else {
+            return Err(self.error(p, "a data motive is a function of the indices and the value"))
+        }
+        var expected = Vec(u32).new()
+        for q in ps { expected.push(self.shift(q, r, 0, depth - 1)?) }
+        for j in 0..r { expected.push(self.add(Term.Var((r - 1 - j) as u32), sp)?) }
+        let family = self.add(Term.Ind(f, expected), sp)?
         if !self.equal(domain, family, depth - 1)? {
-            return Err(self.error(p, "a data motive is a function of the value"))
+            return Err(self.error(p, "a data motive is a function of the indices and the value"))
         }
         let sort = self.normal(sort, depth - 1)?
         let proof = match self.term(sort) {
@@ -1415,16 +1519,14 @@ impl Core {
             _ => return Err(self.error(p, "data elimination is into Prop or Type 0"))
         }
         for k, case in cases {
-            let expected = self.case_type(f, k as u32, p, sp, depth - 1)?
+            let expected = self.data_case_type(f, k as u32, p, ps.as_slice(), sp, depth - 1)?
             self.require(case, expected, ctx, ghost || proof, depth - 1)?
         }
-        let ty = self.infer(x, ctx, ghost || proof, depth - 1)?
-        let ty = self.normal(ty, depth - 1)?
-        let Ind(g, _) = self.term(ty) else {
-            return Err(self.error(x, "case analysis requires a value of its type"))
-        }
-        if g != f { return Err(self.error(x, "case analysis requires a value of its type")) }
-        self.add(Term.App(p, x), sp)
+        // Into Type 0 the value is runtime data.
+        self.infer(x, ctx, ghost || proof, depth - 1)?
+        var result = p
+        for j in params..xs.len() { result = self.add(Term.App(result, xs[j]), sp)? }
+        self.add(Term.App(result, x), sp)
     }
 
     // Check graph integrity independently of the parser. Definitions are
@@ -1623,8 +1725,15 @@ fn chain_family(inout c: Core) {
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "refl".to_string(), ty: refl })
     constructors.push(Constructor { name: "step".to_string(), ty: step })
-    c.families.push(Family { name: "EqChain".to_string(), data: false, arity: 2, constructors,
-        globals: c.definitions.len() as u32, span: sp })
+    c.families.push(Family {
+        name: "EqChain".to_string(),
+        data: false,
+        params: 0,
+        arity: 2,
+        constructors,
+        globals: c.definitions.len() as u32,
+        span: sp
+    })
 }
 
 #[test]
@@ -1733,7 +1842,7 @@ fn rejects_cycles_in_inductive_graphs() {
 fn single(inout c: Core, ty: u32) {
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "make".to_string(), ty })
-    c.families.push(Family { name: "F".to_string(), data: false, arity: 1, constructors,
+    c.families.push(Family { name: "F".to_string(), data: false, params: 0, arity: 1, constructors,
         globals: c.definitions.len() as u32, span: diag.Span.nowhere() })
 }
 
@@ -1795,6 +1904,7 @@ fn families_are_ordered_with_definitions() {
     c.families.push(Family {
         name: "F".to_string(),
         data: false,
+        params: 0,
         arity: 1,
         constructors,
         globals: 1,
@@ -2240,7 +2350,7 @@ fn bit_family(inout c: Core, arity: u32, recursive: bool) {
     var constructors = Vec(Constructor).new()
     constructors.push(Constructor { name: "No".to_string(), ty: b })
     constructors.push(Constructor { name: "Yes".to_string(), ty: yes })
-    c.families.push(Family { name: "B".to_string(), data: true, arity, constructors,
+    c.families.push(Family { name: "B".to_string(), data: true, params: 0, arity, constructors,
         globals: 0, span: sp })
 }
 
@@ -2314,4 +2424,65 @@ fn data_motives_are_small_and_depend_on_the_value() {
             span: sp })
         assert(c.check().is_err(), "data motives are B -> Prop or B -> Type 0")
     }
+}
+
+// data P(n) { C } with one parameter: C binds n, erased, and returns P(n).
+fn parameter_family(inout c: Core, erased: bool, sink result: Term) {
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let index = c.add(result, sp).unwrap()
+    var xs = Vec(u32).new()
+    xs.push(index)
+    let back = c.add(Term.Ind(0, xs), sp).unwrap()
+    let ty = c.add(Term.Pi(erased, u, back), sp).unwrap()
+    var constructors = Vec(Constructor).new()
+    constructors.push(Constructor { name: "C".to_string(), ty })
+    c.families.push(Family { name: "P".to_string(), data: true, params: 1, arity: 1, constructors,
+        globals: 0, span: sp })
+}
+
+#[test]
+fn parameters_are_bound_first_and_returned() {
+    var c = Core.new()
+    parameter_family(&c, true, Term.Var(0))
+    c.check().unwrap()
+    var c = Core.new()
+    parameter_family(&c, false, Term.Var(0))
+    assert(c.check().is_err(), "a parameter is erased")
+    var c = Core.new()
+    parameter_family(&c, true, Term.Natural(3))
+    assert(c.check().is_err(), "a parameter is returned unchanged")
+}
+
+#[test]
+fn erased_indices_stay_out_of_runtime_terms() {
+    let sp = diag.Span.nowhere()
+    // fn(erased n: U64) -> U64 { n } is rejected; with Lt(0, n + 1) it is evidence.
+    var c = Core.new()
+    let u = c.add(Term.U64, sp).unwrap()
+    let n = c.add(Term.Var(0), sp).unwrap()
+    let value = c.add(Term.Lam(true, u, n), sp).unwrap()
+    let ty = c.add(Term.Pi(true, u, u), sp).unwrap()
+    c.definitions.push(Definition { name: "n".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "an erased u64 is not runtime data")
+    var c = Core.new()
+    let u = c.add(Term.U64, sp).unwrap()
+    let n = c.add(Term.Var(0), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let n1 = c.add(Term.UAdd(n, one), sp).unwrap()
+    let lt = c.add(Term.Lt(zero, n1), sp).unwrap()
+    let proof = c.add(Term.ZeroLe(n), sp).unwrap()
+    let value = c.add(Term.Lam(true, u, proof), sp).unwrap()
+    let ty = c.add(Term.Pi(true, u, lt), sp).unwrap()
+    c.definitions.push(Definition { name: "z".to_string(), ty, value, exported: false, span: sp })
+    c.check().unwrap()
+    // An erased I64 is neither evidence nor an index.
+    var c = Core.new()
+    let i = c.add(Term.I64, sp).unwrap()
+    let zero = c.add(Term.Integer(0), sp).unwrap()
+    let value = c.add(Term.Lam(true, i, zero), sp).unwrap()
+    let ty = c.add(Term.Pi(true, i, i), sp).unwrap()
+    c.definitions.push(Definition { name: "i".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "only u64 indices are erased data")
 }
