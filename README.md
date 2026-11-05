@@ -190,7 +190,10 @@ that every node reachable along its declared edges is in bounds, and the
 were built into the kernel before. The recursive proofs are erased before
 the array loads are emitted. The [loop example](examples/core_loop.jh)
 sums arrays of any length with `fold`, whose body has a proof of its
-index's bound, so the loads have no bounds checks. General `.jh` coverage,
+index's bound, so the loads have no bounds checks. In the
+[order example](examples/core_order.jh), u64 indices are natural numbers
+whose `+` traps instead of wrapping; three kernel rules of their order
+justify loads at `i + 1` and over prefixes. General `.jh` coverage,
 dependent motives, inductive data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 

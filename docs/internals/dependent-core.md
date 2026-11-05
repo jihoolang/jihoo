@@ -127,6 +127,8 @@ in the existing grammar, not global keywords or standard-library types:
 | `induct(P, case, ..., evidence)` | structural induction: one case per constructor, into a proposition |
 | `a + b`, `a - b`, `a * b` | [i64 arithmetic](#loops-and-arithmetic); overflow traps |
 | `fold(n, init, fn(i, p, acc) { body })` | loop for `i` below `n`, with erased `p: Lt(i, n)` |
+| `i + j` on `u64` | [addition in the naturals](#index-arithmetic-and-order); overflow traps |
+| `lt_add(a, b, c, p)`, `lt_cancel(a, b, c, p)`, `lt_le(x, y, z, p, q)` | rules of the order of the naturals |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -147,7 +149,7 @@ blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
-`fold`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
+`fold`, `lt_add`, `lt_cancel`, `lt_le`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
 `__jihoo_dependent_main` are reserved in marked modules. Functions,
 propositions and constructors share one namespace. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
@@ -163,7 +165,7 @@ without LLVM or a linker.
 
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
-u64 arithmetic, division and comparison operators, general runtime
+u64 subtraction and products, division and comparison operators, general runtime
 closures/recursion, data (non-`Prop`)
 inductive types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
@@ -373,10 +375,9 @@ initial value, so checking cost does not grow with the count. Arithmetic
 on two literals is computed unless it overflows. An overflowing operation
 is never folded or wrapped; it stays in the program, which traps at run
 time as ordinary jihoo's checked arithmetic does. No proposition mentions
-an i64 value, so arithmetic cannot change what a proof means. U64 values
-appear in propositions and have no arithmetic yet: machine wrapping
-would make `Lt(i, n)` and `Lt(i + 1, n + 1)` disagree at the top of the
-range, so u64 arithmetic needs overflow evidence.
+an i64 value, so arithmetic cannot change what a proof means. U64
+values do appear in propositions; their addition is described
+[below](#index-arithmetic-and-order).
 
 Calls evaluate their arguments first, as ordinary jihoo does, although
 the normalizer substitutes helpers into their callers. When beta
@@ -398,6 +399,57 @@ arithmetic and the index increment, which cannot overflow because
 `i < n`. Both frontends emit the same MIR. In `.jhc` the forms are
 `(add a b)`, `(sub a b)`, `(mul a b)` and `(fold n init body)`, with a
 body `(lam i U64 (lam0 p (Lt i n) (lam acc I64 ...)))`.
+
+## Index arithmetic and order
+
+U64 terms denote natural numbers, and `+` on them is addition in the
+naturals. At run time it is checked: a sum that does not fit traps
+rather than wrap. So every U64 value a program computes is the natural
+number its term denotes, and a proof about the naturals holds of the
+values the program uses. Machine wrapping is never assumed: `Eq(2^64 - 1
++ 1, 0)` has no proof, and `decide_lt` decides only closed inequalities
+whose sides fit a U64. Since the order of a sum's operands cannot change
+whether its total fits, reordering operands keeps trap behavior.
+
+Conversion compares sums in a canonical form: the variables in order,
+then other terms, then the constant, with literals added and zero
+dropped. So `(i + 1) + 1` and `2 + i` are the same term. A constant part
+that does not fit a U64 leaves the sum as written. `Strict`, which only
+orders the evaluation of traps, does not change a term's meaning and is
+ignored by conversion.
+
+`a <= b` is written `Lt(a, b + 1)`. Besides `decide_lt`, the kernel has
+three rules of the order of the naturals:
+
+```text
+lt_add(a, b, c, p : Lt(a, b))         : Lt(a + c, b + c)
+lt_cancel(a, b, c, p : Lt(a + c, b + c)) : Lt(a, b)
+lt_le(x, y, z, p : Lt(x, y), q : Lt(y, z + 1)) : Lt(x, z)
+```
+
+`lt_le` (x < y <= z gives x < z) says the order is discrete: it holds
+in the naturals but not in the reals, where the other rules also hold,
+so it cannot be derived from them. The usual facts are ordinary lemmas:
+`Lt(a, a + 1)` is `lt_add(0, 1, a, decide_lt(0, 1))`, weakening
+`Lt(a, b)` to `Lt(a, b + 1)` is `lt_le(a, b, b + 1, p, lt_add(0, 2, b,
+decide_lt(0, 2)))`, and transitivity follows from weakening and `lt_le`.
+u64 subtraction and products are not supported: subtraction needs
+evidence that it does not go below zero.
+
+[`examples/core_order.jh`](../../examples/core_order.jh) and its
+[core equivalent](../../examples/core_order.jhc) derive weakening and
+transitivity and then:
+
+- `neighbours(n, xs: [i64; n + 1])` multiplies `xs[i]` and `xs[i + 1]`
+  for each `i < n`, with `lt_add(i, n, 1, p)` for the second load;
+- `prefix(k)` compares `k` with 5 once and then sums the first `k`
+  elements of a length-4 array, using `lt_le(i, k, 4, p, q)`: `i < k <= 4`;
+- `next(i)` computes `i + 1` at run time, compares it with the length and
+  loads at it; `next(2^64 - 1)` traps in the addition.
+
+Their MIR has the comparisons and the checked additions, and no bounds
+assertions or evidence. In `.jhc` the forms are `(uadd a b)`,
+`(lt-add a b c p)`, `(lt-cancel a b c p)` and `(lt-le x y z p q)`.
 
 ## Core syntax
 
@@ -421,6 +473,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
 | `(fold n init body)` | bounded loop; `body : (i : U64) -> Lt i n -> I64 -> I64`, erased bound |
+| `(uadd a b)` | addition in the naturals; traps at run time beyond U64 |
+| `(lt-add a b c p)`, `(lt-cancel a b c p)`, `(lt-le x y z p q)` | order rules of the naturals |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -442,7 +496,8 @@ Erased binders must bind propositions; proof binders must be erased.
 Evidence can be used in types and proof arguments, but not as runtime
 data. Erased data/type parameters, inductive data types, equality beyond
 U64 and dependent motives are future work.
-Runtime indices are real U64 values; the prototype does not model them as unbounded mathematical naturals.
+U64 terms denote natural numbers; runtime U64 addition traps instead of
+wrapping, so computed values are those numbers.
 
 Both branches and all definitions are checked before normalization or
 erasure. A false proof in an unused helper, erased argument or unreachable
@@ -515,6 +570,13 @@ bounds above an array's length, a wrong index or bound, runtime uses of
 the bound, wrong body arities or types and array exports. Kernel unit
 tests check that overflow is not folded, that loops are not unrolled
 and that a body needs exactly its erased bound.
+`tests/core_order.py` adds the index-arithmetic example: both frontends'
+MIR and native execution against the evaluator, u64 overflow traps from
+runtime values, literals and unused arguments, and rejection of wrapped
+literals, inequalities decided beyond U64, each rule with wrong premises
+(including `<=` and `<=` for `<`), u64 subtraction and products,
+unchecked or too-long computed indices and runtime evidence. Kernel unit
+tests check canonical sums, that 2^64 is not 0, and the rules' premises.
 
 The next stages of the replacement are:
 
@@ -522,8 +584,8 @@ The next stages of the replacement are:
    and their guarantees are supported by this same core.
 2. Extend the logical foundations beyond U64 equality and declared
    propositions: dependent motives, inductive data types, erased indices,
-   u64 arithmetic on indices with overflow evidence and inequality
-   lemmas, equality of other types and reusable lemma
+   u64 subtraction with evidence, products, equality of other types and
+   reusable lemma
    libraries. Specify normalization, universe
    and erasure rules before enabling them.
 3. Add runtime operations with explicit ownership/effect rules, including

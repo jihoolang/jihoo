@@ -396,9 +396,19 @@ substitution would discard, so calls stay call-by-value. Both frontends,
 both targets, native differential execution, overflow traps, 18 source
 and 8 core rejections and kernel tests run in the `core` suite.
 
-Next: u64 arithmetic with overflow evidence and inequality lemmas (for
-loops over prefixes and `i + 1` indices), dependent motives, inductive
-data types,
+Implemented index arithmetic: U64 terms denote naturals, `+` on them
+traps at run time instead of wrapping, and conversion compares sums in a
+canonical order. Three kernel rules, `lt_add`, `lt_cancel` and the
+discreteness rule `lt_le` (x < y <= z gives x < z), with closed
+`decide_lt`, give the order of the naturals; weakening, transitivity and
+`a < a + 1` are user lemmas. `examples/core_order.jh` reads `xs[i + 1]`
+in a loop, sums a prefix after one comparison and loads at a computed
+`i + 1`, with no bounds checks. Both frontends, both targets, native
+differential execution, u64 traps, 18 source and 7 core rejections and
+kernel tests run in the `core` suite.
+
+Next: u64 subtraction with evidence, dependent motives, inductive data
+types,
 erased indices and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering

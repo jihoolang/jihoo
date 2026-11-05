@@ -62,7 +62,7 @@ def validate_loop(compiler, root, temporary, environment, run, definitions, eval
     assert "2_i64" in folded_mir and "*" not in folded_mir and "goto" not in folded_mir, folded_mir
 
     source_invalid = {
-        "u64-arithmetic": "fn bad(i: u64) -> u64 { i + 1 }",
+        "u64-subtraction": "fn bad(i: u64) -> u64 { i - 1 }",
         "u64-operands": "fn bad(i: u64) -> i64 { i + 1 }",
         "division": "fn bad(x: i64) -> i64 { x / 2 }",
         "comparison": "fn bad(x: i64) -> i64 { x < 2 }",

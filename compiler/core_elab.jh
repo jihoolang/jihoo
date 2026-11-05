@@ -21,6 +21,7 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 
 fn reserved(name: str) -> bool {
     name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "fold" ||
+        name == "lt_add" || name == "lt_cancel" || name == "lt_le" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -88,6 +89,23 @@ impl Elaborator {
         var xs = Vec(u32).new()
         for a in args { xs.push(self.expr(a, Some(u), depth - 1)?) }
         self.c.add(core.Term.Ind(f, xs), sp)
+    }
+
+    // Whether `+` is u64 addition: from the expected type, or else from
+    // the type of its left operand.
+    fn is_u64(inout self, e: ast.Expr, expected: Option(u32)) -> Result(bool, diag.Diag) {
+        match expected {
+            Some(t) => {
+                let t = self.c.normal(t, core.DEPTH)?
+                return Ok(self.c.term(t) == core.Term.U64)
+            }
+            None => {}
+        }
+        let ast.ExprKind.Binary(_, a, _) = e.kind else { return Ok(false) }
+        let left = self.expr(a.deref(), None, core.DEPTH)?
+        let ty = self.c.infer(left, self.ctx.as_slice(), true, core.DEPTH)?
+        let ty = self.c.normal(ty, core.DEPTH)?
+        Ok(self.c.term(ty) == core.Term.U64)
     }
 
     fn u64(inout self, sp: diag.Span) -> Result(u32, diag.Diag) {
@@ -316,14 +334,27 @@ impl Elaborator {
             }
             Block(b) => self.block(b, expected, depth - 1)
             Binary(op, a, b) => {
+                let plus = match op { Add => true, _ => false }
+                let unsigned = self.is_u64(e, expected)?
+                if unsigned && !plus { return Err(error(
+                    sp,
+                    "u64 has only +: subtraction and products need evidence"
+                )) }
+                if unsigned {
+                    // In the naturals; overflow traps at run time.
+                    let u = self.u64(sp)?
+                    let a = self.expr(a.deref(), Some(u), depth - 1)?
+                    let b = self.expr(b.deref(), Some(u), depth - 1)?
+                    return self.c.add(core.Term.UAdd(a, b), sp)
+                }
                 let arith = match op {
                     Add => core.Arith.Add
                     Sub => core.Arith.Sub
                     Mul => core.Arith.Mul
                     _ => return Err(error(sp, "dependent_core supports only i64 + - and *"))
                 }
-                // Only i64 arithmetic: u64 values appear in propositions,
-                // whose meaning machine wrapping would change.
+                // u64 has only addition: subtraction and products would
+                // need evidence or a meaning in the naturals.
                 let i = self.c.add(core.Term.I64, sp)?
                 let a = self.expr(a.deref(), Some(i), depth - 1)?
                 let b = self.expr(b.deref(), Some(i), depth - 1)?
@@ -380,6 +411,21 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
+                }
+                if n == "lt_add" || n == "lt_cancel" || n == "lt_le" {
+                    let count = if n == "lt_le" { 5 } else { 4 }
+                    if args.len() != count { return Err(error(
+                        sp,
+                        (n.as_str() + " requires three u64 values and its evidence").as_str()
+                    )) }
+                    let u = self.u64(sp)?
+                    var xs = Vec(u32).new()
+                    for k in 0..3 { xs.push(self.expr(args[k], Some(u), depth - 1)?) }
+                    for k in 3..count { xs.push(self.expr(args[k], None, depth - 1)?) }
+                    let rule = if n == "lt_add" { core.Term.LtAdd(xs[0], xs[1], xs[2], xs[3]) }
+                    else if n == "lt_cancel" { core.Term.LtCancel(xs[0], xs[1], xs[2], xs[3]) }
+                    else { core.Term.LtLe(xs[0], xs[1], xs[2], xs[3], xs[4]) }
+                    return self.c.add(rule, sp)
                 }
                 if n == "fold" {
                     if args.len() != 3 { return Err(error(

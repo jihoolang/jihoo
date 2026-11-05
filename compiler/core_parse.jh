@@ -49,7 +49,7 @@ fn form_head(s: str) -> bool {
         s == "Type" || s == "int" || s == "array" || s == "index" || s == "induct" ||
         s == "inductive" || s == "def" || s == "export" || s == "if-lt" ||
         s == "if-eq" || s == "decide-lt" || s == "add" || s == "sub" || s == "mul" ||
-        s == "fold"
+        s == "fold" || s == "uadd" || s == "lt-add" || s == "lt-cancel" || s == "lt-le"
 }
 
 struct Parser {
@@ -198,6 +198,16 @@ impl Parser {
             let op = if kind == "add" { core.Arith.Add }
             else if kind == "sub" { core.Arith.Sub } else { core.Arith.Mul }
             core.Term.Arith(op, a, b)
+        } else if kind == "uadd" {
+            let a = self.expr(depth - 1)?
+            let b = self.expr(depth - 1)?
+            core.Term.UAdd(a, b)
+        } else if kind == "lt-add" || kind == "lt-cancel" || kind == "lt-le" {
+            var xs = Vec(u32).new()
+            for _ in 0..(if kind == "lt-le" { 5 } else { 4 }) { xs.push(self.expr(depth - 1)?) }
+            if kind == "lt-add" { core.Term.LtAdd(xs[0], xs[1], xs[2], xs[3]) }
+            else if kind == "lt-cancel" { core.Term.LtCancel(xs[0], xs[1], xs[2], xs[3]) }
+            else { core.Term.LtLe(xs[0], xs[1], xs[2], xs[3], xs[4]) }
         } else if kind == "fold" {
             let n = self.expr(depth - 1)?
             let init = self.expr(depth - 1)?

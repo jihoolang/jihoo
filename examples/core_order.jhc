@@ -1,0 +1,37 @@
+; u64 addition in the naturals and the order rules lt-add, lt-cancel and
+; lt-le, with derived weakening and transitivity, for computed indices.
+(def weaken
+  (pi a U64 (pi b U64 (pi0 p (Lt a b) (Lt a (uadd b 1)))))
+  (lam a U64 (lam b U64 (lam0 p (Lt a b)
+    (lt-le a b (uadd b 1) p (lt-add 0 2 b (decide-lt 0 2)))))))
+
+(def lt_trans
+  (pi a U64 (pi b U64 (pi c U64 (pi0 p (Lt a b) (pi0 q (Lt b c) (Lt a c))))))
+  (lam a U64 (lam b U64 (lam c U64 (lam0 p (Lt a b) (lam0 q (Lt b c)
+    (lt-le a b c p (app weaken b c q))))))))
+
+(def neighbours
+  (pi n U64 (pi xs (Array (uadd n 1)) I64))
+  (lam n U64 (lam xs (Array (uadd n 1))
+    (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64
+      (add acc (mul (index xs i (app weaken i n p))
+                    (index xs (uadd i 1) (lt-add i n 1 p)))))))))))
+
+(export pairs
+  (pi x I64 I64)
+  (lam x I64 (app neighbours 4 (array (int 1) x (int 2) x (int 3)))))
+
+(export prefix
+  (pi k U64 I64)
+  (lam k U64
+    (if-lt k 5 q
+      (fold k (int 0) (lam i U64 (lam0 p (Lt i k) (lam acc I64
+        (add acc (index (array (int 10) (int 20) (int 30) (int 40)) i (lt-le i k 4 p q)))))))
+      (int -1))))
+
+(export next
+  (pi i U64 I64)
+  (lam i U64
+    (if-lt (uadd i 1) 4 p
+      (index (array (int 10) (int 20) (int 30) (int 40)) (uadd i 1) p)
+      (int -1))))

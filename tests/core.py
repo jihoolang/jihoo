@@ -143,6 +143,20 @@ def evaluate(term, env):
         # The compiled program traps here; callers avoid overflowing inputs.
         assert -(1 << 63) <= value < (1 << 63), ("overflow", head, a, b)
         return value
+    if head == "uadd":
+        a, b = (evaluate(x, env) for x in args)
+        # A sum of naturals; the compiled program traps beyond U64.
+        assert a + b < (1 << 64), ("overflow", a, b)
+        return a + b
+    if head in ("lt-add", "lt-cancel"):
+        a, b, c, proof = (evaluate(x, env) for x in args)
+        shifted = (a + c, b + c)
+        assert proof == ((a, b) if head == "lt-add" else shifted) and a < b
+        return shifted if head == "lt-add" else (a, b)
+    if head == "lt-le":
+        x, y, z, p, q = (evaluate(v, env) for v in args)
+        assert p == (x, y) and q == (y, z + 1) and x < y <= z
+        return (x, z)
     if head == "fold":
         n, acc, body = (evaluate(x, env) for x in args)
         for i in range(n):
@@ -416,6 +430,8 @@ def main():
         validate_inductive(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_loop import validate_loop
         validate_loop(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_order import validate_order
+        validate_order(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

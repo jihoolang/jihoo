@@ -1,0 +1,40 @@
+// Arithmetic on indices. u64 terms mean natural numbers: `+` traps on
+// overflow instead of wrapping, so a computed index is its meaning, and
+// a <= b is written Lt(a, b + 1). The kernel's rules lt_add, lt_cancel
+// and lt_le give the order of the naturals; `weaken` and `lt_trans` are
+// ordinary lemmas. `pairs` reads xs[i + 1] for i < n from an array of
+// length n + 1, and `prefix(k)` sums the first k elements after one
+// comparison of k with the length: no bounds checks. main returns 58.
+#![dependent_core]
+
+fn weaken(a: u64, b: u64, p: erased(Lt(a, b))) -> Lt(a, b + 1) {
+    lt_le(a, b, b + 1, p, lt_add(0, 2, b, decide_lt(0, 2)))
+}
+
+fn lt_trans(a: u64, b: u64, c: u64, p: erased(Lt(a, b)), q: erased(Lt(b, c))) -> Lt(a, c) {
+    lt_le(a, b, c, p, weaken(b, c, q))
+}
+
+// The sum of products of neighbours among n + 1 values.
+fn neighbours(n: u64, xs: [i64; n + 1]) -> i64 {
+    fold(n, 0, fn(i, p, acc) {
+        acc + index(xs, i, weaken(i, n, p)) * index(xs, i + 1, lt_add(i, n, 1, p))
+    })
+}
+
+export fn pairs(x: i64) -> i64 { neighbours(4, [1, x, 2, x, 3]) }
+
+// k <= 4 and i < k give i < 4.
+export fn prefix(k: u64) -> i64 {
+    if_lt(k, 5, fn(q) {
+        fold(k, 0, fn(i, p, acc) { acc + index([10, 20, 30, 40], i, lt_le(i, k, 4, p, q)) })
+    }, -1)
+}
+
+// A computed index: i + 1 is checked at run time, so i = 2^64 - 1 traps.
+export fn next(i: u64) -> i64 {
+    if_lt(i + 1, 4, fn(p) { index([10, 20, 30, 40], i + 1, p) }, -1)
+}
+
+fn main() -> i64 { prefix(2) + next(0) + pairs(1) }
+// exit: 58

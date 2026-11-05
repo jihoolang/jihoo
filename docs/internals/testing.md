@@ -87,6 +87,8 @@ the runner. Its suites:
   rejects non-positive, relevant or misordered declarations and wrong cases.
   `tests/core_loop.py` adds bounded loops and i64 arithmetic, including
   overflow traps and loop bounds checked against array lengths.
+  `tests/core_order.py` adds u64 addition and the order rules: computed
+  indices, prefixes, u64 traps and rules with wrong premises.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

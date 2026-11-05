@@ -7,7 +7,9 @@
 // declared U64-indexed inductive propositions. Equality and structural
 // induction eliminate only into Prop. Runtime code has I64 arithmetic,
 // which traps on overflow, and bounded loops whose body has evidence of
-// its index's bound.
+// its index's bound. U64 terms denote natural numbers: their addition
+// traps at run time rather than wrap, so every computed value is its
+// meaning, and Lt has the rules of the order of the naturals.
 // There is no general recursion, axiom,
 // unsafe operation or elimination of evidence into runtime data.
 // Erased binders must be propositions and cannot occur in runtime terms.
@@ -53,6 +55,16 @@ pub enum Term {
     // reduction makes these, so call-by-value overflow traps survive
     // substitution; source and textual core cannot write them.
     Strict(u32, u32)
+    // U64 addition in the naturals. Overflow traps at run time; sums are
+    // compared in a canonical order, and only folded when they fit.
+    UAdd(u32, u32)
+    // a, b, c and evidence of Lt(a, b), for Lt(a + c, b + c).
+    LtAdd(u32, u32, u32, u32)
+    // a, b, c and evidence of Lt(a + c, b + c), for Lt(a, b).
+    LtCancel(u32, u32, u32, u32)
+    // x, y, z, Lt(x, y) and Lt(y, z + 1) (y <= z), for Lt(x, z): the
+    // naturals are discrete. Not derivable from the other rules.
+    LtLe(u32, u32, u32, u32, u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -236,6 +248,24 @@ impl Core {
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
             Strict(a, b) => Term.Strict(self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            UAdd(a, b) => Term.UAdd(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            LtAdd(a, b, c, p) => Term.LtAdd(
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(c, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            LtCancel(a, b, c, p) => Term.LtCancel(
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(c, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            LtLe(x, y, z, p, q) => Term.LtLe(
+                self.transform(x, cutoff, delta, replacement, depth - 1)?,
+                self.transform(y, cutoff, delta, replacement, depth - 1)?,
+                self.transform(z, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?,
+                self.transform(q, cutoff, delta, replacement, depth - 1)?)
             Fold(n, init, body) => Term.Fold(
                 self.transform(n, cutoff, delta, replacement, depth - 1)?,
                 self.transform(init, cutoff, delta, replacement, depth - 1)?,
@@ -441,10 +471,68 @@ impl Core {
                 if !self.may_trap(a, depth - 1) { return Ok(b) }
                 Term.Strict(a, b)
             }
+            UAdd(a, b) => {
+                let a = self.normal(a, depth - 1)?
+                let b = self.normal(b, depth - 1)?
+                return self.sum(a, b, sp, depth - 1)
+            }
+            LtAdd(a, b, c, p) => Term.LtAdd(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?,
+                self.normal(c, depth - 1)?, self.normal(p, depth - 1)?)
+            LtCancel(a, b, c, p) => Term.LtCancel(self.normal(a, depth - 1)?,
+                self.normal(b, depth - 1)?, self.normal(c, depth - 1)?, self.normal(p, depth - 1)?)
+            LtLe(x, y, z, p, q) => Term.LtLe(self.normal(x, depth - 1)?, self.normal(y, depth - 1)?,
+                self.normal(z, depth - 1)?, self.normal(p, depth - 1)?, self.normal(q, depth - 1)?)
             Elements(xs) => Term.Elements(self.normal_all(xs.as_slice(), depth)?)
             t => return Ok(id)
         }
         self.add(term, sp)
+    }
+
+    // The canonical sum of two normal U64 terms: variables in index order,
+    // then other terms in their order, then the constant, without zero.
+    // These are equations of the naturals. A constant that does not fit
+    // a U64 leaves the sum as it is.
+    fn sum(inout self, a: u32, b: u32, sp: diag.Span, depth: u32) -> Result(u32, diag.Diag) {
+        var atoms = Vec(u32).new()
+        var constant: u128 = 0
+        self.collect(a, &atoms, &constant, depth)
+        self.collect(b, &atoms, &constant, depth)
+        if constant > 0xffffffffffffffff { return self.add(Term.UAdd(a, b), sp) }
+        var vars = Vec((u32, u32)).new()
+        var others = Vec(u32).new()
+        for x in atoms {
+            match self.term(x) {
+                Var(k) => {
+                    var at = vars.len()
+                    while at > 0 && vars[at - 1].0 > k { at -= 1 }
+                    vars.insert(at, (k, x))
+                }
+                _ => others.push(x)
+            }
+        }
+        var result: Option(u32) = None
+        var ordered = Vec(u32).new()
+        for v in vars { ordered.push(v.1) }
+        for x in others { ordered.push(x) }
+        if constant > 0 || ordered.len() == 0 { ordered.push(self.add(
+            Term.Natural(constant as u64),
+            sp
+        )?) }
+        for x in ordered {
+            result = Some(match result { Some(r) => self.add(Term.UAdd(r, x), sp)?, None => x })
+        }
+        Ok(result.unwrap())
+    }
+
+    fn collect(self, id: u32, inout atoms: Vec(u32), inout constant: u128, depth: u32) {
+        match self.term(id) {
+            UAdd(a, b) if depth > 0 => {
+                self.collect(a, &atoms, &constant, depth - 1)
+                self.collect(b, &atoms, &constant, depth - 1)
+            }
+            Natural(n) => constant += n as u128
+            _ => atoms.push(id)
+        }
     }
 
     // Whether evaluating a runtime term can trap: it contains arithmetic,
@@ -452,7 +540,7 @@ impl Core {
     fn may_trap(self, id: u32, depth: u32) -> bool {
         if depth == 0 { return true }
         match self.term(id) {
-            Arith(_, _, _) | Strict(_, _) => true
+            Arith(_, _, _) | Strict(_, _) | UAdd(_, _) => true
             t => {
                 for child in children(t) { if self.may_trap(child, depth - 1) { return true } }
                 false
@@ -462,6 +550,9 @@ impl Core {
 
     fn identical(self, a: u32, b: u32, depth: u32) -> bool {
         if depth == 0 { return false }
+        // Strict(x, y) means y: it only orders the evaluation of x's traps.
+        match self.term(a) { Strict(_, y) => return self.identical(y, b, depth - 1), _ => {} }
+        match self.term(b) { Strict(_, y) => return self.identical(a, y, depth - 1), _ => {} }
         match (self.term(a), self.term(b)) {
             (Array(x), Array(y)) | (Refl(x), Refl(y)) => self.identical(x, y, depth - 1)
             (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (
@@ -480,11 +571,18 @@ impl Core {
                 depth - 1
             ) &&
                 self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
-            (Strict(a, b), Strict(c, d)) => self.identical(a, c, depth - 1) && self.identical(
+            (UAdd(a, b), UAdd(c, d)) => self.identical(a, c, depth - 1) && self.identical(
                 b,
                 d,
                 depth - 1
             )
+            (LtAdd(a, b, c, p), LtAdd(x, y, z, q)) | (LtCancel(a, b, c, p), LtCancel(x, y, z, q)) =>
+                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
+                self.identical(c, z, depth - 1) && self.identical(p, q, depth - 1)
+            (LtLe(a, b, c, p, q), LtLe(x, y, z, r, t)) =>
+                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
+                self.identical(c, z, depth - 1) && self.identical(p, r, depth - 1) &&
+                self.identical(q, t, depth - 1)
             (Arith(o, a, b), Arith(p, c, d)) =>
                 o == p && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Fold(a, b, y), Fold(c, d, z)) => self.identical(a, c, depth - 1) &&
@@ -827,6 +925,34 @@ impl Core {
                 self.infer(a, ctx, ghost, depth - 1)?
                 return self.infer(b, ctx, ghost, depth - 1)
             }
+            UAdd(a, b) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, ghost, depth - 1)?
+                self.require(b, u, ctx, ghost, depth - 1)?
+                Term.U64
+            }
+            LtAdd(a, b, c, p) | LtCancel(a, b, c, p) => {
+                let forward = match self.term(id) { LtAdd(_, _, _, _) => true, _ => false }
+                let u = self.add(Term.U64, sp)?
+                for x in [a, b, c] { self.require(x, u, ctx, true, depth - 1)? }
+                let ac = self.add(Term.UAdd(a, c), sp)?
+                let bc = self.add(Term.UAdd(b, c), sp)?
+                let plain = self.add(Term.Lt(a, b), sp)?
+                let shifted = self.add(Term.Lt(ac, bc), sp)?
+                self.require(p, if forward { plain } else { shifted }, ctx, true, depth - 1)?
+                return Ok(if forward { shifted } else { plain })
+            }
+            LtLe(x, y, z, p, q) => {
+                let u = self.add(Term.U64, sp)?
+                for v in [x, y, z] { self.require(v, u, ctx, true, depth - 1)? }
+                let one = self.add(Term.Natural(1), sp)?
+                let z1 = self.add(Term.UAdd(z, one), sp)?
+                let first = self.add(Term.Lt(x, y), sp)?
+                let second = self.add(Term.Lt(y, z1), sp)?
+                self.require(p, first, ctx, true, depth - 1)?
+                self.require(q, second, ctx, true, depth - 1)?
+                Term.Lt(x, z)
+            }
             Fold(n, init, body) => {
                 let u = self.add(Term.U64, sp)?
                 self.require(n, u, ctx, ghost, depth - 1)?
@@ -982,7 +1108,11 @@ pub fn children(term: Term) -> Vec(u32) {
             out.push(a)
             out.push(b)
         }
-        Arith(_, a, b) | Strict(a, b) => { out.push(a); out.push(b) }
+        Arith(_, a, b) | Strict(a, b) | UAdd(a, b) => { out.push(a); out.push(b) }
+        LtAdd(a, b, c, p) | LtCancel(a, b, c, p) => { out.push(a); out.push(b); out.push(c); out.push(
+            p
+        ) }
+        LtLe(a, b, c, p, q) => { out.push(a); out.push(b); out.push(c); out.push(p); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
             p
         ) }
@@ -1422,4 +1552,103 @@ fn substitution_keeps_overflow_traps() {
     let safe = c.add(Term.App(ignore, one), sp).unwrap()
     let normal = c.normal(safe, DEPTH).unwrap()
     assert(c.term(normal) == Term.Integer(7), "an argument that cannot trap is dropped")
+}
+
+#[test]
+fn sums_are_compared_in_the_naturals() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let y = c.add(Term.Var(1), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let max = c.add(Term.Natural(0xffffffffffffffff), sp).unwrap()
+    // ((x + 1) + y) + 1 and (2 + y) + x
+    let a = c.add(Term.UAdd(x, one), sp).unwrap()
+    let a = c.add(Term.UAdd(a, y), sp).unwrap()
+    let a = c.add(Term.UAdd(a, one), sp).unwrap()
+    let b = c.add(Term.UAdd(two, y), sp).unwrap()
+    let b = c.add(Term.UAdd(b, x), sp).unwrap()
+    assert(c.equal(a, b, DEPTH).unwrap(), "associativity, commutativity and constants")
+    let x0 = c.add(Term.UAdd(x, zero), sp).unwrap()
+    assert(c.equal(x0, x, DEPTH).unwrap(), "adding zero")
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let closed = c.add(Term.UAdd(one, two), sp).unwrap()
+    assert(c.equal(closed, three, DEPTH).unwrap(), "closed sums compute")
+    let over = c.add(Term.UAdd(max, one), sp).unwrap()
+    assert(!c.equal(over, zero, DEPTH).unwrap(), "no wrapping")
+    let ty = c.add(Term.Eq(over, zero), sp).unwrap()
+    let value = c.add(Term.Refl(zero), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "wrap".to_string(),
+        ty,
+        value,
+        exported: false,
+        span: sp
+    })
+    assert(c.check().is_err(), "2^64 is not 0 in the naturals")
+}
+
+#[test]
+fn order_rules_need_their_exact_premises() {
+    let sp = diag.Span.nowhere()
+    let rules = [0, 1, 2, 3]
+    for rule in rules {
+        var c = Core.new()
+        let zero = c.add(Term.Natural(0), sp).unwrap()
+        let one = c.add(Term.Natural(1), sp).unwrap()
+        let lt01 = c.add(Term.Decide(zero, one), sp).unwrap()
+        let lt11 = c.add(Term.Decide(one, one), sp).unwrap()
+        // Each claims Lt(1, 0) or another false inequality.
+        let (ty, value) = match rule {
+            0 => (Term.Lt(one, zero), Term.LtLe(zero, one, zero, lt01, lt11))
+            1 => (Term.Lt(one, one), Term.LtAdd(one, zero, one, lt01))
+            2 => (Term.Lt(one, zero), Term.LtCancel(one, zero, one, lt01))
+            _ => (Term.Lt(one, zero), Term.LtLe(one, zero, zero, lt01, lt01))
+        }
+        let ty = c.add(ty, sp).unwrap()
+        let value = c.add(value, sp).unwrap()
+        c.definitions.push(Definition {
+            name: "bad".to_string(),
+            ty,
+            value,
+            exported: false,
+            span: sp
+        })
+        assert(c.check().is_err(), "an order rule with wrong premises is rejected")
+    }
+    // x < y <= z gives x < z: 0 < 1 <= 1.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let lt01 = c.add(Term.Decide(zero, one), sp).unwrap()
+    let lt12 = c.add(Term.Decide(one, two), sp).unwrap()
+    let value = c.add(Term.LtLe(zero, one, one, lt01, lt12), sp).unwrap()
+    let ty = c.add(Term.Lt(zero, one), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "good".to_string(),
+        ty,
+        value,
+        exported: false,
+        span: sp
+    })
+    c.check().unwrap()
+}
+
+#[test]
+fn rejects_cycles_in_order_graphs() {
+    let sp = diag.Span.nowhere()
+    for term in [
+        Term.UAdd(0, 1),
+        Term.LtAdd(0, 0, 0, 1),
+        Term.LtCancel(1, 0, 0, 0),
+        Term.LtLe(0, 0, 0, 0, 1)
+    ] {
+        var c = Core.new()
+        c.add(Term.U64, sp).unwrap()
+        c.add(term.clone(), sp).unwrap()
+        assert(c.check().is_err(), "order terms obey graph integrity")
+    }
 }
