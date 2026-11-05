@@ -4,7 +4,8 @@
 // if_eq, proposition-only transport, inductive propositions declared as
 // `trait Name(i: u64, ...) { fn ctor(...) -> Name(...) }` and their
 // structural induction, `induct(P, case..., evidence)`, i64 `+ - *` and
-// bounded loops, `fold(n, init, fn(i, p, acc) { body })`.
+// bounded loops, `fold(n, init, fn(i, p, acc) { body })`, and refinements
+// `refine(fn(x) { P })` with `pack(a, p)`, `witness(s)` and `proof(s)`.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -22,7 +23,8 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 fn reserved(name: str) -> bool {
     name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "fold" ||
         name == "lt_add" || name == "lt_cancel" || name == "lt_le" || name == "sub" ||
-        name == "zero_le" ||
+        name == "zero_le" || name == "refine" || name == "pack" || name == "witness" ||
+        name == "proof" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -167,6 +169,14 @@ impl Elaborator {
                         if n == "i64" { return self.c.add(core.Term.I64, t.span) }
                     }
                     Some(args) => {
+                        if n == "refine" {
+                            if args.len() != 1 { return Err(error(
+                                t.span,
+                                "expected refine(fn(x) { proposition })"
+                            )) }
+                            let p = self.family(args[0], 1, depth - 1)?
+                            return self.c.add(core.Term.Refine(p), t.span)
+                        }
                         if (n == "Lt" || n == "Eq") && args.len() == 2 {
                             let u = self.u64(t.span)?
                             let a = self.expr(args[0], Some(u), depth - 1)?
@@ -423,6 +433,34 @@ impl Elaborator {
                     let b = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.USub(a, b, p), sp)
+                }
+                if n == "pack" {
+                    // The predicate comes from the expected refinement.
+                    if args.len() != 2 { return Err(error(
+                        sp,
+                        "pack requires a value and its evidence"
+                    )) }
+                    let Some(t) = expected else { return Err(error(
+                        sp,
+                        "pack needs an expected refine(...) type"
+                    )) }
+                    let t = self.c.normal(t, core.DEPTH)?
+                    let core.Term.Refine(p) = self.c.term(t) else {
+                        return Err(error(sp, "pack needs an expected refine(...) type"))
+                    }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let q = self.expr(args[1], None, depth - 1)?
+                    return self.c.add(core.Term.Pack(p, a, q), sp)
+                }
+                if n == "witness" || n == "proof" {
+                    if args.len() != 1 { return Err(error(
+                        sp,
+                        (n.as_str() + " requires one refinement").as_str()
+                    )) }
+                    let s = self.expr(args[0], None, depth - 1)?
+                    let term = if n == "witness" { core.Term.Witness(s) } else { core.Term.Proof(s) }
+                    return self.c.add(term, sp)
                 }
                 if n == "zero_le" {
                     if args.len() != 1 { return Err(error(sp, "zero_le requires one u64 value")) }

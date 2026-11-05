@@ -1,0 +1,42 @@
+// Refinements. refine(fn(x) { P(x) }) is a u64 with erased evidence of
+// P: pack(a, p) makes one from a and p: P(a), witness(s) is its u64 and
+// proof(s) its evidence, of P(witness(s)). At run time a refinement is
+// its u64 alone. `below(i, n, nz)` returns i when i < n and 0 otherwise,
+// with evidence that the result is below n, so `at` loads from an array
+// of length n without a bounds check. `pred` returns k - 1 together with
+// (k - 1) + 1 = k, and `clamp` exports a refinement as a u64. main
+// returns 53.
+#![dependent_core]
+
+fn below(i: u64, n: u64, nz: erased(Lt(0, n))) -> refine(fn(j) { Lt(j, n) }) {
+    if_lt(i, n, fn(p) { pack(i, p) }, pack(0, nz))
+}
+
+fn at(n: u64, xs: [i64; n], s: refine(fn(j) { Lt(j, n) })) -> i64 {
+    index(xs, witness(s), proof(s))
+}
+
+export fn wrap(i: u64) -> i64 { at(3, [11, 22, 33], below(i, 3, decide_lt(0, 3))) }
+
+export fn clamp(i: u64) -> refine(fn(j) { Lt(j, 4) }) { below(i, 4, decide_lt(0, 4)) }
+
+fn sym(a: u64, b: u64, e: erased(Eq(a, b))) -> Eq(b, a) {
+    transport(fn(k) { Eq(k, a) }, e, refl(a))
+}
+
+// k - 1 with evidence of its successor: (k - 1) + 1 is k.
+fn pred(k: u64, p: erased(Lt(0, k))) -> refine(fn(j) { Eq(j + 1, k) }) {
+    pack(sub(k, 1, lt_add(0, k, 1, p)), refl(k))
+}
+
+// j + 1 = k < 5, so j < 4.
+fn before(k: u64, q: erased(Lt(k, 5)), s: refine(fn(j) { Eq(j + 1, k) })) -> i64 {
+    index([10, 20, 30, 40], witness(s), lt_cancel(witness(s), 4, 1,
+        transport(fn(m) { Lt(m, 5) }, sym(witness(s) + 1, k, proof(s)), q)))
+}
+
+export fn last(k: u64) -> i64 {
+    if_lt(0, k, fn(p) { if_lt(k, 5, fn(q) { before(k, q, pred(k, p)) }, -1) }, -1)
+}
+
+fn main() -> i64 { wrap(1) + wrap(7) + last(2) }

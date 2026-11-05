@@ -1,6 +1,6 @@
 // Erase and lower the checked core itself to MIR. The executable fragment
 // is pure: scalar exports, immutable local arrays, beta-reduced helpers,
-// proof-carrying indexing, I64 arithmetic and bounded loops. Array values and erased preconditions cannot
+// refinements as their U64, proof-carrying indexing, I64 arithmetic and bounded loops. Array values and erased preconditions cannot
 // cross the C ABI. No independent source/model translation is used.
 import core
 import diag
@@ -134,6 +134,12 @@ impl Lower {
                 self.block = join
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(result)), ty: y.ty })
             }
+            // A refinement is its U64; its evidence is erased.
+            Pack(_, a, _) | Witness(a) => {
+                let v = self.expr(c, a, env, depth - 1)?
+                if v.ty != types.U64 { return Err(c.error(id, "refinement layout mismatch")) }
+                Ok(v)
+            }
             Strict(a, b) => {
                 // Evaluated for its traps only, before the rest.
                 self.expr(c, a, env, depth - 1)?
@@ -230,6 +236,16 @@ fn scalar(c: core.Core, id: u32) -> Result(u32, diag.Diag) {
     }
 }
 
+// A result may also be a refinement: the export guarantees its evidence,
+// and the caller receives the U64. Arguments cannot be refinements, since
+// a foreign caller cannot supply evidence.
+fn result(c: core.Core, id: u32) -> Result(u32, diag.Diag) {
+    match c.term(id) {
+        Refine(_) => Ok(types.U64)
+        _ => scalar(c, id)
+    }
+}
+
 pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, diag.Diag) {
     var c = c
     // This entry point always checks, even if called without the parser.
@@ -273,7 +289,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
             ty = result
             body = rest
         }
-        let ret = scalar(c, ty)?
+        let ret = result(c, ty)?
         lower.body.locals[0].ty = ret
         lower.body.arg_count = params.len()
         let value = lower.expr(c, body, env.as_slice(), core.DEPTH)?

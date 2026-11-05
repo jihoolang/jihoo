@@ -130,6 +130,8 @@ in the existing grammar, not global keywords or standard-library types:
 | `i + j` on `u64` | [addition in the naturals](#index-arithmetic-and-order); overflow traps |
 | `lt_add(a, b, c, p)`, `lt_cancel(a, b, c, p)`, `lt_le(x, y, z, p, q)` | rules of the order of the naturals |
 | `sub(a, b, p)`, `zero_le(a)` | `a - b` given `p: Lt(b, a + 1)`; evidence of `Lt(0, a + 1)` |
+| `refine(fn(x) { P(x) })` | [refinement](#refinements): a u64 with erased evidence of `P` |
+| `pack(a, p)`, `witness(s)`, `proof(s)` | a refinement from `p: P(a)`; its u64; its evidence |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -150,13 +152,13 @@ blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
-`fold`, `lt_add`, `lt_cancel`, `lt_le`, `sub`, `zero_le`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
+`fold`, `lt_add`, `lt_cancel`, `lt_le`, `sub`, `zero_le`, `refine`, `pack`, `witness`, `proof`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
 `__jihoo_dependent_main` are reserved in marked modules. Functions,
 propositions and constructors share one namespace. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
 
-Exports accept and return only U64/I64 values and cannot require proof
-preconditions from foreign callers. Without `--lib`, the entry must be an
+Exports accept U64/I64 values and return U64/I64 values or
+refinements, and cannot require proof preconditions from foreign callers. Without `--lib`, the entry must be an
 ordinary `fn main() -> i64`; its result becomes the process exit status
 through the existing native entry wrapper. With `--lib`, only explicitly
 exported functions are emitted. Helpers, including a non-exported `main`,
@@ -484,6 +486,63 @@ would overflow still traps.
 comparisons and the two subtractions, and no bounds assertions. In
 `.jhc` the forms are `(usub a b p)` and `(zero-le a)`.
 
+## Refinements
+
+A refinement `refine(fn(x) { P(x) })`, `{x : U64 | P x}`, is a U64
+together with erased evidence that `P` holds of it. A function can
+return a value and what is known about it, which a caller then uses
+without a separate lemma:
+
+| term | type |
+|------|------|
+| `refine(P)` | `Type 0`, for `P : U64 -> Prop` |
+| `pack(a, p)` | `refine(P)`, for `a : U64` and `p : P(a)` |
+| `witness(s)` | `U64`, for `s : refine(P)` |
+| `proof(s)` | `P(witness(s))`, erased |
+
+In source, `pack` takes `P` from the expected type: a function's result,
+a parameter or a branch of one; in `.jhc` it is written
+`(pack P a p)`. A refinement is data, so a binder of one is not erased,
+and `proof(s)` is evidence, usable only where evidence is. There is no
+subtyping: `refine(fn(j) { Lt(j, n) })` is not `refine(fn(j) { Lt(j, n
++ 1) })`; a user lemma repacks the witness with weakened evidence.
+
+`witness(pack(a, p))` is `a` and `proof(pack(a, p))` is `p`. The witness
+of a branch is the branch of its alternatives' witnesses, so
+`witness(if_lt(i, n, fn(p) { pack(i, p) }, pack(0, z)))` is the branch
+choosing `i` or `0`, and the proof of a branch stays a neutral proof of
+`P` at that branch. Packs with the same witness are the same whatever
+their evidence (proof irrelevance). At run time a refinement is its U64:
+`pack` lowers to its witness and `witness` to its argument, and its
+predicate and evidence are neither stored nor evaluated. A witness that
+can trap is still evaluated when it is passed, even if unused, as any
+argument is. An export may return a refinement, received by a foreign
+caller as a `uint64_t`; it cannot take one, since the caller could not
+supply the evidence.
+
+[`examples/core_refine.jh`](../../examples/core_refine.jh) and its
+[core equivalent](../../examples/core_refine.jhc) define
+
+```jihoo
+fn below(i: u64, n: u64, nz: erased(Lt(0, n))) -> refine(fn(j) { Lt(j, n) }) {
+    if_lt(i, n, fn(p) { pack(i, p) }, pack(0, nz))
+}
+
+fn at(n: u64, xs: [i64; n], s: refine(fn(j) { Lt(j, n) })) -> i64 {
+    index(xs, witness(s), proof(s))
+}
+```
+
+and `pred(k, p) : refine(fn(j) { Eq(j + 1, k) })`, `k - 1` with its
+successor equation, from which `last(k)` derives `k - 1 < 4` for
+`k < 5`. `clamp(i)` exports `below(i, 4, ...)` as a `uint64_t`. Their
+MIR has the comparisons, one subtraction and the loads: no pairs,
+evidence or bounds assertions. In `.jhc` the forms are `(Refine P)`,
+`(pack P a p)`, `(witness s)` and `(proof s)`.
+
+Refinements carry U64 values only; dependent pairs of other types, and
+refinements as loop accumulators, are future work.
+
 ## Core syntax
 
 The textual format uses parentheses and semicolon line comments. Local
@@ -509,6 +568,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(uadd a b)` | addition in the naturals; traps at run time beyond U64 |
 | `(lt-add a b c p)`, `(lt-cancel a b c p)`, `(lt-le x y z p q)` | order rules of the naturals |
 | `(usub a b p)`, `(zero-le a)` | `a - b` with `p : Lt b (a + 1)`; evidence of `Lt 0 (a + 1)` |
+| `(Refine P)`, `(pack P a p)` | a U64 with evidence of `P : U64 -> Prop`; one, from `p : P a` |
+| `(witness s)`, `(proof s)` | a refinement's U64, and its erased evidence of `P (witness s)` |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -617,6 +678,15 @@ accepted lemmas, and rejection of missing, strict or reversed evidence,
 underflow, partial cancellation, wrapped results, the `-` operator,
 unchecked `k - 1` loads and runtime uses of evidence. Kernel unit tests
 check cancellation and that `0 - 1` has no evidence.
+`tests/core_refine.py` adds refinements: both frontends' MIR and native
+execution, projections, proof irrelevance, repacking with weaker
+evidence and branches of packs; witnesses that trap are evaluated even
+when unused, and erased predicates are not. It rejects false or
+mismatched evidence, subtyping, wrong bounds, runtime proofs,
+projections of u64 values, untyped packs, data predicates, erased
+refinements and refinement arguments of exports. Kernel unit tests
+check evidence at the witness, projection, erasure and the witness of a
+branch.
 
 The next stages of the replacement are:
 

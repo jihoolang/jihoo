@@ -155,6 +155,15 @@ def evaluate(term, env):
     if head == "zero-le":
         a = evaluate(args[0], env)
         return (0, a + 1)
+    if head == "pack":
+        family, a, proof = (evaluate(x, env) for x in args)
+        # The evidence must be of the predicate at the witness.
+        assert proof == family(a), ("pack", a, proof)
+        return ("pack", a, proof)
+    if head in ("witness", "proof"):
+        tag, a, proof = evaluate(args[0], env)
+        assert tag == "pack"
+        return a if head == "witness" else proof
     if head in ("lt-add", "lt-cancel"):
         a, b, c, proof = (evaluate(x, env) for x in args)
         shifted = (a + c, b + c)
@@ -441,6 +450,8 @@ def main():
         validate_order(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_sub import validate_sub
         validate_sub(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_refine import validate_refine
+        validate_refine(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

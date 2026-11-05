@@ -4,7 +4,8 @@
 //
 // This finite fragment has levelled universes, dependent functions,
 // immutable I64 arrays indexed by U64 lengths, Lt, U64 equality and
-// declared U64-indexed inductive propositions. Equality and structural
+// declared U64-indexed inductive propositions, and refinements {x : U64 |
+// P x}, a U64 with erased evidence. Equality and structural
 // induction eliminate only into Prop. Runtime code has I64 arithmetic,
 // which traps on overflow, and bounded loops whose body has evidence of
 // its index's bound. U64 terms denote natural numbers: their addition
@@ -70,6 +71,14 @@ pub enum Term {
     USub(u32, u32, u32)
     // Lt(0, a + 1): every natural is at least 0.
     ZeroLe(u32)
+    // {x : U64 | P x} for P : U64 -> Prop: a U64 with erased evidence. Its
+    // runtime representation is the U64 alone.
+    Refine(u32)
+    // P, a : U64 and evidence of P a, of type Refine(P).
+    Pack(u32, u32, u32)
+    // The U64 of a refinement, and its evidence, of P (Witness(s)).
+    Witness(u32)
+    Proof(u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -259,6 +268,12 @@ impl Core {
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?)
             ZeroLe(a) => Term.ZeroLe(self.transform(a, cutoff, delta, replacement, depth - 1)?)
+            Refine(p) => Term.Refine(self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            Pack(p, a, q) => Term.Pack(self.transform(p, cutoff, delta, replacement, depth - 1)?,
+                self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(q, cutoff, delta, replacement, depth - 1)?)
+            Witness(s) => Term.Witness(self.transform(s, cutoff, delta, replacement, depth - 1)?)
+            Proof(s) => Term.Proof(self.transform(s, cutoff, delta, replacement, depth - 1)?)
             LtAdd(a, b, c, p) => Term.LtAdd(
                 self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
@@ -521,6 +536,25 @@ impl Core {
                 Term.USub(a, b, p)
             }
             ZeroLe(a) => Term.ZeroLe(self.normal(a, depth - 1)?)
+            Refine(p) => Term.Refine(self.normal(p, depth - 1)?)
+            Pack(p, a, q) => Term.Pack(self.normal(p, depth - 1)?, self.normal(a, depth - 1)?,
+                self.normal(q, depth - 1)?)
+            Witness(s) => {
+                let s = self.normal(s, depth - 1)?
+                return self.witness(s, sp, depth - 1)
+            }
+            Proof(s) => {
+                let s = self.normal(s, depth - 1)?
+                match self.term(s) {
+                    Pack(_, _, q) => return Ok(q)
+                    // Traps order runtime evaluation; evidence has none.
+                    Strict(_, x) => {
+                        let proof = self.add(Term.Proof(x), sp)?
+                        return self.normal(proof, depth - 1)
+                    }
+                    _ => Term.Proof(s)
+                }
+            }
             LtAdd(a, b, c, p) => Term.LtAdd(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?,
                 self.normal(c, depth - 1)?, self.normal(p, depth - 1)?)
             LtCancel(a, b, c, p) => Term.LtCancel(self.normal(a, depth - 1)?,
@@ -531,6 +565,31 @@ impl Core {
             t => return Ok(id)
         }
         self.add(term, sp)
+    }
+
+    // The U64 of a normal refinement: a packed value is its witness, and
+    // the witness of a branch is the branch of its alternatives' witnesses.
+    // A trap kept by Strict still happens first.
+    fn witness(inout self, s: u32, sp: diag.Span, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(self.error(s, "nesting limit reached")) }
+        match self.term(s) {
+            Pack(_, a, _) => Ok(a)
+            Strict(t, x) => {
+                let x = self.witness(x, sp, depth - 1)?
+                if !self.may_trap(t, depth - 1) { return Ok(x) }
+                self.add(Term.Strict(t, x), sp)
+            }
+            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                let equality = match self.term(s) { IfEq(_, _, _, _) => true, _ => false }
+                let yes = self.witness(yes, sp, depth - 1)?
+                let no = self.witness(no, sp, depth - 1)?
+                self.add(
+                    if equality { Term.IfEq(a, b, yes, no) } else { Term.IfLt(a, b, yes, no) },
+                    sp
+                )
+            }
+            _ => self.add(Term.Witness(s), sp)
+        }
     }
 
     // The canonical sum of two normal U64 terms: variables in index order,
@@ -660,6 +719,10 @@ impl Core {
         if depth == 0 { return true }
         match self.term(id) {
             Arith(_, _, _) | Strict(_, _) | UAdd(_, _) => true
+            // Only a refinement's witness is evaluated; its predicate and
+            // evidence are erased.
+            Pack(_, a, _) => self.may_trap(a, depth - 1)
+            Refine(_) | Proof(_) => false
             t => {
                 for child in children(t) { if self.may_trap(child, depth - 1) { return true } }
                 false
@@ -693,7 +756,13 @@ impl Core {
             // Proof irrelevance: any evidence of b <= a gives the same a - b.
             (USub(a, b, _), USub(c, d, _)) =>
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
-            (ZeroLe(a), ZeroLe(b)) => self.identical(a, b, depth - 1)
+            (ZeroLe(a), ZeroLe(b)) | (Refine(a), Refine(b)) | (Witness(a), Witness(b)) | (
+                Proof(a),
+                Proof(b)
+            ) => self.identical(a, b, depth - 1)
+            // Proof irrelevance: the evidence does not change the value.
+            (Pack(p, a, _), Pack(q, b, _)) =>
+                self.identical(p, q, depth - 1) && self.identical(a, b, depth - 1)
             (UAdd(a, b), UAdd(c, d)) => self.identical(a, c, depth - 1) && self.identical(
                 b,
                 d,
@@ -796,6 +865,13 @@ impl Core {
             return Err(self.error(id, "inductive family used before its declaration is checked"))
         }
         Ok(())
+    }
+
+    // U64 -> Prop, the type of a refinement's predicate.
+    fn predicate(inout self, sp: diag.Span) -> Result(u32, diag.Diag) {
+        let u = self.add(Term.U64, sp)?
+        let prop = self.add(Term.Prop, sp)?
+        self.add(Term.Pi(false, u, prop), sp)
     }
 
     // U64 -> ... -> Prop, one binder per index: elimination is into
@@ -1085,6 +1161,32 @@ impl Core {
                 let a1 = self.add(Term.UAdd(a, one), sp)?
                 Term.Lt(zero, a1)
             }
+            Refine(p) => {
+                let family = self.predicate(sp)?
+                self.require(p, family, ctx, true, depth - 1)?
+                Term.Universe(0)
+            }
+            Pack(p, a, q) => {
+                let family = self.predicate(sp)?
+                self.require(p, family, ctx, true, depth - 1)?
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, ghost, depth - 1)?
+                let holds = self.add(Term.App(p, a), sp)?
+                self.require(q, holds, ctx, true, depth - 1)?
+                Term.Refine(p)
+            }
+            Witness(s) | Proof(s) => {
+                let proof = match self.term(id) { Proof(_) => true, _ => false }
+                // The evidence is erased: only the witness is runtime data.
+                let ty = self.infer(s, ctx, ghost || proof, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Refine(p) = self.term(ty) else {
+                    return Err(self.error(s, "expected a refinement"))
+                }
+                if !proof { return self.add(Term.U64, sp) }
+                let w = self.add(Term.Witness(s), sp)?
+                Term.App(p, w)
+            }
             LtAdd(a, b, c, p) | LtCancel(a, b, c, p) => {
                 let forward = match self.term(id) { LtAdd(_, _, _, _) => true, _ => false }
                 let u = self.add(Term.U64, sp)?
@@ -1268,7 +1370,8 @@ pub fn children(term: Term) -> Vec(u32) {
         ) }
         LtLe(a, b, c, p, q) => { out.push(a); out.push(b); out.push(c); out.push(p); out.push(q) }
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
-        ZeroLe(a) => out.push(a)
+        ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) => out.push(a)
+        Pack(p, a, q) => { out.push(p); out.push(a); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
             p
         ) }
@@ -1909,4 +2012,98 @@ fn cancellation_keeps_the_evaluation_it_removes() {
     let back = c.add(Term.UAdd(pred, one), sp).unwrap()
     let normal = c.normal(back, DEPTH).unwrap()
     assert(c.term(normal) == Term.Var(0), "nothing to keep")
+}
+
+// Refine(fn(j) { Lt(j, 3) }), a closed predicate.
+fn below_three(inout c: Core) -> (u32, u32) {
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let j = c.add(Term.Var(0), sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let lt = c.add(Term.Lt(j, three), sp).unwrap()
+    let p = c.add(Term.Lam(false, u, lt), sp).unwrap()
+    (p, c.add(Term.Refine(p), sp).unwrap())
+}
+
+#[test]
+fn refinements_need_evidence_at_their_witness() {
+    let sp = diag.Span.nowhere()
+    for witness in [0 as u64, 2, 3, 5] {
+        var c = Core.new()
+        let (p, ty) = below_three(&c)
+        let a = c.add(Term.Natural(witness), sp).unwrap()
+        let three = c.add(Term.Natural(3), sp).unwrap()
+        let evidence = c.add(Term.Decide(a, three), sp).unwrap()
+        let value = c.add(Term.Pack(p, a, evidence), sp).unwrap()
+        c.definitions.push(Definition { name: "r".to_string(), ty, value, exported: false,
+            span: sp })
+        assert(c.check().is_ok() == (witness < 3), "evidence is of P at the witness")
+    }
+    // Evidence of P at another value does not make a refinement.
+    var c = Core.new()
+    let (p, ty) = below_three(&c)
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let five = c.add(Term.Natural(5), sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let evidence = c.add(Term.Decide(zero, three), sp).unwrap()
+    let value = c.add(Term.Pack(p, five, evidence), sp).unwrap()
+    c.definitions.push(Definition { name: "r".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "evidence at 0 is not evidence at 5")
+}
+
+#[test]
+fn refinements_project_and_erase() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let (p, ty) = below_three(&c)
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let evidence = c.add(Term.Decide(two, three), sp).unwrap()
+    let packed = c.add(Term.Pack(p, two, evidence), sp).unwrap()
+    let witness = c.add(Term.Witness(packed), sp).unwrap()
+    let proof = c.add(Term.Proof(packed), sp).unwrap()
+    assert(c.term(c.normal(witness, DEPTH).unwrap()) == Term.Natural(2), "the witness computes")
+    assert(c.equal(proof, evidence, DEPTH).unwrap(), "and so does the proof")
+    // An erased refinement is not a proposition; a proof binder of one is
+    // rejected, as is the proof of a refinement used as runtime data.
+    let erased = c.add(Term.Lam(true, ty, two), sp).unwrap()
+    let erased_ty = c.add(Term.Pi(true, ty, ty), sp).unwrap()
+    c.definitions.push(Definition { name: "e".to_string(), ty: erased_ty, value: erased,
+        exported: false, span: sp })
+    assert(c.check().is_err(), "refinements are data")
+    var c = Core.new()
+    let (_, ty) = below_three(&c)
+    let s = c.add(Term.Var(0), sp).unwrap()
+    let proof = c.add(Term.Proof(s), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let value = c.add(Term.Lam(false, ty, proof), sp).unwrap()
+    let fty = c.add(Term.Pi(false, ty, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty: fty, value, exported: false,
+        span: sp })
+    assert(c.check().is_err(), "the proof is not the witness")
+    for term in [Term.Refine(0), Term.Pack(0, 0, 0), Term.Witness(0), Term.Proof(0)] {
+        var c = Core.new()
+        c.add(term.clone(), sp).unwrap()
+        assert(c.check().is_err(), "refinement terms obey graph integrity")
+    }
+}
+
+#[test]
+fn the_witness_of_a_branch_is_a_branch() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let (p, _) = below_three(&c)
+    let i = c.add(Term.Var(0), sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let evidence = c.add(Term.Var(0), sp).unwrap()
+    let inner = c.add(Term.Var(1), sp).unwrap()
+    let yes = c.add(Term.Pack(p, inner, evidence), sp).unwrap()
+    let none = c.add(Term.Decide(zero, three), sp).unwrap()
+    let no = c.add(Term.Pack(p, zero, none), sp).unwrap()
+    let branch = c.add(Term.IfLt(i, three, yes, no), sp).unwrap()
+    let witness = c.add(Term.Witness(branch), sp).unwrap()
+    let normal = c.normal(witness, DEPTH).unwrap()
+    let IfLt(_, _, y, n) = c.term(normal) else { panic("a branch of witnesses") }
+    assert(c.term(y) == Term.Var(1) && c.term(n) == Term.Natural(0), "each alternative's witness")
 }

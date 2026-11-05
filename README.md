@@ -195,7 +195,9 @@ index's bound, so the loads have no bounds checks. In the
 whose `+` traps instead of wrapping; three kernel rules of their order
 justify loads at `i + 1` and over prefixes, and the
 [subtraction example](examples/core_sub.jh) reads arrays backwards with
-`sub(n, i + 1, p)`, whose evidence shows it cannot underflow. General `.jh` coverage,
+`sub(n, i + 1, p)`, whose evidence shows it cannot underflow. A
+[refinement](examples/core_refine.jh) `refine(fn(j) { Lt(j, n) })` is a
+u64 returned together with its evidence, and is the u64 alone at run time. General `.jh` coverage,
 dependent motives, inductive data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 

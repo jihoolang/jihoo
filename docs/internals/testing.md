@@ -90,6 +90,8 @@ the runner. Its suites:
   `tests/core_order.py` adds u64 addition and the order rules: computed
   indices, prefixes, u64 traps and rules with wrong premises.
   `tests/core_sub.py` adds subtraction with evidence and its cancellation.
+  `tests/core_refine.py` adds refinements: projections, kept witness traps,
+  false or mismatched evidence and the export ABI.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

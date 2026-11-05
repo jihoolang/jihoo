@@ -1,0 +1,42 @@
+; Refinements: a U64 with erased evidence of a predicate. pack, witness
+; and proof; at run time a refinement is its U64.
+(def below
+  (pi i U64 (pi n U64 (pi0 nz (Lt 0 n) (Refine (lam j U64 (Lt j n))))))
+  (lam i U64 (lam n U64 (lam0 nz (Lt 0 n)
+    (if-lt i n p (pack (lam j U64 (Lt j n)) i p) (pack (lam j U64 (Lt j n)) 0 nz))))))
+
+(def at
+  (pi n U64 (pi xs (Array n) (pi s (Refine (lam j U64 (Lt j n))) I64)))
+  (lam n U64 (lam xs (Array n) (lam s (Refine (lam j U64 (Lt j n)))
+    (index xs (witness s) (proof s))))))
+
+(export wrap
+  (pi i U64 I64)
+  (lam i U64 (app at 3 (array (int 11) (int 22) (int 33)) (app below i 3 (decide-lt 0 3)))))
+
+(export clamp
+  (pi i U64 (Refine (lam j U64 (Lt j 4))))
+  (lam i U64 (app below i 4 (decide-lt 0 4))))
+
+(def sym
+  (pi a U64 (pi b U64 (pi0 e (Eq a b) (Eq b a))))
+  (lam a U64 (lam b U64 (lam0 e (Eq a b) (transport (lam k U64 (Eq k a)) e (refl a))))))
+
+(def pred
+  (pi k U64 (pi0 p (Lt 0 k) (Refine (lam j U64 (Eq (uadd j 1) k)))))
+  (lam k U64 (lam0 p (Lt 0 k)
+    (pack (lam j U64 (Eq (uadd j 1) k)) (usub k 1 (lt-add 0 k 1 p)) (refl k)))))
+
+(def before
+  (pi k U64 (pi0 q (Lt k 5) (pi s (Refine (lam j U64 (Eq (uadd j 1) k))) I64)))
+  (lam k U64 (lam0 q (Lt k 5) (lam s (Refine (lam j U64 (Eq (uadd j 1) k)))
+    (index (array (int 10) (int 20) (int 30) (int 40)) (witness s)
+      (lt-cancel (witness s) 4 1
+        (transport (lam m U64 (Lt m 5)) (app sym (uadd (witness s) 1) k (proof s)) q)))))))
+
+(export last
+  (pi k U64 I64)
+  (lam k U64
+    (if-lt 0 k p
+      (if-lt k 5 q (app before k q (app pred k p)) (int -1))
+      (int -1))))

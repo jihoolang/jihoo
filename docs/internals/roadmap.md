@@ -415,6 +415,15 @@ with no bounds checks. Both frontends, both targets, native differential
 execution, 14 source and 5 core rejections and kernel tests run in the
 `core` suite.
 
+Implemented refinements: `refine(fn(j) { P(j) })` is a u64 with erased
+evidence of `P`, made by `pack(a, p)` and taken apart by `witness(s)`
+and `proof(s)`; it is the u64 alone at run time, and an export may
+return one. `examples/core_refine.jh` returns a clamped index with its
+bound and `k - 1` with `(k - 1) + 1 = k`, and loads with them without
+bounds checks. Both frontends, both targets, native differential
+execution, kept witness traps, 18 source and 7 core rejections and
+kernel tests run in the `core` suite.
+
 Next: dependent motives, inductive data types,
 erased indices and broader lemma libraries;
 cover owned/mutable memory;
