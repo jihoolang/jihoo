@@ -43,6 +43,14 @@ CONSTRUCTORS = {}
 FAMILIES = {}
 # Data type name -> number of parameters, which cases do not receive.
 PARAMS = {}
+# Every buffer the evaluator allocated, to check that each is freed once.
+BUFFERS = []
+
+
+class Buffer:
+    def __init__(self, values):
+        self.values = values
+        self.alive = True
 
 
 def definitions(text):
@@ -167,6 +175,29 @@ def evaluate(term, env):
     if head == "zero-le":
         a = evaluate(args[0], env)
         return (0, a + 1)
+    if head == "alloc":
+        n, x = (evaluate(v, env) for v in args)
+        assert n < (1 << 20), ("test buffers are small", n)
+        buffer = Buffer([x] * n)
+        BUFFERS.append(buffer)
+        return buffer
+    if head in ("load", "store"):
+        buffer, index, *rest = (evaluate(v, env) for v in args)
+        # A freed buffer is never touched again.
+        assert buffer.alive and 0 <= index < len(buffer.values)
+        if head == "load":
+            proof, k = rest
+            assert proof == (index, len(buffer.values))
+            return k(buffer.values[index])(buffer)
+        value, proof = rest
+        assert proof == (index, len(buffer.values))
+        buffer.values[index] = value
+        return buffer
+    if head == "free":
+        buffer = evaluate(args[0], env)
+        assert buffer.alive, "double free"
+        buffer.alive = False
+        return evaluate(args[1], env)
     if head == "pack":
         family, a, proof = (evaluate(x, env) for x in args)
         # The evidence must be of the predicate at the witness.
@@ -468,6 +499,8 @@ def main():
         validate_data(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_indexed import validate_indexed
         validate_indexed(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_buffer import validate_buffer
+        validate_buffer(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

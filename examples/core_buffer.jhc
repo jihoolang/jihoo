@@ -1,0 +1,34 @@
+; Owned buffers: (Buffer n), (alloc n x), (load b i p k) with
+; k = (lam x I64 (lam b (Buffer n) ...)), (store b i v p) and (free b rest).
+; The kernel checks that each buffer is used exactly once.
+(def weaken
+  (pi i U64 (pi n U64 (pi0 p (Lt i n) (Lt i (uadd n 1)))))
+  (lam i U64 (lam n U64 (lam0 p (Lt i n)
+    (lt-le i n (uadd n 1) p (lt-add 0 2 n (decide-lt 0 2)))))))
+
+(def running
+  (pi n U64 (pi b (Buffer (uadd n 1)) (Buffer (uadd n 1))))
+  (lam n U64 (lam b (Buffer (uadd n 1))
+    (fold n b (lam i U64 (lam0 p (Lt i n) (lam acc (Buffer (uadd n 1))
+      (load acc i (app weaken i n p) (lam x I64 (lam acc (Buffer (uadd n 1))
+        (load acc (uadd i 1) (lt-add i n 1 p) (lam y I64 (lam acc (Buffer (uadd n 1))
+          (store acc (uadd i 1) (add x y) (lt-add i n 1 p)))))))))))))))
+
+(export total
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (load (app running n (alloc (uadd n 1) x)) n (lt-add 0 1 n (decide-lt 0 1))
+      (lam last I64 (lam b (Buffer (uadd n 1)) (free b last)))))))
+
+(def three
+  (pi x I64 (Buffer 3))
+  (lam x I64
+    (store (store (store (alloc 3 (int 0)) 0 x (decide-lt 0 3)) 1 (add x (int 1)) (decide-lt 1 3))
+      2 (add x (int 2)) (decide-lt 2 3))))
+
+(export pick
+  (pi i U64 (pi x I64 I64))
+  (lam i U64 (lam x I64
+    (if-lt i 3 p
+      (load (app three x) i p (lam v I64 (lam b (Buffer 3) (free b v))))
+      (int -1)))))

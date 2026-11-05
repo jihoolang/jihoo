@@ -449,9 +449,29 @@ nonempty array, with exports that take no erased length. Both
 frontends, both targets, native differential execution, 19 source and
 11 core rejections and kernel tests run in the `core` suite.
 
-Next: recursive data types with a runtime representation and structural
-recursion, and broader lemma libraries;
-cover owned/mutable memory;
+Next: owned memory, then recursive data types on it, following the
+[memory plan](dependent-core.md#owned-memory-plan): allocation is
+explicit, and memory is freed explicitly or when its owner's scope ends.
+The kernel checks that every owned value is used exactly once, so the
+untrusted source elaborator inserts the frees, and a wrong free is a
+compile error rather than a leak or a double free. The steps: (1) the
+kernel's linearity check, owned heap buffers and explicit `free`;
+(2) recursive data types as heap nodes; (3) structural recursion that
+consumes them; (4) frees inserted in source where ownership ends;
+(5) borrows, reading without consuming. Broader lemma libraries;
+
+Implemented step (1), owned buffers: `buffer(n)` is n i64 values on the
+heap, made by `alloc(n, x)` and read, written and freed with `load`,
+`store` and `free`, at indices with evidence and without bounds checks;
+a loop may carry one as its accumulator. The kernel counts each owned
+value's runtime uses and requires exactly one, alternatives alike; no
+function value, loop body or partial application can hold one, and
+normalization binds an argument that touches memory once instead of
+substituting it. `examples/core_buffer.jh` computes running sums in
+place and reads a table at a runtime index; its MIR calls malloc and
+free once each per export. Both frontends, both targets, native
+execution counting allocations and frees, valgrind on the example, 23
+source and 12 core rejections and kernel tests run in the `core` suite.
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing

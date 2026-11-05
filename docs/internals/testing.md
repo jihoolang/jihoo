@@ -96,6 +96,9 @@ the runner. Its suites:
   field traps, positivity of fields and motives.
   `tests/core_indexed.py` adds erased u64 indices, parameterized data
   types and, in `.jhc`, a true index.
+  `tests/core_buffer.py` adds owned buffers: native calls are linked
+  with counting `malloc`/`free` wrappers, and each must free what it
+  allocates; leaks, double frees, uses after free and captures are rejected.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

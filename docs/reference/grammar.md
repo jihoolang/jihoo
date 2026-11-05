@@ -75,7 +75,9 @@ alias    = "type" name [ "=" type ]
   `refl`, `transport`, `induct`, `fold`, `lt_add`, `lt_cancel`, `lt_le`,
   `sub`, `zero_le`, `refine`, `pack`, `witness` and `proof` forms, and
   `enum` declarations, with u64 parameters, and `match` for
-  [data types](../internals/dependent-core.md#data-types),
+  [data types](../internals/dependent-core.md#data-types), and `buffer`,
+  `alloc`, `load`, `store` and `free` for
+  [owned buffers](../internals/dependent-core.md#owned-buffers),
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)

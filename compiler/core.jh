@@ -5,7 +5,8 @@
 // This finite fragment has levelled universes, dependent functions,
 // immutable I64 arrays indexed by U64 lengths, Lt, U64 equality and
 // declared U64-indexed inductive propositions, and refinements {x : U64 |
-// P x}, a U64 with erased evidence. Equality and structural
+// P x}, a U64 with erased evidence, data types, and owned heap buffers,
+// which the kernel checks are used exactly once. Equality and structural
 // induction eliminate only into Prop. Runtime code has I64 arithmetic,
 // which traps on overflow, and bounded loops whose body has evidence of
 // its index's bound. U64 terms denote natural numbers: their addition
@@ -79,6 +80,17 @@ pub enum Term {
     // The U64 of a refinement, and its evidence, of P (Witness(s)).
     Witness(u32)
     Proof(u32)
+    // An owned heap buffer of n I64 values. Owned values are used exactly
+    // once at run time; uses in types and evidence do not count.
+    Buffer(u32)
+    // n and x: a new buffer of n copies of x.
+    Alloc(u32, u32)
+    // b, i, evidence of Lt(i, n) and k: k(b[i], b), b given back to k.
+    Load(u32, u32, u32, u32)
+    // b, i, v and evidence of Lt(i, n): b with v at i, in place.
+    Store(u32, u32, u32, u32)
+    // Free b, then the rest.
+    Free(u32, u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -155,6 +167,9 @@ pub struct Core {
     steps: i64
     visible: u32
     visible_families: u32
+    // Set while inferring the function of an application, so that only
+    // the top of an application spine checks for a partial application.
+    spine: bool
 }
 
 impl Core {
@@ -166,7 +181,8 @@ impl Core {
             signatures: Vec(Vec(Signature)).new(),
             steps: 0,
             visible: 0,
-            visible_families: 0
+            visible_families: 0,
+            spine: false
         }
     }
 
@@ -281,6 +297,21 @@ impl Core {
                 self.transform(q, cutoff, delta, replacement, depth - 1)?)
             Witness(s) => Term.Witness(self.transform(s, cutoff, delta, replacement, depth - 1)?)
             Proof(s) => Term.Proof(self.transform(s, cutoff, delta, replacement, depth - 1)?)
+            Buffer(n) => Term.Buffer(self.transform(n, cutoff, delta, replacement, depth - 1)?)
+            Alloc(n, x) => Term.Alloc(self.transform(n, cutoff, delta, replacement, depth - 1)?,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?)
+            Load(b, i, p, k) => Term.Load(self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(i, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?,
+                self.transform(k, cutoff, delta, replacement, depth - 1)?)
+            Store(b, i, v, p) => Term.Store(
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(i, cutoff, delta, replacement, depth - 1)?,
+                self.transform(v, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?
+            )
+            Free(b, rest) => Term.Free(self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(rest, cutoff, delta, replacement, depth - 1)?)
             LtAdd(a, b, c, p) => Term.LtAdd(
                 self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
@@ -361,6 +392,13 @@ impl Core {
                 let f = self.normal(f, depth - 1)?
                 let a = self.normal(a, depth - 1)?
                 match self.term(f) {
+                    // An argument that allocates, frees or touches memory is
+                    // not substituted: the redex binds it, evaluated once.
+                    Lam(false, domain, body) if self.effectful(a, depth - 1) => {
+                        let body = self.normal(body, depth - 1)?
+                        let lam = self.add(Term.Lam(false, domain, body), sp)?
+                        return self.add(Term.App(lam, a), sp)
+                    }
                     Lam(erased, _, body) => {
                         let body = self.substitute(body, a, depth - 1)?
                         let result = self.normal(body, depth - 1)?
@@ -387,6 +425,20 @@ impl Core {
                         let applied = self.add(Term.App(g, a), sp)?
                         let applied = self.normal(applied, depth - 1)?
                         return self.add(Term.Strict(first, applied), sp)
+                    }
+                    // A kept redex binds its effectful argument once; the
+                    // application moves inside it. The order is the same:
+                    // that argument, the function, then this argument.
+                    App(g, e) if self.binders(g, 1) => {
+                        let Lam(false, domain, body) = self.term(g) else { return self.add(
+                            Term.App(f, a),
+                            sp
+                        ) }
+                        let shifted = self.shift(a, 1, 0, depth - 1)?
+                        let inner = self.add(Term.App(body, shifted), sp)?
+                        let inner = self.normal(inner, depth - 1)?
+                        let lam = self.add(Term.Lam(false, domain, inner), sp)?
+                        return self.add(Term.App(lam, e), sp)
                     }
                     _ => Term.App(f, a)
                 }
@@ -511,7 +563,12 @@ impl Core {
                 // Loops are not unrolled; only the empty loop computes. Its
                 // body never runs, so neither do the body's traps.
                 if self.term(n) == Term.Natural(0) { return Ok(init) }
+                let normal_body = self.normal(body, depth - 1)?
+                if self.binders(normal_body, 3) {
+                    return self.add(Term.Fold(n, init, normal_body), sp)
+                }
                 // Eta-expand the body, so that lowering finds its binders.
+                // Its annotations are not used after checking.
                 let u = self.add(Term.U64, sp)?
                 let i = self.add(Term.I64, sp)?
                 let x0 = self.add(Term.Var(0), sp)?
@@ -549,7 +606,10 @@ impl Core {
                 var minus = Vec(u32).new()
                 var less: u128 = 0
                 self.collect(b, &minus, &less, &pending, depth - 1)
-                if less <= constant {
+                // Operands that touch memory are evaluated exactly once, so
+                // they are neither cancelled nor kept twice.
+                let effects = self.effectful(a, depth - 1) || self.effectful(b, depth - 1)
+                if less <= constant && !effects {
                     match self.without(atoms.as_slice(), minus.as_slice(), depth - 1) {
                         Some(rest) => {
                             match self.canonical(rest.as_slice(), constant - less, sp)? {
@@ -574,6 +634,14 @@ impl Core {
             }
             ZeroLe(a) => Term.ZeroLe(self.normal(a, depth - 1)?)
             Refine(p) => Term.Refine(self.normal(p, depth - 1)?)
+            // Memory operations are not computed: they happen at run time.
+            Buffer(n) => Term.Buffer(self.normal(n, depth - 1)?)
+            Alloc(n, x) => Term.Alloc(self.normal(n, depth - 1)?, self.normal(x, depth - 1)?)
+            Load(b, i, p, k) => Term.Load(self.normal(b, depth - 1)?, self.normal(i, depth - 1)?,
+                self.normal(p, depth - 1)?, self.normal(k, depth - 1)?)
+            Store(b, i, v, p) => Term.Store(self.normal(b, depth - 1)?, self.normal(i, depth - 1)?,
+                self.normal(v, depth - 1)?, self.normal(p, depth - 1)?)
+            Free(b, rest) => Term.Free(self.normal(b, depth - 1)?, self.normal(rest, depth - 1)?)
             Pack(p, a, q) => Term.Pack(self.normal(p, depth - 1)?, self.normal(a, depth - 1)?,
                 self.normal(q, depth - 1)?)
             Witness(s) => {
@@ -643,6 +711,8 @@ impl Core {
         // (x - y) + y is x when the sum has all of y's parts.
         var changed = true
         var rounds = 0
+        // Terms that touch memory are evaluated exactly once: no cancellation.
+        for x in atoms { if self.effectful(x, depth) { changed = false } }
         while changed && rounds < 64 {
             changed = false
             rounds += 1
@@ -756,6 +826,8 @@ impl Core {
         if depth == 0 { return true }
         match self.term(id) {
             Arith(_, _, _) | Strict(_, _) | UAdd(_, _) => true
+            // Allocation can fail; memory effects are kept like traps.
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) => true
             // Only a refinement's witness is evaluated; its predicate and
             // evidence are erased.
             Pack(_, a, _) => self.may_trap(a, depth - 1)
@@ -765,6 +837,25 @@ impl Core {
                 false
             }
         }
+    }
+
+    // Whether evaluating a term allocates, frees or touches memory.
+    // Conservative at the depth limit.
+    fn effectful(self, id: u32, depth: u32) -> bool {
+        if depth == 0 { return true }
+        match self.term(id) {
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) => true
+            t => {
+                for child in children(t) { if self.effectful(child, depth - 1) { return true } }
+                false
+            }
+        }
+    }
+
+    // Whether a term is at least `count` nested lambdas.
+    fn binders(self, id: u32, count: u32) -> bool {
+        if count == 0 { return true }
+        match self.term(id) { Lam(_, _, body) => self.binders(body, count - 1), _ => false }
     }
 
     fn identical(self, a: u32, b: u32, depth: u32) -> bool {
@@ -793,6 +884,12 @@ impl Core {
             // Proof irrelevance: any evidence of b <= a gives the same a - b.
             (USub(a, b, _), USub(c, d, _)) =>
                 self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Buffer(a), Buffer(b)) => self.identical(a, b, depth - 1)
+            (Alloc(a, b), Alloc(c, d)) | (Free(a, b), Free(c, d)) =>
+                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Load(a, b, c, d), Load(w, x, y, z)) | (Store(a, b, c, d), Store(w, x, y, z)) =>
+                self.identical(a, w, depth - 1) && self.identical(b, x, depth - 1) &&
+                self.identical(c, y, depth - 1) && self.identical(d, z, depth - 1)
             (ZeroLe(a), ZeroLe(b)) | (Refine(a), Refine(b)) | (Witness(a), Witness(b)) | (
                 Proof(a),
                 Proof(b)
@@ -1036,15 +1133,25 @@ impl Core {
         Ok(result)
     }
 
-    // (i : U64) -> (erased p : Lt(i, n)) -> (acc : I64) -> I64, with n
-    // from the outer context. Also used to elaborate source loop bodies.
-    pub fn fold_body_type(inout self, n: u32, sp: diag.Span, depth: u32) -> Result(u32, diag.Diag) {
+    // (i : U64) -> (erased p : Lt(i, n)) -> (acc : T) -> T, with n and the
+    // accumulator's type T from the outer context. Also used to elaborate
+    // source loop bodies.
+    pub fn fold_body_type(
+        inout self,
+        n: u32,
+        acc: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
         let u = self.add(Term.U64, sp)?
-        let i = self.add(Term.I64, sp)?
         let x0 = self.add(Term.Var(0), sp)?
         let bound = self.shift(n, 1, 0, depth)?
         let lt = self.add(Term.Lt(x0, bound), sp)?
-        let ty = self.add(Term.Pi(false, i, i), sp)?
+        // The accumulator's type, under the index and the bound, and under
+        // the accumulator itself for the result.
+        let domain = self.shift(acc, 2, 0, depth)?
+        let result = self.shift(acc, 3, 0, depth)?
+        let ty = self.add(Term.Pi(false, domain, result), sp)?
         let ty = self.add(Term.Pi(true, lt, ty), sp)?
         self.add(Term.Pi(false, u, ty), sp)
     }
@@ -1169,6 +1276,8 @@ impl Core {
         ghost: bool,
         depth: u32
     ) -> Result(u32, diag.Diag) {
+        let head = self.spine
+        self.spine = false
         self.tick(id, depth)?
         let sp = self.nodes[id as i64].span
         let ty = match self.term(id) {
@@ -1318,6 +1427,56 @@ impl Core {
                 self.require(q, holds, ctx, true, depth - 1)?
                 Term.Refine(p)
             }
+            Buffer(n) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(n, u, ctx, true, depth - 1)?
+                Term.Universe(0)
+            }
+            Alloc(n, x) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(n, u, ctx, ghost, depth - 1)?
+                let i = self.add(Term.I64, sp)?
+                self.require(x, i, ctx, ghost, depth - 1)?
+                Term.Buffer(n)
+            }
+            Store(b, i, v, p) => {
+                let n = self.buffer_length(b, ctx, ghost, depth)?
+                let u = self.add(Term.U64, sp)?
+                self.require(i, u, ctx, ghost, depth - 1)?
+                let t = self.add(Term.I64, sp)?
+                self.require(v, t, ctx, ghost, depth - 1)?
+                let lt = self.add(Term.Lt(i, n), sp)?
+                self.require(p, lt, ctx, true, depth - 1)?
+                Term.Buffer(n)
+            }
+            Load(b, i, p, k) => {
+                let n = self.buffer_length(b, ctx, ghost, depth)?
+                let u = self.add(Term.U64, sp)?
+                self.require(i, u, ctx, ghost, depth - 1)?
+                let lt = self.add(Term.Lt(i, n), sp)?
+                self.require(p, lt, ctx, true, depth - 1)?
+                // k : (x : I64) -> (b : Buffer(n)) -> T, T independent of both.
+                let ty = self.infer(k, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Pi(false, x, rest) = self.term(ty) else {
+                    return Err(self.error(k, "load continues with fn(x, b) { ... }"))
+                }
+                let Pi(false, again, result) = self.term(rest) else {
+                    return Err(self.error(k, "load continues with fn(x, b) { ... }"))
+                }
+                let i64 = self.add(Term.I64, sp)?
+                let n2 = self.shift(n, 1, 0, depth - 1)?
+                let same = self.add(Term.Buffer(n2), sp)?
+                if !self.equal(x, i64, depth - 1)? || !self.equal(again, same, depth - 1)? {
+                    return Err(self.error(k, "load continues with the value and the same buffer"))
+                }
+                let result = self.normal(result, depth - 1)?
+                return self.shift(result, -2, 0, depth - 1)
+            }
+            Free(b, rest) => {
+                self.buffer_length(b, ctx, ghost, depth)?
+                return self.infer(rest, ctx, ghost, depth - 1)
+            }
             Witness(s) | Proof(s) => {
                 let proof = match self.term(id) { Proof(_) => true, _ => false }
                 // The evidence is erased: only the witness is runtime data.
@@ -1355,11 +1514,24 @@ impl Core {
             Fold(n, init, body) => {
                 let u = self.add(Term.U64, sp)?
                 self.require(n, u, ctx, ghost, depth - 1)?
-                let i = self.add(Term.I64, sp)?
-                self.require(init, i, ctx, ghost, depth - 1)?
-                let ty = self.fold_body_type(n, sp, depth - 1)?
+                // The accumulator is an I64 or an owned buffer.
+                let acc = self.infer(init, ctx, ghost, depth - 1)?
+                let acc = self.normal(acc, depth - 1)?
+                match self.term(acc) {
+                    I64 | Buffer(_) => {}
+                    _ => return Err(self.error(init, "a loop accumulator is an i64 or a buffer"))
+                }
+                let ty = self.fold_body_type(n, acc, sp, depth - 1)?
                 self.require(body, ty, ctx, ghost, depth - 1)?
-                Term.I64
+                // The body is evaluated each iteration: an expression that
+                // touches memory to produce it would be repeated.
+                if !self.binders(body, 3) && self.effectful(body, depth - 1) {
+                    return Err(self.error(
+                        body,
+                        "a loop body that touches memory is fn(i, p, acc) { ... }"
+                    ))
+                }
+                return Ok(acc)
             }
             Transport(family, evidence, proof) => {
                 // Restrict equality elimination to propositions. In
@@ -1394,16 +1566,37 @@ impl Core {
                 for x in ctx { inner.push(x) }
                 inner.push(Binding { ty: a, erased })
                 let result = self.infer(body, inner.as_slice(), ghost, depth - 1)?
+                if !ghost && !erased && self.owned(a, depth - 1)? {
+                    let n = self.uses_function(body, 0, inner.as_slice(), depth - 1)?
+                    if n == 0 { return Err(self.error(
+                        id,
+                        "an owned value must be used: freed, moved or returned"
+                    )) }
+                    if n > 1 { return Err(self.error(id, "an owned value is used more than once")) }
+                }
                 Term.Pi(erased, a, result)
             }
             App(f, a) => {
+                self.spine = true
                 let ty = self.infer(f, ctx, ghost, depth - 1)?
+                self.spine = false
                 let ty = self.normal(ty, depth - 1)?
                 let Pi(erased, domain, result) = self.term(ty) else {
                     return Err(self.error(f, "application needs a dependent function"))
                 }
                 self.require(a, domain, ctx, ghost || erased, depth - 1)?
-                return self.substitute(result, a, depth - 1)
+                let result = self.substitute(result, a, depth - 1)?
+                // The top of a spine whose value is still a function is a
+                // partial application, a function value that could run any
+                // number of times: it cannot hold an owned value.
+                if !head && !ghost {
+                    let normal = self.normal(result, depth - 1)?
+                    match self.term(normal) {
+                        Pi(_, _, _) => self.unsaturated(id, ctx, depth)?
+                        _ => {}
+                    }
+                }
+                return Ok(result)
             }
             Elements(xs) => {
                 let i = self.add(Term.I64, sp)?
@@ -1455,6 +1648,244 @@ impl Core {
             }
         }
         self.add(ty, sp)
+    }
+
+    // The length n of a buffer b : Buffer(n), a runtime term.
+    fn buffer_length(
+        inout self,
+        b: u32,
+        ctx: [Binding],
+        ghost: bool,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let ty = self.infer(b, ctx, ghost, depth - 1)?
+        let ty = self.normal(ty, depth - 1)?
+        let Buffer(n) = self.term(ty) else { return Err(self.error(b, "expected a buffer")) }
+        Ok(n)
+    }
+
+    // Whether values of a type are owned: used exactly once at run time.
+    pub fn owned(inout self, ty: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let ty = self.normal(ty, depth)?
+        Ok(match self.term(ty) { Buffer(_) => true, _ => false })
+    }
+
+    // How many times evaluating a checked runtime term uses variable v at
+    // run time. Types and evidence are not visited: their uses are not at
+    // run time. Alternatives must use it equally, and a function other
+    // than a redex's, a load's continuation or a case cannot capture it,
+    // since it could run any number of times.
+    fn uses(inout self, id: u32, v: u32, ctx: [Binding], depth: u32) -> Result(u32, diag.Diag) {
+        self.tick(id, depth)?
+        match self.term(id) {
+            Var(k) => Ok(if k == v { 1 } else { 0 })
+            App(_, _) => {
+                // The whole spine: a head applied to its arguments.
+                var nodes = Vec(u32).new()
+                var args = Vec(u32).new()
+                var head = id
+                loop {
+                    let App(f, a) = self.term(head) else { break }
+                    nodes.insert(0, head)
+                    args.insert(0, a)
+                    head = f
+                }
+                var total: u32 = 0
+                // A lambda head runs its body once, given its arguments.
+                var binders = Vec((u32, bool)).new()
+                var body = head
+                var j = 0
+                while j < args.len() {
+                    let Lam(erased, domain, rest) = self.term(body) else { break }
+                    binders.push((domain, erased))
+                    if !erased { total += self.uses(args[j], v, ctx, depth - 1)? }
+                    body = rest
+                    j += 1
+                }
+                if j > 0 { total += self.uses_under(body, v, ctx, binders.as_slice(), depth)? }
+                else { total += self.uses(head, v, ctx, depth - 1)? }
+                if j < args.len() {
+                    var ty = if j == 0 { self.infer(head, ctx, true, depth - 1)? }
+                    else { self.infer(nodes[j - 1], ctx, true, depth - 1)? }
+                    for k in j..args.len() {
+                        let normal = self.normal(ty, depth - 1)?
+                        let Pi(erased, _, result) = self.term(normal) else { return Err(self.error(
+                            nodes[k],
+                            "application needs a dependent function"
+                        )) }
+                        if !erased { total += self.uses(args[k], v, ctx, depth - 1)? }
+                        ty = self.substitute(result, args[k], depth - 1)?
+                    }
+                }
+                // A spine whose value is a function could be called any
+                // number of times: it cannot capture an owned value.
+                if total > 0 {
+                    let ty = self.infer(id, ctx, true, depth - 1)?
+                    let ty = self.normal(ty, depth - 1)?
+                    match self.term(ty) {
+                        Pi(_, _, _) => return Err(self.error(
+                            id,
+                            "a partial application cannot capture an owned value"
+                        ))
+                        _ => {}
+                    }
+                }
+                Ok(total)
+            }
+            Lam(erased, domain, body) => {
+                if self.uses_under(body, v, ctx, [(domain, erased)], depth)? > 0 {
+                    return Err(self.error(id, "a function cannot capture an owned value"))
+                }
+                Ok(0)
+            }
+            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                let equality = match self.term(id) { IfEq(_, _, _, _) => true, _ => false }
+                let first = self.uses(a, v, ctx, depth - 1)? + self.uses(b, v, ctx, depth - 1)?
+                let p = self.add(
+                    if equality { Term.Eq(a, b) } else { Term.Lt(a, b) },
+                    diag.Span.nowhere()
+                )?
+                let y = self.uses_under(yes, v, ctx, [(p, true)], depth)?
+                let n = self.uses(no, v, ctx, depth - 1)?
+                if y != n { return Err(self.error(
+                    id,
+                    "both branches must use an owned value alike"
+                )) }
+                Ok(first + y)
+            }
+            Elim(f, _, cases, x) => {
+                var total = self.uses(x, v, ctx, depth - 1)?
+                if !self.is_data(f) { return Ok(0) }
+                // Exactly one case runs; each must use the value alike.
+                let params = self.families[f as i64].params as i64
+                var common: Option(u32) = None
+                for k, case in cases {
+                    let count = self.signatures[f as i64][k].fields.len() - params
+                    let n = self.uses_case(case, count, v, ctx, depth)?
+                    match common {
+                        Some(m) => if m != n { return Err(self.error(
+                            id,
+                            "every case must use an owned value alike"
+                        )) }
+                        None => common = Some(n)
+                    }
+                }
+                match common { Some(m) => total += m, None => {} }
+                Ok(total)
+            }
+            Load(b, i, _, k) => {
+                let first = self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)?
+                Ok(first + self.uses_case(k, 2, v, ctx, depth)?)
+            }
+            Fold(n, init, body) => {
+                let first = self.uses(n, v, ctx, depth - 1)? + self.uses(init, v, ctx, depth - 1)?
+                if self.uses_case(body, 3, v, ctx, depth)? > 0 { return Err(self.error(
+                    body,
+                    "a loop body runs many times: pass an owned value as the accumulator"
+                )) }
+                Ok(first)
+            }
+            Con(f, k, fields) => {
+                var ty = self.families[f as i64].constructors[k as i64].ty
+                var total: u32 = 0
+                for x in fields {
+                    let Pi(erased, _, rest) = self.term(ty) else { break }
+                    if !erased { total += self.uses(x, v, ctx, depth - 1)? }
+                    ty = rest
+                }
+                Ok(total)
+            }
+            Pack(_, a, _) | Witness(a) => self.uses(a, v, ctx, depth - 1)
+            Index(a, b, _) | USub(a, b, _) | Arith(_, a, b) | UAdd(a, b) | Strict(a, b) | Alloc(
+                a,
+                b
+            ) | Free(a, b) => Ok(
+                self.uses(a, v, ctx, depth - 1)? + self.uses(b, v, ctx, depth - 1)?
+            )
+            Store(b, i, x, _) => Ok(
+                self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)? +
+                    self.uses(x, v, ctx, depth - 1)?
+            )
+            Elements(xs) => {
+                var total: u32 = 0
+                for x in xs { total += self.uses(x, v, ctx, depth - 1)? }
+                Ok(total)
+            }
+            _ => Ok(0)
+        }
+    }
+
+    // A partial application's runtime arguments cannot be owned values.
+    fn unsaturated(inout self, id: u32, ctx: [Binding], depth: u32) -> Result((), diag.Diag) {
+        var at = id
+        loop {
+            let App(f, a) = self.term(at) else { break }
+            let ty = self.infer(f, ctx, true, depth - 1)?
+            let ty = self.normal(ty, depth - 1)?
+            let Pi(erased, domain, _) = self.term(ty) else { break }
+            if !erased && self.owned(domain, depth - 1)? {
+                return Err(self.error(id, "a partial application cannot take an owned value"))
+            }
+            at = f
+        }
+        Ok(())
+    }
+
+    // Uses of v in the rest of a function: its later parameters' lambdas
+    // are the same function, which runs once each time it is fully applied;
+    // a partial application that captures v is rejected where it is made.
+    fn uses_function(
+        inout self,
+        body: u32,
+        v: u32,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        var inner = body
+        var binders = Vec((u32, bool)).new()
+        loop {
+            let Lam(erased, domain, rest) = self.term(inner) else { break }
+            binders.push((domain, erased))
+            inner = rest
+        }
+        if binders.len() == 0 { return self.uses(body, v, ctx, depth) }
+        self.uses_under(inner, v, ctx, binders.as_slice(), depth)
+    }
+
+    // Uses of v in a term under new binders (outermost first).
+    fn uses_under(
+        inout self,
+        body: u32,
+        v: u32,
+        ctx: [Binding],
+        binders: [(u32, bool)],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        var inner = Vec(Binding).new()
+        for x in ctx { inner.push(x) }
+        for (ty, erased) in binders { inner.push(Binding { ty, erased }) }
+        self.uses(body, v + binders.len as u32, inner.as_slice(), depth - 1)
+    }
+
+    // Uses of v in a function that runs once, given `count` arguments: a
+    // case or a load's continuation, which may capture owned values.
+    fn uses_case(
+        inout self,
+        f: u32,
+        count: i64,
+        v: u32,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        var body = f
+        var binders = Vec((u32, bool)).new()
+        for _ in 0..count {
+            let Lam(erased, domain, rest) = self.term(body) else { break }
+            binders.push((domain, erased))
+            body = rest
+        }
+        if binders.len() as i64 != count { return self.uses(f, v, ctx, depth - 1) }
+        self.uses_under(body, v, ctx, binders.as_slice(), depth)
     }
 
     // Case analysis of a data value. The motive P : F -> Prop or F -> Type 0
@@ -1585,7 +2016,9 @@ pub fn children(term: Term) -> Vec(u32) {
         ) }
         LtLe(a, b, c, p, q) => { out.push(a); out.push(b); out.push(c); out.push(p); out.push(q) }
         USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
-        ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) => out.push(a)
+        ZeroLe(a) | Refine(a) | Witness(a) | Proof(a) | Buffer(a) => out.push(a)
+        Alloc(a, b) | Free(a, b) => { out.push(a); out.push(b) }
+        Load(a, b, c, d) | Store(a, b, c, d) => { out.push(a); out.push(b); out.push(c); out.push(d) }
         Pack(p, a, q) => { out.push(p); out.push(a); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
             p
@@ -2485,4 +2918,53 @@ fn erased_indices_stay_out_of_runtime_terms() {
     let ty = c.add(Term.Pi(true, i, i), sp).unwrap()
     c.definitions.push(Definition { name: "i".to_string(), ty, value, exported: false, span: sp })
     assert(c.check().is_err(), "only u64 indices are erased data")
+}
+
+// fn(b: Buffer(1)) -> I64 { body }: body frees b `frees` times.
+fn consumer(inout c: Core, frees: u32) {
+    let sp = diag.Span.nowhere()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let buffer = c.add(Term.Buffer(one), sp).unwrap()
+    let i = c.add(Term.I64, sp).unwrap()
+    let b = c.add(Term.Var(0), sp).unwrap()
+    var value = c.add(Term.Integer(0), sp).unwrap()
+    for _ in 0..frees { value = c.add(Term.Free(b, value), sp).unwrap() }
+    let value = c.add(Term.Lam(false, buffer, value), sp).unwrap()
+    let ty = c.add(Term.Pi(false, buffer, i), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+}
+
+#[test]
+fn owned_values_are_used_exactly_once() {
+    for frees in [0 as u32, 1, 2] {
+        var c = Core.new()
+        consumer(&c, frees)
+        assert(c.check().is_ok() == (frees == 1), "a buffer is freed exactly once")
+    }
+    for term in [Term.Buffer(0), Term.Alloc(0, 0), Term.Load(0, 0, 0, 0), Term.Store(0, 0, 0, 0),
+        Term.Free(0, 0)] {
+            var c = Core.new()
+            c.add(term.clone(), diag.Span.nowhere()).unwrap()
+            assert(c.check().is_err(), "memory terms obey graph integrity")
+        }
+}
+
+#[test]
+fn effectful_arguments_are_bound_once() {
+    // (fn(b) { free(b, 0) })(alloc(1, 0)) keeps the redex instead of
+    // substituting the allocation, and memory terms are not computed.
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let buffer = c.add(Term.Buffer(one), sp).unwrap()
+    let zero = c.add(Term.Integer(0), sp).unwrap()
+    let b = c.add(Term.Var(0), sp).unwrap()
+    let body = c.add(Term.Free(b, zero), sp).unwrap()
+    let f = c.add(Term.Lam(false, buffer, body), sp).unwrap()
+    let made = c.add(Term.Alloc(one, zero), sp).unwrap()
+    let call = c.add(Term.App(f, made), sp).unwrap()
+    let normal = c.normal(call, DEPTH).unwrap()
+    let App(g, a) = c.term(normal) else { panic("the redex is kept") }
+    let Lam(false, _, _) = c.term(g) else { panic("binding the allocation") }
+    let Alloc(_, _) = c.term(a) else { panic("evaluated once") }
 }

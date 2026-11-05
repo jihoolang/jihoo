@@ -7,7 +7,9 @@
 // bounded loops, `fold(n, init, fn(i, p, acc) { body })`, and refinements
 // `refine(fn(x) { P })` with `pack(a, p)`, `witness(s)` and `proof(s)`,
 // and data types declared as `enum`, built with `E.V(...)` and taken apart
-// with `match` or, into a proposition, `induct(fn(x) { P(x) }, ..., v)`.
+// with `match` or, into a proposition, `induct(fn(x) { P(x) }, ..., v)`,
+// and owned buffers `buffer(n)`: `alloc(n, x)`, `load(b, i, p, fn(x, b)
+// { ... })`, `store(b, i, v, p)` and `free(b, rest)`, each used once.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -26,7 +28,8 @@ fn reserved(name: str) -> bool {
     name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "fold" ||
         name == "lt_add" || name == "lt_cancel" || name == "lt_le" || name == "sub" ||
         name == "zero_le" || name == "refine" || name == "pack" || name == "witness" ||
-        name == "proof" ||
+        name == "proof" || name == "buffer" || name == "alloc" || name == "load" ||
+        name == "store" || name == "free" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -371,6 +374,12 @@ impl Elaborator {
                         if n == "i64" { return self.c.add(core.Term.I64, t.span) }
                     }
                     Some(args) => {
+                        if n == "buffer" {
+                            if args.len() != 1 { return Err(error(t.span, "expected buffer(n)")) }
+                            let u = self.u64(t.span)?
+                            let length = self.expr(args[0], Some(u), depth - 1)?
+                            return self.c.add(core.Term.Buffer(length), t.span)
+                        }
                         if n == "refine" {
                             if args.len() != 1 { return Err(error(
                                 t.span,
@@ -680,6 +689,67 @@ impl Elaborator {
                     let q = self.expr(args[1], None, depth - 1)?
                     return self.c.add(core.Term.Pack(p, a, q), sp)
                 }
+                if n == "alloc" {
+                    if args.len() != 2 { return Err(error(
+                        sp,
+                        "alloc requires a length and a value"
+                    )) }
+                    let u = self.u64(sp)?
+                    let length = self.expr(args[0], Some(u), depth - 1)?
+                    let i = self.c.add(core.Term.I64, sp)?
+                    let x = self.expr(args[1], Some(i), depth - 1)?
+                    return self.c.add(core.Term.Alloc(length, x), sp)
+                }
+                if n == "store" {
+                    if args.len() != 4 { return Err(error(
+                        sp,
+                        "store requires a buffer, an index, a value and evidence"
+                    )) }
+                    let b = self.expr(args[0], None, depth - 1)?
+                    let u = self.u64(sp)?
+                    let i = self.expr(args[1], Some(u), depth - 1)?
+                    let t = self.c.add(core.Term.I64, sp)?
+                    let v = self.expr(args[2], Some(t), depth - 1)?
+                    let p = self.expr(args[3], None, depth - 1)?
+                    return self.c.add(core.Term.Store(b, i, v, p), sp)
+                }
+                if n == "free" {
+                    if args.len() != 2 { return Err(error(
+                        sp,
+                        "free requires a buffer and the rest"
+                    )) }
+                    let b = self.expr(args[0], None, depth - 1)?
+                    let rest = self.expr(args[1], expected, depth - 1)?
+                    return self.c.add(core.Term.Free(b, rest), sp)
+                }
+                if n == "load" {
+                    if args.len() != 4 { return Err(error(
+                        sp,
+                        "load requires a buffer, an index, evidence and fn(x, b) { ... }"
+                    )) }
+                    let Some(t) = expected else { return Err(error(
+                        sp,
+                        "load needs an expected type"
+                    )) }
+                    let b = self.expr(args[0], None, depth - 1)?
+                    let ty = self.c.infer(b, self.ctx.as_slice(), true, core.DEPTH)?
+                    let ty = self.c.normal(ty, core.DEPTH)?
+                    let core.Term.Buffer(length) = self.c.term(ty) else {
+                        return Err(error(args[0].span, "load requires a buffer"))
+                    }
+                    let u = self.u64(sp)?
+                    let i = self.expr(args[1], Some(u), depth - 1)?
+                    let p = self.expr(args[2], None, depth - 1)?
+                    // fn(x: i64, b: buffer(n)) -> T
+                    let i64 = self.c.add(core.Term.I64, sp)?
+                    let length = self.c.shift(length, 1, 0, core.DEPTH)?
+                    let again = self.c.add(core.Term.Buffer(length), sp)?
+                    let result = self.c.shift(t, 2, 0, core.DEPTH)?
+                    let inner = self.c.add(core.Term.Pi(false, again, result), sp)?
+                    let k_ty = self.c.add(core.Term.Pi(false, i64, inner), sp)?
+                    let k = self.proof_case(args[3], k_ty, 2, depth - 1)?
+                    return self.c.add(core.Term.Load(b, i, p, k), sp)
+                }
                 if n == "witness" || n == "proof" {
                     if args.len() != 1 { return Err(error(
                         sp,
@@ -717,9 +787,14 @@ impl Elaborator {
                     )) }
                     let u = self.u64(sp)?
                     let count = self.expr(args[0], Some(u), depth - 1)?
-                    let i = self.c.add(core.Term.I64, sp)?
-                    let init = self.expr(args[1], Some(i), depth - 1)?
-                    let ty = self.c.fold_body_type(count, sp, core.DEPTH)?
+                    // The accumulator is an i64, or a buffer of the expected type.
+                    let acc = match expected {
+                        Some(t) => t
+                        None => self.c.add(core.Term.I64, sp)?
+                    }
+                    let init = self.expr(args[1], Some(acc), depth - 1)?
+                    let acc = self.c.infer(init, self.ctx.as_slice(), true, core.DEPTH)?
+                    let ty = self.c.fold_body_type(count, acc, sp, core.DEPTH)?
                     let body = self.proof_case(args[2], ty, 3, depth - 1)?
                     return self.c.add(core.Term.Fold(count, init, body), sp)
                 }

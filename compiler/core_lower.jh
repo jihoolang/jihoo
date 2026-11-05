@@ -1,6 +1,7 @@
 // Erase and lower the checked core itself to MIR. The executable fragment
 // is pure: scalar exports, immutable local arrays, beta-reduced helpers,
-// refinements as their U64, proof-carrying indexing, I64 arithmetic and bounded loops. Array values and erased preconditions cannot
+// refinements as their U64, owned heap buffers (malloc and free, loads
+// and stores at proved indices), proof-carrying indexing, I64 arithmetic and bounded loops. Array values and erased preconditions cannot
 // cross the C ABI. No independent source/model translation is used.
 import core
 import diag
@@ -18,6 +19,11 @@ struct Lower {
     body: mir.Body
     types: types.Types
     block: u32
+    // The ids of the C library's malloc and free, declared after the
+    // exports when a buffer is used.
+    malloc: u32
+    free: u32
+    heap: bool
 }
 
 impl Lower {
@@ -134,6 +140,129 @@ impl Lower {
                 self.block = join
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(result)), ty: y.ty })
             }
+            // A redex the normalizer kept binds an argument that touches
+            // memory: evaluated once, then the body.
+            App(f, a) => {
+                let core.Term.Lam(false, _, body) = c.term(f) else {
+                    return Err(c.error(
+                        id,
+                        "term has no runtime representation in this core fragment"
+                    ))
+                }
+                let v = self.expr(c, a, env, depth - 1)?
+                var inner = copy_env(env)
+                inner.push(Some(v))
+                self.expr(c, body, inner.as_slice(), depth - 1)
+            }
+            Alloc(n, x) => {
+                let n = self.expr(c, n, env, depth - 1)?
+                let x = self.expr(c, x, env, depth - 1)?
+                // n * 8 bytes, checked, and one more element so that an empty
+                // buffer is still a distinct allocation.
+                let bytes = self.value(types.U64, mir.Rvalue.Bin(lex.Op.Mul, n.op.clone(),
+                    mir.Operand.Const(mir.Const.Int(8, types.U64))), sp)
+                let bytes = self.value(types.U64, mir.Rvalue.Bin(lex.Op.Add, bytes.op.clone(),
+                    mir.Operand.Const(mir.Const.Int(8, types.U64))), sp)
+                let ptr = self.pointer()
+                let at = self.local(ptr, mir.LocalKind.Temp, sp)
+                let next = self.block()
+                var args = Vec(mir.Operand).new()
+                args.push(bytes.op.clone())
+                self.heap = true
+                self.term(mir.Term.Call(
+                    mir.Callee.Fn(self.malloc),
+                    args,
+                    mir.Place.local(at),
+                    next,
+                    sp
+                ))
+                self.block = next
+                // Allocation failure stops the program, like a trap.
+                let address = self.value(types.U64, mir.Rvalue.Cast(
+                    mir.Operand.Copy(mir.Place.local(at)),
+                    types.U64,
+                    mir.CastKind.Numeric
+                ), sp)
+                let ok = self.value(types.BOOL, mir.Rvalue.Bin(lex.Op.Ne, address.op.clone(),
+                    mir.Operand.Const(mir.Const.Int(0, types.U64))), sp)
+                let filled = self.block()
+                self.term(mir.Term.Assert(
+                    ok.op.clone(),
+                    "allocation failed".to_string(),
+                    filled,
+                    sp
+                ))
+                self.block = filled
+                // Every element starts as x.
+                let i = self.local(types.U64, mir.LocalKind.Temp, sp)
+                self.assign(i, mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(0, types.U64))), sp)
+                let head = self.block()
+                let step = self.block()
+                let exit = self.block()
+                self.term(mir.Term.Goto(head))
+                self.block = head
+                let more = self.value(types.BOOL, mir.Rvalue.Bin(lex.Op.Lt,
+                    mir.Operand.Copy(mir.Place.local(i)), n.op.clone()), sp)
+                var cases = Vec(mir.SwitchTarget).new()
+                cases.push(mir.SwitchTarget { value: 0, block: exit })
+                self.term(mir.Term.Switch(more.op.clone(), cases, step))
+                self.block = step
+                let slot = self.slot(at, mir.Operand.Copy(mir.Place.local(i)), sp)
+                self.store(slot, x.op.clone(), sp)
+                self.assign(i, mir.Rvalue.Bin(lex.Op.Add, mir.Operand.Copy(mir.Place.local(i)),
+                    mir.Operand.Const(mir.Const.Int(1, types.U64))), sp)
+                self.term(mir.Term.Goto(head))
+                self.block = exit
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(at)), ty: ptr })
+            }
+            Load(b, i, _, k) => {
+                // The checker required Lt(i, n) for this buffer of length n.
+                let b = self.expr(c, b, env, depth - 1)?
+                let i = self.expr(c, i, env, depth - 1)?
+                let at = self.local(b.ty, mir.LocalKind.Temp, sp)
+                self.assign(at, mir.Rvalue.Use(b.op.clone()), sp)
+                let slot = self.slot(at, i.op.clone(), sp)
+                let x = self.value(types.I64, mir.Rvalue.Use(mir.Operand.Copy(
+                    mir.Place.local(slot).with(mir.Proj.Deref)
+                )), sp)
+                let core.Term.Lam(false, _, inner) = c.term(k) else {
+                    return Err(c.error(k, "load needs fn(x, b) { ... }"))
+                }
+                let core.Term.Lam(false, _, body) = c.term(inner) else {
+                    return Err(c.error(k, "load needs fn(x, b) { ... }"))
+                }
+                var scope = copy_env(env)
+                scope.push(Some(x))
+                scope.push(Some(Value { op: mir.Operand.Copy(mir.Place.local(at)), ty: b.ty }))
+                self.expr(c, body, scope.as_slice(), depth - 1)
+            }
+            Store(b, i, v, _) => {
+                let b = self.expr(c, b, env, depth - 1)?
+                let i = self.expr(c, i, env, depth - 1)?
+                let v = self.expr(c, v, env, depth - 1)?
+                let at = self.local(b.ty, mir.LocalKind.Temp, sp)
+                self.assign(at, mir.Rvalue.Use(b.op.clone()), sp)
+                let slot = self.slot(at, i.op.clone(), sp)
+                self.store(slot, v.op.clone(), sp)
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(at)), ty: b.ty })
+            }
+            Free(b, rest) => {
+                let b = self.expr(c, b, env, depth - 1)?
+                let unit = self.local(types.UNIT, mir.LocalKind.Temp, sp)
+                let next = self.block()
+                var args = Vec(mir.Operand).new()
+                args.push(b.op.clone())
+                self.heap = true
+                self.term(mir.Term.Call(
+                    mir.Callee.Fn(self.free),
+                    args,
+                    mir.Place.local(unit),
+                    next,
+                    sp
+                ))
+                self.block = next
+                self.expr(c, rest, env, depth - 1)
+            }
             // A refinement is its U64; its evidence is erased.
             Pack(_, a, _) | Witness(a) => {
                 let v = self.expr(c, a, env, depth - 1)?
@@ -188,7 +317,9 @@ impl Lower {
                     "loop body needs an accumulator"
                 )) }
                 let i = self.local(types.U64, mir.LocalKind.Temp, sp)
-                let acc = self.local(types.I64, mir.LocalKind.Temp, sp)
+                // An i64 or a buffer's pointer.
+                let acc_ty = init.ty
+                let acc = self.local(acc_ty, mir.LocalKind.Temp, sp)
                 self.assign(i, mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(0, types.U64))), sp)
                 self.assign(acc, mir.Rvalue.Use(init.op.clone()), sp)
                 let head = self.block()
@@ -211,17 +342,17 @@ impl Lower {
                 inner.push(None)
                 inner.push(Some(Value {
                     op: mir.Operand.Copy(mir.Place.local(acc)),
-                    ty: types.I64
+                    ty: acc_ty
                 }))
                 let v = self.expr(c, body, inner.as_slice(), depth - 1)?
-                if v.ty != types.I64 { return Err(c.error(id, "loop layout mismatch")) }
+                if v.ty != acc_ty { return Err(c.error(id, "loop layout mismatch")) }
                 self.assign(acc, mir.Rvalue.Use(v.op.clone()), sp)
                 // i < n, so the increment cannot overflow.
                 self.assign(i, mir.Rvalue.Bin(lex.Op.Add, mir.Operand.Copy(mir.Place.local(i)),
                     mir.Operand.Const(mir.Const.Int(1, types.U64))), sp)
                 self.term(mir.Term.Goto(head))
                 self.block = exit
-                Ok(Value { op: mir.Operand.Copy(mir.Place.local(acc)), ty: types.I64 })
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(acc)), ty: acc_ty })
             }
             _ => Err(c.error(id, "term has no runtime representation in this core fragment"))
         }
@@ -229,6 +360,25 @@ impl Lower {
 }
 
 impl Lower {
+    // The runtime type of a buffer: a pointer to its first I64.
+    fn pointer(inout self) -> u32 { self.types.intern(types.TyKind.Ptr(types.I64)) }
+
+    // A pointer to element i of the buffer whose pointer is in local `at`.
+    fn slot(inout self, at: u32, sink i: mir.Operand, sp: diag.Span) -> u32 {
+        let ty = self.pointer()
+        let slot = self.local(ty, mir.LocalKind.Temp, sp)
+        self.assign(slot, mir.Rvalue.Offset(mir.Operand.Copy(mir.Place.local(at)), i), sp)
+        slot
+    }
+
+    fn store(inout self, slot: u32, sink v: mir.Operand, sp: diag.Span) {
+        self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
+            mir.Place.local(slot).with(mir.Proj.Deref),
+            mir.Rvalue.Use(v),
+            sp
+        ))
+    }
+
     // Evaluate a term only for its traps. A data value has no runtime
     // representation: normalization removes every case analysis of one,
     // and what remains is evaluated field by field. Erased fields are not.
@@ -295,6 +445,14 @@ impl Lower {
     }
 }
 
+fn copy_env(env: [Option(Value)]) -> Vec(Option(Value)) {
+    var out = Vec(Option(Value)).new()
+    for x in env {
+        out.push(match x { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None })
+    }
+    out
+}
+
 fn scalar(c: core.Core, id: u32) -> Result(u32, diag.Diag) {
     match c.term(id) {
         U64 => Ok(types.U64)
@@ -320,6 +478,10 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
     var out = Vec(mir.Function).new()
     var runtime_types = types.Types.new()
     let count = c.definitions.len()
+    // malloc and free follow the exports, declared only when used.
+    var exports: u32 = 0
+    for d in c.definitions { if d.exported { exports += 1 } }
+    var heap = false
     for i in 0..count {
         if !c.definitions[i].exported { continue }
         let sp = c.definitions[i].span
@@ -332,6 +494,9 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
                 arg_count: 0, contract: mir.Contract.new() }
             types: runtime_types
             block: 0
+            malloc: exports
+            free: exports + 1
+            heap: false
         }
         lower.local(types.UNIT, mir.LocalKind.Ret, sp)
         lower.block()
@@ -363,6 +528,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
         if value.ty != ret { return Err(c.error(body, "return layout mismatch")) }
         lower.assign(0, mir.Rvalue.Use(value.op.clone()), sp)
         lower.term(mir.Term.Return)
+        if lower.heap { heap = true }
         let Lower { body, types: next_types, .. } = move lower
         runtime_types = next_types
         out.push(mir.Function {
@@ -373,6 +539,21 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
         })
     }
     if out.len() == 0 { return Err(c.error(0, "no exported runtime functions")) }
+    if heap {
+        let ptr = runtime_types.intern(types.TyKind.Ptr(types.I64))
+        let sp = diag.Span.nowhere()
+        for (name, params, ret) in [("malloc", [types.U64], ptr), ("free", [ptr], types.UNIT)] {
+            var ps = Vec(u32).new()
+            var pass = Vec(mir.ParamPass).new()
+            for p in params { ps.push(p); pass.push(mir.ParamPass.Value) }
+            out.push(mir.Function {
+                name: name.to_string(), symbol: name.to_string()
+                sig: types.Sig { c_abi: true, variadic: false, params: ps, ret }
+                pass, body: None, linkage: mir.Linkage.Extern, variadic: false,
+                returns_ref: false, span: sp
+            })
+        }
+    }
     Ok(mir.Program { fns: out, types: runtime_types, entry: None, panic_handler: None,
         profile: target.Profile.Native, checked: true, statics: Vec(mir.StaticDef).new(),
         drop_impls: Map(u32, u32).new(), invariants: Map(u32, Vec(mir.Clause)).new(),

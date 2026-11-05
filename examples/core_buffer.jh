@@ -1,0 +1,41 @@
+// Owned buffers. alloc(n, x) allocates n i64 values on the heap, each x,
+// and every buffer is used exactly once: freed with free(b, rest), passed
+// on, or returned. load(b, i, p, fn(x, b) { ... }) reads b[i] and gives
+// the buffer back; store(b, i, v, p) writes in place and returns it.
+// Indices need evidence, so there are no bounds checks, and a loop can
+// carry a buffer as its accumulator. The kernel rejects a buffer that is
+// never freed or used twice. main returns 30.
+#![dependent_core]
+
+fn weaken(i: u64, n: u64, p: erased(Lt(i, n))) -> Lt(i, n + 1) {
+    lt_le(i, n, n + 1, p, lt_add(0, 2, n, decide_lt(0, 2)))
+}
+
+// b[i + 1] += b[i] for each i < n: running sums, in place.
+fn running(n: u64, b: buffer(n + 1)) -> buffer(n + 1) {
+    fold(n, b, fn(i, p, acc) {
+        load(acc, i, weaken(i, n, p), fn(x, acc) {
+            load(acc, i + 1, lt_add(i, n, 1, p), fn(y, acc) {
+                store(acc, i + 1, x + y, lt_add(i, n, 1, p))
+            })
+        })
+    })
+}
+
+// n + 1 copies of x summed through a buffer: (n + 1) * x.
+export fn total(n: u64, x: i64) -> i64 {
+    load(running(n, alloc(n + 1, x)), n, lt_add(0, 1, n, decide_lt(0, 1)), fn(last, b) {
+        free(b, last)
+    })
+}
+
+fn three(x: i64) -> buffer(3) {
+    store(store(store(alloc(3, 0), 0, x, decide_lt(0, 3)), 1, x + 1, decide_lt(1, 3)),
+        2, x + 2, decide_lt(2, 3))
+}
+
+export fn pick(i: u64, x: i64) -> i64 {
+    if_lt(i, 3, fn(p) { load(three(x), i, p, fn(v, b) { free(b, v) }) }, -1)
+}
+
+fn main() -> i64 { total(4, 3) + pick(2, 13) }

@@ -119,6 +119,8 @@ in the existing grammar, not global keywords or standard-library types:
 | `F(a, ...)`, `c(x, ...)` | a declared proposition; its constructor, fully applied |
 | `p: erased(P)` | erased Pi/Lam binder of proposition `P` |
 | `n: erased(u64)` | an [erased index](#erased-indices-and-parameters): a u64 for types and evidence only |
+| `buffer(n)`, `alloc(n, x)` | an [owned buffer](#owned-buffers) of n i64 values; a new one, each x |
+| `load(b, i, p, fn(x, b) { k })`, `store(b, i, v, p)`, `free(b, rest)` | read b[i] and continue with b; write in place; free, then `rest` |
 | `f(a, ..., p)` | dependent applications, with all arguments explicit |
 | `[11, 22, 33]` | immutable core array |
 | `index(xs, i, p)` | core load requiring exactly `Lt i (length of xs)` |
@@ -702,6 +704,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(inductive F n (c type) ...)` | top-level declaration of an inductive proposition |
 | `(data E (c type) ...)` | top-level declaration of a data type, without indices |
 | `(data E n p (c type) ...)` | a data type with `n` u64 indices, the first `p` parameters |
+| `(Buffer n)`, `(alloc n x)` | an owned buffer of n I64 values; a new one |
+| `(load b i p k)`, `(store b i v p)`, `(free b rest)` | read and continue with `k x b`; write in place; free, then `rest` |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -853,6 +857,127 @@ exports and parameter binders in patterns; in `.jhc`, parameters bound
 late, relevant or changed, motives without their indices or with other
 parameters, and wrong index cases. Kernel unit tests check parameter
 binding and erased indices in runtime terms.
+`tests/core_buffer.py` adds owned buffers: both frontends' MIR and
+native execution against the evaluator, which tracks every buffer it
+allocates; native objects are linked with counting `malloc`/`free`
+wrappers, and every call must free exactly what it allocates, including
+a u64 that touches memory inside a cancelled subtraction. Size overflow
+traps and a failed allocation stops the program. It rejects leaks (also
+in a load's continuation or a loop body), double frees, uses after
+free, two calls, unequal branches or cases, captures by loop bodies,
+lambdas and partial applications (also of a fresh buffer), out-of-bounds
+or unchecked indices, wrong lengths, lost stores, erased buffers,
+buffers in exports, data and arrays, and malformed continuations.
+Kernel unit tests check the exact-once count and that an allocating
+argument is bound, not substituted.
+
+## Owned memory plan
+
+Heap memory in the core follows ordinary jihoo's ownership: allocation
+is explicit, there is no garbage collector, and memory is freed either
+explicitly or when its owner's scope ends. The two are layered so that
+the trusted part stays small:
+
+| layer | rule | trusted |
+|-------|------|---------|
+| kernel | an owned value is used exactly once at run time: freed, moved into a call or a constructor, taken apart, or returned | yes |
+| source | allocation is explicit; the elaborator inserts `free` where an owner's scope ends, and code may also free explicitly | no |
+
+A wrong free inserted by the elaborator is a kernel error, never a leak,
+double free or use after free, and lowering translates a checked `free`
+to a call without deciding anything. This is a quantitative type
+discipline (as in Idris 2): erased binders are used zero times at run
+time, owned ones exactly once, and scalars any number of times. A use in
+a type or in evidence is not a use at run time, so a proposition can
+still mention a value that has been freed or moved.
+
+The steps, each an ordinary slice with its tests:
+
+1. The kernel's linearity check, owned heap buffers `buffer(n)` with
+   proved-bounds loads and stores, and explicit `free`; a loop may carry a
+   buffer as its accumulator. Implemented: see
+   [owned buffers](#owned-buffers).
+2. Recursive data types as heap nodes (a tag and fields), with the
+   existing strict positivity.
+3. Structural recursion that consumes them: a case on a node frees it, and
+   lowering emits a loop or a recursive function; termination is
+   structural.
+4. Frees inserted by the source elaborator where an owner's scope ends.
+5. Borrows: reading a value without consuming it, as in `length(&xs)`.
+   Until then a function that reads an owned value takes it and gives it
+   back.
+
+## Owned buffers
+
+`buffer(n)` is an owned heap buffer of n i64 values, the first step of
+the [plan](#owned-memory-plan). Every owned value is used exactly once
+at run time:
+
+| form | type | use of `b` |
+|------|------|------------|
+| `alloc(n, x)` | `buffer(n)`, n copies of x | a new owner |
+| `load(b, i, p, fn(x, b) { k })` | the type of `k` | `b`, given back to `k` with `x = b[i]` |
+| `store(b, i, v, p)` | `buffer(n)`, `b` with `v` at `i` | `b`, returned |
+| `free(b, rest)` | the type of `rest` | `b`, freed before `rest` |
+
+`p` is evidence of `Lt(i, n)`, so loads and stores have no bounds
+checks. Passing a buffer to a function or returning it also uses it.
+A loop may carry a buffer as its accumulator, which the body uses once
+and returns:
+
+```jihoo
+fn running(n: u64, b: buffer(n + 1)) -> buffer(n + 1) {
+    fold(n, b, fn(i, p, acc) {
+        load(acc, i, weaken(i, n, p), fn(x, acc) {
+            load(acc, i + 1, lt_add(i, n, 1, p), fn(y, acc) {
+                store(acc, i + 1, x + y, lt_add(i, n, 1, p))
+            })
+        })
+    })
+}
+```
+
+The kernel counts, for each owned binder of a runtime function, the
+uses of the bound value at run time: types and evidence are not
+visited, both branches of a comparison and every case of a match must
+use it alike, and the count must be one. A function's own later
+parameters are part of it, but no other function value can capture an
+owned value: not a lambda, a loop body (which runs many times), nor a
+partial application, which also cannot take a fresh buffer. A load's
+continuation and a match's cases run once and may use one. So the
+kernel rejects a buffer that is never freed, freed twice, used after it
+is freed or passed to two calls. In source, frees are still written
+explicitly; the elaborator will insert them in a later step, checked by
+this same count.
+
+Memory operations are not computed by normalization. When beta
+reduction would substitute an argument that touches memory, the redex
+stays and binds it, so it is evaluated exactly once, and an application
+of such a redex moves inside it. u64 cancellation and loop
+eta-expansion never drop or repeat such a term. A buffer is a pointer
+at run time: `alloc` calls `malloc` for `8 * n + 8` bytes (checked: an
+overflowing size traps; the extra element keeps an empty buffer a
+distinct allocation), stops the program with "allocation failed" when
+it returns null, and fills the elements; `load` and `store` are offsets;
+`free` calls `free`. `malloc` and `free` are declared after the exports
+when a buffer is used. Exports cannot take or return buffers, data
+types cannot hold them and arrays cannot contain them.
+
+[`examples/core_buffer.jh`](../../examples/core_buffer.jh) and its
+[core equivalent](../../examples/core_buffer.jhc) compute running sums
+in place over a buffer of runtime length and read a three-element table
+at a runtime index. Each export's MIR calls `malloc` and `free` once
+and has no bounds checks; valgrind finds no leaks or errors. In `.jhc`
+the forms are `(Buffer n)`, `(alloc n x)`, `(load b i p k)` with
+`k = (lam x I64 (lam b (Buffer n) ...))`, `(store b i v p)` and
+`(free b rest)`.
+
+Not yet supported: borrows (a function that reads a buffer takes it and
+gives it back), buffers of other element types, frees inserted by the
+elaborator, and buffers in data types, exports and arrays. A data value
+whose fields touch memory cannot yet be passed to a function: the
+argument is bound once, and data has no runtime representation, so
+lowering reports an error rather than evaluating it twice.
 
 The next stages of the replacement are:
 
