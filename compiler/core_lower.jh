@@ -9,6 +9,7 @@ import lex
 import mir
 import target
 import types
+import std.mem
 
 struct Value {
     op: mir.Operand
@@ -24,6 +25,9 @@ struct Lower {
     malloc: u32
     free: u32
     heap: bool
+    // Recursive functions made for structural recursion on heap data,
+    // declared after malloc and free; ids start at `free + 1`.
+    generated: Vec(mir.Function)
 }
 
 impl Lower {
@@ -139,6 +143,33 @@ impl Lower {
                 self.term(mir.Term.Goto(join))
                 self.block = join
                 Ok(Value { op: mir.Operand.Copy(mir.Place.local(result)), ty: y.ty })
+            }
+            // A heap node: its tag, then its runtime fields.
+            Con(f, k, fields) if c.is_boxed(f) => {
+                let erased = layout(c, f, k)?
+                var values = Vec(Value).new()
+                for j, x in fields {
+                    if erased[j] { continue }
+                    values.push(self.expr(c, x, env, depth - 1)?)
+                }
+                let at = self.allocate(values.len() as u64 + 1, sp)
+                self.put(
+                    at,
+                    0,
+                    mir.Operand.Const(mir.Const.Int(k as i128, types.I64)),
+                    types.I64,
+                    sp
+                )
+                for j, v in values { self.put(at, j as u64 + 1, v.op.clone(), v.ty, sp) }
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(at)), ty: self.pointer() })
+            }
+            Case(f, _, cases, x) => {
+                let x = self.expr(c, x, env, depth - 1)?
+                self.dispatch(c, id, f, cases.as_slice(), x, env, None, depth)
+            }
+            Elim(f, _, cases, x) if c.is_boxed(f) => {
+                let x = self.expr(c, x, env, depth - 1)?
+                self.recursion(c, id, f, cases.as_slice(), x, env, depth)
             }
             // A redex the normalizer kept binds an argument that touches
             // memory: evaluated once, then the body.
@@ -371,6 +402,294 @@ impl Lower {
         slot
     }
 
+    // malloc(8 * slots), stopping the program when it returns null.
+    fn allocate(inout self, slots: u64, sp: diag.Span) -> u32 {
+        let ptr = self.pointer()
+        let at = self.local(ptr, mir.LocalKind.Temp, sp)
+        let next = self.block()
+        var args = Vec(mir.Operand).new()
+        args.push(mir.Operand.Const(mir.Const.Int((slots * 8) as i128, types.U64)))
+        self.heap = true
+        self.term(mir.Term.Call(mir.Callee.Fn(self.malloc), args, mir.Place.local(at), next, sp))
+        self.block = next
+        let address = self.value(types.U64, mir.Rvalue.Cast(
+            mir.Operand.Copy(mir.Place.local(at)),
+            types.U64,
+            mir.CastKind.Numeric
+        ), sp)
+        let ok = self.value(types.BOOL, mir.Rvalue.Bin(lex.Op.Ne, address.op.clone(),
+            mir.Operand.Const(mir.Const.Int(0, types.U64))), sp)
+        let after = self.block()
+        self.term(mir.Term.Assert(ok.op.clone(), "allocation failed".to_string(), after, sp))
+        self.block = after
+        at
+    }
+
+    fn release(inout self, at: u32, sp: diag.Span) {
+        let unit = self.local(types.UNIT, mir.LocalKind.Temp, sp)
+        let next = self.block()
+        var args = Vec(mir.Operand).new()
+        args.push(mir.Operand.Copy(mir.Place.local(at)))
+        self.heap = true
+        self.term(mir.Term.Call(mir.Callee.Fn(self.free), args, mir.Place.local(unit), next, sp))
+        self.block = next
+    }
+
+    // Slot i of the node in local `at`, which holds an i64, a u64 or a pointer.
+    fn put(inout self, at: u32, i: u64, sink v: mir.Operand, ty: u32, sp: diag.Span) {
+        let value = if ty == types.I64 { v }
+        else { self.value(types.I64, mir.Rvalue.Cast(v, types.I64, mir.CastKind.Numeric), sp).op }
+        let slot = self.slot(at, mir.Operand.Const(mir.Const.Int(i as i128, types.U64)), sp)
+        self.store(slot, value, sp)
+    }
+
+    fn get(inout self, at: u32, i: u64, ty: u32, sp: diag.Span) -> Value {
+        let slot = self.slot(at, mir.Operand.Const(mir.Const.Int(i as i128, types.U64)), sp)
+        let raw = self.value(types.I64, mir.Rvalue.Use(mir.Operand.Copy(
+            mir.Place.local(slot).with(mir.Proj.Deref)
+        )), sp)
+        if ty == types.I64 { return raw }
+        self.value(ty, mir.Rvalue.Cast(raw.op.clone(), ty, mir.CastKind.Numeric), sp)
+    }
+
+    // The runtime type of a value of a core type, if it has one.
+    fn runtime(inout self, c: core.Core, ty: u32) -> Option(u32) {
+        match c.term(ty) {
+            U64 | Refine(_) => Some(types.U64)
+            I64 => Some(types.I64)
+            Buffer(_) => Some(self.pointer())
+            Ind(f, _) if c.is_boxed(f) => Some(self.pointer())
+            _ => None
+        }
+    }
+
+    // Take the node x apart: switch on its tag, load each case's fields,
+    // free the node and run the case. With `recursion`, the function made
+    // for the recursion and its extra arguments: each recursive field is
+    // first given to it, and the case receives the results.
+    fn dispatch(
+        inout self,
+        c: core.Core,
+        id: u32,
+        f: u32,
+        cases: [u32],
+        x: Value,
+        env: [Option(Value)],
+        recursion: Option((u32, Vec(mir.Operand), u32)),
+        depth: u32
+    ) -> Result(Value, diag.Diag) {
+        if depth == 0 { return Err(c.error(id, "lowering nesting limit reached")) }
+        let sp = c.nodes[id as i64].span
+        let at = self.local(x.ty, mir.LocalKind.Temp, sp)
+        self.assign(at, mir.Rvalue.Use(x.op.clone()), sp)
+        let tag = self.get(at, 0, types.I64, sp)
+        var blocks = Vec(u32).new()
+        for _ in cases { blocks.push(self.block()) }
+        let join = self.block()
+        var targets = Vec(mir.SwitchTarget).new()
+        for k in 0..blocks.len() - 1 { targets.push(mir.SwitchTarget {
+            value: k as i128,
+            block: blocks[k]
+        }) }
+        self.term(mir.Term.Switch(tag.op.clone(), targets, blocks[blocks.len() - 1]))
+        var result: Option(Value) = None
+        for k, case in cases {
+            self.block = blocks[k]
+            let erased = layout(c, f, k as u32)?
+            let params = c.families[f as i64].params as i64
+            var scope = copy_env(env)
+            var body = case
+            var slot: u64 = 1
+            var results = Vec(Value).new()
+            var bound = Vec(Option(Value)).new()
+            for j in params..erased.len() {
+                let core.Term.Lam(_, domain, rest) = c.term(body) else {
+                    return Err(c.error(case, "a case needs one binder per field"))
+                }
+                if erased[j] { bound.push(None) }
+                else {
+                    let Some(ty) = self.runtime(c, domain) else {
+                        return Err(c.error(domain, "field has no runtime representation"))
+                    }
+                    let v = self.get(at, slot, ty, sp)
+                    slot += 1
+                    // A recursion consumes the recursive field: the case
+                    // sees it only in types, and receives its result.
+                    let own = match c.term(domain) { Ind(g, _) => g == f, _ => false }
+                    match recursion {
+                        Some((function, extra, ret)) if own => {
+                            let r = self.local(ret, mir.LocalKind.Temp, sp)
+                            var args = Vec(mir.Operand).new()
+                            args.push(v.op.clone())
+                            for e in extra { args.push(e.clone()) }
+                            let next = self.block()
+                            self.term(mir.Term.Call(
+                                mir.Callee.Fn(function),
+                                args,
+                                mir.Place.local(r),
+                                next,
+                                sp
+                            ))
+                            self.block = next
+                            results.push(Value {
+                                op: mir.Operand.Copy(mir.Place.local(r)),
+                                ty: ret
+                            })
+                            bound.push(None)
+                        }
+                        _ => bound.push(Some(v))
+                    }
+                }
+                body = rest
+            }
+            // Every field is loaded: the node is freed before the case runs.
+            self.release(at, sp)
+            for b in bound {
+                scope.push(
+                    match b { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None }
+                )
+            }
+            for r in results {
+                let core.Term.Lam(_, _, rest) = c.term(body) else {
+                    return Err(c.error(case, "a case needs one binder per result"))
+                }
+                scope.push(Some(Value { op: r.op.clone(), ty: r.ty }))
+                body = rest
+            }
+            let v = self.expr(c, body, scope.as_slice(), depth - 1)?
+            let out = match result {
+                Some(r) => {
+                    if r.ty != v.ty { return Err(c.error(id, "case layout mismatch")) }
+                    Value { op: r.op.clone(), ty: r.ty }
+                }
+                None => {
+                    let local = self.local(v.ty, mir.LocalKind.Temp, sp)
+                    Value { op: mir.Operand.Copy(mir.Place.local(local)), ty: v.ty }
+                }
+            }
+            let mir.Operand.Copy(place) = out.op.clone() else { return Err(c.error(
+                id,
+                "unreachable"
+            )) }
+            self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
+                place,
+                mir.Rvalue.Use(v.op.clone()),
+                sp
+            ))
+            self.term(mir.Term.Goto(join))
+            result = Some(out)
+        }
+        self.block = join
+        let Some(r) = result else { return Err(c.error(id, "a data type without constructors")) }
+        Ok(Value { op: r.op.clone(), ty: r.ty })
+    }
+
+    // Structural recursion on heap data: a recursive function of the node
+    // and of the outer runtime values the cases may read.
+    fn recursion(
+        inout self,
+        c: core.Core,
+        id: u32,
+        f: u32,
+        cases: [u32],
+        x: Value,
+        env: [Option(Value)],
+        depth: u32
+    ) -> Result(Value, diag.Diag) {
+        let sp = c.nodes[id as i64].span
+        // The result's type: a case's first hypothesis.
+        var ret: Option(u32) = None
+        for k, case in cases {
+            let erased = layout(c, f, k as u32)?
+            let params = c.families[f as i64].params as i64
+            var body = case
+            for _ in params..erased.len() {
+                let core.Term.Lam(_, _, rest) = c.term(body) else { break }
+                body = rest
+            }
+            var own = false
+            for j in 0..erased.len() { if !erased[j] && recursive_field(c, f, k as u32, j) { own = true } }
+            if !own { continue }
+            let core.Term.Lam(_, domain, _) = c.term(body) else { continue }
+            ret = self.runtime(c, domain)
+            break
+        }
+        let Some(ret) = ret else {
+            // No recursive field: one level of case analysis.
+            return self.dispatch(c, id, f, cases, x, env, None, depth)
+        }
+        // Reserve the function's id, then build its body in place of ours.
+        let function = self.free + 1 + self.generated.len() as u32
+        self.generated.push(mir.Function {
+            name: "recursion".to_string(), symbol: "recursion".to_string()
+            sig: types.Sig { c_abi: false, variadic: false, params: Vec(u32).new(), ret }
+            pass: Vec(mir.ParamPass).new(), body: None, linkage: mir.Linkage.Internal,
+            variadic: false, returns_ref: false, span: sp
+        })
+        let outer = mem.replace(&self.body, mir.Body { locals: Vec(mir.LocalDecl).new(),
+            blocks: Vec(mir.Block).new(), arg_count: 0, contract: mir.Contract.new() })
+        let outer_block = self.block
+        self.local(ret, mir.LocalKind.Ret, sp)
+        self.block = self.block()
+        var params = Vec(u32).new()
+        let node = self.local(x.ty, mir.LocalKind.Arg, sp)
+        params.push(x.ty)
+        var inner = Vec(Option(Value)).new()
+        var extra = Vec(mir.Operand).new()
+        var outside = Vec(mir.Operand).new()
+        for e in env {
+            match e {
+                Some(v) => {
+                    let local = self.local(v.ty, mir.LocalKind.Arg, sp)
+                    params.push(v.ty)
+                    inner.push(Some(Value {
+                        op: mir.Operand.Copy(mir.Place.local(local)),
+                        ty: v.ty
+                    }))
+                    extra.push(mir.Operand.Copy(mir.Place.local(local)))
+                    outside.push(v.op.clone())
+                }
+                None => inner.push(None)
+            }
+        }
+        self.body.arg_count = params.len()
+        let argument = Value { op: mir.Operand.Copy(mir.Place.local(node)), ty: x.ty }
+        let v = self.dispatch(
+            c,
+            id,
+            f,
+            cases,
+            argument,
+            inner.as_slice(),
+            Some((function, extra, ret)),
+            depth
+        )?
+        if v.ty != ret { return Err(c.error(id, "recursion layout mismatch")) }
+        self.assign(0, mir.Rvalue.Use(v.op.clone()), sp)
+        self.term(mir.Term.Return)
+        let body = mem.replace(&self.body, outer)
+        self.block = outer_block
+        var pass = Vec(mir.ParamPass).new()
+        for _ in params { pass.push(mir.ParamPass.Value) }
+        let index = (function - self.free - 1) as i64
+        self.generated[index].sig = types.Sig { c_abi: false, variadic: false, params, ret }
+        self.generated[index].pass = pass
+        self.generated[index].body = Some(body)
+        self.generated[index].name = ("recursion." + function.to_string().as_str()).to_string()
+        self.generated[index].symbol = (
+            "__jihoo_core_recursion_" + function.to_string().as_str()
+        ).to_string()
+        // The call: the node and the outer values.
+        let r = self.local(ret, mir.LocalKind.Temp, sp)
+        var args = Vec(mir.Operand).new()
+        args.push(x.op.clone())
+        for o in outside { args.push(o.clone()) }
+        let next = self.block()
+        self.term(mir.Term.Call(mir.Callee.Fn(function), args, mir.Place.local(r), next, sp))
+        self.block = next
+        Ok(Value { op: mir.Operand.Copy(mir.Place.local(r)), ty: ret })
+    }
+
     fn store(inout self, slot: u32, sink v: mir.Operand, sp: diag.Span) {
         self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
             mir.Place.local(slot).with(mir.Proj.Deref),
@@ -445,6 +764,31 @@ impl Lower {
     }
 }
 
+// Per field of constructor k, parameters included: whether it is erased
+// (no slot in the node).
+fn layout(c: core.Core, f: u32, k: u32) -> Result(Vec(bool), diag.Diag) {
+    var out = Vec(bool).new()
+    var ty = c.families[f as i64].constructors[k as i64].ty
+    loop {
+        let core.Term.Pi(erased, _, rest) = c.term(ty) else { break }
+        out.push(erased)
+        ty = rest
+    }
+    Ok(out)
+}
+
+// Whether field j of constructor k is recursive.
+fn recursive_field(c: core.Core, f: u32, k: u32, j: i64) -> bool {
+    var ty = c.families[f as i64].constructors[k as i64].ty
+    var i = 0
+    loop {
+        let core.Term.Pi(_, domain, rest) = c.term(ty) else { return false }
+        if i == j { return match c.term(domain) { Ind(g, _) => g == f, _ => false } }
+        i += 1
+        ty = rest
+    }
+}
+
 fn copy_env(env: [Option(Value)]) -> Vec(Option(Value)) {
     var out = Vec(Option(Value)).new()
     for x in env {
@@ -482,13 +826,17 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
     var exports: u32 = 0
     for d in c.definitions { if d.exported { exports += 1 } }
     var heap = false
+    var generated = Vec(mir.Function).new()
     for i in 0..count {
         if !c.definitions[i].exported { continue }
         let sp = c.definitions[i].span
         let mut_ty = c.definitions[i].ty
         let mut_body = c.definitions[i].value
         var ty = c.normal(mut_ty, core.DEPTH)?
+        // The body runs: arguments that touch memory are evaluated once.
+        c.runtime = true
         var body = c.normal(mut_body, core.DEPTH)?
+        c.runtime = false
         var lower = Lower {
             body: mir.Body { locals: Vec(mir.LocalDecl).new(), blocks: Vec(mir.Block).new(),
                 arg_count: 0, contract: mir.Contract.new() }
@@ -497,6 +845,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
             malloc: exports
             free: exports + 1
             heap: false
+            generated: mem.take(&generated)
         }
         lower.local(types.UNIT, mir.LocalKind.Ret, sp)
         lower.block()
@@ -529,8 +878,9 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
         lower.assign(0, mir.Rvalue.Use(value.op.clone()), sp)
         lower.term(mir.Term.Return)
         if lower.heap { heap = true }
-        let Lower { body, types: next_types, .. } = move lower
+        let Lower { body, types: next_types, generated: made, .. } = move lower
         runtime_types = next_types
+        generated = made
         out.push(mir.Function {
             name: c.definitions[i].name.clone(), symbol: c.definitions[i].name.clone()
             sig: types.Sig { c_abi: true, variadic: false, params, ret }
@@ -553,6 +903,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
                 returns_ref: false, span: sp
             })
         }
+        while generated.len() > 0 { out.push(generated.remove(0)) }
     }
     Ok(mir.Program { fns: out, types: runtime_types, entry: None, panic_handler: None,
         profile: target.Profile.Native, checked: true, statics: Vec(mir.StaticDef).new(),

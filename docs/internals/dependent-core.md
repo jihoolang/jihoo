@@ -705,6 +705,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(data E (c type) ...)` | top-level declaration of a data type, without indices |
 | `(data E n p (c type) ...)` | a data type with `n` u64 indices, the first `p` parameters |
 | `(Buffer n)`, `(alloc n x)` | an owned buffer of n I64 values; a new one |
+| `(case F P case ... v)` | one level of case analysis of heap data: the node is freed |
 | `(load b i p k)`, `(store b i v p)`, `(free b rest)` | read and continue with `k x b`; write in place; free, then `rest` |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
@@ -870,6 +871,17 @@ or unchecked indices, wrong lengths, lost stores, erased buffers,
 buffers in exports, data and arrays, and malformed continuations.
 Kernel unit tests check the exact-once count and that an allocating
 argument is bound, not substituted.
+`tests/core_list.py` adds recursive data: both frontends' MIR and native
+execution against the evaluator, which takes every node apart once;
+native objects count `malloc` and `free`, and every call frees what it
+allocates. Valid programs include `tail` by `match`, binary trees with
+a proof by induction that mirroring keeps the leaves, and a
+parameterized list of checked indices. It rejects unused tails, double
+uses, runtime uses of a recursion's rest, captures by recursion cases,
+unequal arms, heap data in exports, false inductions, changed
+parameters, flat fields of heap data and loop captures. Kernel unit
+tests check boxing, one-level analysis and that sums convert in any
+order but run in theirs.
 
 ## Owned memory plan
 
@@ -898,10 +910,11 @@ The steps, each an ordinary slice with its tests:
    buffer as its accumulator. Implemented: see
    [owned buffers](#owned-buffers).
 2. Recursive data types as heap nodes (a tag and fields), with the
-   existing strict positivity.
+   existing strict positivity. Implemented: see
+   [recursive data](#recursive-data-on-the-heap).
 3. Structural recursion that consumes them: a case on a node frees it, and
-   lowering emits a loop or a recursive function; termination is
-   structural.
+   lowering emits a recursive function; termination is structural.
+   Implemented with step 2.
 4. Frees inserted by the source elaborator where an owner's scope ends.
 5. Borrows: reading a value without consuming it, as in `length(&xs)`.
    Until then a function that reads an owned value takes it and gives it
@@ -971,6 +984,88 @@ and has no bounds checks; valgrind finds no leaks or errors. In `.jhc`
 the forms are `(Buffer n)`, `(alloc n x)`, `(load b i p k)` with
 `k = (lam x I64 (lam b (Buffer n) ...))`, `(store b i v p)` and
 `(free b rest)`.
+
+## Recursive data on the heap
+
+A data type with a recursive field, or with a field that is itself on
+the heap, is *boxed*: the kernel decides this from the declaration. Its
+values are heap nodes, owned like buffers and used exactly once.
+
+```jihoo
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn sum(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs) }
+
+fn head_or(xs: List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x + drop(rest)
+    }
+}
+```
+
+`List.Cons(x, xs)` allocates a node that owns `xs`. There are two ways
+to take a value apart:
+
+- `match` is one level of case analysis (kernel term `Case`): the node is
+  freed and each arm receives all of its fields, recursive ones as owned
+  values that the arm must use, as `rest` above.
+- `induct(fn(t) { T }, case..., v)` is structural recursion (`Elim`).
+  Each case receives the fields, the recursive ones erased, followed by
+  the result for each recursive field: `fn(x, rest, ih)`. The recursion
+  consumes the rest, so a case can mention `rest` only in types and
+  evidence. With `T` a type it is runtime code; with `T` a proposition
+  it is a proof by induction, erased:
+
+```jihoo
+fn doubled_length(xs: List) -> Eq(length(doubled(xs)), length(xs)) {
+    induct(fn(t) { Eq(length(doubled(t)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(length(doubled(rest)) + 1, k + 1) }, ih,
+            refl(length(doubled(rest)) + 1))
+    }, xs)
+}
+```
+
+The cases of a recursion run once per node, so they cannot use an outer
+owned value; a match's arms run once and may. A parameterized type's
+recursive fields keep its parameters, `enum Indices(n: u64) { None,
+More(refine(fn(j) { Lt(j, n) }), Indices(n)) }`, and a heap type cannot
+hold a flat data value, which has no representation. Erased binders may
+now be data, which recursion uses for its recursive fields.
+
+A node is `8 * (1 + fields)` bytes from `malloc`: the constructor's
+index, then each runtime field (u64, i64, refinement or pointer) in
+declaration order; erased fields and parameters take no space. `match`
+loads the tag, switches, loads the fields, frees the node and runs the
+arm. A recursion becomes a recursive MIR function of the node and of the
+outer runtime values: it loads the fields, frees the node, calls itself
+on each recursive field and then runs the case. Its depth is the depth
+of the data, on the machine stack.
+
+Normalization is in one of two modes. Conversion computes in the pure
+model, where nodes are values: any argument is substituted and a known
+node is taken apart without being built. Code to run, normalized by
+lowering, binds an argument that allocates once instead, keeps traps
+with `Strict`, and evaluates a sum's operands in their order. In the
+pure model a sum's non-variable operands are sorted by structure, since
+addition commutes in the naturals; a proof that needs commutativity of
+variables gets it by `refl`.
+
+[`examples/core_list.jh`](../../examples/core_list.jh) and its
+[core equivalent](../../examples/core_list.jhc) build lists in a loop,
+double, sum and measure them, take the head with `match` and prove that
+doubling keeps the length. valgrind finds every node freed. In `.jhc`, a
+`(data ...)` declaration with a recursive field is boxed, `(induct F P
+case... v)` is the recursion and `(case F P case... v)` the one-level
+analysis.
+
+Not yet supported for heap data: borrows (reading a list without
+consuming it), frees inserted by the elaborator (`drop` is written by
+hand), mutual recursion, recursion depth beyond the machine stack, and
+heap data in exports.
 
 Not yet supported: borrows (a function that reads a buffer takes it and
 gives it back), buffers of other element types, frees inserted by the

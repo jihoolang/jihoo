@@ -53,6 +53,23 @@ class Buffer:
         self.alive = True
 
 
+# Data types with a recursive field live on the heap; every node is taken
+# apart exactly once.
+BOXED = set()
+NODES = []
+
+
+class Node:
+    def __init__(self, family, k, fields):
+        self.family, self.k, self.fields = family, k, fields
+        self.alive = True
+
+    def take(self):
+        assert self.alive, "node used twice"
+        self.alive = False
+        return ("con", self.family, self.k, self.fields)
+
+
 def definitions(text):
     """Return (kind, name, type, body) tuples, registering inductives for evaluate.
 
@@ -63,6 +80,7 @@ def definitions(text):
     CONSTRUCTORS.clear()
     FAMILIES.clear()
     PARAMS.clear()
+    BOXED.clear()
     result = []
     for form in read_terms(text):
         if form[0] not in ("inductive", "data"):
@@ -90,13 +108,24 @@ def definitions(text):
                     recursive.append(fields)
                 fields += 1
             CONSTRUCTORS[name] = (family, k, fields, tuple(recursive))
+            if form[0] == "data" and recursive:
+                BOXED.add(family)
     return result
 
 
 def constructor(name, fields):
     family, k, count, _ = CONSTRUCTORS[name]
     assert len(fields) == count
+    if family in BOXED:
+        node = Node(family, k, tuple(fields))
+        NODES.append(node)
+        return node
     return ("con", family, k, tuple(fields))
+
+
+def opened(value):
+    """A constructor value; a heap node is consumed."""
+    return value.take() if isinstance(value, Node) else value
 
 
 def evaluate(term, env):
@@ -145,7 +174,7 @@ def evaluate(term, env):
                     for f, k, count, recursive in CONSTRUCTORS.values() if f == family}
 
         def fold(proof):
-            tag, actual_family, k, fields = proof
+            tag, actual_family, k, fields = opened(proof)
             assert tag == "con" and actual_family == family
             count, recursive = metadata[k]
             assert len(fields) == count
@@ -175,6 +204,15 @@ def evaluate(term, env):
     if head == "zero-le":
         a = evaluate(args[0], env)
         return (0, a + 1)
+    if head == "case":
+        family, _, *branches, value = args
+        cases = [evaluate(case, env) for case in branches]
+        tag, actual, k, fields = opened(evaluate(value, env))
+        assert tag == "con" and actual == family
+        result = cases[k]
+        for field in fields[PARAMS.get(family, 0):]:
+            result = result(field)
+        return result
     if head == "alloc":
         n, x = (evaluate(v, env) for v in args)
         assert n < (1 << 20), ("test buffers are small", n)
@@ -501,6 +539,8 @@ def main():
         validate_indexed(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_buffer import validate_buffer
         validate_buffer(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS)
+        from core_list import validate_list
+        validate_list(compiler, root, temporary, environment, run, definitions, evaluate, NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

@@ -103,7 +103,8 @@ export fn via(i: u64) -> i64 { index([1, 2, 3, 4, 5], nested(Sample.Taken(Readin
         "no-expected": "fn bad(s: Slot) -> u64 { witness(match s { Empty => pack(0, decide_lt(0, 4)), Full(j) => j }) }",
         "match-u64": "fn bad(i: u64) -> i64 { match i { Empty => 0, Full(j) => 1 } }",
         "match-evidence": "fn bad(p: erased(Lt(0, 1))) -> i64 { match p { Empty => 0, Full(j) => 1 } }",
-        "recursive": "enum List {\n    Nil\n    Cons(i64, List)\n}",
+        "erased-recursive": "enum List {\n    Nil\n    Cons(i64, erased(List))\n}",
+        "heap-holds-flat": "enum Flat {\n    A\n}\nenum Heap {\n    Nil\n    Cons(Flat, Heap)\n}",
         "array-field": "enum Holder {\n    Holds([i64; 3])\n}",
         "unqualified": "fn bad(i: u64, p: erased(Lt(i, 4))) -> Slot { Full(pack(i, p)) }",
         "unknown-variant": "fn bad() -> Slot { Slot.Nothing }",
@@ -113,7 +114,7 @@ export fn via(i: u64) -> i64 { index([1, 2, 3, 4, 5], nested(Sample.Taken(Readin
         "missing-case": "fn bad(s: Slot) -> Lt(position(s), 4) { induct(fn(t) { Lt(position(t), 4) }, decide_lt(0, 4), s) }",
         "export-argument": "export fn bad(s: Slot) -> i64 { 0 }",
         "export-result": "export fn bad(i: u64) -> Slot { slot(i) }",
-        "erased-data": "fn bad(s: erased(Slot)) -> i64 { 0 }",
+        "erased-data-runtime": "fn bad(s: erased(Slot)) -> u64 { position(s) }",
         "arm-types": "fn bad(s: Slot) -> i64 { match s { Empty => 0, Full(j) => j } }",
         "parameters": "enum Box(T: type) {\n    B(u64)\n}",
         "duplicate-variant": "enum Twice {\n    A\n    A\n}",
@@ -134,7 +135,7 @@ export fn via(i: u64) -> i64 { index([1, 2, 3, 4, 5], nested(Sample.Taken(Readin
 
     refine4 = "(Refine (lam j U64 (Lt j 4)))"
     core_invalid = {
-        "recursive": "(data L (Nil L) (Cons (pi x I64 (pi t L L))))",
+        "erased-recursive": "(data L (Nil L) (Cons (pi x I64 (pi0 t L L))))",
         "array-field": "(data B (Holds (pi a (Array 3) B)))",
         "relevant-proof": "(data B (W (pi p (Lt 0 1) B)))",
         "function-field": "(data B (F (pi f (pi x U64 U64) B)))",

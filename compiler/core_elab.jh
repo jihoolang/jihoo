@@ -8,6 +8,8 @@
 // `refine(fn(x) { P })` with `pack(a, p)`, `witness(s)` and `proof(s)`,
 // and data types declared as `enum`, built with `E.V(...)` and taken apart
 // with `match` or, into a proposition, `induct(fn(x) { P(x) }, ..., v)`,
+// data types that are recursive live on the heap: `match` takes one node
+// apart and `induct(fn(x) { T }, case..., v)` is structural recursion,
 // and owned buffers `buffer(n)`: `alloc(n, x)`, `load(b, i, p, fn(x, b)
 // { ... })`, `store(b, i, v, p)` and `free(b, rest)`, each used once.
 // No source text or independent execution model is generated here.
@@ -218,6 +220,8 @@ impl Elaborator {
             }
             cases.push(value)
         }
+        // On heap data, one level: the node is freed, its fields are given.
+        if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, p, cases, x), sp) }
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
     }
 
@@ -243,6 +247,17 @@ impl Elaborator {
         let u = self.u64(sp)?
         for _ in 0..r { p = self.c.add(core.Term.Lam(false, u, p), sp)? }
         Ok((p, ps))
+    }
+
+    // Whether a data motive's values are propositions.
+    fn proposition_motive(inout self, p: u32) -> Result(bool, diag.Diag) {
+        let ty = self.c.infer(p, self.ctx.as_slice(), true, core.DEPTH)?
+        var t = self.c.normal(ty, core.DEPTH)?
+        loop {
+            let core.Term.Pi(_, _, rest) = self.c.term(t) else { break }
+            t = rest
+        }
+        Ok(self.c.term(t) == core.Term.Prop)
     }
 
     // fn(x) { P(x) }, a proposition about a value of data type f with
@@ -824,7 +839,19 @@ impl Elaborator {
                     else { self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)? }
                     var cases = Vec(u32).new()
                     for k in 0..count {
-                        let expected = if data {
+                        let expected = if data && self.c.is_boxed(f) {
+                            // Structural recursion: results for recursive fields.
+                            let proof = self.proposition_motive(p)?
+                            self.c.recursion_case_type(
+                                f,
+                                k as u32,
+                                p,
+                                ps.as_slice(),
+                                proof,
+                                sp,
+                                core.DEPTH
+                            )?
+                        } else if data {
                             self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)?
                         } else { self.c.case_type(f, k as u32, p, sp, core.DEPTH)? }
                         // Fields, then one hypothesis per recursive field.

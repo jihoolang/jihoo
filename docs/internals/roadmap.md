@@ -472,6 +472,20 @@ place and reads a table at a runtime index; its MIR calls malloc and
 free once each per export. Both frontends, both targets, native
 execution counting allocations and frees, valgrind on the example, 23
 source and 12 core rejections and kernel tests run in the `core` suite.
+
+Implemented steps (2) and (3), recursive data and structural recursion:
+a data type with a recursive field (or a field on the heap) is boxed: its
+values are heap nodes, owned and used exactly once. `match` takes one
+node apart, frees it and gives its fields; `induct(fn(t) { T }, ...)`
+is structural recursion, compiled to a recursive function that frees
+each node, whose cases see the recursive fields only erased and receive
+their results; into a proposition it is a proof by induction.
+Conversion now treats a sum's operands in any order, while code keeps
+their evaluation order. `examples/core_list.jh` builds, doubles, sums,
+measures and takes apart lists and proves that doubling keeps the
+length. Both frontends, both targets, native execution counting
+allocations and frees, valgrind on the example, 17 source and 8 core
+rejections and kernel tests run in the `core` suite.
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.
 The `.jhc` prototype does not complete the 0.5 release gate. The existing

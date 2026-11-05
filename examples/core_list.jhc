@@ -1,0 +1,59 @@
+; Recursive data on the heap. A data type with a recursive field is boxed:
+; its values are heap nodes, used exactly once. (case F P c... v) takes one
+; node apart and frees it; (induct F P c... v) is structural recursion, whose
+; cases see a recursive field only erased and receive its result.
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def sum
+  (pi xs List I64)
+  (lam xs List (induct List (lam t List I64) (int 0)
+    (lam x I64 (lam0 rest List (lam ih I64 (add x ih)))) xs)))
+
+(def length
+  (pi xs List U64)
+  (lam xs List (induct List (lam t List U64) 0
+    (lam x I64 (lam0 rest List (lam ih U64 (uadd ih 1)))) xs)))
+
+(def doubled
+  (pi xs List List)
+  (lam xs List (induct List (lam t List List) Nil
+    (lam x I64 (lam0 rest List (lam ih List (Cons (mul x (int 2)) ih)))) xs)))
+
+(def drop
+  (pi xs List I64)
+  (lam xs List (induct List (lam t List I64) (int 0)
+    (lam x I64 (lam0 rest List (lam ih I64 ih))) xs)))
+
+(def head_or
+  (pi xs List (pi missing I64 I64))
+  (lam xs List (lam missing I64
+    (case List (lam t List I64) missing
+      (lam x I64 (lam rest List (add x (app drop rest)))) xs))))
+
+(def doubled_length
+  (pi xs List (Eq (app length (app doubled xs)) (app length xs)))
+  (lam xs List
+    (induct List (lam t List (Eq (app length (app doubled t)) (app length t)))
+      (refl 0)
+      (lam x I64 (lam0 rest List (lam0 ih (Eq (app length (app doubled rest)) (app length rest))
+        (transport (lam k U64 (Eq (uadd (app length (app doubled rest)) 1) (uadd k 1))) ih
+          (refl (uadd (app length (app doubled rest)) 1))))))
+      xs)))
+
+(export total
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64 (app sum (app doubled (app repeat n x))))))
+
+(export count
+  (pi n U64 U64)
+  (lam n U64 (app length (app repeat n (int 7)))))
+
+(export first
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64 (app head_or (app repeat n x) (int -1)))))

@@ -91,6 +91,11 @@ pub enum Term {
     Store(u32, u32, u32, u32)
     // Free b, then the rest.
     Free(u32, u32)
+    // Family, motive, one case per constructor and a value of a boxed data
+    // type: one level of case analysis. The node is freed and each case
+    // receives all of its fields, recursive ones as owned values. Elim on a
+    // boxed type is structural recursion instead.
+    Case(u32, u32, Vec(u32), u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -164,12 +169,19 @@ pub struct Core {
     pub definitions: Vec(Definition)
     pub families: Vec(Family)
     signatures: Vec(Vec(Signature))
+    // Per checked family: a data type whose values live on the heap, because
+    // a field is recursive or itself on the heap. Computed by the kernel.
+    boxed: Vec(bool)
     steps: i64
     visible: u32
     visible_families: u32
     // Set while inferring the function of an application, so that only
     // the top of an application spine checks for a partial application.
     spine: bool
+    // Set by lowering. Conversion computes in the pure model, where any
+    // argument may be substituted; code to run binds an argument that
+    // touches memory once instead.
+    pub runtime: bool
 }
 
 impl Core {
@@ -179,10 +191,12 @@ impl Core {
             definitions: Vec(Definition).new(),
             families: Vec(Family).new(),
             signatures: Vec(Vec(Signature)).new(),
+            boxed: Vec(bool).new(),
             steps: 0,
             visible: 0,
             visible_families: 0,
-            spine: false
+            spine: false,
+            runtime: false
         }
     }
 
@@ -267,6 +281,10 @@ impl Core {
                 self.transform_all(xs.as_slice(), cutoff, delta, replacement, depth)?
             )
             Elim(f, p, cases, x) => Term.Elim(f,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?,
+                self.transform_all(cases.as_slice(), cutoff, delta, replacement, depth)?,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?)
+            Case(f, p, cases, x) => Term.Case(f,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?,
                 self.transform_all(cases.as_slice(), cutoff, delta, replacement, depth)?,
                 self.transform(x, cutoff, delta, replacement, depth - 1)?)
@@ -394,7 +412,7 @@ impl Core {
                 match self.term(f) {
                     // An argument that allocates, frees or touches memory is
                     // not substituted: the redex binds it, evaluated once.
-                    Lam(false, domain, body) if self.effectful(a, depth - 1) => {
+                    Lam(false, domain, body) if self.runtime && self.effectful(a, depth - 1) => {
                         let body = self.normal(body, depth - 1)?
                         let lam = self.add(Term.Lam(false, domain, body), sp)?
                         return self.add(Term.App(lam, a), sp)
@@ -404,7 +422,9 @@ impl Core {
                         let result = self.normal(body, depth - 1)?
                         // The body may not use a runtime argument, or only
                         // in one branch; its traps still happen first.
-                        if !erased && self.may_trap(a, depth - 1) {
+                        // Only code that runs needs the traps; conversion
+                        // ignores Strict.
+                        if self.runtime && !erased && self.may_trap(a, depth - 1) {
                             return self.add(Term.Strict(a, result), sp)
                         }
                         return Ok(result)
@@ -507,6 +527,41 @@ impl Core {
                     result = self.add(Term.App(result, ih), sp)?
                 }
                 return self.normal(result, depth - 1)
+            }
+            Case(f, p, cases, x) => {
+                let p = self.normal(p, depth - 1)?
+                let cases = self.normal_all(cases.as_slice(), depth)?
+                let x = self.normal(x, depth - 1)?
+                match self.term(x) {
+                    // As for Elim: a case on a branch is a branch of cases.
+                    IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                        let equality = match self.term(x) { IfEq(_, _, _, _) => true, _ => false }
+                        let inner = self.shift(p, 1, 0, depth - 1)?
+                        var shifted = Vec(u32).new()
+                        for c in cases { shifted.push(self.shift(c, 1, 0, depth - 1)?) }
+                        let yes = self.add(Term.Case(f, inner, shifted, yes), sp)?
+                        let no = self.add(Term.Case(f, p, cases.clone(), no), sp)?
+                        let branch = if equality { Term.IfEq(a, b, yes, no) }
+                        else { Term.IfLt(a, b, yes, no) }
+                        let branch = self.add(branch, sp)?
+                        return self.normal(branch, depth - 1)
+                    }
+                    Strict(t, y) => {
+                        let e = self.add(Term.Case(f, p, cases.clone(), y), sp)?
+                        let e = self.normal(e, depth - 1)?
+                        return self.add(Term.Strict(t, e), sp)
+                    }
+                    // A known node is taken apart without being built.
+                    Con(g, k, fields) if g == f && (k as i64) < cases.len() => {
+                        let skip = self.families[f as i64].params as i64
+                        var result = cases[k as i64]
+                        for j, field in fields {
+                            if j >= skip { result = self.add(Term.App(result, field), sp)? }
+                        }
+                        return self.normal(result, depth - 1)
+                    }
+                    _ => Term.Case(f, p, cases, x)
+                }
             }
             Transport(f, e, p) => {
                 let f = self.normal(f, depth - 1)?
@@ -768,6 +823,18 @@ impl Core {
                 _ => others.push(x)
             }
         }
+        // In the pure model a sum's order is immaterial: other terms are
+        // sorted by their structure, so sums that differ only in order
+        // convert. Code that runs keeps its operands' evaluation order.
+        if !self.runtime {
+            var sorted = Vec(u32).new()
+            for x in others {
+                var at = sorted.len()
+                while at > 0 && self.compare(sorted[at - 1], x, DEPTH) > 0 { at -= 1 }
+                sorted.insert(at, x)
+            }
+            others = sorted
+        }
         var ordered = Vec(u32).new()
         for v in vars { ordered.push(v.1) }
         for x in others { ordered.push(x) }
@@ -780,6 +847,30 @@ impl Core {
             result = Some(match result { Some(r) => self.add(Term.UAdd(r, x), sp)?, None => x })
         }
         Ok(result)
+    }
+
+    // A total order on terms by structure, for sorting sums; 0 for
+    // identical terms, ignoring Strict as `identical` does.
+    fn compare(self, a: u32, b: u32, depth: u32) -> i64 {
+        if depth == 0 || a == b { return 0 }
+        match self.term(a) { Strict(_, y) => return self.compare(y, b, depth - 1), _ => {} }
+        match self.term(b) { Strict(_, y) => return self.compare(a, y, depth - 1), _ => {} }
+        let (x, y) = (self.term(a), self.term(b))
+        let (rx, ry) = (rank(x.clone()), rank(y.clone()))
+        if rx != ry { return if rx < ry { -1 } else { 1 } }
+        let (px, py) = (payload(x.clone()), payload(y.clone()))
+        for i in 0..px.len() {
+            if i >= py.len() { return 1 }
+            if px[i] != py[i] { return if px[i] < py[i] { -1 } else { 1 } }
+        }
+        if px.len() < py.len() { return -1 }
+        let (cx, cy) = (children(x), children(y))
+        for i in 0..cx.len() {
+            if i >= cy.len() { return 1 }
+            let c = self.compare(cx[i], cy[i], depth - 1)
+            if c != 0 { return c }
+        }
+        if cx.len() < cy.len() { -1 } else { 0 }
     }
 
     // The pool without one identical occurrence of each item, if it has them.
@@ -827,7 +918,8 @@ impl Core {
         match self.term(id) {
             Arith(_, _, _) | Strict(_, _) | UAdd(_, _) => true
             // Allocation can fail; memory effects are kept like traps.
-            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) => true
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Case(_, _, _, _) => true
+            Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
             // Only a refinement's witness is evaluated; its predicate and
             // evidence are erased.
             Pack(_, a, _) => self.may_trap(a, depth - 1)
@@ -844,7 +936,9 @@ impl Core {
     fn effectful(self, id: u32, depth: u32) -> bool {
         if depth == 0 { return true }
         match self.term(id) {
-            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) => true
+            Alloc(_, _) | Load(_, _, _, _) | Store(_, _, _, _) | Free(_, _) | Case(_, _, _, _) => true
+            // Building a heap node allocates; recursion over one frees it.
+            Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
             t => {
                 for child in children(t) { if self.effectful(child, depth - 1) { return true } }
                 false
@@ -920,6 +1014,12 @@ impl Core {
             )
             (Con(f, k, xs), Con(g, l, ys)) =>
                 f == g && k == l && self.identical_all(xs.as_slice(), ys.as_slice(), depth)
+            (Case(f, p, xs, a), Case(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1) &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth) && self.identical(
+                a,
+                b,
+                depth - 1
+            )
             (Elim(f, p, xs, a), Elim(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1) &&
                 self.identical_all(xs.as_slice(), ys.as_slice(), depth) && self.identical(
                 a,
@@ -971,9 +1071,15 @@ impl Core {
         // An erased u64 is an index: used in types and evidence only.
         if erased && level != -1 {
             let d = self.normal(domain, depth)?
-            if self.term(d) != Term.U64 { return Err(self.error(
+            // A u64 index, or a data value known only to types and evidence.
+            let ghost = match self.term(d) {
+                U64 => true
+                Ind(g, _) => self.is_data(g)
+                _ => false
+            }
+            if !ghost { return Err(self.error(
                 domain,
-                "erased binders must be propositions or u64"
+                "erased binders must be propositions, u64 or data"
             )) }
         }
         if !erased && level == -1 { return Err(self.error(domain, "proof binders must be erased")) }
@@ -1017,6 +1123,8 @@ impl Core {
     pub fn is_data(self, f: u32) -> bool {
         f as i64 < self.families.len() && self.families[f as i64].data
     }
+
+    pub fn is_boxed(self, f: u32) -> bool { f as i64 < self.boxed.len() && self.boxed[f as i64] }
 
     pub fn motive_type(inout self, f: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
         let u = self.add(Term.U64, sp)?
@@ -1133,6 +1241,65 @@ impl Core {
         Ok(result)
     }
 
+    // The case for constructor k of structural recursion on a heap data
+    // type: (fields..., recursive ones erased) -> (ih_i : P(indices of r_i,
+    // r_i))... -> P(indices..., c(ps, fields...)). The recursion consumes
+    // the recursive fields, so the case sees them only in types and
+    // evidence; the results ih are runtime values unless P is a proposition.
+    pub fn recursion_case_type(
+        inout self,
+        f: u32,
+        k: u32,
+        p: u32,
+        ps: [u32],
+        proof: bool,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let base = self.data_case_type(f, k, p, ps, sp, depth)?
+        // Peel the fields, marking recursive ones erased.
+        var fields = Vec((bool, u32)).new()
+        var recursive = Vec(i64).new()
+        var t = base
+        loop {
+            let Pi(erased, domain, rest) = self.term(t) else { break }
+            match self.term(domain) {
+                Ind(g, _) if g == f => { recursive.push(fields.len()); fields.push((true, domain)) }
+                _ => fields.push((erased, domain))
+            }
+            t = rest
+        }
+        let m = fields.len()
+        let r = recursive.len()
+        var result = self.shift(t, r, 0, depth)?
+        var q = r
+        while q > 0 {
+            q -= 1
+            // Field j's type lives under its j preceding fields; ih_q is
+            // under all m fields and the q hypotheses before it.
+            let j = recursive[q]
+            let Ind(_, indices) = self.term(fields[j].1) else {
+                return Err(diag.Diag.new(sp, "core: malformed recursive field"))
+            }
+            let params = self.families[f as i64].params as i64
+            var ih = self.shift(p, m + q, 0, depth)?
+            for x in params..indices.len() {
+                let index = self.shift(indices[x], m + q - j, 0, depth)?
+                ih = self.add(Term.App(ih, index), sp)?
+            }
+            let field = self.add(Term.Var((m - 1 - j + q) as u32), sp)?
+            ih = self.add(Term.App(ih, field), sp)?
+            result = self.add(Term.Pi(proof, ih, result), sp)?
+        }
+        var j = m
+        while j > 0 {
+            j -= 1
+            let (erased, domain) = fields[j]
+            result = self.add(Term.Pi(erased, domain, result), sp)?
+        }
+        Ok(result)
+    }
+
     // (i : U64) -> (erased p : Lt(i, n)) -> (acc : T) -> T, with n and the
     // accumulator's type T from the outer context. Also used to elaborate
     // source loop bodies.
@@ -1187,10 +1354,24 @@ impl Core {
                         _ => None
                     }
                     let recursive = match recursive {
-                        Some(_) if self.is_data(f) => return Err(self.error(
-                            domain,
-                            "recursive data types are not supported yet"
-                        ))
+                        // A data type's recursive field is a runtime value
+                        // with the same parameters: the type is boxed.
+                        Some(xs) if self.is_data(f) => {
+                            if erased { return Err(self.error(
+                                domain,
+                                "a recursive field of a data type is a value"
+                            )) }
+                            self.indices(xs.as_slice(), f, ctx.as_slice(), domain)?
+                            let params = self.families[f as i64].params as i64
+                            for j in 0..params {
+                                let at = (ctx.len() - 1 - j) as u32
+                                if self.term(xs[j]) != Term.Var(at) { return Err(self.error(
+                                    domain,
+                                    "a recursive field has its type's parameters"
+                                )) }
+                            }
+                            Some(self.normal_all(xs.as_slice(), DEPTH)?)
+                        }
                         Some(xs) => {
                             if !erased { return Err(self.error(
                                 domain,
@@ -1214,7 +1395,7 @@ impl Core {
                         U64 | I64 | Refine(_) => true
                         Ind(g, _) => self.is_data(g)
                         _ => false
-                    }
+                    } || recursive.is_some()
                     if !erased && !first_order { return Err(self.error(
                         domain,
                         "data fields are u64, i64, refinements or data types"
@@ -1265,7 +1446,27 @@ impl Core {
             let ty = self.families[f as i64].constructors[k].ty
             signatures.push(self.signature(f, ty)?)
         }
+        // On the heap: a recursive field, or a field that is on the heap.
+        var boxed = false
+        var flat = false
+        for sig in signatures {
+            for field in sig.fields {
+                if field.erased { continue }
+                if field.recursive.is_some() { boxed = true; continue }
+                match self.term(field.domain) {
+                    Ind(g, _) => if self.is_boxed(g) { boxed = true } else { flat = true }
+                    _ => {}
+                }
+            }
+        }
+        // A heap node stores its fields; a data value without a
+        // representation cannot be one of them.
+        if boxed && flat { return Err(diag.Diag.new(
+            sp,
+            "core: a heap data type cannot hold a data value without a representation"
+        )) }
         self.signatures.push(signatures)
+        self.boxed.push(boxed && self.families[f as i64].data)
         Ok(())
     }
 
@@ -1353,7 +1554,7 @@ impl Core {
                 if cases.len() != self.families[f as i64].constructors.len() {
                     return Err(self.error(id, "induction needs one case per constructor"))
                 }
-                if self.is_data(f) { return self.eliminate(
+                if self.is_data(f) { return self.eliminate(false,
                     id,
                     f,
                     p,
@@ -1378,6 +1579,17 @@ impl Core {
                 var result = p
                 for i in indices { result = self.add(Term.App(result, i), sp)? }
                 return Ok(result)
+            }
+            Case(f, p, cases, x) => {
+                self.family_ref(id, f)?
+                if !self.is_boxed(f) { return Err(self.error(
+                    id,
+                    "one-level case analysis is for heap data"
+                )) }
+                if cases.len() != self.families[f as i64].constructors.len() {
+                    return Err(self.error(id, "case analysis needs one case per constructor"))
+                }
+                return self.eliminate(true, id, f, p, cases.as_slice(), x, ctx, ghost, depth)
             }
             Arith(_, a, b) => {
                 let i = self.add(Term.I64, sp)?
@@ -1517,9 +1729,13 @@ impl Core {
                 // The accumulator is an I64 or an owned buffer.
                 let acc = self.infer(init, ctx, ghost, depth - 1)?
                 let acc = self.normal(acc, depth - 1)?
+                let owned = self.owned(acc, depth - 1)?
                 match self.term(acc) {
-                    I64 | Buffer(_) => {}
-                    _ => return Err(self.error(init, "a loop accumulator is an i64 or a buffer"))
+                    I64 => {}
+                    _ => if !owned { return Err(self.error(
+                        init,
+                        "a loop accumulator is an i64 or an owned value"
+                    )) }
                 }
                 let ty = self.fold_body_type(n, acc, sp, depth - 1)?
                 self.require(body, ty, ctx, ghost, depth - 1)?
@@ -1667,7 +1883,11 @@ impl Core {
     // Whether values of a type are owned: used exactly once at run time.
     pub fn owned(inout self, ty: u32, depth: u32) -> Result(bool, diag.Diag) {
         let ty = self.normal(ty, depth)?
-        Ok(match self.term(ty) { Buffer(_) => true, _ => false })
+        Ok(match self.term(ty) {
+            Buffer(_) => true
+            Ind(f, _) => self.is_boxed(f)
+            _ => false
+        })
     }
 
     // How many times evaluating a checked runtime term uses variable v at
@@ -1753,15 +1973,26 @@ impl Core {
                 )) }
                 Ok(first + y)
             }
-            Elim(f, _, cases, x) => {
+            Elim(f, _, cases, x) | Case(f, _, cases, x) => {
                 var total = self.uses(x, v, ctx, depth - 1)?
                 if !self.is_data(f) { return Ok(0) }
-                // Exactly one case runs; each must use the value alike.
+                let recursion = self.is_boxed(f) && match self.term(id) { Elim(_, _, _, _) => true, _ => false }
+                // Exactly one case runs; each must use the value alike. A
+                // recursion's cases run once per node: they capture nothing.
                 let params = self.families[f as i64].params as i64
                 var common: Option(u32) = None
                 for k, case in cases {
-                    let count = self.signatures[f as i64][k].fields.len() - params
+                    var count = self.signatures[f as i64][k].fields.len() - params
+                    if recursion {
+                        for field in self.signatures[f as i64][k].fields {
+                            if field.recursive.is_some() { count += 1 }
+                        }
+                    }
                     let n = self.uses_case(case, count, v, ctx, depth)?
+                    if recursion && n > 0 { return Err(self.error(
+                        id,
+                        "a recursion's cases run once per node: they cannot use an outer owned value"
+                    )) }
                     match common {
                         Some(m) => if m != n { return Err(self.error(
                             id,
@@ -1894,6 +2125,7 @@ impl Core {
     // code, the cases functions of the fields and the value runtime data.
     fn eliminate(
         inout self,
+        analysis: bool,
         id: u32,
         f: u32,
         p: u32,
@@ -1950,7 +2182,11 @@ impl Core {
             _ => return Err(self.error(p, "data elimination is into Prop or Type 0"))
         }
         for k, case in cases {
-            let expected = self.data_case_type(f, k as u32, p, ps.as_slice(), sp, depth - 1)?
+            // Recursion on a heap type gives each case the results for its
+            // recursive fields; one-level analysis gives the fields.
+            let expected = if self.is_boxed(f) && !analysis {
+                self.recursion_case_type(f, k as u32, p, ps.as_slice(), proof, sp, depth - 1)?
+            } else { self.data_case_type(f, k as u32, p, ps.as_slice(), sp, depth - 1)? }
             self.require(case, expected, ctx, ghost || proof, depth - 1)?
         }
         // Into Type 0 the value is runtime data.
@@ -1965,6 +2201,7 @@ impl Core {
     pub fn check(inout self) -> Result((), diag.Diag) {
         self.steps = 0
         self.signatures = Vec(Vec(Signature)).new()
+        self.boxed = Vec(bool).new()
         if self.nodes.len() > LIMIT { return Err(self.error(0, "term limit reached")) }
         for i in 0..self.nodes.len() {
             for child in children(self.nodes[i].term) {
@@ -2002,6 +2239,38 @@ impl Core {
     }
 }
 
+// The position of a term's constructor, for ordering terms.
+fn rank(term: Term) -> u32 {
+    match term {
+        Var(_) => 0, Global(_) => 1, Universe(_) => 2, Prop => 3, U64 => 4, I64 => 5,
+        Array(_) => 6, Lt(_, _) => 7, Eq(_, _) => 8, Refl(_) => 9, Transport(_, _, _) => 10,
+        Ind(_, _) => 11, Con(_, _, _) => 12, Elim(_, _, _, _) => 13, Arith(_, _, _) => 14,
+        Fold(_, _, _) => 15, Strict(_, _) => 16, UAdd(_, _) => 17, LtAdd(_, _, _, _) => 18,
+        LtCancel(_, _, _, _) => 19, LtLe(_, _, _, _, _) => 20, USub(_, _, _) => 21,
+        ZeroLe(_) => 22, Refine(_) => 23, Pack(_, _, _) => 24, Witness(_) => 25, Proof(_) => 26,
+        Buffer(_) => 27, Alloc(_, _) => 28, Load(_, _, _, _) => 29, Store(_, _, _, _) => 30,
+        Free(_, _) => 31, Case(_, _, _, _) => 32, Pi(_, _, _) => 33, Lam(_, _, _) => 34,
+        App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
+        Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42
+    }
+}
+
+// What distinguishes terms with the same constructor besides children.
+fn payload(term: Term) -> Vec(i128) {
+    var out = Vec(i128).new()
+    match term {
+        Var(k) | Global(k) | Universe(k) | Ind(k, _) | Elim(k, _, _, _) | Case(k, _, _, _) =>
+            out.push(k as i128)
+        Natural(n) => out.push(n as i128)
+        Integer(n) => out.push(n as i128)
+        Con(f, k, _) => { out.push(f as i128); out.push(k as i128) }
+        Arith(op, _, _) => out.push(match op { Add => 0, Sub => 1, Mul => 2 })
+        Pi(e, _, _) | Lam(e, _, _) => out.push(if e { 1 } else { 0 })
+        _ => {}
+    }
+    out
+}
+
 pub fn children(term: Term) -> Vec(u32) {
     var out = Vec(u32).new()
     match term {
@@ -2024,7 +2293,7 @@ pub fn children(term: Term) -> Vec(u32) {
             p
         ) }
         Ind(_, xs) | Con(_, _, xs) | Elements(xs) => for x in xs { out.push(x) }
-        Elim(_, p, cases, x) => {
+        Elim(_, p, cases, x) | Case(_, p, cases, x) => {
             out.push(p)
             for c in cases { out.push(c) }
             out.push(x)
@@ -2461,6 +2730,7 @@ fn rejects_cycles_in_loop_graphs() {
 fn substitution_keeps_overflow_traps() {
     let sp = diag.Span.nowhere()
     var c = Core.new()
+    c.runtime = true
     let i = c.add(Term.I64, sp).unwrap()
     let max = c.add(Term.Integer(9223372036854775807), sp).unwrap()
     let one = c.add(Term.Integer(1), sp).unwrap()
@@ -2788,13 +3058,15 @@ fn bit_family(inout c: Core, arity: u32, recursive: bool) {
 }
 
 #[test]
-fn data_types_are_flat_and_unindexed() {
+fn recursive_data_types_live_on_the_heap() {
     var c = Core.new()
     bit_family(&c, 0, false)
     c.check().unwrap()
+    assert(!c.is_boxed(0), "a flat data type has no representation")
     var c = Core.new()
     bit_family(&c, 0, true)
-    assert(c.check().is_err(), "no recursive data yet")
+    c.check().unwrap()
+    assert(c.is_boxed(0), "a recursive data type is on the heap")
     var c = Core.new()
     bit_family(&c, 1, false)
     assert(c.check().is_err(), "no indexed data yet")
@@ -2955,6 +3227,7 @@ fn effectful_arguments_are_bound_once() {
     // substituting the allocation, and memory terms are not computed.
     let sp = diag.Span.nowhere()
     var c = Core.new()
+    c.runtime = true
     let one = c.add(Term.Natural(1), sp).unwrap()
     let buffer = c.add(Term.Buffer(one), sp).unwrap()
     let zero = c.add(Term.Integer(0), sp).unwrap()
@@ -2967,4 +3240,67 @@ fn effectful_arguments_are_bound_once() {
     let App(g, a) = c.term(normal) else { panic("the redex is kept") }
     let Lam(false, _, _) = c.term(g) else { panic("binding the allocation") }
     let Alloc(_, _) = c.term(a) else { panic("evaluated once") }
+}
+
+#[test]
+fn sums_convert_in_any_order_but_run_in_theirs() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let y = c.add(Term.Var(1), sp).unwrap()
+    let a = c.add(Term.Witness(x), sp).unwrap()
+    let b = c.add(Term.Witness(y), sp).unwrap()
+    let ab = c.add(Term.UAdd(a, b), sp).unwrap()
+    let ba = c.add(Term.UAdd(b, a), sp).unwrap()
+    assert(c.equal(ab, ba, DEPTH).unwrap(), "addition commutes in the pure model")
+    c.runtime = true
+    let left = c.normal(ab, DEPTH).unwrap()
+    let right = c.normal(ba, DEPTH).unwrap()
+    assert(!c.identical(left, right, DEPTH), "code to run keeps its operands' order")
+}
+
+#[test]
+fn one_level_case_analysis_is_for_heap_data() {
+    let sp = diag.Span.nowhere()
+    for recursive in [false, true] {
+        var c = Core.new()
+        bit_family(&c, 0, recursive)
+        let none = Vec(u32).new()
+        let b = c.add(Term.Ind(0, none.clone()), sp).unwrap()
+        let u = c.add(Term.U64, sp).unwrap()
+        let p = c.add(Term.Lam(false, b, u), sp).unwrap()
+        let zero = c.add(Term.Natural(0), sp).unwrap()
+        // Yes(x): x is a u64 or, when recursive, a B that must be used.
+        let field = if recursive { b } else { u }
+        let x = c.add(Term.Var(0), sp).unwrap()
+        let body = if recursive {
+            let q = c.add(Term.Lam(false, b, u), sp).unwrap()
+            let one = c.add(Term.Natural(1), sp).unwrap()
+            // (erased rest: B) -> (ih: U64) -> 1
+            let ones = c.add(Term.Lam(false, u, one), sp).unwrap()
+            let ones = c.add(Term.Lam(true, b, ones), sp).unwrap()
+            var cases = Vec(u32).new()
+            cases.push(zero)
+            cases.push(ones)
+            // The rest is consumed by a recursion that counts it.
+            let counted = c.add(Term.Elim(0, q, cases, x), sp).unwrap()
+            counted
+        } else { x }
+        let yes = c.add(Term.Lam(false, field, body), sp).unwrap()
+        var cases = Vec(u32).new()
+        cases.push(zero)
+        cases.push(yes)
+        let v = c.add(Term.Var(0), sp).unwrap()
+        let analysis = c.add(Term.Case(0, p, cases, v), sp).unwrap()
+        let value = c.add(Term.Lam(false, b, analysis), sp).unwrap()
+        let ty = c.add(Term.Pi(false, b, u), sp).unwrap()
+        c.definitions.push(Definition {
+            name: "f".to_string(),
+            ty,
+            value,
+            exported: false,
+            span: sp
+        })
+        assert(c.check().is_ok() == recursive, "flat data is taken apart by Elim")
+    }
 }

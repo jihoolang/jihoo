@@ -1,0 +1,49 @@
+// Recursive data on the heap. A recursive enum such as List keeps its
+// nodes on the heap: List.Cons(x, xs) allocates a node that owns xs, and
+// every list is used exactly once. `match` takes one node apart and frees
+// it, giving its fields; induct(fn(t) { T }, nil, fn(x, rest, ih) { ... },
+// xs) is structural recursion, which frees every node and gives each case
+// the result for the rest of the list. A proposition can still mention a
+// list that was consumed: `doubled_length` proves by induction that
+// doubling keeps the length. main returns 38.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn sum(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs) }
+
+fn length(xs: List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn doubled(xs: List) -> List {
+    induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(x * 2, ih) }, xs)
+}
+
+// Frees every node.
+fn drop(xs: List) -> i64 { induct(fn(t) { i64 }, 0, fn(x, rest, ih) { ih }, xs) }
+
+fn head_or(xs: List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x + drop(rest)
+    }
+}
+
+fn doubled_length(xs: List) -> Eq(length(doubled(xs)), length(xs)) {
+    induct(fn(t) { Eq(length(doubled(t)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(length(doubled(rest)) + 1, k + 1) }, ih,
+            refl(length(doubled(rest)) + 1))
+    }, xs)
+}
+
+export fn total(n: u64, x: i64) -> i64 { sum(doubled(repeat(n, x))) }
+
+export fn count(n: u64) -> u64 { length(repeat(n, 7)) }
+
+export fn first(n: u64, x: i64) -> i64 { head_or(repeat(n, x), -1) }
+
+fn main() -> i64 { total(3, 5) + first(2, 7) + head_or(List.Nil, 1) }

@@ -77,7 +77,8 @@ alias    = "type" name [ "=" type ]
   `enum` declarations, with u64 parameters, and `match` for
   [data types](../internals/dependent-core.md#data-types), and `buffer`,
   `alloc`, `load`, `store` and `free` for
-  [owned buffers](../internals/dependent-core.md#owned-buffers),
+  [owned buffers](../internals/dependent-core.md#owned-buffers); a
+  recursive `enum` is [heap data](../internals/dependent-core.md#recursive-data-on-the-heap),
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)

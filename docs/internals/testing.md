@@ -99,6 +99,9 @@ the runner. Its suites:
   `tests/core_buffer.py` adds owned buffers: native calls are linked
   with counting `malloc`/`free` wrappers, and each must free what it
   allocates; leaks, double frees, uses after free and captures are rejected.
+  `tests/core_list.py` adds recursive data on the heap: `match`,
+  structural recursion, trees and parameterized lists, proofs by
+  induction, and counted nodes.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with
