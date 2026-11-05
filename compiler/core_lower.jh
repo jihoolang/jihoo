@@ -139,6 +139,16 @@ impl Lower {
                 self.expr(c, a, env, depth - 1)?
                 self.expr(c, b, env, depth - 1)
             }
+            USub(a, b, _) => {
+                // The evidence b <= a is erased; the subtraction cannot fail.
+                let a = self.expr(c, a, env, depth - 1)?
+                let b = self.expr(c, b, env, depth - 1)?
+                Ok(self.value(
+                    types.U64,
+                    mir.Rvalue.Bin(lex.Op.Sub, a.op.clone(), b.op.clone()),
+                    sp
+                ))
+            }
             UAdd(a, b) => {
                 let a = self.expr(c, a, env, depth - 1)?
                 let b = self.expr(c, b, env, depth - 1)?

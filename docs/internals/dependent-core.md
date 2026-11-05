@@ -129,6 +129,7 @@ in the existing grammar, not global keywords or standard-library types:
 | `fold(n, init, fn(i, p, acc) { body })` | loop for `i` below `n`, with erased `p: Lt(i, n)` |
 | `i + j` on `u64` | [addition in the naturals](#index-arithmetic-and-order); overflow traps |
 | `lt_add(a, b, c, p)`, `lt_cancel(a, b, c, p)`, `lt_le(x, y, z, p, q)` | rules of the order of the naturals |
+| `sub(a, b, p)`, `zero_le(a)` | `a - b` given `p: Lt(b, a + 1)`; evidence of `Lt(0, a + 1)` |
 
 `n` and `i` are ordinary runtime U64 parameters. `[i64; n]` records the
 length symbolically in the core; it does not evaluate `n` as a legacy
@@ -149,7 +150,7 @@ blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
 `erased` is allowed only as the outer parameter annotation. The forms
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
-`fold`, `lt_add`, `lt_cancel`, `lt_le`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
+`fold`, `lt_add`, `lt_cancel`, `lt_le`, `sub`, `zero_le`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
 `__jihoo_dependent_main` are reserved in marked modules. Functions,
 propositions and constructors share one namespace. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
@@ -165,7 +166,7 @@ without LLVM or a linker.
 
 Imports, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
-u64 subtraction and products, division and comparison operators, general runtime
+u64 products, the `-` operator on u64 (use `sub`), division and comparison operators, general runtime
 closures/recursion, data (non-`Prop`)
 inductive types and mutable memory are outside this slice and rejected. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
@@ -265,10 +266,12 @@ type, a closed telescope, when the family is declared:
   other field is an erased proposition;
 - the family itself may occur only as a whole erased field `F(indices)`
   (a recursive field) and as the result, `F(indices)` with exactly its
-  arity of `u64` indices. The telescope is checked after normalization,
-  and while its constructors are checked the family is not yet in scope,
-  so any other occurrence (under an arrow, in an index, in another
-  field's type) is rejected. This is strict positivity,
+  arity of `u64` indices. The telescope is checked as written, before
+  normalization, and while its constructors are checked the family is
+  not yet in scope, so any other occurrence (under an arrow, in an index,
+  in another field's type, or one that beta reduction would remove) is
+  rejected, and evidence inside the telescope is checked even where
+  reduction would remove it. This is strict positivity,
   restricted further to first-order recursive fields;
 - a family may use earlier definitions and families, and is visible only
   to later items. Families and definitions form one ordered sequence;
@@ -433,8 +436,7 @@ so it cannot be derived from them. The usual facts are ordinary lemmas:
 `Lt(a, a + 1)` is `lt_add(0, 1, a, decide_lt(0, 1))`, weakening
 `Lt(a, b)` to `Lt(a, b + 1)` is `lt_le(a, b, b + 1, p, lt_add(0, 2, b,
 decide_lt(0, 2)))`, and transitivity follows from weakening and `lt_le`.
-u64 subtraction and products are not supported: subtraction needs
-evidence that it does not go below zero.
+u64 products are not supported.
 
 [`examples/core_order.jh`](../../examples/core_order.jh) and its
 [core equivalent](../../examples/core_order.jhc) derive weakening and
@@ -450,6 +452,37 @@ transitivity and then:
 Their MIR has the comparisons and the checked additions, and no bounds
 assertions or evidence. In `.jhc` the forms are `(uadd a b)`,
 `(lt-add a b c p)`, `(lt-cancel a b c p)` and `(lt-le x y z p q)`.
+
+### Subtraction
+
+`sub(a, b, p)` is `a - b` in the naturals and needs evidence `p` of
+`b <= a`, `Lt(b, a + 1)`. It never underflows; at run time it is an
+ordinary subtraction, and its evidence is erased. The `-` operator on
+u64 is rejected, since it would need that evidence. `zero_le(a)` is
+evidence of `Lt(0, a + 1)`: without it no rule gives a lower bound for a
+variable.
+
+Conversion cancels subtraction, which is valid in the naturals given its
+evidence: `a - b` is the rest of `a` when `b`'s variables, other terms
+and constant are among `a`'s, so `(i + 2) - 1` is `i + 1` and closed
+subtractions compute; and a sum containing `x - y` and all of `y`'s parts
+is the sum with `x` in their place, so `(k - 1) + 1` is `k`. Two
+subtractions of the same terms are the same term whatever their
+evidence (proof irrelevance). There is no partial cancellation:
+`(k - 1) + m` is not `(k + m) - 1`. Cancellation keeps the evaluation
+of what it removes: `(k + 1) - 1` is `k` in conversion, but at run time
+the addition is still evaluated, through `Strict`, so a `k + 1` that
+would overflow still traps.
+
+[`examples/core_sub.jh`](../../examples/core_sub.jh) and its
+[core equivalent](../../examples/core_sub.jhc) prove
+`Lt(n - (i + 1), n)` for `i < n` from `zero_le(i)` and cancellation
+(`d < d + (i + 1)`, which is `n`), so `reversed` multiplies `xs[i]` with
+`ys[n - 1 - i]` in a loop. `last(k)` loads `xs[k - 1]` after checking
+`0 < k` and `k < 5`, with `pred(k, p)` a runtime helper and
+`Lt(pred(k, p), k)` a lemma proved by cancellation. Their MIR has the
+comparisons and the two subtractions, and no bounds assertions. In
+`.jhc` the forms are `(usub a b p)` and `(zero-le a)`.
 
 ## Core syntax
 
@@ -475,6 +508,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(fold n init body)` | bounded loop; `body : (i : U64) -> Lt i n -> I64 -> I64`, erased bound |
 | `(uadd a b)` | addition in the naturals; traps at run time beyond U64 |
 | `(lt-add a b c p)`, `(lt-cancel a b c p)`, `(lt-le x y z p q)` | order rules of the naturals |
+| `(usub a b p)`, `(zero-le a)` | `a - b` with `p : Lt b (a + 1)`; evidence of `Lt 0 (a + 1)` |
 | `(pi x A B)` | dependent function type, with `x` in scope in `B` |
 | `(lam x A body)` | function with an explicitly typed argument |
 | `(pi0 p P B)`, `(lam0 p P body)` | erased proof binder |
@@ -577,6 +611,12 @@ literals, inequalities decided beyond U64, each rule with wrong premises
 (including `<=` and `<=` for `<`), u64 subtraction and products,
 unchecked or too-long computed indices and runtime evidence. Kernel unit
 tests check canonical sums, that 2^64 is not 0, and the rules' premises.
+`tests/core_sub.py` adds subtraction: both frontends' MIR and native
+execution, cancellation, closed computation and proof irrelevance in
+accepted lemmas, and rejection of missing, strict or reversed evidence,
+underflow, partial cancellation, wrapped results, the `-` operator,
+unchecked `k - 1` loads and runtime uses of evidence. Kernel unit tests
+check cancellation and that `0 - 1` has no evidence.
 
 The next stages of the replacement are:
 
@@ -584,7 +624,7 @@ The next stages of the replacement are:
    and their guarantees are supported by this same core.
 2. Extend the logical foundations beyond U64 equality and declared
    propositions: dependent motives, inductive data types, erased indices,
-   u64 subtraction with evidence, products, equality of other types and
+   products, equality of other types and
    reusable lemma
    libraries. Specify normalization, universe
    and erasure rules before enabling them.

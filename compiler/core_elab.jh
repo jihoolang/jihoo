@@ -21,7 +21,8 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 
 fn reserved(name: str) -> bool {
     name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "fold" ||
-        name == "lt_add" || name == "lt_cancel" || name == "lt_le" ||
+        name == "lt_add" || name == "lt_cancel" || name == "lt_le" || name == "sub" ||
+        name == "zero_le" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -338,7 +339,7 @@ impl Elaborator {
                 let unsigned = self.is_u64(e, expected)?
                 if unsigned && !plus { return Err(error(
                     sp,
-                    "u64 has only +: subtraction and products need evidence"
+                    "u64 has only +; use sub(a, b, p) with p: Lt(b, a + 1)"
                 )) }
                 if unsigned {
                     // In the naturals; overflow traps at run time.
@@ -411,6 +412,23 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
+                }
+                if n == "sub" {
+                    if args.len() != 3 { return Err(error(
+                        sp,
+                        "sub requires a, b and evidence of Lt(b, a + 1)"
+                    )) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    let b = self.expr(args[1], Some(u), depth - 1)?
+                    let p = self.expr(args[2], None, depth - 1)?
+                    return self.c.add(core.Term.USub(a, b, p), sp)
+                }
+                if n == "zero_le" {
+                    if args.len() != 1 { return Err(error(sp, "zero_le requires one u64 value")) }
+                    let u = self.u64(sp)?
+                    let a = self.expr(args[0], Some(u), depth - 1)?
+                    return self.c.add(core.Term.ZeroLe(a), sp)
                 }
                 if n == "lt_add" || n == "lt_cancel" || n == "lt_le" {
                     let count = if n == "lt_le" { 5 } else { 4 }

@@ -65,6 +65,11 @@ pub enum Term {
     // x, y, z, Lt(x, y) and Lt(y, z + 1) (y <= z), for Lt(x, z): the
     // naturals are discrete. Not derivable from the other rules.
     LtLe(u32, u32, u32, u32, u32)
+    // a, b and evidence of Lt(b, a + 1) (b <= a): a - b in the naturals,
+    // which never underflows. Conversion ignores the evidence.
+    USub(u32, u32, u32)
+    // Lt(0, a + 1): every natural is at least 0.
+    ZeroLe(u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -250,6 +255,10 @@ impl Core {
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
             UAdd(a, b) => Term.UAdd(self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
+            USub(a, b, p) => Term.USub(self.transform(a, cutoff, delta, replacement, depth - 1)?,
+                self.transform(b, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?)
+            ZeroLe(a) => Term.ZeroLe(self.transform(a, cutoff, delta, replacement, depth - 1)?)
             LtAdd(a, b, c, p) => Term.LtAdd(
                 self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?,
@@ -476,6 +485,42 @@ impl Core {
                 let b = self.normal(b, depth - 1)?
                 return self.sum(a, b, sp, depth - 1)
             }
+            USub(a, b, p) => {
+                let a = self.normal(a, depth - 1)?
+                let b = self.normal(b, depth - 1)?
+                let p = self.normal(p, depth - 1)?
+                // (r + b) - b is r when b's parts are among a's.
+                var atoms = Vec(u32).new()
+                var constant: u128 = 0
+                var pending = Vec(u32).new()
+                self.collect(a, &atoms, &constant, &pending, depth - 1)
+                var minus = Vec(u32).new()
+                var less: u128 = 0
+                self.collect(b, &minus, &less, &pending, depth - 1)
+                if less <= constant {
+                    match self.without(atoms.as_slice(), minus.as_slice(), depth - 1) {
+                        Some(rest) => {
+                            match self.canonical(rest.as_slice(), constant - less, sp)? {
+                                Some(id) => {
+                                    // The operands are still evaluated for
+                                    // their traps, as the subtraction would.
+                                    var result = id
+                                    for x in [b, a] {
+                                        if self.may_trap(x, depth - 1) {
+                                            result = self.add(Term.Strict(x, result), sp)?
+                                        }
+                                    }
+                                    return Ok(result)
+                                }
+                                None => {}
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                Term.USub(a, b, p)
+            }
+            ZeroLe(a) => Term.ZeroLe(self.normal(a, depth - 1)?)
             LtAdd(a, b, c, p) => Term.LtAdd(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?,
                 self.normal(c, depth - 1)?, self.normal(p, depth - 1)?)
             LtCancel(a, b, c, p) => Term.LtCancel(self.normal(a, depth - 1)?,
@@ -495,9 +540,56 @@ impl Core {
     fn sum(inout self, a: u32, b: u32, sp: diag.Span, depth: u32) -> Result(u32, diag.Diag) {
         var atoms = Vec(u32).new()
         var constant: u128 = 0
-        self.collect(a, &atoms, &constant, depth)
-        self.collect(b, &atoms, &constant, depth)
-        if constant > 0xffffffffffffffff { return self.add(Term.UAdd(a, b), sp) }
+        // Traps of Strict terms in the sum, evaluated before the result.
+        var pending = Vec(u32).new()
+        self.collect(a, &atoms, &constant, &pending, depth)
+        self.collect(b, &atoms, &constant, &pending, depth)
+        // (x - y) + y is x when the sum has all of y's parts.
+        var changed = true
+        var rounds = 0
+        while changed && rounds < 64 {
+            changed = false
+            rounds += 1
+            for k in 0..atoms.len() {
+                let USub(x, y, _) = self.term(atoms[k]) else { continue }
+                var minus = Vec(u32).new()
+                var less: u128 = 0
+                var traps = Vec(u32).new()
+                self.collect(y, &minus, &less, &traps, depth)
+                if less > constant || traps.len() != 0 { continue }
+                var others = Vec(u32).new()
+                for j in 0..atoms.len() { if j != k { others.push(atoms[j]) } }
+                let Some(rest) = self.without(others.as_slice(), minus.as_slice(), depth) else {
+                    continue
+                }
+                atoms = rest
+                constant -= less
+                // y is no longer evaluated; its traps still happen.
+                if self.may_trap(y, depth) { pending.push(y) }
+                self.collect(x, &atoms, &constant, &pending, depth)
+                changed = true
+                break
+            }
+        }
+        match self.canonical(atoms.as_slice(), constant, sp)? {
+            Some(id) => {
+                var result = id
+                for x in pending { result = self.add(Term.Strict(x, result), sp)? }
+                Ok(result)
+            }
+            None => self.add(Term.UAdd(a, b), sp)
+        }
+    }
+
+    // Variables in index order, then other terms in their order, then the
+    // constant; None when the constant does not fit a U64.
+    fn canonical(
+        inout self,
+        atoms: [u32],
+        constant: u128,
+        sp: diag.Span
+    ) -> Result(Option(u32), diag.Diag) {
+        if constant > 0xffffffffffffffff { return Ok(None) }
         var vars = Vec((u32, u32)).new()
         var others = Vec(u32).new()
         for x in atoms {
@@ -510,7 +602,6 @@ impl Core {
                 _ => others.push(x)
             }
         }
-        var result: Option(u32) = None
         var ordered = Vec(u32).new()
         for v in vars { ordered.push(v.1) }
         for x in others { ordered.push(x) }
@@ -518,17 +609,45 @@ impl Core {
             Term.Natural(constant as u64),
             sp
         )?) }
+        var result: Option(u32) = None
         for x in ordered {
             result = Some(match result { Some(r) => self.add(Term.UAdd(r, x), sp)?, None => x })
         }
-        Ok(result.unwrap())
+        Ok(result)
     }
 
-    fn collect(self, id: u32, inout atoms: Vec(u32), inout constant: u128, depth: u32) {
+    // The pool without one identical occurrence of each item, if it has them.
+    fn without(self, pool: [u32], items: [u32], depth: u32) -> Option(Vec(u32)) {
+        var rest = Vec(u32).new()
+        for x in pool { rest.push(x) }
+        for item in items {
+            var found = -1
+            for k in 0..rest.len() {
+                if self.identical(rest[k], item, depth) { found = k; break }
+            }
+            if found < 0 { return None }
+            rest.remove(found)
+        }
+        Some(rest)
+    }
+
+    fn collect(
+        self,
+        id: u32,
+        inout atoms: Vec(u32),
+        inout constant: u128,
+        inout pending: Vec(u32),
+        depth: u32
+    ) {
         match self.term(id) {
             UAdd(a, b) if depth > 0 => {
-                self.collect(a, &atoms, &constant, depth - 1)
-                self.collect(b, &atoms, &constant, depth - 1)
+                self.collect(a, &atoms, &constant, &pending, depth - 1)
+                self.collect(b, &atoms, &constant, &pending, depth - 1)
+            }
+            // Strict(t, r) is r in the naturals; t is evaluated first.
+            Strict(t, r) if depth > 0 => {
+                pending.push(t)
+                self.collect(r, &atoms, &constant, &pending, depth - 1)
             }
             Natural(n) => constant += n as u128
             _ => atoms.push(id)
@@ -571,6 +690,10 @@ impl Core {
                 depth - 1
             ) &&
                 self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
+            // Proof irrelevance: any evidence of b <= a gives the same a - b.
+            (USub(a, b, _), USub(c, d, _)) =>
+                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (ZeroLe(a), ZeroLe(b)) => self.identical(a, b, depth - 1)
             (UAdd(a, b), UAdd(c, d)) => self.identical(a, c, depth - 1) && self.identical(
                 b,
                 d,
@@ -766,41 +889,54 @@ impl Core {
     // so infer rejects it everywhere except as a whole recursive field
     // F(indices) or the constructor's result, which are matched here.
     fn signature(inout self, f: u32, ty: u32) -> Result(Signature, diag.Diag) {
-        var ty = self.normal(ty, DEPTH)?
+        // The telescope is checked as written, before any normalization,
+        // so evidence inside it is checked even where reduction removes it.
+        var ty = ty
         var ctx = Vec(Binding).new()
         var fields = Vec(Field).new()
         loop {
+            if (ty as i64) >= self.nodes.len() { return Err(self.error(
+                ty,
+                "invalid term reference"
+            )) }
             match self.term(ty) {
                 Pi(erased, domain, rest) => {
                     let recursive = match self.term(domain) {
                         Ind(g, xs) if g == f => Some(xs)
                         _ => None
                     }
-                    match recursive.clone() {
+                    let recursive = match recursive {
                         Some(xs) => {
                             if !erased { return Err(self.error(
                                 domain,
                                 "recursive constructor fields must be erased"
                             )) }
                             self.indices(xs.as_slice(), f, ctx.as_slice(), domain)?
+                            Some(self.normal_all(xs.as_slice(), DEPTH)?)
                         }
                         None => {
                             self.binder(domain, erased, ctx.as_slice(), DEPTH)?
-                            if !erased && self.term(domain) != Term.U64 { return Err(self.error(
-                                domain,
-                                "constructor data fields must be u64"
-                            )) }
+                            None
                         }
                     }
+                    let domain = self.normal(domain, DEPTH)?
+                    if !erased && self.term(domain) != Term.U64 { return Err(self.error(
+                        domain,
+                        "constructor data fields must be u64"
+                    )) }
                     fields.push(Field { erased, domain, recursive })
                     ctx.push(Binding { ty: domain, erased })
                     ty = rest
                 }
                 Ind(g, xs) if g == f => {
                     self.indices(xs.as_slice(), f, ctx.as_slice(), ty)?
-                    return Ok(Signature { fields, result: xs })
+                    let result = self.normal_all(xs.as_slice(), DEPTH)?
+                    return Ok(Signature { fields, result })
                 }
-                _ => return Err(self.error(ty, "a constructor must produce its own family"))
+                _ => return Err(self.error(
+                    ty,
+                    "a constructor type is a telescope ending in its own family"
+                ))
             }
         }
     }
@@ -930,6 +1066,24 @@ impl Core {
                 self.require(a, u, ctx, ghost, depth - 1)?
                 self.require(b, u, ctx, ghost, depth - 1)?
                 Term.U64
+            }
+            USub(a, b, p) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, ghost, depth - 1)?
+                self.require(b, u, ctx, ghost, depth - 1)?
+                let one = self.add(Term.Natural(1), sp)?
+                let a1 = self.add(Term.UAdd(a, one), sp)?
+                let le = self.add(Term.Lt(b, a1), sp)?
+                self.require(p, le, ctx, true, depth - 1)?
+                Term.U64
+            }
+            ZeroLe(a) => {
+                let u = self.add(Term.U64, sp)?
+                self.require(a, u, ctx, true, depth - 1)?
+                let zero = self.add(Term.Natural(0), sp)?
+                let one = self.add(Term.Natural(1), sp)?
+                let a1 = self.add(Term.UAdd(a, one), sp)?
+                Term.Lt(zero, a1)
             }
             LtAdd(a, b, c, p) | LtCancel(a, b, c, p) => {
                 let forward = match self.term(id) { LtAdd(_, _, _, _) => true, _ => false }
@@ -1113,6 +1267,8 @@ pub fn children(term: Term) -> Vec(u32) {
             p
         ) }
         LtLe(a, b, c, p, q) => { out.push(a); out.push(b); out.push(c); out.push(p); out.push(q) }
+        USub(a, b, p) => { out.push(a); out.push(b); out.push(p) }
+        ZeroLe(a) => out.push(a)
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
             p
         ) }
@@ -1651,4 +1807,106 @@ fn rejects_cycles_in_order_graphs() {
         c.add(term.clone(), sp).unwrap()
         assert(c.check().is_err(), "order terms obey graph integrity")
     }
+}
+
+#[test]
+fn subtraction_cancels_in_the_naturals() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let k = c.add(Term.Var(0), sp).unwrap()
+    let m = c.add(Term.Var(1), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let p = c.add(Term.Var(2), sp).unwrap()
+    let q = c.add(Term.Var(3), sp).unwrap()
+    // (k - 1) + 1 is k; (k + 2) - 1 is k + 1; (k - 1) + m is not k + m - 1.
+    let pred = c.add(Term.USub(k, one, p), sp).unwrap()
+    let back = c.add(Term.UAdd(pred, one), sp).unwrap()
+    assert(c.equal(back, k, DEPTH).unwrap(), "(k - 1) + 1 is k")
+    let k2 = c.add(Term.UAdd(k, two), sp).unwrap()
+    let k1 = c.add(Term.UAdd(k, one), sp).unwrap()
+    let less = c.add(Term.USub(k2, one, p), sp).unwrap()
+    assert(c.equal(less, k1, DEPTH).unwrap(), "(k + 2) - 1 is k + 1")
+    let other = c.add(Term.UAdd(pred, m), sp).unwrap()
+    assert(!c.equal(other, k, DEPTH).unwrap(), "no cancellation without the subtrahend")
+    let again = c.add(Term.USub(k, one, q), sp).unwrap()
+    assert(c.equal(pred, again, DEPTH).unwrap(), "evidence is irrelevant")
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    let closed = c.add(Term.USub(three, two, p), sp).unwrap()
+    assert(c.equal(closed, one, DEPTH).unwrap(), "closed subtraction computes")
+}
+
+#[test]
+fn subtraction_needs_evidence_of_its_bound() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    // 0 - 1 with evidence of Lt(0, 1) instead of Lt(1, 0 + 1).
+    let wrong = c.add(Term.Decide(zero, one), sp).unwrap()
+    let value = c.add(Term.USub(zero, one, wrong), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "bad".to_string(),
+        ty: u,
+        value,
+        exported: false,
+        span: sp
+    })
+    assert(c.check().is_err(), "0 - 1 has no evidence")
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let two = c.add(Term.Natural(2), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let ok = c.add(Term.Decide(one, two), sp).unwrap()
+    let value = c.add(Term.USub(one, one, ok), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "good".to_string(),
+        ty: u,
+        value,
+        exported: false,
+        span: sp
+    })
+    c.check().unwrap()
+    assert(c.equal(value, zero, DEPTH).unwrap(), "1 - 1 is 0")
+}
+
+#[test]
+fn zero_is_least() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let value = c.add(Term.ZeroLe(zero), sp).unwrap()
+    let ty = c.add(Term.Lt(zero, one), sp).unwrap()
+    c.definitions.push(Definition { name: "z".to_string(), ty, value, exported: false, span: sp })
+    c.check().unwrap()
+    for term in [Term.USub(0, 0, 1), Term.ZeroLe(0)] {
+        var c = Core.new()
+        c.add(term.clone(), sp).unwrap()
+        assert(c.check().is_err(), "subtraction terms obey graph integrity")
+    }
+}
+
+#[test]
+fn cancellation_keeps_the_evaluation_it_removes() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let k = c.add(Term.Var(0), sp).unwrap()
+    let p = c.add(Term.Var(1), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    // (k + 1) - 1 is k, but k + 1 can overflow: it is still evaluated.
+    let k1 = c.add(Term.UAdd(k, one), sp).unwrap()
+    let value = c.add(Term.USub(k1, one, p), sp).unwrap()
+    let normal = c.normal(value, DEPTH).unwrap()
+    let Strict(first, rest) = c.term(normal) else { panic("the cancelled sum is kept") }
+    assert(c.equal(first, k1, DEPTH).unwrap() && c.term(rest) == Term.Var(0), "then k")
+    assert(c.equal(normal, k, DEPTH).unwrap(), "and it is k")
+    // (k - 1) + 1 removes only the literal 1, which cannot trap.
+    let pred = c.add(Term.USub(k, one, p), sp).unwrap()
+    let back = c.add(Term.UAdd(pred, one), sp).unwrap()
+    let normal = c.normal(back, DEPTH).unwrap()
+    assert(c.term(normal) == Term.Var(0), "nothing to keep")
 }

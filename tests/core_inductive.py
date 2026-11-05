@@ -160,12 +160,14 @@ export fn path_cost(b: u64) -> i64 {
         "relevant-parameter": "(def bad (pi r (Reach 0) I64) (lam r (Reach 0) (int 0)))",
         "dead-branch": "(export bad I64 (if-eq 0 0 e (int 7) (app node 3 (step 2 3 at_two e12))))",
     }
-    # Constructor types are checked after normalization: an occurrence
-    # that beta reduction removes is no occurrence.
-    reducible = temporary / "inductive-reducible.jhc"
-    reducible.write_text(core_prefix + "(inductive Ok 1 (ok (pi0 h (Ok 0) (Ok (app (lam x Prop 0) (Ok 0))))))\n"
-                         "(export good I64 (int 0))\n")
-    command("check", reducible, source=False)
+    # Constructor types are checked as written, before normalization: an
+    # occurrence that beta reduction would remove is still rejected, and
+    # so is false evidence that cancellation would remove.
+    for name, text in (("reducible", "(inductive Ok 1 (ok (pi0 h (Ok 0) (Ok (app (lam x Prop 0) (Ok 0))))))"),
+                       ("cancelled", "(inductive Ok 1 (ok (Ok (uadd (usub 0 1 (decide-lt 0 1)) 1))))")):
+        path = temporary / f"inductive-{name}.jhc"
+        path.write_text(core_prefix + text + "\n(export good I64 (int 0))\n")
+        command("check", path, source=False, success=False)
     deep = "start"
     for _ in range(150):
         deep = f"(same 0 0 {deep} (refl 0))"

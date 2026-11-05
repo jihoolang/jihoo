@@ -1,0 +1,36 @@
+// Subtraction on indices. sub(a, b, p) needs evidence p of b <= a,
+// written Lt(b, a + 1), and is then subtraction in the naturals: it
+// never underflows. Conversion cancels it: (k - 1) + 1 is k and
+// (n - (i + 1)) + (i + 1) is n. `mirror` proves n - (i + 1) < n for
+// i < n, so `reversed` reads an array backwards, and `last(k)` loads
+// xs[k - 1] for 1 <= k <= 4, with no bounds checks. main returns 143.
+#![dependent_core]
+
+// n - (i + 1) is at most n - 1: d < d + (i + 1), which is n.
+fn mirror(i: u64, n: u64, p: erased(Lt(i, n))) -> Lt(sub(n, i + 1, lt_add(i, n, 1, p)), n) {
+    lt_add(0, i + 1, sub(n, i + 1, lt_add(i, n, 1, p)), zero_le(i))
+}
+
+fn reversed(n: u64, xs: [i64; n], ys: [i64; n]) -> i64 {
+    fold(n, 0, fn(i, p, acc) {
+        acc + index(xs, i, p) * index(ys, sub(n, i + 1, lt_add(i, n, 1, p)), mirror(i, n, p))
+    })
+}
+
+export fn convolve(x: i64) -> i64 { reversed(3, [1, 2, 3], [x, 10, 100]) }
+
+fn pred(k: u64, p: erased(Lt(0, k))) -> u64 { sub(k, 1, lt_add(0, k, 1, p)) }
+
+// k - 1 < k, since (k - 1) + 1 is k.
+fn pred_lt(k: u64, p: erased(Lt(0, k))) -> Lt(pred(k, p), k) {
+    lt_add(0, 1, pred(k, p), decide_lt(0, 1))
+}
+
+export fn last(k: u64) -> i64 {
+    if_lt(0, k, fn(p) { if_lt(k, 5, fn(q) {
+        index([10, 20, 30, 40], pred(k, p), lt_le(pred(k, p), k, 4, pred_lt(k, p), q))
+    }, -1) }, -1)
+}
+
+fn main() -> i64 { last(2) + convolve(1) }
+// exit: 143

@@ -407,8 +407,15 @@ in a loop, sums a prefix after one comparison and loads at a computed
 differential execution, u64 traps, 18 source and 7 core rejections and
 kernel tests run in the `core` suite.
 
-Next: u64 subtraction with evidence, dependent motives, inductive data
-types,
+Implemented subtraction: `sub(a, b, p)` needs evidence of `b <= a` and
+never underflows; conversion cancels it (`(k - 1) + 1` is `k`) with
+proof irrelevance, and `zero_le(a)` gives the lower bound 0.
+`examples/core_sub.jh` reads arrays backwards and loads `xs[k - 1]`,
+with no bounds checks. Both frontends, both targets, native differential
+execution, 14 source and 5 core rejections and kernel tests run in the
+`core` suite.
+
+Next: dependent motives, inductive data types,
 erased indices and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering

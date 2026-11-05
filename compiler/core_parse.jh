@@ -49,7 +49,8 @@ fn form_head(s: str) -> bool {
         s == "Type" || s == "int" || s == "array" || s == "index" || s == "induct" ||
         s == "inductive" || s == "def" || s == "export" || s == "if-lt" ||
         s == "if-eq" || s == "decide-lt" || s == "add" || s == "sub" || s == "mul" ||
-        s == "fold" || s == "uadd" || s == "lt-add" || s == "lt-cancel" || s == "lt-le"
+        s == "fold" || s == "uadd" || s == "lt-add" || s == "lt-cancel" || s == "lt-le" ||
+        s == "usub" || s == "zero-le"
 }
 
 struct Parser {
@@ -198,6 +199,13 @@ impl Parser {
             let op = if kind == "add" { core.Arith.Add }
             else if kind == "sub" { core.Arith.Sub } else { core.Arith.Mul }
             core.Term.Arith(op, a, b)
+        } else if kind == "usub" {
+            let a = self.expr(depth - 1)?
+            let b = self.expr(depth - 1)?
+            let p = self.expr(depth - 1)?
+            core.Term.USub(a, b, p)
+        } else if kind == "zero-le" {
+            core.Term.ZeroLe(self.expr(depth - 1)?)
         } else if kind == "uadd" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?

@@ -89,6 +89,7 @@ the runner. Its suites:
   overflow traps and loop bounds checked against array lengths.
   `tests/core_order.py` adds u64 addition and the order rules: computed
   indices, prefixes, u64 traps and rules with wrong premises.
+  `tests/core_sub.py` adds subtraction with evidence and its cancellation.
 - **examples**: the programs in `examples/` build and run.
 - **backend**: the C ABI (`tests/run/ffi.jh` and `ffi_aggregates.jh`) at
   `-O0` to `-O3` with

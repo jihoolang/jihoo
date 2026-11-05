@@ -148,6 +148,13 @@ def evaluate(term, env):
         # A sum of naturals; the compiled program traps beyond U64.
         assert a + b < (1 << 64), ("overflow", a, b)
         return a + b
+    if head == "usub":
+        a, b, proof = (evaluate(x, env) for x in args)
+        assert proof == (b, a + 1) and b <= a
+        return a - b
+    if head == "zero-le":
+        a = evaluate(args[0], env)
+        return (0, a + 1)
     if head in ("lt-add", "lt-cancel"):
         a, b, c, proof = (evaluate(x, env) for x in args)
         shifted = (a + c, b + c)
@@ -432,6 +439,8 @@ def main():
         validate_loop(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_order import validate_order
         validate_order(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_sub import validate_sub
+        validate_sub(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

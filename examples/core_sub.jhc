@@ -1,0 +1,36 @@
+; Subtraction with evidence of b <= a, cancellation in conversion and
+; zero-le, for reading arrays backwards and loading at k - 1.
+(def mirror
+  (pi i U64 (pi n U64 (pi0 p (Lt i n)
+    (Lt (usub n (uadd i 1) (lt-add i n 1 p)) n))))
+  (lam i U64 (lam n U64 (lam0 p (Lt i n)
+    (lt-add 0 (uadd i 1) (usub n (uadd i 1) (lt-add i n 1 p)) (zero-le i))))))
+
+(def reversed
+  (pi n U64 (pi xs (Array n) (pi ys (Array n) I64)))
+  (lam n U64 (lam xs (Array n) (lam ys (Array n)
+    (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64
+      (add acc (mul (index xs i p)
+        (index ys (usub n (uadd i 1) (lt-add i n 1 p)) (app mirror i n p))))))))))))
+
+(export convolve
+  (pi x I64 I64)
+  (lam x I64 (app reversed 3 (array (int 1) (int 2) (int 3)) (array x (int 10) (int 100)))))
+
+(def pred
+  (pi k U64 (pi0 p (Lt 0 k) U64))
+  (lam k U64 (lam0 p (Lt 0 k) (usub k 1 (lt-add 0 k 1 p)))))
+
+(def pred_lt
+  (pi k U64 (pi0 p (Lt 0 k) (Lt (app pred k p) k)))
+  (lam k U64 (lam0 p (Lt 0 k) (lt-add 0 1 (app pred k p) (decide-lt 0 1)))))
+
+(export last
+  (pi k U64 I64)
+  (lam k U64
+    (if-lt 0 k p
+      (if-lt k 5 q
+        (index (array (int 10) (int 20) (int 30) (int 40)) (app pred k p)
+          (lt-le (app pred k p) k 4 (app pred_lt k p) q))
+        (int -1))
+      (int -1))))

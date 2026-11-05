@@ -193,7 +193,9 @@ sums arrays of any length with `fold`, whose body has a proof of its
 index's bound, so the loads have no bounds checks. In the
 [order example](examples/core_order.jh), u64 indices are natural numbers
 whose `+` traps instead of wrapping; three kernel rules of their order
-justify loads at `i + 1` and over prefixes. General `.jh` coverage,
+justify loads at `i + 1` and over prefixes, and the
+[subtraction example](examples/core_sub.jh) reads arrays backwards with
+`sub(n, i + 1, p)`, whose evidence shows it cannot underflow. General `.jh` coverage,
 dependent motives, inductive data, mutable memory and proofs of the new kernel, elaboration and
 lowering remain required before this replaces the existing verifier.
 
