@@ -43,6 +43,14 @@ fn ident(s: str) -> bool {
     s != "U64" && s != "I64" && s != "Prop"
 }
 
+fn form_head(s: str) -> bool {
+    s == "pi" || s == "pi0" || s == "lam" || s == "lam0" || s == "app" ||
+        s == "Array" || s == "refl" || s == "transport" || s == "Eq" || s == "Lt" ||
+        s == "Type" || s == "int" || s == "array" || s == "index" || s == "induct" ||
+        s == "inductive" || s == "def" || s == "export" || s == "if-lt" ||
+        s == "if-eq" || s == "decide-lt"
+}
+
 struct Parser {
     tokens: Vec(Token)
     pos: i64
@@ -86,6 +94,43 @@ impl Parser {
         Ok(token.text.clone())
     }
 
+    fn resolve(self, word: str) -> Option(core.Term) {
+        var i = self.names.len()
+        while i > 0 {
+            i -= 1
+            if self.names[i] == word {
+                return Some(core.Term.Var((self.names.len() - 1 - i) as u32))
+            }
+        }
+        for i, d in self.core.definitions {
+            if d.name == word { return Some(core.Term.Global(i as u32)) }
+        }
+        for f, family in self.core.families {
+            if family.name == word { return Some(core.Term.Ind(f as u32, Vec(u32).new())) }
+            for k, constructor in family.constructors {
+                if constructor.name == word {
+                    return Some(core.Term.Con(f as u32, k as u32, Vec(u32).new()))
+                }
+            }
+        }
+        None
+    }
+
+    fn unique(self, name: str, span: diag.Span) -> Result((), diag.Diag) {
+        if self.resolve(name).is_some() {
+            return Err(diag.Diag.new(span, "core: duplicate name"))
+        }
+        Ok(())
+    }
+
+    fn declaration_name(inout self) -> Result(String, diag.Diag) {
+        let span = if self.pos < self.tokens.len() { self.tokens[self.pos].span } else { self.end }
+        let name = self.name()?
+        if form_head(name.as_str()) { return Err(diag.Diag.new(span, "core: reserved form name")) }
+        self.unique(name.as_str(), span)?
+        Ok(name)
+    }
+
     fn expr(inout self, depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(self.error("nesting limit reached")) }
         let token = self.take()?
@@ -96,21 +141,7 @@ impl Parser {
             else if word == "I64" { core.Term.I64 }
             else if word == "Prop" { core.Term.Prop }
             else {
-                var found: Option(core.Term) = None
-                var i = self.names.len()
-                while i > 0 {
-                    i -= 1
-                    if self.names[i] == word {
-                        found = Some(core.Term.Var((self.names.len() - 1 - i) as u32))
-                        break
-                    }
-                }
-                if found.is_none() {
-                    for i, d in self.core.definitions {
-                        if d.name == word { found = Some(core.Term.Global(i as u32)); break }
-                    }
-                }
-                match found {
+                match self.resolve(word) {
                     Some(t) => t
                     None => {
                         let n = natural(word)
@@ -146,21 +177,20 @@ impl Parser {
             return Ok(f)
         } else if kind == "Array" {
             core.Term.Array(self.expr(depth - 1)?)
-        } else if kind == "chain-refl" {
-            core.Term.ChainRefl(self.expr(depth - 1)?)
-        } else if kind == "chain-step" {
-            let a = self.expr(depth - 1)?
-            let b = self.expr(depth - 1)?
-            let c = self.expr(depth - 1)?
-            let e = self.expr(depth - 1)?
-            let tail = self.expr(depth - 1)?
-            core.Term.ChainStep(a, b, c, e, tail)
-        } else if kind == "chain-induct" {
-            let p = self.expr(depth - 1)?
-            let base = self.expr(depth - 1)?
-            let step = self.expr(depth - 1)?
-            let chain = self.expr(depth - 1)?
-            core.Term.ChainInd(p, base, step, chain)
+        } else if kind == "induct" {
+            let name = self.name()?
+            var family: Option(u32) = None
+            for f, declared in self.core.families {
+                if declared.name == name { family = Some(f as u32); break }
+            }
+            let Some(f) = family else { return Err(self.error("unknown inductive family")) }
+            let motive = self.expr(depth - 1)?
+            var arguments = Vec(u32).new()
+            while !self.at(")") { arguments.push(self.expr(depth - 1)?) }
+            let Some(evidence) = arguments.pop() else {
+                return Err(self.error("induct needs evidence"))
+            }
+            core.Term.Elim(f, motive, arguments, evidence)
         } else if kind == "refl" {
             core.Term.Refl(self.expr(depth - 1)?)
         } else if kind == "transport" {
@@ -168,11 +198,10 @@ impl Parser {
             let e = self.expr(depth - 1)?
             let p = self.expr(depth - 1)?
             core.Term.Transport(family, e, p)
-        } else if kind == "EqChain" || kind == "Eq" || kind == "Lt" || kind == "decide-lt" {
+        } else if kind == "Eq" || kind == "Lt" || kind == "decide-lt" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?
-            if kind == "EqChain" { core.Term.EqChain(a, b) }
-            else if kind == "Eq" { core.Term.Eq(a, b) }
+            if kind == "Eq" { core.Term.Eq(a, b) }
             else if kind == "Lt" { core.Term.Lt(a, b) } else { core.Term.Decide(a, b) }
         } else if kind == "Type" {
             let n = self.take()?
@@ -210,7 +239,21 @@ impl Parser {
             let no = self.expr(depth - 1)?
             if kind == "if-eq" { core.Term.IfEq(a, b, yes, no) }
             else { core.Term.IfLt(a, b, yes, no) }
-        } else { return Err(diag.Diag.new(head.span, "core: unknown term constructor")) }
+        } else {
+            let Some(named) = self.resolve(kind) else {
+                return Err(diag.Diag.new(head.span, "core: unknown term constructor"))
+            }
+            var arguments = Vec(u32).new()
+            while !self.at(")") { arguments.push(self.expr(depth - 1)?) }
+            match named {
+                Ind(f, _) => core.Term.Ind(f, arguments)
+                Con(f, k, _) => core.Term.Con(f, k, arguments)
+                _ => return Err(diag.Diag.new(
+                    head.span,
+                    "core: use (app f x ...) to apply a function"
+                ))
+            }
+        }
         self.expect(")")?
         self.core.add(term, sp)
     }
@@ -218,15 +261,37 @@ impl Parser {
     fn definition(inout self) -> Result((), diag.Diag) {
         self.expect("(")?
         let mode = self.take()?
+        if mode.text == "inductive" {
+            let name = self.declaration_name()?
+            let arity = self.take()?
+            let Some(n) = natural(arity.text.as_str()) else {
+                return Err(diag.Diag.new(arity.span, "core: invalid inductive arity"))
+            }
+            if n > 0xffffffff { return Err(diag.Diag.new(
+                arity.span,
+                "core: invalid inductive arity"
+            )) }
+            let f = self.core.families.len()
+            self.core.families.push(core.Family { name, arity: n as u32,
+                constructors: Vec(core.Constructor).new(),
+                globals: self.core.definitions.len() as u32, span: mode.span })
+            while !self.at(")") {
+                self.expect("(")?
+                let name = self.declaration_name()?
+                let ty = self.expr(core.DEPTH)?
+                self.expect(")")?
+                self.core.families[f].constructors.push(core.Constructor { name, ty })
+            }
+            self.expect(")")?
+            return Ok(())
+        }
         let exported = mode.text == "export"
         if !exported && mode.text != "def" { return Err(diag.Diag.new(
             mode.span,
-            "core: expected def or export"
+            "core: expected def, export or inductive"
         )) }
         let name = self.name()?
-        for d in self.core.definitions {
-            if d.name == name { return Err(diag.Diag.new(mode.span, "core: duplicate definition")) }
-        }
+        self.unique(name.as_str(), mode.span)?
         let ty = self.expr(core.DEPTH)?
         let value = self.expr(core.DEPTH)?
         self.expect(")")?

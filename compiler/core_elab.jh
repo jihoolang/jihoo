@@ -1,7 +1,9 @@
 // Explicit .jh subset -> the existing dependent core, directly from AST.
 // Contextual forms use the ordinary parser: erased(P), if_lt(a, b,
 // fn(p) { yes }, no), index(xs, i, p), decide_lt(a, b), Eq, refl,
-// if_eq, proposition-only transport and indexed chain induction.
+// if_eq, proposition-only transport, inductive propositions declared as
+// `trait Name(i: u64, ...) { fn ctor(...) -> Name(...) }` and their
+// structural induction, `induct(P, case..., evidence)`.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -17,8 +19,7 @@ fn error(sp: diag.Span, message: str) -> diag.Diag {
 }
 
 fn reserved(name: str) -> bool {
-    name == "erased" || name == "Lt" || name == "Eq" || name == "EqChain" ||
-        name == "chain_refl" || name == "chain_step" || name == "chain_induct" || name == "if_lt" ||
+    name == "erased" || name == "Lt" || name == "Eq" || name == "induct" || name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
         name == "__jihoo_dependent_main"
@@ -53,6 +54,40 @@ impl Elaborator {
         Err(error(sp, ("unknown name (or recursive/forward definition): " + name).as_str()))
     }
 
+    fn find_family(self, name: str) -> Option(u32) {
+        for i, f in self.c.families { if f.name == name { return Some(i as u32) } }
+        None
+    }
+
+    fn find_constructor(self, name: str) -> Option((u32, u32)) {
+        for i, f in self.c.families {
+            for k, c in f.constructors { if c.name == name { return Some((i as u32, k as u32)) } }
+        }
+        None
+    }
+
+    fn taken(self, name: str) -> bool {
+        for d in self.c.definitions { if d.name == name { return true } }
+        self.find_family(name).is_some() || self.find_constructor(name).is_some()
+    }
+
+    // A family applied to U64 index expressions.
+    fn indexed(
+        inout self,
+        f: u32,
+        args: [ast.Expr],
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if args.len != self.c.families[f as i64].arity as i64 {
+            return Err(error(sp, "wrong number of family indices"))
+        }
+        let u = self.u64(sp)?
+        var xs = Vec(u32).new()
+        for a in args { xs.push(self.expr(a, Some(u), depth - 1)?) }
+        self.c.add(core.Term.Ind(f, xs), sp)
+    }
+
     fn u64(inout self, sp: diag.Span) -> Result(u32, diag.Diag) {
         self.c.add(core.Term.U64, sp)
     }
@@ -67,15 +102,27 @@ impl Elaborator {
                     e.span,
                     "unsupported type"
                 )) }
-                if (n != "Lt" && n != "Eq" && n != "EqChain") || args.len() != 2 {
-                    return Err(error(e.span, "expected Lt(i, n), Eq(a, b) or EqChain(a, b)"))
+                match self.find_family(n.as_str()) {
+                    Some(family) => return self.indexed(family, args.as_slice(), e.span, depth)
+                    None => {}
+                }
+                if (n != "Lt" && n != "Eq") || args.len() != 2 {
+                    return Err(error(
+                        e.span,
+                        "expected Lt(i, n), Eq(a, b) or a declared proposition"
+                    ))
                 }
                 let u = self.u64(e.span)?
                 let a = self.expr(args[0], Some(u), depth - 1)?
                 let b = self.expr(args[1], Some(u), depth - 1)?
-                let proposition = if n == "EqChain" { core.Term.EqChain(a, b) }
-                else if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(a, b) }
+                let proposition = if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(a, b) }
                 self.c.add(proposition, e.span)
+            }
+            Name(n) => {
+                let Some(family) = self.find_family(n.as_str()) else {
+                    return Err(error(e.span, "unsupported type in dependent_core"))
+                }
+                self.indexed(family, [], e.span, depth)
             }
             _ => Err(error(e.span, "unsupported type in dependent_core"))
         }
@@ -86,21 +133,25 @@ impl Elaborator {
         match t.kind {
             Path(path, args) if path.len() == 1 => {
                 let n = path[0].as_str()
+                match self.find_family(n) {
+                    Some(family) => return match args {
+                        Some(args) => self.indexed(family, args.as_slice(), t.span, depth)
+                        None => self.indexed(family, [], t.span, depth)
+                    }
+                    None => {}
+                }
                 match args {
                     None => {
                         if n == "u64" { return self.u64(t.span) }
                         if n == "i64" { return self.c.add(core.Term.I64, t.span) }
                     }
                     Some(args) => {
-                        if (n == "Lt" || n == "Eq" || n == "EqChain") && args.len() == 2 {
+                        if (n == "Lt" || n == "Eq") && args.len() == 2 {
                             let u = self.u64(t.span)?
                             let a = self.expr(args[0], Some(u), depth - 1)?
                             let b = self.expr(args[1], Some(u), depth - 1)?
-                            let proposition = if n == "EqChain" { core.Term.EqChain(a, b) }
-                            else if n == "Eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
-                                a,
-                                b
-                            ) }
+                            let proposition = if n == "Eq" { core.Term.Eq(a, b) }
+                            else { core.Term.Lt(a, b) }
                             return self.c.add(proposition, t.span)
                         }
                     }
@@ -314,39 +365,63 @@ impl Elaborator {
                     let p = self.expr(args[2], None, depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
                 }
-                if n == "chain_refl" {
-                    if args.len() != 1 { return Err(error(
+                if n == "induct" {
+                    if args.len() < 2 { return Err(error(
                         sp,
-                        "chain_refl requires one U64 argument"
+                        "induct requires a motive, one case per constructor and evidence"
                     )) }
-                    let u = self.u64(sp)?
-                    let a = self.expr(args[0], Some(u), depth - 1)?
-                    return self.c.add(core.Term.ChainRefl(a), sp)
+                    let evidence = self.expr(args[args.len() - 1], None, depth - 1)?
+                    let ty = self.c.infer(evidence, self.ctx.as_slice(), true, core.DEPTH)?
+                    let ty = self.c.normal(ty, core.DEPTH)?
+                    let core.Term.Ind(f, _) = self.c.term(ty) else {
+                        return Err(error(
+                            args[args.len() - 1].span,
+                            "induct requires evidence of a declared proposition"
+                        ))
+                    }
+                    let count = self.c.families[f as i64].constructors.len()
+                    if args.len() != count + 2 { return Err(error(
+                        sp,
+                        "induct requires one case per constructor"
+                    )) }
+                    let p = self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)?
+                    var cases = Vec(u32).new()
+                    for k in 0..count {
+                        let expected = self.c.case_type(f, k as u32, p, sp, core.DEPTH)?
+                        // Fields, then one hypothesis per recursive field.
+                        var arity = 0
+                        var rest = self.c.normal(expected, core.DEPTH)?
+                        loop {
+                            let core.Term.Pi(_, _, inner) = self.c.term(rest) else { break }
+                            arity += 1
+                            rest = inner
+                        }
+                        cases.push(self.proof_case(args[k + 1], expected, arity, depth - 1)?)
+                    }
+                    return self.c.add(core.Term.Elim(f, p, cases, evidence), sp)
                 }
-                if n == "chain_step" {
-                    if args.len() != 5 { return Err(error(
-                        sp,
-                        "chain_step requires three indices, equality and tail"
-                    )) }
-                    let u = self.u64(sp)?
-                    let a = self.expr(args[0], Some(u), depth - 1)?
-                    let b = self.expr(args[1], Some(u), depth - 1)?
-                    let c = self.expr(args[2], Some(u), depth - 1)?
-                    let e = self.expr(args[3], None, depth - 1)?
-                    let tail = self.expr(args[4], None, depth - 1)?
-                    return self.c.add(core.Term.ChainStep(a, b, c, e, tail), sp)
-                }
-                if n == "chain_induct" {
-                    if args.len() != 4 { return Err(error(
-                        sp,
-                        "chain_induct requires motive, base, step and chain"
-                    )) }
-                    let p = self.family(args[0], 2, depth - 1)?
-                    let (base_ty, step_ty) = self.c.chain_case_types(p, sp, core.DEPTH)?
-                    let base = self.proof_case(args[1], base_ty, 1, depth - 1)?
-                    let step = self.proof_case(args[2], step_ty, 6, depth - 1)?
-                    let chain = self.expr(args[3], None, depth - 1)?
-                    return self.c.add(core.Term.ChainInd(p, base, step, chain), sp)
+                match self.find_constructor(n.as_str()) {
+                    Some((f, k)) => {
+                        // Constructors are fully applied; each field is
+                        // elaborated against the telescope instantiated so far.
+                        var ty = self.c.families[f as i64].constructors[k as i64].ty
+                        var fields = Vec(u32).new()
+                        for a in args {
+                            let normal = self.c.normal(ty, core.DEPTH)?
+                            let core.Term.Pi(_, domain, result) = self.c.term(normal) else {
+                                return Err(error(sp, "too many constructor arguments"))
+                            }
+                            let field = self.expr(a, Some(domain), depth - 1)?
+                            fields.push(field)
+                            ty = self.c.substitute(result, field, core.DEPTH)?
+                        }
+                        let normal = self.c.normal(ty, core.DEPTH)?
+                        let core.Term.Ind(_, _) = self.c.term(normal) else {
+                            return Err(error(sp, "a constructor requires all of its fields"))
+                        }
+                        return self.c.add(core.Term.Con(f, k, fields), sp)
+                    }
+                    None => {}
                 }
                 if n == "refl" {
                     if args.len() != 1 { return Err(error(sp, "refl requires one U64 argument")) }
@@ -396,10 +471,94 @@ impl Elaborator {
         }
     }
 
+    // `trait Name(i: u64, ...) { fn ctor(fields) -> Name(indices) }` declares
+    // an inductive proposition. Its constructor signatures are elaborated
+    // with the family already in scope; the kernel checks positivity.
+    fn inductive(inout self, item: ast.Item, t: ast.TraitDecl) -> Result((), diag.Diag) {
+        if item.attrs.len() != 0 || t.supertraits.len() != 0 { return Err(error(
+            item.span,
+            "inductive propositions have no attributes or supertraits"
+        )) }
+        if reserved(t.name.as_str()) || self.taken(t.name.as_str()) {
+            return Err(error(item.span, "duplicate or reserved proposition name"))
+        }
+        for i, p in t.params {
+            let valid = match p.ty {
+                Some(ty) => match ty.kind { Path(path, None) => path.len() == 1 && path[0] == "u64", _ => false }
+                None => false
+            }
+            // The parser marks a trait's parameters compile-time ones.
+            let mode = p.mode == ast.Mode.Let || p.mode == ast.Mode.Comptime
+            if !mode || p.bounds.len() != 0 || !valid || reserved(p.name.as_str()) {
+                return Err(error(p.span, "inductive propositions are indexed by u64 parameters"))
+            }
+            for j in 0..i {
+                if t.params[j].name == p.name { return Err(error(p.span, "duplicate index")) }
+            }
+        }
+        let f = self.c.families.len() as u32
+        self.c.families.push(core.Family {
+            name: t.name.clone(),
+            arity: t.params.len() as u32,
+            constructors: Vec(core.Constructor).new(),
+            globals: self.c.definitions.len() as u32,
+            span: item.span
+        })
+        for it in t.items {
+            let ast.ItemKind.Fn(c) = it.kind else { return Err(error(
+                it.span,
+                "inductive propositions contain only constructor signatures"
+            )) }
+            let ast.RetMode.Value = c.ret_mode else { return Err(error(
+                it.span,
+                "borrowed results are unsupported"
+            )) }
+            let normal = match c.kind { Normal => true, _ => false }
+            if it.attrs.len() != 0 || c.is_unsafe || c.variadic || c.requires.len() != 0 ||
+                c.ensures.len() != 0 || c.body.is_some() || !normal {
+                return Err(error(it.span, "constructors are plain signatures without a body"))
+            }
+            if reserved(c.name.as_str()) || self.taken(c.name.as_str()) {
+                return Err(error(c.name_span, "duplicate or reserved constructor name"))
+            }
+            var domains = Vec((bool, u32)).new()
+            for p in c.params {
+                if p.mode != ast.Mode.Let || p.bounds.len() != 0 || reserved(p.name.as_str()) {
+                    return Err(error(p.span, "constructor fields are u64 values or erased(P)"))
+                }
+                for name in self.names {
+                    if name == p.name { return Err(error(p.span, "duplicate field")) }
+                }
+                let Some(ty) = p.ty else { return Err(error(p.span, "field needs an explicit type")) }
+                let (erased, domain) = self.domain(ty)?
+                domains.push((erased, domain))
+                self.push(p.name.as_str(), domain, erased)
+            }
+            let Some(ret) = c.ret else { return Err(error(it.span, "constructor needs its result")) }
+            var ty = self.ty(ret, core.DEPTH)?
+            var i = domains.len()
+            while i > 0 {
+                i -= 1
+                let (erased, domain) = domains[i]
+                ty = self.c.add(core.Term.Pi(erased, domain, ty), it.span)?
+                self.pop()
+            }
+            self.c.families[f as i64].constructors.push(core.Constructor {
+                name: c.name.clone(),
+                ty
+            })
+        }
+        self.c.check()
+    }
+
     fn definition(inout self, item: ast.Item, entry: bool) -> Result((), diag.Diag) {
+        match item.kind {
+            Trait(t) => return self.inductive(item, t)
+            _ => {}
+        }
         let ast.ItemKind.Fn(f) = item.kind else { return Err(error(
             item.span,
-            "dependent_core supports only function definitions"
+            "dependent_core supports only function definitions and inductive propositions"
         )) }
         if item.attrs.len() != 0 || f.is_unsafe || f.variadic || f.requires.len() != 0 ||
             f.ensures.len() != 0 { return Err(error(
@@ -428,9 +587,7 @@ impl Elaborator {
             f.name_span,
             "reserved dependent_core name"
         )) }
-        for d in self.c.definitions {
-            if d.name == f.name { return Err(error(f.name_span, "duplicate definition")) }
-        }
+        if self.taken(f.name.as_str()) { return Err(error(f.name_span, "duplicate definition")) }
         var domains = Vec((bool, u32)).new()
         for p in f.params {
             if p.mode != ast.Mode.Let || p.bounds.len() != 0 { return Err(error(

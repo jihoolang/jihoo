@@ -1,0 +1,53 @@
+// Inductive propositions declared in the program itself. `Edge` lists
+// the edges of a small graph and `Reach` the nodes reachable from 0, by
+// paths of any length. `reach_bound` proves by structural induction that
+// every reachable node is below 3, so `node` loads from a length-3 array
+// with no bounds check. The evidence is checked, then erased: `cost`
+// keeps only its real comparisons. It exports cost(b) and returns 30.
+#![dependent_core]
+
+trait Edge(a: u64, b: u64) {
+    fn e01() -> Edge(0, 1)
+    fn e12() -> Edge(1, 2)
+    fn e02() -> Edge(0, 2)
+}
+
+trait Reach(b: u64) {
+    fn start() -> Reach(0)
+    fn step(a: u64, b: u64, r: erased(Reach(a)), e: erased(Edge(a, b))) -> Reach(b)
+    fn same(a: u64, b: u64, r: erased(Reach(a)), e: erased(Eq(a, b))) -> Reach(b)
+}
+
+fn sym(a: u64, b: u64, e: erased(Eq(a, b))) -> Eq(b, a) {
+    transport(fn(k) { Eq(k, a) }, e, refl(a))
+}
+
+// Case analysis: one case per edge, no hypotheses.
+fn edge_bound(a: u64, b: u64, e: erased(Edge(a, b))) -> Lt(b, 3) {
+    induct(fn(x, y) { Lt(y, 3) }, decide_lt(1, 3), decide_lt(2, 3), decide_lt(2, 3), e)
+}
+
+// Induction: `same` uses the hypothesis for the path it extends.
+fn reach_bound(b: u64, r: erased(Reach(b))) -> Lt(b, 3) {
+    induct(
+        fn(x) { Lt(x, 3) },
+        decide_lt(0, 3),
+        fn(a, b, r, e, ih) { edge_bound(a, b, e) },
+        fn(a, b, r, e, ih) { transport(fn(k) { Lt(k, 3) }, e, ih) },
+        r
+    )
+}
+
+fn node(b: u64, r: erased(Reach(b))) -> i64 { index([10, 20, 30], b, reach_bound(b, r)) }
+
+fn at_one() -> Reach(1) { step(0, 1, start(), e01()) }
+
+fn at_two() -> Reach(2) { step(1, 2, at_one(), e12()) }
+
+export fn cost(b: u64) -> i64 {
+    if_eq(b, 2, fn(e) { node(b, same(2, b, at_two(), sym(b, 2, e))) },
+        if_eq(b, 1, fn(e) { node(b, same(1, b, at_one(), sym(b, 1, e))) }, -1))
+}
+
+fn main() -> i64 { cost(2) }
+// exit: 30

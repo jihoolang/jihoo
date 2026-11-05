@@ -38,10 +38,59 @@ def read_terms(text):
     return [read(token) for token in tokens]
 
 
+# Constructor name -> (family name, case index, field count, recursive positions).
+CONSTRUCTORS = {}
+FAMILIES = {}
+
+
+def definitions(text):
+    """Return (kind, name, type, body) tuples, registering inductives for evaluate.
+
+    Use this instead of read_terms when loading a program's definitions, including
+    from core_chain.py. Each call resets the module-level family/constructor tables;
+    evaluate the returned bodies in declaration order into the same environment.
+    """
+    CONSTRUCTORS.clear()
+    FAMILIES.clear()
+    result = []
+    for form in read_terms(text):
+        if form[0] != "inductive":
+            kind, name, ty, body = form
+            assert kind in ("def", "export")
+            result.append((kind, name, ty, body))
+            continue
+        _, family, arity, *constructors = form
+        FAMILIES[family] = int(arity)
+        for k, (name, ty) in enumerate(constructors):
+            fields, recursive = 0, []
+            while isinstance(ty, list) and ty[0] in ("pi", "pi0"):
+                _, _, domain, ty = ty
+                head = domain[0] if isinstance(domain, list) else domain
+                if head == family:
+                    recursive.append(fields)
+                fields += 1
+            CONSTRUCTORS[name] = (family, k, fields, tuple(recursive))
+    return result
+
+
+def constructor(name, fields):
+    family, k, count, _ = CONSTRUCTORS[name]
+    assert len(fields) == count
+    return ("con", family, k, tuple(fields))
+
+
 def evaluate(term, env):
     """An independent named-variable evaluator; the compiler uses de Bruijn terms."""
     if isinstance(term, str):
-        return int(term) if term.isdecimal() else env[term]
+        if term.isdecimal():
+            return int(term)
+        if term in env:
+            return env[term]
+        if term in CONSTRUCTORS:
+            return constructor(term, [])
+        if term in FAMILIES:
+            return ("ind", term)
+        raise AssertionError(f"unknown reference name {term}")
     head, *args = term
     if head in ("lam", "lam0"):
         name, _, body = args
@@ -69,28 +118,25 @@ def evaluate(term, env):
     if head == "if-eq":
         a, b = evaluate(args[0], env), evaluate(args[1], env)
         return evaluate(args[3], {**env, args[2]: ("eq", a, b)}) if a == b else evaluate(args[4], env)
-    if head == "EqChain":
-        a, b = (evaluate(x, env) for x in args)
-        return ("chain", a, b)
-    if head == "chain-refl":
-        return ("chain-refl", evaluate(args[0], env))
-    if head == "chain-step":
-        a, b, c, edge, tail = (evaluate(x, env) for x in args)
-        assert edge == ("eq", a, b) and a == b
-        endpoints = (tail[1], tail[1]) if tail[0] == "chain-refl" else (tail[1], tail[3])
-        assert endpoints == (b, c)
-        return ("chain-step", a, b, c, edge, tail)
-    if head == "chain-induct":
-        _, base, step, chain = (evaluate(x, env) for x in args)
+    if head == "induct":
+        family, _, *branches, evidence = args
+        cases = [evaluate(case, env) for case in branches]
+        metadata = {k: (count, recursive)
+                    for f, k, count, recursive in CONSTRUCTORS.values() if f == family}
 
         def fold(proof):
-            if proof[0] == "chain-refl":
-                return base(proof[1])
-            tag, a, b, c, edge, tail = proof
-            assert tag == "chain-step"
-            return step(a)(b)(c)(edge)(tail)(fold(tail))
+            tag, actual_family, k, fields = proof
+            assert tag == "con" and actual_family == family
+            count, recursive = metadata[k]
+            assert len(fields) == count
+            value = cases[k]
+            for field in fields:
+                value = value(field)
+            for position in recursive:
+                value = value(fold(fields[position]))
+            return value
 
-        return fold(chain)
+        return fold(evaluate(evidence, env))
     if head == "decide-lt":
         a, b = (evaluate(x, env) for x in args)
         assert a < b
@@ -102,6 +148,10 @@ def evaluate(term, env):
         array, index, proof = (evaluate(x, env) for x in args)
         assert proof == (index, len(array)) and 0 <= index < len(array)
         return array[index]
+    if head in CONSTRUCTORS:
+        return constructor(head, [evaluate(x, env) for x in args])
+    if head in FAMILIES:
+        return ("ind", head, *(evaluate(x, env) for x in args))
     raise AssertionError(f"unsupported reference term {head}")
 
 
@@ -280,7 +330,7 @@ export fn shadow(i: u64) -> i64 {
     path.write_text(source)
     core_path.write_text(core_source)
     reference = {}
-    for _, name, _, body in read_terms(core_source):
+    for _, name, _, body in definitions(core_source):
         reference[name] = evaluate(body, reference.copy())
     command("check", path, "--lib")
     source_mir = command("emit-mir", path, "--lib").stdout
@@ -348,9 +398,11 @@ def main():
 
         source_frontend(compiler, root, temporary, environment)
         from core_equality import validate_equality
-        validate_equality(compiler, root, temporary, environment, run, read_terms, evaluate)
+        validate_equality(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_chain import validate_chain
-        validate_chain(compiler, root, temporary, environment, run, read_terms, evaluate)
+        validate_chain(compiler, root, temporary, environment, run, definitions, evaluate)
+        from core_inductive import validate_inductive
+        validate_inductive(compiler, root, temporary, environment, run, definitions, evaluate)
 
         example = root / "examples/core_index.jhc"
         command("check", example)
@@ -389,6 +441,21 @@ def main():
             "i64-overflow": "(export bad I64 (int 9223372036854775808))",
             "i64-underflow": "(export bad I64 (int -9223372036854775809))",
             "duplicate": "(def same U64 1) (def same U64 2)",
+            "duplicate-family": "(inductive F 0) (inductive F 0)",
+            "definition-family": "(def F U64 0) (inductive F 0)",
+            "family-definition": "(inductive F 0) (def F U64 0)",
+            "constructor-family": "(inductive F 0 (C F)) (inductive C 0)",
+            "family-constructor": "(inductive F 0 (F F))",
+            "constructor-definition": "(inductive F 0 (C F)) (def C U64 0)",
+            "definition-constructor": "(def C U64 0) (inductive F 0 (C F))",
+            "duplicate-constructor": "(inductive F 0 (C F) (C F))",
+            "cross-family-constructor": "(inductive F 0 (C F)) (inductive G 0 (C G))",
+            "reserved-family": "(inductive pi 0)",
+            "reserved-constructor": "(inductive F 0 (refl F))",
+            "negative-arity": "(inductive F -1)",
+            "overflow-arity": "(inductive F 4294967296)",
+            "unknown-induct-family": "(def bad (Eq 0 0) (induct Missing (Eq 0 0) (refl 0)))",
+            "removed-chain-refl": "(def bad (Eq 0 0) (chain-refl 0))",
             "trailing": "(export good I64 (int 1)) )",
             "nesting": "(export bad U64 " + "(app (lam x U64 x) " * 140 + "0" + ")" * 140 + ")",
         }
@@ -439,7 +506,7 @@ def main():
         path = temporary / "program.jhc"
         path.write_text(source)
         reference = {}
-        for _, name, _, body in read_terms(source):
+        for _, name, _, body in definitions(source):
             reference[name] = evaluate(body, reference.copy())
         command("check", path)
         host = "aarch64" if platform.machine() in ("aarch64", "arm64") else "x86_64"

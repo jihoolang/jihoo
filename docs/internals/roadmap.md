@@ -370,8 +370,24 @@ indices/cases and raw kernel reduction. The supported inductive family is
 fixed in the kernel. General declarations and dependent elimination over
 chain evidence remain future work.
 
-Next: add user-declared strictly positive inductive propositions, general
-dependent induction, erased indices and broader lemma libraries;
+Implemented declared inductive propositions: in a marked module,
+`trait F(a: u64, ...) { fn c(...) -> F(...) }` declares a U64-indexed
+proposition whose bodiless signatures are its constructors, and
+`induct(P, case..., evidence)` eliminates it into a proposition family on
+its indices. The kernel checks constructor telescopes (u64 data fields,
+erased proof fields, the family only as a whole recursive field or the
+result) and derives each case's type and the reduction on recursive
+fields. The built-in `EqChain` and its four kernel terms are removed;
+`examples/core_chain.jh` declares the chain itself, so the trusted
+kernel has three general terms instead of a fixed family.
+`examples/core_inductive.jh` proves that nodes reachable along declared
+graph edges are in bounds and indexes an array with no bounds check.
+Both frontends, both targets at `-O0`/`-O2`, native differential
+execution, 52 source and 21 core rejections and raw kernel tests of
+positivity, ordering and elimination run in the `core` suite.
+
+Next: dependent motives, inductive data types, arithmetic on indices,
+erased indices and broader lemma libraries;
 cover owned/mutable memory;
 establish the kernel's soundness and elaboration/erasure/lowering
 preservation.

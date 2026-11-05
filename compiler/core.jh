@@ -3,8 +3,9 @@
 // or external proof checker participates in this path.
 //
 // This finite fragment has levelled universes, dependent functions,
-// immutable I64 arrays indexed by U64 lengths, Lt and U64 equality.
-// Equality and indexed chain induction eliminate only into Prop.
+// immutable I64 arrays indexed by U64 lengths, Lt, U64 equality and
+// declared U64-indexed inductive propositions. Equality and structural
+// induction eliminate only into Prop.
 // There is no general recursion, axiom,
 // unsafe operation or elimination of evidence into runtime data.
 // Erased binders must be propositions and cannot occur in runtime terms.
@@ -28,12 +29,13 @@ pub enum Term {
     Refl(u32)
     // P : U64 -> Prop, e : Eq a b, p : P a yields evidence of P b.
     Transport(u32, u32, u32)
-    EqChain(u32, u32)
-    ChainRefl(u32)
-    // Endpoints a,b,c, edge Eq a b, recursive tail EqChain b c.
-    ChainStep(u32, u32, u32, u32, u32)
-    // Motive U64 -> U64 -> Prop, base, step, chain evidence.
-    ChainInd(u32, u32, u32, u32)
+    // A declared inductive proposition applied to its U64 indices.
+    Ind(u32, Vec(u32))
+    // Family, constructor and all of the constructor's fields.
+    Con(u32, u32, Vec(u32))
+    // Family, motive (U64 -> ... -> Prop), one case per constructor and
+    // the evidence eliminated. Only into propositions.
+    Elim(u32, u32, Vec(u32), u32)
     Pi(bool, u32, u32)
     Lam(bool, u32, u32)
     App(u32, u32)
@@ -60,6 +62,36 @@ pub struct Definition {
     pub span: diag.Span
 }
 
+pub struct Constructor {
+    pub name: String
+    // A closed Pi telescope of U64 data and erased proof fields, ending
+    // in its own family. Checked by the kernel, never trusted.
+    pub ty: u32
+}
+
+// Families and definitions form one sequence: a family follows the first
+// `globals` definitions and may use them and earlier families.
+pub struct Family {
+    pub name: String
+    pub arity: u32
+    pub constructors: Vec(Constructor)
+    pub globals: u32
+    pub span: diag.Span
+}
+
+// Computed by the kernel from a checked constructor type.
+struct Field {
+    erased: bool
+    domain: u32
+    // Indices of a recursive field, the only place its family may occur.
+    recursive: Option(Vec(u32))
+}
+
+struct Signature {
+    fields: Vec(Field)
+    result: Vec(u32)
+}
+
 pub struct Binding {
     pub ty: u32
     pub erased: bool
@@ -68,13 +100,24 @@ pub struct Binding {
 pub struct Core {
     pub nodes: Vec(Node)
     pub definitions: Vec(Definition)
+    pub families: Vec(Family)
+    signatures: Vec(Vec(Signature))
     steps: i64
     visible: u32
+    visible_families: u32
 }
 
 impl Core {
     pub fn new() -> Core {
-        Core { nodes: Vec(Node).new(), definitions: Vec(Definition).new(), steps: 0, visible: 0 }
+        Core {
+            nodes: Vec(Node).new(),
+            definitions: Vec(Definition).new(),
+            families: Vec(Family).new(),
+            signatures: Vec(Vec(Signature)).new(),
+            steps: 0,
+            visible: 0,
+            visible_families: 0
+        }
     }
 
     pub fn error(self, id: u32, message: str) -> diag.Diag {
@@ -148,26 +191,19 @@ impl Core {
                 self.transform(f, cutoff, delta, replacement, depth - 1)?,
                 self.transform(e, cutoff, delta, replacement, depth - 1)?,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?)
-            EqChain(a, b) => Term.EqChain(self.transform(a, cutoff, delta, replacement, depth - 1)?,
-                self.transform(b, cutoff, delta, replacement, depth - 1)?)
-            ChainRefl(a) => Term.ChainRefl(self.transform(
-                a,
-                cutoff,
-                delta,
-                replacement,
-                depth - 1
-            )?)
-            ChainStep(a, b, c, e, tail) => Term.ChainStep(
-                self.transform(a, cutoff, delta, replacement, depth - 1)?,
-                self.transform(b, cutoff, delta, replacement, depth - 1)?,
-                self.transform(c, cutoff, delta, replacement, depth - 1)?,
-                self.transform(e, cutoff, delta, replacement, depth - 1)?,
-                self.transform(tail, cutoff, delta, replacement, depth - 1)?)
-            ChainInd(p, base, step, chain) => Term.ChainInd(
+            Ind(f, xs) => Term.Ind(
+                f,
+                self.transform_all(xs.as_slice(), cutoff, delta, replacement, depth)?
+            )
+            Con(f, k, xs) => Term.Con(
+                f,
+                k,
+                self.transform_all(xs.as_slice(), cutoff, delta, replacement, depth)?
+            )
+            Elim(f, p, cases, x) => Term.Elim(f,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?,
-                self.transform(base, cutoff, delta, replacement, depth - 1)?,
-                self.transform(step, cutoff, delta, replacement, depth - 1)?,
-                self.transform(chain, cutoff, delta, replacement, depth - 1)?)
+                self.transform_all(cases.as_slice(), cutoff, delta, replacement, depth)?,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?)
             Array(n) => Term.Array(self.transform(n, cutoff, delta, replacement, depth - 1)?)
             Lt(a, b) => Term.Lt(self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(b, cutoff, delta, replacement, depth - 1)?)
@@ -178,14 +214,35 @@ impl Core {
             Index(a, i, p) => Term.Index(self.transform(a, cutoff, delta, replacement, depth - 1)?,
                 self.transform(i, cutoff, delta, replacement, depth - 1)?,
                 self.transform(p, cutoff, delta, replacement, depth - 1)?)
-            Elements(xs) => {
-                var out = Vec(u32).new()
-                for x in xs { out.push(self.transform(x, cutoff, delta, replacement, depth - 1)?) }
-                Term.Elements(out)
-            }
+            Elements(xs) => Term.Elements(self.transform_all(
+                xs.as_slice(),
+                cutoff,
+                delta,
+                replacement,
+                depth
+            )?)
             t => t
         }
         self.add(term, sp)
+    }
+
+    fn transform_all(
+        inout self,
+        xs: [u32],
+        cutoff: u32,
+        delta: i64,
+        replacement: Option(u32),
+        depth: u32
+    ) -> Result(Vec(u32), diag.Diag) {
+        var out = Vec(u32).new()
+        for x in xs { out.push(self.transform(x, cutoff, delta, replacement, depth - 1)?) }
+        Ok(out)
+    }
+
+    fn normal_all(inout self, xs: [u32], depth: u32) -> Result(Vec(u32), diag.Diag) {
+        var out = Vec(u32).new()
+        for x in xs { out.push(self.normal(x, depth - 1)?) }
+        Ok(out)
     }
 
     pub fn shift(
@@ -230,34 +287,34 @@ impl Core {
             Lt(a, b) => Term.Lt(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Eq(a, b) => Term.Eq(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Refl(a) => Term.Refl(self.normal(a, depth - 1)?)
-            EqChain(a, b) => Term.EqChain(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
-            ChainRefl(a) => Term.ChainRefl(self.normal(a, depth - 1)?)
-            ChainStep(a, b, c, e, tail) => Term.ChainStep(
-                self.normal(a, depth - 1)?, self.normal(b, depth - 1)?,
-                self.normal(c, depth - 1)?, self.normal(e, depth - 1)?,
-                self.normal(tail, depth - 1)?)
-            ChainInd(p, base, step, chain) => {
+            Ind(f, xs) => Term.Ind(f, self.normal_all(xs.as_slice(), depth)?)
+            Con(f, k, xs) => Term.Con(f, k, self.normal_all(xs.as_slice(), depth)?)
+            Elim(f, p, cases, x) => {
                 let p = self.normal(p, depth - 1)?
-                let base = self.normal(base, depth - 1)?
-                let step = self.normal(step, depth - 1)?
-                let chain = self.normal(chain, depth - 1)?
-                match self.term(chain) {
-                    ChainRefl(a) => {
-                        let result = self.add(Term.App(base, a), sp)?
-                        return self.normal(result, depth - 1)
-                    }
-                    ChainStep(a, b, c, e, tail) => {
-                        // The only recursive call is on this constructor's
-                        // strictly positive tail. No user-chosen recursion.
-                        let ih = self.add(Term.ChainInd(p, base, step, tail), sp)?
-                        var result = step
-                        for argument in [a, b, c, e, tail, ih] {
-                            result = self.add(Term.App(result, argument), sp)?
-                        }
-                        return self.normal(result, depth - 1)
-                    }
-                    _ => Term.ChainInd(p, base, step, chain)
+                let cases = self.normal_all(cases.as_slice(), depth)?
+                let x = self.normal(x, depth - 1)?
+                // Iota reduction applies the constructor's case to its
+                // fields, then to induction on each recursive field: the
+                // strictly positive subterms. User code chooses no recursion.
+                // Ill-formed terms stay neutral; infer rejects them.
+                let Con(g, k, fields) = self.term(x) else { return self.add(
+                    Term.Elim(f, p, cases, x),
+                    sp
+                ) }
+                if g != f || f as i64 >= self.signatures.len() || k as i64 >= cases.len() ||
+                    cases.len() != self.signatures[f as i64].len() {
+                    return self.add(Term.Elim(f, p, cases, x), sp)
                 }
+                let count = self.signatures[f as i64][k as i64].fields.len()
+                if fields.len() != count { return self.add(Term.Elim(f, p, cases, x), sp) }
+                var result = cases[k as i64]
+                for field in fields { result = self.add(Term.App(result, field), sp)? }
+                for j in 0..count {
+                    if self.signatures[f as i64][k as i64].fields[j].recursive.is_none() { continue }
+                    let ih = self.add(Term.Elim(f, p, cases.clone(), fields[j]), sp)?
+                    result = self.add(Term.App(result, ih), sp)?
+                }
+                return self.normal(result, depth - 1)
             }
             Transport(f, e, p) => {
                 let f = self.normal(f, depth - 1)?
@@ -293,11 +350,7 @@ impl Core {
             Decide(a, b) => Term.Decide(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Index(a, i, p) => Term.Index(self.normal(a, depth - 1)?, self.normal(i, depth - 1)?,
                 self.normal(p, depth - 1)?)
-            Elements(xs) => {
-                var out = Vec(u32).new()
-                for x in xs { out.push(self.normal(x, depth - 1)?) }
-                Term.Elements(out)
-            }
+            Elements(xs) => Term.Elements(self.normal_all(xs.as_slice(), depth)?)
             t => return Ok(id)
         }
         self.add(term, sp)
@@ -306,12 +359,8 @@ impl Core {
     fn identical(self, a: u32, b: u32, depth: u32) -> bool {
         if depth == 0 { return false }
         match (self.term(a), self.term(b)) {
-            (Array(x), Array(y)) | (Refl(x), Refl(y)) | (ChainRefl(x), ChainRefl(y)) => self.identical(
-                x,
-                y,
-                depth - 1
-            )
-            (EqChain(a, b), EqChain(c, d)) | (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (
+            (Array(x), Array(y)) | (Refl(x), Refl(y)) => self.identical(x, y, depth - 1)
+            (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (
                 App(a, b),
                 App(c, d)
             ) | (
@@ -327,25 +376,35 @@ impl Core {
                 depth - 1
             ) &&
                 self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
-            (ChainStep(a, b, c, e, t), ChainStep(x, y, z, f, u)) =>
-                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
-                self.identical(c, z, depth - 1) && self.identical(e, f, depth - 1) &&
-                self.identical(t, u, depth - 1)
-            (ChainInd(a, b, y, n), ChainInd(c, d, z, m)) |
-                (IfLt(a, b, y, n), IfLt(c, d, z, m)) |
+            (Ind(f, xs), Ind(g, ys)) => f == g && self.identical_all(
+                xs.as_slice(),
+                ys.as_slice(),
+                depth
+            )
+            (Con(f, k, xs), Con(g, l, ys)) =>
+                f == g && k == l && self.identical_all(xs.as_slice(), ys.as_slice(), depth)
+            (Elim(f, p, xs, a), Elim(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1) &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth) && self.identical(
+                a,
+                b,
+                depth - 1
+            )
+            (IfLt(a, b, y, n), IfLt(c, d, z, m)) |
                 (IfEq(a, b, y, n), IfEq(c, d, z, m)) => self.identical(a, c, depth - 1) &&
                 self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1) && self.identical(
                 n,
                 m,
                 depth - 1
             )
-            (Elements(xs), Elements(ys)) => {
-                if xs.len() != ys.len() { return false }
-                for i in 0..xs.len() { if !self.identical(xs[i], ys[i], depth - 1) { return false } }
-                true
-            }
+            (Elements(xs), Elements(ys)) => self.identical_all(xs.as_slice(), ys.as_slice(), depth)
             (x, y) => x == y
         }
+    }
+
+    fn identical_all(self, xs: [u32], ys: [u32], depth: u32) -> bool {
+        if xs.len != ys.len { return false }
+        for i in 0..xs.len { if !self.identical(xs[i], ys[i], depth - 1) { return false } }
+        true
     }
 
     pub fn equal(inout self, a: u32, b: u32, depth: u32) -> Result(bool, diag.Diag) {
@@ -398,38 +457,142 @@ impl Core {
         self.add(Term.App(f, b), sp)
     }
 
-    // Expected case types are also used to elaborate contextual source
-    // lambdas. infer always checks those elaborated terms independently.
-    pub fn chain_case_types(
+    fn family_ref(self, id: u32, f: u32) -> Result((), diag.Diag) {
+        if f >= self.visible_families || f as i64 >= self.signatures.len() {
+            return Err(self.error(id, "inductive family used before its declaration is checked"))
+        }
+        Ok(())
+    }
+
+    // U64 -> ... -> Prop, one binder per index: elimination is into
+    // propositions only, so evidence never determines runtime data.
+    pub fn motive_type(inout self, f: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
+        let u = self.add(Term.U64, sp)?
+        var ty = self.add(Term.Prop, sp)?
+        for _ in 0..self.families[f as i64].arity { ty = self.add(Term.Pi(false, u, ty), sp)? }
+        Ok(ty)
+    }
+
+    // The case for constructor k with fields x and recursive fields
+    // r1..rn: (x...) -> (erased ih_i : P(indices of r_i))... -> P(result).
+    // Hypotheses follow all fields. P comes from the outer context and is
+    // weakened under the new binders. Also used to elaborate source lambdas;
+    // infer checks those elaborated terms independently.
+    pub fn case_type(
         inout self,
+        f: u32,
+        k: u32,
         p: u32,
         sp: diag.Span,
         depth: u32
-    ) -> Result((u32, u32), diag.Diag) {
-        // Each domain is expressed under its preceding binders. The
-        // motive comes from the outer context and must be weakened.
+    ) -> Result(u32, diag.Diag) {
+        if f as i64 >= self.signatures.len() || k as i64 >= self.signatures[f as i64].len() {
+            return Err(diag.Diag.new(sp, "core: unchecked inductive family or constructor"))
+        }
+        var erased = Vec(bool).new()
+        var domains = Vec(u32).new()
+        var positions = Vec(i64).new()
+        var recursive = Vec(Vec(u32)).new()
+        for j, field in self.signatures[f as i64][k as i64].fields {
+            erased.push(field.erased)
+            domains.push(field.domain)
+            match field.recursive {
+                Some(xs) => { positions.push(j); recursive.push(xs.clone()) }
+                None => {}
+            }
+        }
+        let indices = self.signatures[f as i64][k as i64].result.clone()
+        let m = domains.len()
+        let r = positions.len()
+        var result = self.shift(p, m + r, 0, depth)?
+        for x in indices {
+            let x = self.shift(x, r, 0, depth)?
+            result = self.add(Term.App(result, x), sp)?
+        }
+        var t = r
+        while t > 0 {
+            t -= 1
+            // Field j's indices live under its j preceding fields.
+            var ih = self.shift(p, m + t, 0, depth)?
+            for x in recursive[t] {
+                let x = self.shift(x, m + t - positions[t], 0, depth)?
+                ih = self.add(Term.App(ih, x), sp)?
+            }
+            result = self.add(Term.Pi(true, ih, result), sp)?
+        }
+        var j = m
+        while j > 0 {
+            j -= 1
+            result = self.add(Term.Pi(erased[j], domains[j], result), sp)?
+        }
+        Ok(result)
+    }
+
+    fn indices(inout self, xs: [u32], f: u32, ctx: [Binding], at: u32) -> Result((), diag.Diag) {
+        if xs.len != self.families[f as i64].arity as i64 {
+            return Err(self.error(at, "wrong number of family indices"))
+        }
+        let sp = self.nodes[at as i64].span
         let u = self.add(Term.U64, sp)?
-        let x0 = self.add(Term.Var(0), sp)?
-        let p1 = self.shift(p, 1, 0, depth)?
-        let base_result = self.apply2(p1, x0, x0, sp)?
-        let base = self.add(Term.Pi(false, u, base_result), sp)?
-        let x1 = self.add(Term.Var(1), sp)?
-        let x2 = self.add(Term.Var(2), sp)?
-        let x3 = self.add(Term.Var(3), sp)?
-        let x5 = self.add(Term.Var(5), sp)?
-        let edge = self.add(Term.Eq(x2, x1), sp)?
-        let tail = self.add(Term.EqChain(x2, x1), sp)?
-        let p5 = self.shift(p, 5, 0, depth)?
-        let ih = self.apply2(p5, x3, x2, sp)?
-        let p6 = self.shift(p, 6, 0, depth)?
-        let result = self.apply2(p6, x5, x3, sp)?
-        let step = self.add(Term.Pi(true, ih, result), sp)?
-        let step = self.add(Term.Pi(true, tail, step), sp)?
-        let step = self.add(Term.Pi(true, edge, step), sp)?
-        let step = self.add(Term.Pi(false, u, step), sp)?
-        let step = self.add(Term.Pi(false, u, step), sp)?
-        let step = self.add(Term.Pi(false, u, step), sp)?
-        Ok((base, step))
+        for x in xs { self.require(x, u, ctx, true, DEPTH)? }
+        Ok(())
+    }
+
+    // Strict positivity: while family f is checked it is not yet visible,
+    // so infer rejects it everywhere except as a whole recursive field
+    // F(indices) or the constructor's result, which are matched here.
+    fn signature(inout self, f: u32, ty: u32) -> Result(Signature, diag.Diag) {
+        var ty = self.normal(ty, DEPTH)?
+        var ctx = Vec(Binding).new()
+        var fields = Vec(Field).new()
+        loop {
+            match self.term(ty) {
+                Pi(erased, domain, rest) => {
+                    let recursive = match self.term(domain) {
+                        Ind(g, xs) if g == f => Some(xs)
+                        _ => None
+                    }
+                    match recursive.clone() {
+                        Some(xs) => {
+                            if !erased { return Err(self.error(
+                                domain,
+                                "recursive constructor fields must be erased"
+                            )) }
+                            self.indices(xs.as_slice(), f, ctx.as_slice(), domain)?
+                        }
+                        None => {
+                            self.binder(domain, erased, ctx.as_slice(), DEPTH)?
+                            if !erased && self.term(domain) != Term.U64 { return Err(self.error(
+                                domain,
+                                "constructor data fields must be u64"
+                            )) }
+                        }
+                    }
+                    fields.push(Field { erased, domain, recursive })
+                    ctx.push(Binding { ty: domain, erased })
+                    ty = rest
+                }
+                Ind(g, xs) if g == f => {
+                    self.indices(xs.as_slice(), f, ctx.as_slice(), ty)?
+                    return Ok(Signature { fields, result: xs })
+                }
+                _ => return Err(self.error(ty, "a constructor must produce its own family"))
+            }
+        }
+    }
+
+    fn declare(inout self, f: u32) -> Result((), diag.Diag) {
+        let sp = self.families[f as i64].span
+        if self.families[f as i64].arity > 16 {
+            return Err(diag.Diag.new(sp, "core: inductive families have at most 16 indices"))
+        }
+        var signatures = Vec(Signature).new()
+        for k in 0..self.families[f as i64].constructors.len() {
+            let ty = self.families[f as i64].constructors[k].ty
+            signatures.push(self.signature(f, ty)?)
+        }
+        self.signatures.push(signatures)
+        Ok(())
     }
 
     pub fn infer(
@@ -468,7 +631,7 @@ impl Core {
                 self.require(n, u, ctx, true, depth - 1)?
                 Term.Universe(0)
             }
-            EqChain(a, b) | Eq(a, b) | Lt(a, b) => {
+            Eq(a, b) | Lt(a, b) => {
                 let u = self.add(Term.U64, sp)?
                 self.require(a, u, ctx, true, depth - 1)?
                 self.require(b, u, ctx, true, depth - 1)?
@@ -479,35 +642,54 @@ impl Core {
                 self.require(a, u, ctx, true, depth - 1)?
                 Term.Eq(a, a)
             }
-            ChainRefl(a) => {
-                let u = self.add(Term.U64, sp)?
-                self.require(a, u, ctx, true, depth - 1)?
-                Term.EqChain(a, a)
+            Ind(f, xs) => {
+                self.family_ref(id, f)?
+                self.indices(xs.as_slice(), f, ctx, id)?
+                Term.Prop
             }
-            ChainStep(a, b, c, edge, tail) => {
-                let u = self.add(Term.U64, sp)?
-                for x in [a, b, c] { self.require(x, u, ctx, true, depth - 1)? }
-                let eq = self.add(Term.Eq(a, b), sp)?
-                self.require(edge, eq, ctx, true, depth - 1)?
-                let chain = self.add(Term.EqChain(b, c), sp)?
-                self.require(tail, chain, ctx, true, depth - 1)?
-                Term.EqChain(a, c)
-            }
-            ChainInd(p, base, step, chain) => {
-                let u = self.add(Term.U64, sp)?
-                let prop = self.add(Term.Prop, sp)?
-                let inner = self.add(Term.Pi(false, u, prop), sp)?
-                let motive = self.add(Term.Pi(false, u, inner), sp)?
-                self.require(p, motive, ctx, true, depth - 1)?
-                let (base_ty, step_ty) = self.chain_case_types(p, sp, depth - 1)?
-                self.require(base, base_ty, ctx, true, depth - 1)?
-                self.require(step, step_ty, ctx, true, depth - 1)?
-                let ty = self.infer(chain, ctx, true, depth - 1)?
-                let ty = self.normal(ty, depth - 1)?
-                let EqChain(a, b) = self.term(ty) else {
-                    return Err(self.error(chain, "chain-induct requires EqChain evidence"))
+            Con(f, k, xs) => {
+                self.family_ref(id, f)?
+                if k as i64 >= self.families[f as i64].constructors.len() {
+                    return Err(self.error(id, "unknown constructor"))
                 }
-                return self.apply2(p, a, b, sp)
+                // Instantiate the closed constructor telescope field by field.
+                let closed = self.families[f as i64].constructors[k as i64].ty
+                var ty = self.shift(closed, ctx.len, 0, depth - 1)?
+                for x in xs {
+                    let normal = self.normal(ty, depth - 1)?
+                    let Pi(_, domain, result) = self.term(normal) else {
+                        return Err(self.error(x, "too many constructor fields"))
+                    }
+                    self.require(x, domain, ctx, true, depth - 1)?
+                    ty = self.substitute(result, x, depth - 1)?
+                }
+                let ty = self.normal(ty, depth - 1)?
+                let Ind(_, _) = self.term(ty) else { return Err(self.error(
+                    id,
+                    "a constructor needs all of its fields"
+                )) }
+                return Ok(ty)
+            }
+            Elim(f, p, cases, x) => {
+                self.family_ref(id, f)?
+                if cases.len() != self.families[f as i64].constructors.len() {
+                    return Err(self.error(id, "induction needs one case per constructor"))
+                }
+                let motive = self.motive_type(f, sp)?
+                self.require(p, motive, ctx, true, depth - 1)?
+                for k, case in cases {
+                    let expected = self.case_type(f, k as u32, p, sp, depth - 1)?
+                    self.require(case, expected, ctx, true, depth - 1)?
+                }
+                let ty = self.infer(x, ctx, true, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Ind(g, indices) = self.term(ty) else {
+                    return Err(self.error(x, "induction requires evidence of its family"))
+                }
+                if g != f { return Err(self.error(x, "induction requires evidence of its family")) }
+                var result = p
+                for i in indices { result = self.add(Term.App(result, i), sp)? }
+                return Ok(result)
             }
             Transport(family, evidence, proof) => {
                 // Restrict equality elimination to propositions. In
@@ -609,6 +791,7 @@ impl Core {
     // checked in order; no definition can use itself or a later one.
     pub fn check(inout self) -> Result((), diag.Diag) {
         self.steps = 0
+        self.signatures = Vec(Vec(Signature)).new()
         if self.nodes.len() > LIMIT { return Err(self.error(0, "term limit reached")) }
         for i in 0..self.nodes.len() {
             for child in children(self.nodes[i].term) {
@@ -619,15 +802,29 @@ impl Core {
             }
         }
         let count = self.definitions.len()
-        for i in 0..count {
+        var f = 0
+        for i in 0..count + 1 {
+            while f < self.families.len() && self.families[f].globals as i64 == i {
+                self.visible = i as u32
+                self.visible_families = f as u32
+                self.declare(f as u32)?
+                f += 1
+            }
+            if i == count { break }
             self.visible = i as u32
+            self.visible_families = f as u32
             let ty = self.definitions[i].ty
             let value = self.definitions[i].value
             let sort = self.infer(ty, [], true, DEPTH)?
             let ghost = self.sort(sort, DEPTH)? == -1
             self.require(value, ty, [], ghost, DEPTH)?
         }
+        if f != self.families.len() { return Err(diag.Diag.new(
+            self.families[f].span,
+            "core: inductive families must follow the definitions they use, in order"
+        )) }
         self.visible = count as u32
+        self.visible_families = f as u32
         Ok(())
     }
 }
@@ -635,19 +832,21 @@ impl Core {
 pub fn children(term: Term) -> Vec(u32) {
     var out = Vec(u32).new()
     match term {
-        Array(n) | Refl(n) | ChainRefl(n) => out.push(n)
-        EqChain(a, b) | Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
+        Array(n) | Refl(n) => out.push(n)
+        Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
             out.push(a)
             out.push(b)
         }
         Index(a, i, p) | Transport(a, i, p) => { out.push(a); out.push(i); out.push(p) }
-        ChainStep(a, b, c, e, tail) => { out.push(a); out.push(b); out.push(c); out.push(e); out.push(
-            tail
-        ) }
-        ChainInd(a, b, y, n) | IfLt(a, b, y, n) | IfEq(a, b, y, n) => { out.push(a); out.push(b); out.push(
+        Ind(_, xs) | Con(_, _, xs) | Elements(xs) => for x in xs { out.push(x) }
+        Elim(_, p, cases, x) => {
+            out.push(p)
+            for c in cases { out.push(c) }
+            out.push(x)
+        }
+        IfLt(a, b, y, n) | IfEq(a, b, y, n) => { out.push(a); out.push(b); out.push(
             y
         ); out.push(n) }
-        Elements(xs) => for x in xs { out.push(x) }
         _ => {}
     }
     out
@@ -747,16 +946,48 @@ fn rejects_cycles_in_equality_graphs() {
     }
 }
 
+fn ids(xs: [u32]) -> Vec(u32) {
+    var out = Vec(u32).new()
+    for x in xs { out.push(x) }
+    out
+}
+
+// EqChain(a, b), declared through the raw kernel interface:
+// refl(a) : EqChain(a, a) and
+// step(a, b, c, erased Eq(a, b), erased EqChain(b, c)) : EqChain(a, c).
+fn chain_family(inout c: Core) {
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let x0 = c.add(Term.Var(0), sp).unwrap()
+    let x1 = c.add(Term.Var(1), sp).unwrap()
+    let x2 = c.add(Term.Var(2), sp).unwrap()
+    let x4 = c.add(Term.Var(4), sp).unwrap()
+    let refl = c.add(Term.Ind(0, ids([x0, x0])), sp).unwrap()
+    let refl = c.add(Term.Pi(false, u, refl), sp).unwrap()
+    var step = c.add(Term.Ind(0, ids([x4, x2])), sp).unwrap()
+    let tail = c.add(Term.Ind(0, ids([x2, x1])), sp).unwrap()
+    let edge = c.add(Term.Eq(x2, x1), sp).unwrap()
+    step = c.add(Term.Pi(true, tail, step), sp).unwrap()
+    step = c.add(Term.Pi(true, edge, step), sp).unwrap()
+    for _ in 0..3 { step = c.add(Term.Pi(false, u, step), sp).unwrap() }
+    var constructors = Vec(Constructor).new()
+    constructors.push(Constructor { name: "refl".to_string(), ty: refl })
+    constructors.push(Constructor { name: "step".to_string(), ty: step })
+    c.families.push(Family { name: "EqChain".to_string(), arity: 2, constructors,
+        globals: c.definitions.len() as u32, span: sp })
+}
+
 #[test]
 fn rejects_false_chain_constructors_without_frontends() {
     let sp = diag.Span.nowhere()
     var c = Core.new()
+    chain_family(&c)
     let zero = c.add(Term.Natural(0), sp).unwrap()
     let one = c.add(Term.Natural(1), sp).unwrap()
     let edge = c.add(Term.Refl(zero), sp).unwrap()
-    let tail = c.add(Term.ChainRefl(one), sp).unwrap()
-    let value = c.add(Term.ChainStep(zero, one, one, edge, tail), sp).unwrap()
-    let ty = c.add(Term.EqChain(zero, one), sp).unwrap()
+    let tail = c.add(Term.Con(0, 0, ids([one])), sp).unwrap()
+    let value = c.add(Term.Con(0, 1, ids([zero, one, one, edge, tail])), sp).unwrap()
+    let ty = c.add(Term.Ind(0, ids([zero, one])), sp).unwrap()
     c.definitions.push(Definition { name: "bad".to_string(), ty, value, exported: false, span: sp })
     assert(c.check().is_err(), "chain edges must prove their exact endpoints")
 }
@@ -765,6 +996,7 @@ fn rejects_false_chain_constructors_without_frontends() {
 // proposition Eq 0 0. This bypasses parser/elaboration and case generation.
 fn induction_fixture(inout c: Core, bad_step: bool) -> (u32, u32, u32) {
     let sp = diag.Span.nowhere()
+    chain_family(&c)
     let u = c.add(Term.U64, sp).unwrap()
     let zero = c.add(Term.Natural(0), sp).unwrap()
     let one = c.add(Term.Natural(1), sp).unwrap()
@@ -774,22 +1006,24 @@ fn induction_fixture(inout c: Core, bad_step: bool) -> (u32, u32, u32) {
     let p = c.add(Term.Lam(false, u, ty), sp).unwrap()
     let p = c.add(Term.Lam(false, u, p), sp).unwrap()
     let base = c.add(Term.Lam(false, u, proof), sp).unwrap()
-    let x0 = c.add(Term.Var(0), sp).unwrap()
     let x1 = c.add(Term.Var(1), sp).unwrap()
+    let x0 = c.add(Term.Var(0), sp).unwrap()
     let x2 = c.add(Term.Var(2), sp).unwrap()
     let edge_ty = c.add(Term.Eq(x2, x1), sp).unwrap()
-    let tail_ty = c.add(Term.EqChain(x2, x1), sp).unwrap()
+    let tail_ty = c.add(Term.Ind(0, ids([x2, x1])), sp).unwrap()
     let step = c.add(Term.Lam(true, ty, if bad_step { wrong } else { x0 }), sp).unwrap()
     let step = c.add(Term.Lam(true, tail_ty, step), sp).unwrap()
     let step = c.add(Term.Lam(true, edge_ty, step), sp).unwrap()
     let step = c.add(Term.Lam(false, u, step), sp).unwrap()
     let step = c.add(Term.Lam(false, u, step), sp).unwrap()
     let step = c.add(Term.Lam(false, u, step), sp).unwrap()
-    var chain = c.add(Term.ChainRefl(zero), sp).unwrap()
+    var chain = c.add(Term.Con(0, 0, ids([zero])), sp).unwrap()
     if !bad_step {
-        for _ in 0..2 { chain = c.add(Term.ChainStep(zero, zero, zero, proof, chain), sp).unwrap() }
+        for _ in 0..2 {
+            chain = c.add(Term.Con(0, 1, ids([zero, zero, zero, proof, chain])), sp).unwrap()
+        }
     }
-    let value = c.add(Term.ChainInd(p, base, step, chain), sp).unwrap()
+    let value = c.add(Term.Elim(0, p, ids([base, step]), chain), sp).unwrap()
     (ty, value, proof)
 }
 
@@ -818,16 +1052,121 @@ fn induction_checks_unused_step_without_frontends() {
 }
 
 #[test]
+fn induction_requires_every_case_without_frontends() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let (ty, value, _) = induction_fixture(&c, false)
+    let Elim(f, p, cases, x) = c.term(value) else { panic("fixture") }
+    let value = c.add(Term.Elim(f, p, ids([cases[0]]), x), sp).unwrap()
+    c.definitions.push(Definition { name: "bad".to_string(), ty, value, exported: false, span: sp })
+    assert(c.check().is_err(), "a missing step case is rejected")
+}
+
+#[test]
 fn rejects_cycles_in_inductive_graphs() {
     let sp = diag.Span.nowhere()
     for term in [
-        Term.EqChain(0, 0),
-        Term.ChainRefl(0),
-        Term.ChainStep(0, 0, 0, 0, 0),
-        Term.ChainInd(0, 0, 0, 0)
+        Term.Ind(0, ids([1])),
+        Term.Con(0, 0, ids([0, 1])),
+        Term.Elim(0, 1, Vec(u32).new(), 0),
+        Term.Elim(0, 0, ids([1]), 0),
+        Term.Elim(0, 0, Vec(u32).new(), 1)
     ] {
         var c = Core.new()
+        c.add(Term.U64, sp).unwrap()
         c.add(term.clone(), sp).unwrap()
         assert(c.check().is_err(), "inductive terms obey the same graph integrity checks")
     }
+}
+
+// One family F(i) with a single constructor of the given type.
+fn single(inout c: Core, ty: u32) {
+    var constructors = Vec(Constructor).new()
+    constructors.push(Constructor { name: "make".to_string(), ty })
+    c.families.push(Family { name: "F".to_string(), arity: 1, constructors,
+        globals: c.definitions.len() as u32, span: diag.Span.nowhere() })
+}
+
+#[test]
+fn rejects_non_positive_and_relevant_fields() {
+    let sp = diag.Span.nowhere()
+    // make(erased h : F(0) -> Lt(0, 1)) : F(0) is not strictly positive.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let f0 = c.add(Term.Ind(0, ids([zero])), sp).unwrap()
+    let lt = c.add(Term.Lt(zero, one), sp).unwrap()
+    let negative = c.add(Term.Pi(true, f0, lt), sp).unwrap()
+    let ty = c.add(Term.Pi(true, negative, f0), sp).unwrap()
+    single(&c, ty)
+    assert(c.check().is_err(), "a family under an arrow is rejected")
+    // make(x : I64) : F(0) has runtime data other than indices.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let i = c.add(Term.I64, sp).unwrap()
+    let f0 = c.add(Term.Ind(0, ids([zero])), sp).unwrap()
+    let ty = c.add(Term.Pi(false, i, f0), sp).unwrap()
+    single(&c, ty)
+    assert(c.check().is_err(), "constructor data fields are U64")
+    // make(h : F(0)) : F(0), recursive but not erased.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let f0 = c.add(Term.Ind(0, ids([zero])), sp).unwrap()
+    let ty = c.add(Term.Pi(false, f0, f0), sp).unwrap()
+    single(&c, ty)
+    assert(c.check().is_err(), "recursive fields are erased")
+    // make : Lt(0, 1) produces another proposition.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let lt = c.add(Term.Lt(zero, one), sp).unwrap()
+    single(&c, lt)
+    assert(c.check().is_err(), "a constructor produces its own family")
+    // make : F(0, 0) has the wrong number of indices.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let f00 = c.add(Term.Ind(0, ids([zero, zero])), sp).unwrap()
+    single(&c, f00)
+    assert(c.check().is_err(), "family arity is checked")
+}
+
+#[test]
+fn families_are_ordered_with_definitions() {
+    let sp = diag.Span.nowhere()
+    // A definition before the family's declaration cannot use it.
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let f0 = c.add(Term.Ind(0, ids([zero])), sp).unwrap()
+    let value = c.add(Term.Con(0, 0, Vec(u32).new()), sp).unwrap()
+    c.definitions.push(Definition { name: "early".to_string(), ty: f0, value,
+        exported: false, span: sp })
+    var constructors = Vec(Constructor).new()
+    constructors.push(Constructor { name: "make".to_string(), ty: f0 })
+    c.families.push(Family { name: "F".to_string(), arity: 1, constructors, globals: 1, span: sp })
+    assert(c.check().is_err(), "families are not visible to earlier definitions")
+    c.families[0].globals = 0
+    c.check().unwrap()
+    c.families[0].globals = 2
+    assert(c.check().is_err(), "a family after every definition is still in range")
+}
+
+#[test]
+fn induction_eliminates_only_into_propositions() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let f0 = c.add(Term.Ind(0, ids([zero])), sp).unwrap()
+    single(&c, f0)
+    let motive = c.add(Term.Lam(false, u, u), sp).unwrap()
+    let evidence = c.add(Term.Con(0, 0, Vec(u32).new()), sp).unwrap()
+    let value = c.add(Term.Elim(0, motive, ids([zero]), evidence), sp).unwrap()
+    c.definitions.push(Definition {
+        name: "bad".to_string(),
+        ty: u,
+        value,
+        exported: false,
+        span: sp
+    })
+    assert(c.check().is_err(), "a data motive is rejected")
 }

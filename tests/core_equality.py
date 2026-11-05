@@ -9,7 +9,7 @@ import shlex
 import struct
 
 
-def validate_equality(compiler, root, temporary, environment, run, read_terms, evaluate):
+def validate_equality(compiler, root, temporary, environment, run, definitions, evaluate):
     def command(action, path, *options, source=True, success=True, env=None):
         prefix = [compiler] if source else [compiler, "core"]
         return run([*prefix, action, str(path), *options], success=success,
@@ -177,7 +177,7 @@ export fn reflexive(i: u64) -> i64 {
     formatted.write_text(command("fmt", path).stdout)
     assert paired_mir == command("emit-mir", formatted, "--lib").stdout
     reference = {}
-    for _, name, _, body in read_terms(core_source):
+    for _, name, _, body in definitions(core_source):
         reference[name] = evaluate(body, reference.copy())
     rng = random.Random(0xE9)
     values = [0, 1, 2, 3, 4, (1 << 63) - 1, 1 << 63, (1 << 64) - 1,
