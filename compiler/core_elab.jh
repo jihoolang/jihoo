@@ -216,22 +216,8 @@ impl Elaborator {
         }
         let result = self.expr(e, inner, depth)
         let Some(frame) = self.frames.pop() else { return Err(error(e.span, "unreachable")) }
-        // The type of a borrowing e, inferred under its borrows.
-        var a: Option(u32) = expected
-        let value = match result {
-            Ok(v) => v
-            Err(d) => {
-                for _ in 0..k { self.pop() }
-                return Err(d)
-            }
-        }
-        if a.is_none() {
-            a = match self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH) {
-                Ok(t) => Some(t)
-                Err(_) => None
-            }
-        }
         for _ in 0..k { self.pop() }
+        let value = result?
         var value = value
         var count = 0
         for u in frame.used { if u { count += 1 } }
@@ -249,15 +235,23 @@ impl Elaborator {
             value = self.c.shift(value, -1, kept, core.DEPTH)?
         }
         let Some(o) = owner else { return Ok((value, None)) }
-        let a = match (expected, a) {
-            (Some(t), _) => t
-            (None, Some(t)) => {
-                // Inferred under every borrow binder; it depends on none.
-                var t = t
-                for _ in 0..k { t = self.c.shift(t, -1, 0, core.DEPTH)? }
-                t
+        // The type of a borrowing e, inferred as the kernel checks its
+        // lend: with the borrow reading its owner, Borrow(owner), so the
+        // type may depend on it.
+        let a = match expected {
+            Some(t) => t
+            None => {
+                let x = self.c.add(core.Term.Var((base - 1 - o) as u32), e.span)?
+                let lent = self.c.add(core.Term.Borrow(x), e.span)?
+                let read = self.c.substitute(value, lent, core.DEPTH)?
+                match self.c.infer_reading(read, x, self.ctx.as_slice()) {
+                    Ok(t) => t
+                    Err(_) => return Err(error(
+                        e.span,
+                        "a borrowing expression needs a known type"
+                    ))
+                }
             }
-            _ => return Err(error(e.span, "a borrowing expression needs a known type"))
         }
         Ok((value, Some((o, a))))
     }
@@ -340,30 +334,47 @@ impl Elaborator {
                 self.c.add(core.Term.App(f, value), sp)
             }
             Some((o, a)) => {
+                // The kernel gives the owner back as itself: the rest goes
+                // on with the same variable, so facts about it still hold.
                 let t = self.type_at(o)?
                 let r = self.c.add(core.Term.Ref(t), sp)?
                 let f = self.c.add(core.Term.Lam(false, r, value), sp)?
-                let owner = self.names[o].clone()
                 let back = self.c.shift(t, 1, 0, core.DEPTH)?
                 self.push(name.as_str(), a, false)
-                self.push(owner.as_str(), back, false)
                 let inner = match expected {
-                    Some(t) => Some(self.c.shift(t, 2, 0, core.DEPTH)?)
+                    Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                     None => None
                 }
                 let rest = self.lets(stmts[1..], tail, inner, depth - 1)
                 let rest: Result(u32, diag.Diag) = match rest {
-                    Ok(r) => if ghost { Ok(r) } else { self.settle(r, 2) }
+                    Ok(r) => if ghost { Ok(r) } else { self.give_back(r, o) }
                     Err(d) => Err(d)
                 }
                 self.pop()
-                self.pop()
-                let g = self.c.add(core.Term.Lam(false, back, rest?), sp)?
+                // fn(a, y) { rest }, where rest names the owner, not y.
+                let rest = self.c.shift(rest?, 1, 0, core.DEPTH)?
+                let g = self.c.add(core.Term.Lam(false, back, rest), sp)?
                 let g = self.c.add(core.Term.Lam(false, a, g), sp)?
                 let x = self.c.add(core.Term.Var((self.ctx.len() - 1 - o) as u32), sp)?
                 self.c.add(core.Term.Lend(x, f, g), sp)
             }
         }
+    }
+
+    // The rest after a let that lends owner o, under the let's binder: the
+    // owner is freed first if the rest does not use it, and the let's value
+    // if it is owned and unused.
+    fn give_back(inout self, rest: u32, o: i64) -> Result(u32, diag.Diag) {
+        var value = self.settle(rest, 1)?
+        let v = (self.ctx.len() - 1 - o) as u32
+        match self.c.runtime_uses(value, v, self.ctx.as_slice(), []) {
+            Ok(0) => {
+                let ty = self.type_at(o)?
+                value = self.release(v, ty, value)?
+            }
+            _ => {}
+        }
+        Ok(value)
     }
 
     // induct(fn(t) { T }, case..., r) on a borrow: structural recursion

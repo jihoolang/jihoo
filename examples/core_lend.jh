@@ -1,0 +1,42 @@
+// Dependent lends. Lending an owned list to a function that reads it,
+// the kernel knows that the borrow reads that list, and that the list it
+// gets back is the same one. So evidence about the owner applies to the
+// borrow: slot_owned passes its precondition on to slot, which reads a
+// buffer at the list's length without a bounds check. A borrowing call's
+// result type may mention the owner: size returns the length with
+// evidence that it is the length, and demo, which owns its list, checks
+// that length once and uses the evidence in a later lend. main returns 10.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn repeat(n: u64, x: i64) -> List { fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) }) }
+
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) { pack(length(xs), refl(length(xs))) }
+
+fn slot(xs: ref List, b: buffer(4), p: erased(Lt(length(xs), 4))) -> i64 {
+    load(b, length(xs), p, fn(v, b) { v })
+}
+
+fn slot_owned(xs: List, b: buffer(4), p: erased(Lt(length(xs), 4))) -> i64 { slot(xs, b, p) }
+
+export fn demo(n: u64, x: i64) -> i64 {
+    let xs = repeat(n, x)
+    let k = size(xs)
+    if_lt(witness(k), 4, fn(q) {
+        slot(
+            xs,
+            store(alloc(4, 0), 2, x, decide_lt(2, 4)),
+            transport(fn(m) { Lt(m, 4) }, proof(k), q)
+        )
+    }, -1)
+}
+
+export fn first(x: i64) -> i64 { slot_owned(List.Nil, alloc(4, x), decide_lt(0, 4)) }
+
+fn main() -> i64 { demo(2, 9) + first(1) }

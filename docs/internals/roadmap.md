@@ -537,6 +537,17 @@ and 6 core rejections and kernel tests run in the `core` suite. An
 independent review (Codex) found no unsound case and one evidence
 position the elaborator missed, now fixed.
 
+Implemented dependent lends
+([design](dependent-core.md#dependent-lends)): when a lend lends a
+variable, its reader is checked with the borrow equal to `Borrow(x)`,
+and its continuation with the owner given back equal to x, which the
+continuation uses exactly once instead of the lend. Lowering is
+unchanged. `examples/core_lend.jh` reads a buffer at a list's length
+without a bounds check, from a precondition about the owner or from a
+size whose type mentions it; its MIR equals the `.jhc`'s, and native
+execution against the evaluator, counted allocations, 6 source and 10
+core rejections and kernel tests run in the `core` suite.
+
 #### The 0.5.0 release gate for the native core
 
 The direction changed after the gate in step 6 below was written: that
@@ -553,10 +564,12 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    indexing without bounds checks (done: arrays, buffers, borrowed
    buffers), contracts as types (`requires` as erased evidence, `ensures`
    as refined or equality results), loops whose invariants are types,
-   and enough ownership for ordinary code. Remaining, in order:
-   (a) dependent lends, whose reader knows that its borrow reads the
-   owner, so evidence about the owner applies to the borrow and a lend's
-   result type may depend on it; (b) proofs by induction over a borrow;
+   and enough ownership for ordinary code. Done: (a) dependent lends
+   ([design](dependent-core.md#dependent-lends)): a lend of a variable
+   is checked with its borrow reading the owner and the owner given back
+   as itself, so evidence about the owner holds of the borrow and after
+   the lend, and a borrowing call's result type may mention the owner.
+   Remaining, in order: (b) proofs by induction over a borrow;
    (c) loops with a dependent accumulator (an invariant); (d) mutable
    borrows and in-place updates of heap data; (e) a `std` slice in the
    core (a vector as an owned buffer with its length and capacity),

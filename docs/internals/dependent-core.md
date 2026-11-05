@@ -709,9 +709,9 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(case F P case ... v)` | one level of case analysis of heap data: the node is freed |
 | `(load b i p k)`, `(store b i v p)`, `(free b rest)` | read and continue with `k x b`; write in place; free, then `rest` |
 | `(drop F v rest)` | free heap data `v` of type `F` and every node it owns, then `rest` |
-| `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` |
+| `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` (of a variable: [dependent](#dependent-lends)) |
 | `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
-| `(borrow x)` | a borrow of the owned `x`, in types and evidence only |
+| `(borrow x)` | a borrow of the owned `x`, in types and evidence, or in the reader of a lend of `x` |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
 | `(induct F P case ... e)` | proposition-only structural induction on evidence of `F` |
 | `(add a b)`, `(sub a b)`, `(mul a b)` | i64 arithmetic; overflow traps at run time |
@@ -922,6 +922,14 @@ preconditions and a proof that needs induction; in `.jhc`, a borrow in
 code that runs, of a scalar or of a borrow. Kernel unit tests check
 that views and lends compute in the pure model only, and that a
 `Borrow` is evidence only.
+`tests/core_lend.py` adds dependent lends: both frontends' MIR, with no
+bounds check on a load at a borrowed list's length, and native
+execution against the evaluator with counted allocations; facts kept
+across lets that lend the same list; and 6 source and 10 core
+rejections of evidence about the wrong list, owners used in a reader,
+before a lend, twice or never after it, and borrows by name outside
+their lend. Kernel unit tests check that the owner given back is used
+exactly once, by either name.
 
 ## Owned memory plan
 
@@ -1259,7 +1267,7 @@ fn head(xs: List, p: erased(Lt(0, length(xs)))) -> i64 { ... }   // consumes xs
 Nothing in a type or in evidence runs, so nothing there is lent: the
 kernel term `Borrow(x)` (in `.jhc`, `(borrow x)`) is a borrow of an owned
 x : T, of type `Ref(T)`, and is allowed only where `infer` checks a
-type or evidence. It is neither a use of x nor a lend, so x may be a
+type or evidence (and in the reader of a [lend](#dependent-lends) of x). It is neither a use of x nor a lend, so x may be a
 temporary such as `doubled(xs)`, a value moved or freed meanwhile (as in
 `head`'s precondition) or a recursion's erased field. The elaborator,
 untrusted, borrows in place wherever it elaborates a type or evidence:
@@ -1298,11 +1306,74 @@ lends, a proof that needs induction, unproved preconditions, and a
 review found no unsound case.
 
 Not yet supported: a proof by induction over a borrow (a view's result
-is runtime data, not a motive), and evidence about a borrow that a lend
-made: inside a lend, its borrow `r` is a variable, not `Borrow(x)`, so a
-fact about the owner does not apply to `r`, nor can a lend's result type
-depend on `r`. A dependent lend, whose `f` knows that `r` reads `x`,
-would allow both.
+is runtime data, not a motive). Evidence about an owner applies to the
+borrow a lend makes of it: see [dependent lends](#dependent-lends).
+
+## Dependent lends
+
+When a lend lends a variable, the kernel knows what its borrow reads
+and what it gives back:
+
+```jihoo
+fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) { pack(length(xs), refl(length(xs))) }
+
+fn slot(xs: ref List, b: buffer(4), p: erased(Lt(length(xs), 4))) -> i64 {
+    load(b, length(xs), p, fn(v, b) { v })
+}
+
+fn slot_owned(xs: List, b: buffer(4), p: erased(Lt(length(xs), 4))) -> i64 { slot(xs, b, p) }
+
+export fn demo(n: u64, x: i64) -> i64 {
+    let xs = repeat(n, x)
+    let k = size(xs)                  // k : refine(fn(m) { Eq(m, length(xs)) })
+    if_lt(witness(k), 4, fn(q) {
+        slot(xs, store(alloc(4, 0), 2, x, decide_lt(2, 4)), transport(fn(m) { Lt(m, 4) }, proof(k), q))
+    }, -1)
+}
+```
+
+`slot_owned` lends `xs` to `slot`, whose precondition is about the
+borrow: it holds because it is the owner's. `size(xs)` has a result type
+that mentions the owner, and `demo` uses that evidence in a later lend
+of the same list.
+
+The rule, for `Lend(x, fn(r) { body }, fn(a, y) { rest })` with x a
+variable:
+
+- `body` is checked with r = `Borrow(x)`. So the result type A may
+  mention `Borrow(x)` (it still holds no borrow: a scalar, a refinement,
+  an array, a buffer or data), and evidence about x is evidence about r.
+  While `body` is checked, code there may also borrow x by name, which
+  lowering compiles as x's pointer, as it does r.
+- `rest` is checked with y = x: the owner given back is x itself, so
+  types after the lend can still mention x. x is not counted at the lend;
+  `rest` must use x, by either name, exactly once. So x is not used
+  before its lend (its one use is after it), not consumed by the reader
+  (that would be a second use), and nothing after the lend outside
+  `rest` uses it.
+
+Lowering runs `f` and `g` themselves, unchanged: r is x's pointer and y
+is x's value, the same pointer, so the substituted terms the kernel
+checked compute what lowering runs. A lend of any other term, or with a
+reader or continuation that is not a lambda, keeps the earlier rule:
+the borrow is a variable, and A cannot depend on it.
+
+The elaborator, untrusted, now continues a `let` that lends an owner
+with the same variable, freeing it at the start of the rest if the rest
+does not use it, and infers a borrowing `let`'s type as the kernel
+checks it, so `let k = size(xs)` needs no annotation.
+
+[`examples/core_lend.jh`](../../examples/core_lend.jh) and its
+[core equivalent](../../examples/core_lend.jhc) compile to the same MIR,
+whose only checks are the allocations': the load at the list's length
+has none. `tests/core_lend.py` runs both against the evaluator with
+counted allocations and frees, a fact kept across several lets that lend
+the same list, and a reader that borrows its owner by name, and checks 6
+source and 10 core rejections: evidence about another list or an older
+one, a false size, a use after moving, the owner used in the reader,
+unused or used twice after the lend, consumed before it or by a nested
+lend, a borrow by name after the lend, of another owner or as the
+reader's result, and a continuation that returns a closure.
 
 The next stages of the replacement are:
 

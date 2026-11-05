@@ -212,7 +212,10 @@ recursion, with proofs by induction. An owned value is
 parameter [borrows](examples/core_borrow.jh) a value without consuming
 it. Types and proofs may [borrow any value](examples/core_borrow_proof.jh),
 so a proof by induction can be about `length(xs: ref List)` and a
-precondition about the list its function consumes. Wider `.jh` coverage
+precondition about the list its function consumes. A
+[lend](examples/core_lend.jh) of an owned list knows that its borrow
+reads that list, so such evidence applies to the borrow, and a borrowing
+call's result type may mention the owner. Wider `.jh` coverage
 and mechanized proofs of the kernel, erasure and lowering remain
 required before this replaces the existing verifier; the
 [roadmap](docs/internals/roadmap.md#the-050-release-gate-for-the-native-core)

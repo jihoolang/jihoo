@@ -203,6 +203,10 @@ pub struct Core {
     // argument may be substituted; code to run binds an argument that
     // touches memory once instead.
     pub runtime: bool
+    // The owners being lent, each a variable with the context length where
+    // its lend is checked: inside the lend's reader, a borrow of one is the
+    // reader's own borrow, which code may use.
+    lent: Vec((i64, u32))
 }
 
 impl Core {
@@ -217,7 +221,8 @@ impl Core {
             visible: 0,
             visible_families: 0,
             spine: false,
-            runtime: false
+            runtime: false,
+            lent: Vec((i64, u32)).new()
         }
     }
 
@@ -1951,9 +1956,12 @@ impl Core {
                 }
                 Term.Universe(0)
             }
-            // Only in types and evidence, which never run: nothing is lent.
+            // In types and evidence, which never run, nothing is lent. In code,
+            // a borrow is of an owner a lend is lending, inside its reader.
             Borrow(x) => {
-                if !ghost { return Err(self.error(id, "a borrow of a value is evidence only")) }
+                if !ghost && !self.lending(x, ctx.len, depth - 1)? {
+                    return Err(self.error(id, "a borrow of a value is evidence only"))
+                }
                 let t = self.infer(x, ctx, true, depth - 1)?
                 if !self.owned(t, depth - 1)? {
                     return Err(self.error(x, "a borrow is of a buffer or heap data"))
@@ -1965,28 +1973,70 @@ impl Core {
                 if !self.owned(t, depth - 1)? {
                     return Err(self.error(x, "only an owned value is lent"))
                 }
+                let borrow = self.add(Term.Ref(t), sp)?
+                match self.dependent_lend(x, f, g, sp, depth - 1)? {
+                    Some((domain, read, rest)) => {
+                        self.binder(domain, false, ctx, depth - 1)?
+                        if !self.equal(domain, borrow, depth - 1)? {
+                            return Err(self.error(f, "a lend reads through a borrow of its owner"))
+                        }
+                        self.lent.push((ctx.len, x))
+                        let a = self.infer(read, ctx, ghost, depth - 1)
+                        self.lent.pop()
+                        let a = self.normal(a?, depth - 1)?
+                        self.outlived(f, a)?
+                        let Lam(false, first, inner) = self.term(g) else {
+                            return Err(self.error(g, "a lend continues with fn(a, x) { ... }"))
+                        }
+                        let Lam(false, again, _) = self.term(inner) else {
+                            return Err(self.error(g, "a lend continues with fn(a, x) { ... }"))
+                        }
+                        let back = self.shift(t, 1, 0, depth - 1)?
+                        self.binder(first, false, ctx, depth - 1)?
+                        if !self.equal(first, a, depth - 1)? || !self.equal(again, back, depth - 1)? {
+                            return Err(self.error(
+                                g,
+                                "a lend continues with the result and the owner"
+                            ))
+                        }
+                        // The continuation, with the owner given back as x
+                        // itself, uses x exactly once.
+                        let ty = self.infer(rest, ctx, ghost, depth - 1)?
+                        let ty = self.normal(ty, depth - 1)?
+                        let Pi(false, _, result) = self.term(ty) else {
+                            return Err(self.error(g, "a lend continues with fn(a, x) { ... }"))
+                        }
+                        if !ghost {
+                            let Var(k) = self.term(x) else { return Err(self.error(
+                                x,
+                                "unreachable"
+                            )) }
+                            if self.uses_case(rest, 1, k, ctx, depth)? != 1 {
+                                return Err(self.error(
+                                    g,
+                                    "a lent owner is used exactly once after its lend"
+                                ))
+                            }
+                        }
+                        let result = self.normal(result, depth - 1)?
+                        let result = self.shift(result, -1, 0, depth - 1)?
+                        self.not_function(g, result, depth - 1)?
+                        return Ok(result)
+                    }
+                    None => {}
+                }
                 // f : Ref(T) -> A, A independent of the borrow.
                 let ty = self.infer(f, ctx, ghost, depth - 1)?
                 let ty = self.normal(ty, depth - 1)?
                 let Pi(false, domain, a) = self.term(ty) else {
                     return Err(self.error(f, "a lend reads with fn(r) { ... }"))
                 }
-                let borrow = self.add(Term.Ref(t), sp)?
                 if !self.equal(domain, borrow, depth - 1)? {
                     return Err(self.error(f, "a lend reads through a borrow of its owner"))
                 }
                 let a = self.shift(a, -1, 0, depth - 1)?
                 let a = self.normal(a, depth - 1)?
-                // No borrow outlives f: its result is a scalar, a
-                // refinement, an array, a buffer or data, none of which
-                // holds a borrow; not a borrow, a function or a type
-                // variable, which could stand for either.
-                let known = match self.term(a) {
-                    U64 | I64 | Refine(_) | Array(_) | Buffer(_) => true
-                    Ind(g, _) => self.is_data(g)
-                    _ => false
-                }
-                if !known { return Err(self.error(f, "a borrow cannot outlive its lend")) }
+                self.outlived(f, a)?
                 // g : A -> T -> R, R independent of both.
                 let ty = self.infer(g, ctx, ghost, depth - 1)?
                 let ty = self.normal(ty, depth - 1)?
@@ -2427,11 +2477,24 @@ impl Core {
                 let first = self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)?
                 Ok(first + self.uses_case(k, 2, v, ctx, depth)?)
             }
-            // f and g each run once.
-            Lend(x, f, g) => Ok(
-                self.uses(x, v, ctx, depth - 1)? + self.uses_case(f, 1, v, ctx, depth)? +
-                    self.uses_case(g, 2, v, ctx, depth)?
-            )
+            // f and g each run once. A dependent lend is counted as it is
+            // checked: its reader with r = Borrow(x), which uses nothing, and
+            // its continuation with y = x, where x is used.
+            Lend(x, f, g) => {
+                let sp = self.nodes[id as i64].span
+                match self.dependent_lend(x, f, g, sp, depth - 1)? {
+                    Some((_, read, rest)) => {
+                        self.lent.push((ctx.len, x))
+                        let n = self.uses(read, v, ctx, depth - 1)
+                        self.lent.pop()
+                        Ok(n? + self.uses_case(rest, 1, v, ctx, depth)?)
+                    }
+                    None => Ok(
+                        self.uses(x, v, ctx, depth - 1)? + self.uses_case(f, 1, v, ctx, depth)? +
+                            self.uses_case(g, 2, v, ctx, depth)?
+                    )
+                }
+            }
             View(recursion, f, _, cases, x) => {
                 let total = self.uses(x, v, ctx, depth - 1)?
                 // One case runs, or, in a recursion, each once per node.
@@ -2495,6 +2558,75 @@ impl Core {
             }
             _ => Ok(0)
         }
+    }
+
+    // A dependent lend: x a variable, f = fn(r) { body } and g = fn(a, y)
+    // { rest }. f's body is checked with r = Borrow(x), so facts about x
+    // hold of r and f's result type may mention Borrow(x); g's with y = x,
+    // the same owner given back, so facts about x hold after the lend. Gives
+    // f's domain, its body with r = Borrow(x), and fn(a) { rest } with y = x.
+    // Lowering runs f and g themselves: r is x's pointer and y is x.
+    fn dependent_lend(
+        inout self,
+        x: u32,
+        f: u32,
+        g: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(Option((u32, u32, u32)), diag.Diag) {
+        let Var(_) = self.term(x) else { return Ok(None) }
+        let Lam(false, domain, body) = self.term(f) else { return Ok(None) }
+        let Lam(false, first, inner) = self.term(g) else { return Ok(None) }
+        let Lam(false, _, rest) = self.term(inner) else { return Ok(None) }
+        let lent = self.add(Term.Borrow(x), sp)?
+        let read = self.substitute(body, lent, depth)?
+        let owner = self.shift(x, 1, 0, depth)?
+        let rest = self.substitute(rest, owner, depth)?
+        let rest = self.add(Term.Lam(false, first, rest), sp)?
+        Ok(Some((domain, read, rest)))
+    }
+
+    // No borrow outlives a lend's reader: its result a is a scalar, a
+    // refinement, an array, a buffer or data, none of which holds a borrow;
+    // not a borrow, a function or a type variable, which could stand for
+    // either.
+    fn outlived(inout self, f: u32, a: u32) -> Result((), diag.Diag) {
+        let known = match self.term(a) {
+            U64 | I64 | Refine(_) | Array(_) | Buffer(_) => true
+            Ind(g, _) => self.is_data(g)
+            _ => false
+        }
+        if !known { return Err(self.error(f, "a borrow cannot outlive its lend")) }
+        Ok(())
+    }
+
+    // A lend's reader read = f's body with r = Borrow(x), inferred as the
+    // kernel checks it: x, a variable, may be borrowed in code there.
+    pub fn infer_reading(
+        inout self,
+        read: u32,
+        x: u32,
+        ctx: [Binding]
+    ) -> Result(u32, diag.Diag) {
+        self.lent.push((ctx.len, x))
+        let a = self.infer(read, ctx, true, DEPTH)
+        self.lent.pop()
+        a
+    }
+
+    // Whether x, in a context of the given length, is an owner whose lend's
+    // reader is being checked.
+    fn lending(inout self, x: u32, len: i64, depth: u32) -> Result(bool, diag.Diag) {
+        let Var(_) = self.term(x) else { return Ok(false) }
+        var i = self.lent.len()
+        while i > 0 {
+            i -= 1
+            let (at, y) = self.lent[i]
+            if at > len { continue }
+            let shifted = self.shift(y, len - at, 0, depth)?
+            if self.identical(shifted, x, depth) { return Ok(true) }
+        }
+        Ok(false)
     }
 
     // A partial application's runtime arguments cannot be owned values.
@@ -4034,4 +4166,48 @@ fn borrows_of_values_are_evidence_only() {
     let value = c.add(Term.Refl(n), sp).unwrap()
     c.definitions.push(Definition { name: "p".to_string(), ty, value, exported: false, span: sp })
     assert(c.check().is_err(), "a borrow is of a buffer or heap data")
+}
+
+// fn(x: B) -> U64 { lend(x, fn(r) { read }, fn(a, y) { drop(back, a) }) }
+// with B, count; read is count(r) or count(borrow(x)), and back is y, x or
+// neither (a leak: the result alone).
+fn dependent(by_name: bool, back: i64) -> Core {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    counting(&c)
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let r = c.add(Term.Ref(b), sp).unwrap()
+    let global = c.add(Term.Global(0), sp).unwrap()
+    let v0 = c.add(Term.Var(0), sp).unwrap()
+    let v1 = c.add(Term.Var(1), sp).unwrap()
+    let v2 = c.add(Term.Var(2), sp).unwrap()
+    // Under r: r is 0 and x is 1.
+    let borrowed = if by_name { c.add(Term.Borrow(v1), sp).unwrap() } else { v0 }
+    let read = c.add(Term.App(global, borrowed), sp).unwrap()
+    let f = c.add(Term.Lam(false, r, read), sp).unwrap()
+    // Under a and y: y is 0, a is 1 and x is 2.
+    let rest = if back == 0 { c.add(Term.Drop(0, v0, v1), sp).unwrap() }
+    else if back == 1 { c.add(Term.Drop(0, v2, v1), sp).unwrap() } else { v1 }
+    let g = c.add(Term.Lam(false, b, rest), sp).unwrap()
+    let g = c.add(Term.Lam(false, u, g), sp).unwrap()
+    let lend = c.add(Term.Lend(v0, f, g), sp).unwrap()
+    let value = c.add(Term.Lam(false, b, lend), sp).unwrap()
+    let ty = c.add(Term.Pi(false, b, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    c
+}
+
+#[test]
+fn a_dependent_lend_gives_back_its_owner_itself() {
+    for by_name in [false, true] {
+        for back in [0, 1, 2] {
+            var c = dependent(by_name, back)
+            let ok = c.check().is_ok()
+            // The owner given back is used once, as y or as x; the reader
+            // may borrow x by name.
+            assert(ok == (back != 2), "the owner is used exactly once after its lend")
+        }
+    }
 }

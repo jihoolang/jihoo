@@ -188,6 +188,14 @@ impl Lower {
                 if recursive { self.recursion(c, id, f, cases.as_slice(), x, env, true, depth) }
                 else { self.dispatch(c, id, f, cases.as_slice(), x, env, None, true, depth) }
             }
+            // A borrow of an owner inside its lend's reader, which the kernel
+            // allows only of a variable: the owner's pointer, read in place.
+            Borrow(x) => {
+                let core.Term.Var(_) = c.term(x) else {
+                    return Err(c.error(id, "a borrow of a value is evidence only"))
+                }
+                self.expr(c, x, env, depth - 1)
+            }
             // f reads the owner through its pointer, then g receives the
             // result and the owner.
             Lend(x, f, g) => {

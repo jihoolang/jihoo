@@ -1,0 +1,53 @@
+; Dependent lends, written out: core_lend.jh compiles to the same MIR.
+; When (lend xs (lam r (Ref T) body) (lam a A (lam y T rest))) lends a
+; variable, body is checked with r = (borrow xs), which code there may
+; use, and rest with y = xs: the owner given back is xs itself, which rest
+; uses exactly once, by either name. So A may mention (borrow xs), and
+; evidence about xs holds of r and after the lend.
+(data List
+  (Nil List)
+  (Cons (pi x I64 (pi xs List List))))
+
+(def repeat
+  (pi n U64 (pi x I64 List))
+  (lam n U64 (lam x I64 (fold n Nil (lam i U64 (lam0 p (Lt i n) (lam acc List (Cons x acc))))))))
+
+(def length
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+
+(def size
+  (pi xs (Ref List) (Refine (lam k U64 (Eq k (app length xs)))))
+  (lam xs (Ref List)
+    (pack (lam k U64 (Eq k (app length xs))) (app length xs) (refl (app length xs)))))
+
+(def slot
+  (pi xs (Ref List) (pi b (Buffer 4) (pi0 p (Lt (app length xs) 4) I64)))
+  (lam xs (Ref List) (lam b (Buffer 4) (lam0 p (Lt (app length xs) 4)
+    (load b (app length xs) p (lam v I64 (lam b (Buffer 4) (free b v))))))))
+
+(def slot_owned
+  (pi xs List (pi b (Buffer 4) (pi0 p (Lt (app length (borrow xs)) 4) I64)))
+  (lam xs List (lam b (Buffer 4) (lam0 p (Lt (app length (borrow xs)) 4)
+    (lend xs (lam r (Ref List) (app slot r b p))
+      (lam a I64 (lam xs List (drop List xs a))))))))
+
+(export demo
+  (pi n U64 (pi x I64 I64))
+  (lam n U64 (lam x I64
+    (app (lam xs List
+      (lend xs (lam r (Ref List) (app size r))
+        (lam k (Refine (lam m U64 (Eq m (app length (borrow xs))))) (lam y List
+          (if-lt (witness k) 4 q
+            (lend xs
+              (lam r (Ref List)
+                (app slot r (store (alloc 4 (int 0)) 2 x (decide-lt 2 4))
+                  (transport (lam m U64 (Lt m 4)) (proof k) q)))
+              (lam a I64 (lam xs List (drop List xs a))))
+            (drop List xs (int -1)))))))
+      (app repeat n x)))))
+
+(export first
+  (pi x I64 I64)
+  (lam x I64 (app slot_owned Nil (alloc 4 x) (decide-lt 0 4))))

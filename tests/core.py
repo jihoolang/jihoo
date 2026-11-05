@@ -653,6 +653,9 @@ def main():
         from core_borrow_proof import validate_borrow_proof
         validate_borrow_proof(compiler, root, temporary, environment, run, definitions, evaluate,
                               BUFFERS, NODES)
+        from core_lend import validate_lend
+        validate_lend(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
+                      NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)
