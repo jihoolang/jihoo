@@ -1,0 +1,59 @@
+; A dependent view of a borrow of a symbolic choice keeps its motive.
+(data List (Nil List) (Cons (pi x I64 (pi xs List List))))
+(def length
+  (pi xs (Ref List) U64)
+  (lam xs (Ref List) (view-rec List U64 0
+    (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+
+(def size
+  (pi xs (Ref List) (Refine (lam k U64 (Eq k (app length xs)))))
+  (lam xs (Ref List)
+    (view-rec List (lam r (Ref List) (Refine (lam k U64 (Eq k (app length r)))))
+      (pack (lam k U64 (Eq k 0)) 0 (refl 0))
+      (lam x I64 (lam rest (Ref List)
+        (lam ih (Refine (lam k U64 (Eq k (app length rest))))
+          (pack (lam k U64 (Eq k (uadd (app length rest) 1))) (uadd (witness ih) 1)
+            (transport (lam k U64 (Eq (uadd (witness ih) 1) (uadd k 1))) (proof ih)
+              (refl (uadd (witness ih) 1)))))))
+      xs)))
+
+
+
+(def view_lt
+  (pi i U64 (Eq (witness (app size (borrow (if-lt i 1 p (Cons (int 7) Nil) Nil)))) (app length (borrow (if-lt i 1 p (Cons (int 7) Nil) Nil)))))
+  (lam i U64 (proof (app size (borrow (if-lt i 1 p (Cons (int 7) Nil) Nil))))))
+
+(def view_eq
+  (pi i U64 (Eq (witness (app size (borrow (if-eq i 1 p (Cons (int 7) Nil) Nil)))) (app length (borrow (if-eq i 1 p (Cons (int 7) Nil) Nil)))))
+  (lam i U64 (proof (app size (borrow (if-eq i 1 p (Cons (int 7) Nil) Nil))))))
+
+; Known branches retain constructor computation and refinement projection.
+(def less (Eq 1 1) (app view_lt 0))
+(def not_less (Eq 0 0) (app view_lt 1))
+(def equal (Eq 1 1) (app view_eq 1))
+(def not_equal (Eq 0 0) (app view_eq 0))
+
+; Nonrecursive dependent views also retain motives on symbolic comparisons.
+(data B (Empty B) (Next (pi tail B B)))
+(def tag (pi b (Ref B) U64)
+ (lam b (Ref B) (view B U64 0 (lam tail (Ref B) 1) b)))
+(def refined_tag
+ (pi b (Ref B) (Refine (lam n U64 (Eq n (app tag b)))))
+ (lam b (Ref B)
+  (view B (lam r (Ref B) (Refine (lam n U64 (Eq n (app tag r)))))
+    (pack (lam n U64 (Eq n 0)) 0 (refl 0))
+    (lam tail (Ref B) (pack (lam n U64 (Eq n 1)) 1 (refl 1))) b)))
+(def proof_lt
+ (pi n U64 (pi i U64 (Eq
+  (witness (app refined_tag (borrow (if-lt i n p (Next Empty) Empty))))
+  (app tag (borrow (if-lt i n p (Next Empty) Empty))))))
+ (lam n U64 (lam i U64
+  (proof (app refined_tag (borrow (if-lt i n p (Next Empty) Empty)))))))
+(def proof_eq
+ (pi n U64 (pi i U64 (Eq
+  (witness (app refined_tag (borrow (if-eq i n p (Next Empty) Empty))))
+  (app tag (borrow (if-eq i n p (Next Empty) Empty))))))
+ (lam n U64 (lam i U64
+  (proof (app refined_tag (borrow (if-eq i n p (Next Empty) Empty)))))))
+(def concrete_lt (Eq 1 1) (app proof_lt 2 0))
+(def concrete_eq (Eq 0 0) (app proof_eq 2 0))

@@ -657,13 +657,22 @@ until the core replaces it. 0.5.0 requires:
    `normal`. `tests/core_spec.py` fails on a term without an entry and tests
    preservation on the core examples. An independent review (Codex) against the code
    gave 28 corrections and two findings in the code: loop eta-expansion that made
-   normal forms ill-typed, fixed, and branches without a motive, whose normal forms
-   may not check again. The second admits nothing, since normal forms are only
-   compared, and is left for the kernel's proof to decide.
+   normal forms ill-typed, fixed, and branches without a motive. The latter is
+   addressed by the first 0.6 stabilization step below.
 
-After 0.5.0, in this order, starting from that specification:
+For 0.6, complete and stabilize the dependent-type kernel first, then
+mechanize its soundness, starting from that specification:
 
-1. **Kernel soundness, mechanized.** A proof in Lean 4, checked in CI, of
+1. **Dependent-type stabilization.** Started: pure normalization retains
+   dependent elimination and view motives on symbolic branches, while runtime
+   lowering still distributes data cases. The core examples and preservation
+   fixtures must all recheck, with no expected preservation failures. This
+   fixes the known branch-normalization gap, not the whole 0.6 milestone.
+   Continue auditing conversion, substitution, erased indices, indexed
+   elimination and ownership boundaries against accepted and rejected programs.
+   Record remaining source-subset restrictions and settle the kernel rules
+   before proving them; retain both-target execution and self-hosting checks.
+2. **Kernel soundness, mechanized.** A proof in Lean 4, checked in CI, of
    the specified rules: logical consistency (no closed evidence of
    `Lt(0, 0)`), preservation of types by the pure model's reductions, and
    quantity soundness: in the erased program every owned value is used
@@ -671,12 +680,12 @@ After 0.5.0, in this order, starting from that specification:
    implementation is tested against the specification (independent
    evaluator, rejection suites, independent reviews), and remains
    trusted to implement it.
-2. **Erasure and lowering.** A proof that the erased program computes
+3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
    heap nodes, cases, recursions, views, lends, frees). Differential
    tests remain regression checks, not this proof.
-3. **The published theorem.** What an accepted core program is
+4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
    kernel's implementation, lowering where not proved, MIR to LLVM, LLVM
    and the runtime. The elaborator is untrusted, since the kernel checks

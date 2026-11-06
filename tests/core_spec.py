@@ -10,23 +10,13 @@ import re
 LABELS = ("**Type.**", "**Uses.**", "**Reduces.**", "**Runs.**")
 
 
-# Their normal forms hold a branch whose alternatives' types differ: see the
-# specification, under Preservation. Each must keep failing with this reason, so
-# that a fix updates the page.
-KNOWN_UNPRESERVED = {"core_data.jhc": "type mismatch", "core_indexed.jhc": "type mismatch"}
-
-
 def validate_preservation(compiler, root, environment, run):
     programs = [*sorted((root / "examples").glob("*.jhc")),
                 *sorted((root / "tests/core_accepted").glob("*.jhc")),
                 *sorted((root / "tests/core_preserves").glob("*.jhc"))]
     assert len(programs) > 30, programs
     for path in programs:
-        reason = KNOWN_UNPRESERVED.get(path.name)
-        result = run([compiler, "core", "preserves", str(path)], success=reason is None,
-                     env=environment)
-        if reason is not None:
-            assert result.returncode == 1 and reason in result.stderr, (path, result.stderr)
+        run([compiler, "core", "preserves", str(path)], env=environment)
 
 
 def validate_guide(compiler, root, temporary, environment, run):

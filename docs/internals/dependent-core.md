@@ -594,11 +594,14 @@ is rejected. The kernel checks a declaration as for propositions: the
 type is not visible to its own fields, so it is not recursive, and
 runtime fields are first-order.
 
-A data value has no runtime representation. Case analysis of a variant
-reduces to the case applied to the fields; of a branch, to the branch of
-the cases (the true branch's binder is shifted over the cases); of
-`Strict(t, y)`, to `t` then the case of `y`. Evaluation still goes the
-value, then the case. Since an export cannot take or return data, and a
+A flat data value has no runtime representation. Case analysis of a variant
+reduces to the case applied to the fields. Runtime normalization distributes
+a case on a branch into a branch of the cases (shifting over the true
+branch's evidence binder), and a case on `Strict(t, y)` becomes `t` then
+the case of `y`. Pure conversion retains an elimination on a symbolic
+branch: its dependent motive may give the alternatives different types,
+which an ordinary branch cannot express. Concrete choices still compute.
+Evaluation still goes the value, then the case. Since an export cannot take or return data, and a
 loop accumulator is an i64, every case analysis in an export reduces
 away. A data value that is passed but not used is evaluated field by
 field for its traps; erased fields are not evaluated. The cost is that a
@@ -856,7 +859,10 @@ and higher-order fields, unqualified or unknown variants, false proofs
 by cases, data in exports, erased data, large motives, motives of other
 types and evidence fields used at run time. Kernel unit tests reject
 recursive and indexed data and large or mistyped motives, and check that
-a case on a branch is a branch.
+a case on a branch distributes only for runtime lowering. Preservation
+fixtures also cover dependent heap cases and borrowed views, both comparison
+forms, and outer variables under evidence binders. Every pure normal form
+must recheck; this remains a regression check, not a soundness proof.
 `tests/core_indexed.py` adds erased indices and parameterized and
 indexed data: both frontends' MIR and native execution, exports without
 erased arguments, unevaluated erased arguments and kept parameterized
