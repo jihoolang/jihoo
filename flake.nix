@@ -13,13 +13,25 @@
 
       # Only what the compiler needs, so that editing the website (or docs)
       # does not rebuild it.
+      sources = lib.fileset.unions [
+        ./compiler
+        ./lib
+        ./examples
+        ./tests
+      ];
       src = lib.fileset.toSource {
         root = ./.;
+        fileset = sources;
+      };
+
+      # The tests also read the pages they check against the compiler. Editing
+      # these reruns the tests, and does not rebuild the compiler.
+      testSrc = lib.fileset.toSource {
+        root = ./.;
         fileset = lib.fileset.unions [
-          ./compiler
-          ./lib
-          ./examples
-          ./tests
+          sources
+          ./docs/internals/core-spec.md
+          ./docs/language/dependent-types.md
         ];
       };
 
@@ -172,7 +184,8 @@
           # UEFI programs in QEMU.
           tests = pkgs.stdenv.mkDerivation ({
             pname = "jihoo-tests";
-            inherit version src;
+            inherit version;
+            src = testSrc;
             nativeBuildInputs = [ jihoo llvm.clang llvm.lld pkgs.python3 ];
             dontConfigure = true;
             buildPhase = ''
