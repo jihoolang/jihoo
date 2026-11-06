@@ -102,6 +102,16 @@ pub enum Term {
     // borrow, then g receives f's result and x back. A holds no borrow and
     // is not a function, so no borrow outlives f.
     Lend(u32, u32, u32)
+    // What an inout parameter's function returns: whether the result is
+    // erased, the owned type T and M : T -> Type 0 or Prop, a value M(x) with
+    // the owner x given back. Owned: used exactly once. An owner passed in and
+    // given back cannot be aliased, so changing it needs no other rule.
+    Back(bool, u32, u32)
+    // Whether the result is erased, M, the owner x and a : M(x).
+    Give(bool, u32, u32, u32)
+    // A value of Back(e, T, M) and k = fn(x, a) { rest }, with a erased if e;
+    // rest's type depends on neither.
+    Take(u32, u32)
     // A borrow of an owned value x : T, of type Ref(T), in types and
     // evidence only: nothing is lent at run time. Conversion reads it
     // through views, and a lend computes to its continuations on one.
@@ -381,6 +391,21 @@ impl Core {
                 self.transform(rest, cutoff, delta, replacement, depth - 1)?
             )
             Ref(t) => Term.Ref(self.transform(t, cutoff, delta, replacement, depth - 1)?)
+            Back(e, t, m) => Term.Back(
+                e,
+                self.transform(t, cutoff, delta, replacement, depth - 1)?,
+                self.transform(m, cutoff, delta, replacement, depth - 1)?
+            )
+            Give(e, m, x, a) => Term.Give(
+                e,
+                self.transform(m, cutoff, delta, replacement, depth - 1)?,
+                self.transform(x, cutoff, delta, replacement, depth - 1)?,
+                self.transform(a, cutoff, delta, replacement, depth - 1)?
+            )
+            Take(x, k) => Term.Take(
+                self.transform(x, cutoff, delta, replacement, depth - 1)?,
+                self.transform(k, cutoff, delta, replacement, depth - 1)?
+            )
             Borrow(x) => Term.Borrow(self.transform(x, cutoff, delta, replacement, depth - 1)?)
             Deref(r) => Term.Deref(self.transform(r, cutoff, delta, replacement, depth - 1)?)
             Absurd(t, p) => Term.Absurd(
@@ -790,6 +815,25 @@ impl Core {
                 self.normal(rest, depth - 1)?
             )
             Ref(t) => Term.Ref(self.normal(t, depth - 1)?)
+            Back(e, t, m) => Term.Back(e, self.normal(t, depth - 1)?, self.normal(m, depth - 1)?)
+            Give(e, m, x, a) => Term.Give(
+                e,
+                self.normal(m, depth - 1)?,
+                self.normal(x, depth - 1)?,
+                self.normal(a, depth - 1)?
+            )
+            // Taking what was just given is k(x, a); an argument that touches
+            // memory stays bound once, as for any redex.
+            Take(x, k) => {
+                let x = self.normal(x, depth - 1)?
+                match self.term(x) {
+                    Give(_, _, owner, a) => {
+                        let rest = self.apply2(k, owner, a, sp)?
+                        return self.normal(rest, depth - 1)
+                    }
+                    _ => Term.Take(x, self.normal(k, depth - 1)?)
+                }
+            }
             Borrow(x) => {
                 let x = self.normal(x, depth - 1)?
                 match self.term(x) { Deref(r) => return Ok(r), _ => Term.Borrow(x) }
@@ -1177,7 +1221,8 @@ impl Core {
             // Only a refinement's witness is evaluated; its predicate and
             // evidence are erased.
             Pack(_, a, _) => self.may_trap(a, depth - 1)
-            Refine(_) | Proof(_) | Absurd(_, _) => false
+            Refine(_) | Proof(_) | Absurd(_, _) | Back(_, _, _) => false
+            Give(e, _, x, a) => self.may_trap(x, depth - 1) || (!e && self.may_trap(a, depth - 1))
             // A type's terms do not run.
             Loop(n, _, init, body) => self.may_trap(n, depth - 1) ||
                 self.may_trap(init, depth - 1) || self.may_trap(body, depth - 1)
@@ -1204,7 +1249,8 @@ impl Core {
             ) => true
             // Building a heap node allocates; recursion over one frees it.
             Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
-            Absurd(_, _) => false
+            Absurd(_, _) | Back(_, _, _) => false
+            Give(e, _, x, a) => self.effectful(x, depth - 1) || (!e && self.effectful(a, depth - 1))
             Loop(n, _, init, body) => self.effectful(n, depth - 1) ||
                 self.effectful(init, depth - 1) || self.effectful(body, depth - 1)
             t => {
@@ -1302,6 +1348,13 @@ impl Core {
                 self.identical(a, b, depth - 1) && self.identical(p, q, depth - 1)
             (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
                 self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
+            (Back(e, a, b), Back(f, x, y)) => e == f && self.identical(a, x, depth - 1) &&
+                self.identical(b, y, depth - 1)
+            // Proof irrelevance: erased evidence does not change the value.
+            (Give(e, m, a, b), Give(f, n, x, y)) => e == f && self.identical(m, n, depth - 1) &&
+                self.identical(a, x, depth - 1) && (e || self.identical(b, y, depth - 1))
+            (Take(a, b), Take(x, y)) => self.identical(a, x, depth - 1) &&
+                self.identical(b, y, depth - 1)
             (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
                 self.identical(t, u, depth - 1) &&
                 self.identical_all(xs.as_slice(), ys.as_slice(), depth) &&
@@ -2170,6 +2223,64 @@ impl Core {
                 }
                 Term.Universe(0)
             }
+            Back(e, t, m) => {
+                let sort = self.infer(t, ctx, true, depth - 1)?
+                if self.sort(sort, depth - 1)? != 0 || !self.owned(t, depth - 1)? {
+                    return Err(self.error(id, "an owner given back is a buffer or heap data"))
+                }
+                self.back_motive(id, e, t, m, ctx, depth)?
+                Term.Universe(0)
+            }
+            Give(e, m, x, a) => {
+                let t = self.infer(x, ctx, ghost, depth - 1)?
+                if !self.owned(t, depth - 1)? {
+                    return Err(self.error(x, "an owner given back is a buffer or heap data"))
+                }
+                self.back_motive(id, e, t, m, ctx, depth)?
+                let expected = self.add(Term.App(m, x), sp)?
+                self.require(a, expected, ctx, ghost || e, depth - 1)?
+                Term.Back(e, t, m)
+            }
+            Take(x, k) => {
+                let ty = self.infer(x, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Back(e, t, m) = self.term(ty) else {
+                    return Err(self.error(x, "take needs an owner given back with a result"))
+                }
+                let Lam(false, owner, inner) = self.term(k) else {
+                    return Err(self.error(k, "take continues with fn(x, a) { ... }"))
+                }
+                let Lam(erased, result, _) = self.term(inner) else {
+                    return Err(self.error(k, "take continues with fn(x, a) { ... }"))
+                }
+                if erased != e { return Err(self.error(
+                    k,
+                    "take's result is erased as it was given"
+                )) }
+                let shifted = self.shift(m, 1, 0, depth - 1)?
+                let v = self.add(Term.Var(0), sp)?
+                let expected = self.add(Term.App(shifted, v), sp)?
+                if !self.equal(owner, t, depth - 1)? || !self.equal(result, expected, depth - 1)? {
+                    return Err(self.error(k, "take continues with the owner and its result"))
+                }
+                let ty = self.infer(k, ctx, ghost, depth - 1)?
+                let ty = self.normal(ty, depth - 1)?
+                let Pi(false, _, rest) = self.term(ty) else {
+                    return Err(self.error(k, "take continues with fn(x, a) { ... }"))
+                }
+                let Pi(_, _, rest) = self.term(rest) else {
+                    return Err(self.error(k, "take continues with fn(x, a) { ... }"))
+                }
+                let rest = self.normal(rest, depth - 1)?
+                let Ok(rest) = self.shift(rest, -2, 0, depth - 1) else {
+                    return Err(self.error(
+                        k,
+                        "take's type depends on neither the owner nor its result"
+                    ))
+                }
+                self.not_function(k, rest, depth - 1)?
+                return Ok(rest)
+            }
             // In types and evidence, which never run, nothing is lent. In code,
             // a borrow is of an owner a lend is lending, inside its reader.
             Borrow(x) => {
@@ -2502,7 +2613,7 @@ impl Core {
                 for x in ctx { inner.push(x) }
                 inner.push(Binding { ty: a, erased })
                 let result = self.infer(body, inner.as_slice(), ghost, depth - 1)?
-                if !ghost && !erased && self.owned(a, depth - 1)? {
+                if !ghost && !erased && self.linear(a, depth - 1)? {
                     let n = self.uses_function(body, 0, inner.as_slice(), depth - 1)?
                     if n == 0 { return Err(self.error(
                         id,
@@ -2628,7 +2739,7 @@ impl Core {
     fn plain(inout self, t: u32, depth: u32) -> Result(bool, diag.Diag) {
         self.tick(t, depth)?
         match self.term(t) {
-            Buffer(_) | Ref(_) | Pi(_, _, _) => return Ok(false)
+            Buffer(_) | Ref(_) | Pi(_, _, _) | Back(_, _, _) => return Ok(false)
             Ind(g, _) if self.is_boxed(g) => return Ok(false)
             // A type family's binders are its indices, not its values.
             Lam(_, _, body) => return self.plain(body, depth - 1)
@@ -2673,6 +2784,56 @@ impl Core {
             Ind(f, _) => self.is_boxed(f)
             _ => false
         })
+    }
+
+    // Whether a binder of this type is used exactly once at run time: an
+    // owned value, or one given back with a result. Only the first can be
+    // lent, freed or read.
+    fn linear(inout self, ty: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let ty = self.normal(ty, depth)?
+        match self.term(ty) { Back(_, _, _) => Ok(true), _ => self.owned(ty, depth) }
+    }
+
+    // M : T -> Type 0 or Prop, as the erased flag says. Its result holds no
+    // borrow and is no function, and has one representation for every owner:
+    // a scalar, a refinement, a buffer, heap data or another owner given back.
+    fn back_motive(
+        inout self,
+        id: u32,
+        e: bool,
+        t: u32,
+        m: u32,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result((), diag.Diag) {
+        let sort = self.infer(m, ctx, true, depth - 1)?
+        let sort = self.normal(sort, depth - 1)?
+        let Pi(false, domain, level) = self.term(sort) else {
+            return Err(self.error(m, "the result after giving back is fn(x) { T }"))
+        }
+        if !self.equal(domain, t, depth - 1)? {
+            return Err(self.error(m, "the result after giving back takes the owner"))
+        }
+        let level = self.sort(level, depth - 1)?
+        if e != (level == -1) {
+            return Err(self.error(id, "only a proposition's evidence is erased when giving back"))
+        }
+        if e { return Ok(()) }
+        if level != 0 { return Err(self.error(m, "the result after giving back is runtime data")) }
+        let normal = self.normal(m, depth - 1)?
+        let Lam(_, _, body) = self.term(normal) else {
+            return Err(self.error(m, "the result after giving back is fn(x) { T }"))
+        }
+        let known = match self.term(body) {
+            U64 | I64 | Refine(_) | Buffer(_) | Back(_, _, _) => true
+            Ind(g, _) => self.is_boxed(g)
+            _ => false
+        }
+        if !known { return Err(self.error(
+            m,
+            "the result after giving back has one representation and holds no borrow"
+        )) }
+        Ok(())
     }
 
     // How many times evaluating a checked runtime term uses variable v at
@@ -2806,6 +2967,13 @@ impl Core {
                 let first = self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)?
                 Ok(first + self.uses_case(k, 2, v, ctx, depth)?)
             }
+            Give(e, _, x, a) => {
+                let first = self.uses(x, v, ctx, depth - 1)?
+                if e { Ok(first) } else { Ok(first + self.uses(a, v, ctx, depth - 1)?) }
+            }
+            Take(x, k) => Ok(
+                self.uses(x, v, ctx, depth - 1)? + self.uses_case(k, 2, v, ctx, depth)?
+            )
             // f and g each run once. A dependent lend is counted as it is
             // checked: its reader with r = Borrow(x), which uses nothing, and
             // its continuation with y = x, where x is used.
@@ -2929,7 +3097,8 @@ impl Core {
     // either.
     fn outlived(inout self, f: u32, a: u32) -> Result((), diag.Diag) {
         let known = match self.term(a) {
-            U64 | I64 | Refine(_) | Array(_) | Buffer(_) => true
+            // Back's formation requires a result that holds no borrow.
+            U64 | I64 | Refine(_) | Array(_) | Buffer(_) | Back(_, _, _) => true
             Ind(g, _) => self.is_data(g)
             _ => false
         }
@@ -2974,7 +3143,7 @@ impl Core {
             let ty = self.infer(f, ctx, true, depth - 1)?
             let ty = self.normal(ty, depth - 1)?
             let Pi(erased, domain, _) = self.term(ty) else { break }
-            if !erased && self.owned(domain, depth - 1)? {
+            if !erased && self.linear(domain, depth - 1)? {
                 return Err(self.error(id, "a partial application cannot take an owned value"))
             }
             at = f
@@ -3189,7 +3358,8 @@ fn rank(term: Term) -> u32 {
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
         Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46,
-        Borrow(_) => 47, Deref(_) => 48, Absurd(_, _) => 49, Loop(_, _, _, _) => 50
+        Borrow(_) => 47, Deref(_) => 48, Absurd(_, _) => 49, Loop(_, _, _, _) => 50,
+        Back(_, _, _) => 51, Give(_, _, _, _) => 52, Take(_, _) => 53
     }
 }
 
@@ -3206,7 +3376,9 @@ fn payload(term: Term) -> Vec(i128) {
         Integer(n) => out.push(n as i128)
         Con(f, k, _) => { out.push(f as i128); out.push(k as i128) }
         Arith(op, _, _) => out.push(match op { Add => 0, Sub => 1, Mul => 2 })
-        Pi(e, _, _) | Lam(e, _, _) => out.push(if e { 1 } else { 0 })
+        Pi(e, _, _) | Lam(e, _, _) | Back(e, _, _) | Give(e, _, _, _) => out.push(
+            if e { 1 } else { 0 }
+        )
         View(r, f, _, _, _) => { out.push(if r { 1 } else { 0 }); out.push(f as i128) }
         _ => {}
     }
@@ -3224,7 +3396,11 @@ pub fn children(term: Term) -> Vec(u32) {
             out.push(a)
             out.push(b)
         }
-        Arith(_, a, b) | Strict(a, b) | UAdd(a, b) => { out.push(a); out.push(b) }
+        Arith(_, a, b) | Strict(a, b) | UAdd(a, b) | Back(_, a, b) | Take(a, b) => {
+            out.push(a)
+            out.push(b)
+        }
+        Give(_, m, x, a) => { out.push(m); out.push(x); out.push(a) }
         LtAdd(a, b, c, p) | LtCancel(a, b, c, p) => { out.push(a); out.push(b); out.push(c); out.push(
             p
         ) }
@@ -4171,7 +4347,7 @@ fn owned_values_are_used_exactly_once() {
         assert(c.check().is_ok() == (frees == 1), "a buffer is freed exactly once")
     }
     for term in [Term.Buffer(0), Term.Alloc(0, 0), Term.Load(0, 0, 0, 0), Term.Store(0, 0, 0, 0),
-        Term.Free(0, 0)] {
+        Term.Free(0, 0), Term.Back(false, 0, 0), Term.Give(false, 0, 0, 0), Term.Take(0, 0)] {
             var c = Core.new()
             c.add(term.clone(), diag.Span.nowhere()).unwrap()
             assert(c.check().is_err(), "memory terms obey graph integrity")

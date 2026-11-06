@@ -53,7 +53,8 @@ fn form_head(s: str) -> bool {
         s == "usub" || s == "zero-le" || s == "Refine" || s == "pack" || s == "witness" ||
         s == "proof" || s == "data" || s == "Buffer" || s == "alloc" || s == "load" ||
         s == "store" || s == "free" || s == "case" || s == "drop" ||
-        s == "Ref" || s == "lend" || s == "view" || s == "view-rec"
+        s == "Ref" || s == "lend" || s == "view" || s == "view-rec" || s == "Back" ||
+        s == "Back0" || s == "give" || s == "give0" || s == "take"
 }
 
 struct Parser {
@@ -272,6 +273,19 @@ impl Parser {
             core.Term.ZeroLe(self.expr(depth - 1)?)
         } else if kind == "Buffer" {
             core.Term.Buffer(self.expr(depth - 1)?)
+        } else if kind == "Back" || kind == "Back0" {
+            let t = self.expr(depth - 1)?
+            let m = self.expr(depth - 1)?
+            core.Term.Back(kind == "Back0", t, m)
+        } else if kind == "give" || kind == "give0" {
+            let m = self.expr(depth - 1)?
+            let x = self.expr(depth - 1)?
+            let a = self.expr(depth - 1)?
+            core.Term.Give(kind == "give0", m, x, a)
+        } else if kind == "take" {
+            let x = self.expr(depth - 1)?
+            let k = self.expr(depth - 1)?
+            core.Term.Take(x, k)
         } else if kind == "alloc" || kind == "free" {
             let a = self.expr(depth - 1)?
             let b = self.expr(depth - 1)?

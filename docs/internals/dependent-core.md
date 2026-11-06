@@ -144,8 +144,9 @@ length symbolically in the core; it does not evaluate `n` as a legacy
 compile-time array size. The generic helper is checked once with symbolic
 `n`, `xs`, `i` and `p`, before any caller substitutes a concrete array.
 `erased(P)` marks a proof binder; it is not a `comptime` parameter or a
-request to fix a value during specialization. `comptime`, `sink` and
-`inout` parameters are rejected in this subset. A helper can forward
+request to fix a value during specialization. `comptime` and `sink`
+parameters are rejected in this subset; `inout` is described in
+[inout parameters](#inout-parameters). A helper can forward
 proofs or return `Lt(i, n)`, `Eq(a, b)` or declared evidence; the checker controls their runtime
 relevance. Every definition and both branches are checked, including
 unused helpers and discarded proof arguments.
@@ -1244,8 +1245,8 @@ function type. The first and the closures of loads and cases predate
 borrows.
 
 Not yet supported: lending more than one owner in an expression,
-lending a temporary, mutable borrows, and returning a borrow from a
-function, which source cannot write. Types and evidence may borrow any
+lending a temporary, and returning a borrow from a function, which source
+cannot write. To change a value, see [inout parameters](#inout-parameters). Types and evidence may borrow any
 value: see [borrows in types and evidence](#borrows-in-types-and-evidence).
 
 Not yet supported for heap data: mutual recursion, recursion depth
@@ -1603,6 +1604,83 @@ or not preserved, an off-by-one table, false inductions, a wrong count,
 a representation that depends on the index, a function or borrow accumulator,
 an evidence accumulator kept at run time, an owned accumulator used twice or
 dropped, and a claim that needs a loop to be unrolled.
+
+## Inout parameters
+
+An `inout` parameter changes a buffer or heap data that its caller keeps:
+
+```jihoo
+fn bump(n: erased(u64), inout b: buffer(n), i: u64, p: erased(Lt(i, n)), by: i64) -> i64 {
+    let before = index(b, i, p)
+    store(&b, i, before + by, p)
+    before
+}
+
+export fn demo(x: i64) -> i64 {
+    var b = alloc(4, x)
+    let first = bump(4, &b, 2, decide_lt(2, 4), 10)
+    first + index(b, 2, decide_lt(2, 4))
+}
+```
+
+The kernel has no mutable references. A function with an inout parameter takes
+the owner and gives it back, so the pure model of `f(inout x: T) -> A` is a
+function from T to a new T with an A. Three terms state this:
+
+- `Back(e, T, M)` (`.jhc`: `(Back T M)`, or `(Back0 T M)` when `e`), a type: an
+  owner of type T given back, with a result of type `M(x)` that may mention the
+  new owner x. T is a buffer or heap data. `M : T -> Type 0` holds no borrow, is
+  no function and has one representation for every owner: a scalar, a
+  refinement, a buffer, heap data or another `Back`. With `M : T -> Prop`, the
+  flag `e` is set and the result is erased evidence.
+- `Give(e, M, x, a)` (`(give M x a)`, `(give0 M x a)`) with `a : M(x)`, of type
+  `Back(e, T, M)`.
+- `Take(v, k)` (`(take v (lam x T (lam a A rest)))`), which gives `k` the owner
+  and the result. `rest`'s type depends on neither. `Take(Give(M, x, a), k)`
+  computes to `k(x, a)`, keeping an argument that touches memory bound once.
+
+A value of `Back` is used exactly once, by the rule for owned values, and it
+cannot be lent, read or freed; a loop accumulator, a data field and a type
+argument cannot be one. Since the owner moves in and comes back, the existing
+count of uses is the whole safety argument: while a function changes an owner
+nothing else can name it. There is no aliasing to rule out, and no new rule
+about what an exclusive borrow may do.
+
+Source gives this the syntax of ordinary jihoo, and the elaborator, untrusted,
+writes the terms:
+
+- The result type sees each inout parameter as it ends. `old(x)`, in types and
+  evidence only, is the value it started with, so a contract can compare them:
+  `fn same(inout xs: List) -> Eq(length(xs), length(old(xs)))`. With no result
+  type, the function gives back evidence of `Lt(0, 1)`.
+- `f(&x)`, with x a `var` or an inout parameter, is a `let`'s value, a statement
+  or a block's value. It becomes a `Take`, and the rest sees the new owner under
+  the name x. Facts about the old value stay about the old value: a new binder
+  is a different variable, so a stale fact does not type-check as a fact about
+  the new one.
+- `store(&b, i, v, p)` is a statement that rebinds b. `index(b, i, p)` now also
+  lends an owned local.
+- Every value a function can end with gives its parameters back, through
+  branches, `match` arms, `load` and `free`. If the value borrows, it is lent
+  around the `Give`, so a function may end with a read of what it changes.
+
+A change inside a `let`'s value, a loop body or a recursion's case is an error:
+such code would need to return the new owner to what follows. Call a function
+with `&x` there, or pass the owner as the accumulator.
+
+At run time `Give` is the owner alone when its result is erased, and otherwise a
+tuple of the owner and the result, in registers or on the stack, never on the
+heap. Helpers are inlined, so most `Take(Give(...))` pairs meet in the optimizer;
+a tuple stays only where it crosses a branch or a recursion's call.
+
+[`examples/core_inout.jh`](../../examples/core_inout.jh) and its
+[core equivalent](../../examples/core_inout.jhc) compile to the same MIR, whose
+only checks are the allocations'. `tests/core_inout.py` runs programs with
+branches, two owners, a read of another owner and heap data at `-O0` and `-O2`
+with counted allocations, and asserts the reason for each of 21 source and 22
+core rejections: passing an owner both ways, a false or stale fact, an owner
+consumed, used twice or dropped, a borrow or function as the result, a value of
+`Back` lent, freed or used as a loop accumulator, and a wrong erased flag.
 
 The next stages of the replacement are:
 

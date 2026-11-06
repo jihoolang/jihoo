@@ -17,6 +17,9 @@
 // `ref T` parameters borrow: an owned local passed where a borrow is
 // expected is lent for the expression or `let` value that borrows it,
 // while types and evidence, which never run, borrow any value in place.
+// `inout` parameters change a buffer or heap data: a function takes the owner
+// and gives it back with its result, `f(&x)` rebinds x, and `old(x)`, in types
+// and evidence, is the value x started with.
 // No source text or independent execution model is generated here.
 import ast
 import core
@@ -36,7 +39,7 @@ fn reserved(name: str) -> bool {
         name == "lt_add" || name == "lt_cancel" || name == "lt_le" || name == "sub" ||
         name == "zero_le" || name == "refine" || name == "pack" || name == "witness" ||
         name == "proof" || name == "buffer" || name == "alloc" || name == "load" ||
-        name == "store" || name == "free" || name == "absurd" ||
+        name == "store" || name == "free" || name == "absurd" || name == "old" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -60,15 +63,32 @@ struct Elaborator {
     // Above zero while elaborating types and evidence, which never run:
     // an owned value there is borrowed in place rather than lent.
     ghost: u32
+    // Per context entry, whether `&name` may change it: a `var` or an
+    // `inout` parameter, and what they are rebound to.
+    mutable: Vec(bool)
+    // Per definition, whether each parameter is inout.
+    inouts: Vec(Vec(bool))
+    // The current function's inout parameters, in order.
+    givers: Vec(String)
+    // Context entries below this one cannot change here: they belong to the
+    // code after a let's value or a loop body being elaborated.
+    barrier: i64
+    // Set for the one call that may take `&x`: a let's value, a statement or
+    // a block's value.
+    allowed: bool
+    // The current function has inout parameters and no result: a block
+    // without a value ends it.
+    unit: bool
 }
 
 impl Elaborator {
     fn push(inout self, name: str, ty: u32, erased: bool) {
         self.names.push(name.to_string())
         self.ctx.push(core.Binding { ty, erased })
+        self.mutable.push(false)
     }
 
-    fn pop(inout self) { self.names.pop(); self.ctx.pop() }
+    fn pop(inout self) { self.names.pop(); self.ctx.pop(); self.mutable.pop() }
 
     // Whether t, a type in the current context, is a proposition: its
     // values are evidence, which owns nothing at run time.
@@ -264,6 +284,12 @@ impl Elaborator {
         expected: Option(u32),
         depth: u32
     ) -> Result(u32, diag.Diag) {
+        // A branch's value may change what it was given.
+        if is_changing(e) { return self.lets([], e, expected, depth) }
+        match self.giving(e, expected)? {
+            Some(t) => return self.give(e, t, depth)
+            None => {}
+        }
         let (value, info) = self.frame(e, expected, depth)?
         let Some((o, a)) = info else { return Ok(value) }
         let sp = e.span
@@ -279,8 +305,201 @@ impl Elaborator {
         self.c.add(core.Term.Lend(x, f, g), sp)
     }
 
-    // `let name = v` statements, then the tail. A let whose value borrows
-    // an owned local lends it, and the rest sees the owner again.
+    // Whether an expected type gives owners back and e is a value rather than
+    // a form that passes the expected type on to its own values: the type.
+    fn giving(inout self, e: ast.Expr, expected: Option(u32)) -> Result(Option(u32), diag.Diag) {
+        let Some(t) = expected else { return Ok(None) }
+        let normal = self.c.normal(t, core.DEPTH)?
+        let core.Term.Back(_, _, _) = self.c.term(normal) else { return Ok(None) }
+        let passes = match e.kind {
+            Block(_) | Match(_, _) => true
+            Call(f, _) => match f.kind {
+                Name(n) => n == "if_lt" || n == "if_eq" || n == "load" || n == "free"
+                _ => false
+            }
+            _ => false
+        }
+        Ok(if passes { None } else { Some(normal) })
+    }
+
+    // The value e with the current inout parameters given back: Give(M, x,
+    // ...) around it. e is evaluated first; if it borrows, it is lent around
+    // them, so it may read the owners it gives back.
+    fn give(inout self, e: ast.Expr, expected: u32, depth: u32) -> Result(u32, diag.Diag) {
+        let sp = e.span
+        var flags = Vec(bool).new()
+        var motives = Vec(u32).new()
+        var names = Vec(String).new()
+        var ty = expected
+        loop {
+            let normal = self.c.normal(ty, core.DEPTH)?
+            let core.Term.Back(erased, _, m) = self.c.term(normal) else { break }
+            if flags.len() >= self.givers.len() { return Err(error(sp, "unreachable")) }
+            let name = self.givers[flags.len()].clone()
+            let x = self.name(name.as_str(), sp)?
+            flags.push(erased)
+            motives.push(m)
+            names.push(name)
+            let applied = self.c.add(core.Term.App(m, x), sp)?
+            ty = self.c.normal(applied, core.DEPTH)?
+        }
+        let (value, info) = self.frame(e, Some(ty), depth)?
+        let Some((o, a)) = info else { return self.gave(
+            flags.as_slice(),
+            motives.as_slice(),
+            names.as_slice(),
+            value,
+            0
+        ) }
+        // Under fn(a, y), where the owner is given back as itself.
+        let t = self.type_at(o)?
+        let r = self.c.add(core.Term.Ref(t), sp)?
+        let f = self.c.add(core.Term.Lam(false, r, value), sp)?
+        let back = self.c.shift(t, 1, 0, core.DEPTH)?
+        self.push("&", a, false)
+        let inner = self.c.shift(back, 1, 0, core.DEPTH)?
+        self.push("&", inner, false)
+        let result = self.c.add(core.Term.Var(1), sp)?
+        var rest = self.gave(flags.as_slice(), motives.as_slice(), names.as_slice(), result, 2)
+        // An owner that is not given back ends here.
+        let own = names.as_slice()
+        var kept = false
+        for n in own { if self.names[o] == n.as_str() { kept = true } }
+        if !kept {
+            rest = match rest {
+                Ok(x) => self.release(0, inner, x)
+                Err(d) => Err(d)
+            }
+        }
+        self.pop()
+        self.pop()
+        let g = self.c.add(core.Term.Lam(false, back, rest?), sp)?
+        let g = self.c.add(core.Term.Lam(false, a, g), sp)?
+        let x = self.c.add(core.Term.Var((self.ctx.len() - 1 - o) as u32), sp)?
+        self.c.add(core.Term.Lend(x, f, g), sp)
+    }
+
+    // Give(M, x, ...) around a value, for each owner by name; the motives are
+    // `shift` binders out.
+    fn gave(
+        inout self,
+        flags: [bool],
+        motives: [u32],
+        names: [String],
+        value: u32,
+        shift: i64
+    ) -> Result(u32, diag.Diag) {
+        let sp = self.c.nodes[value as i64].span
+        var out = value
+        var j = flags.len
+        while j > 0 {
+            j -= 1
+            let x = self.name(names[j].as_str(), sp)?
+            let m = self.c.shift(motives[j], shift, 0, core.DEPTH)?
+            out = self.c.add(core.Term.Give(flags[j], m, x, out), sp)?
+        }
+        Ok(out)
+    }
+
+    // The value of a call that changes its arguments, then the rest: the
+    // owners come back under their names, then the result under `name`.
+    fn taking(
+        inout self,
+        value: u32,
+        ty: u32,
+        names: [String],
+        result: str,
+        annotation: Option(u32),
+        stmts: [ast.Stmt],
+        tail: ast.Expr,
+        expected: Option(u32),
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let sp = self.c.nodes[value as i64].span
+        let normal = self.c.normal(ty, core.DEPTH)?
+        let core.Term.Back(erased, t, m) = self.c.term(normal) else {
+            return Err(error(sp, "only an inout parameter takes &x"))
+        }
+        if names.len == 0 { return Err(error(sp, "unreachable")) }
+        self.push(names[0].as_str(), t, false)
+        self.mutable[self.mutable.len() - 1] = true
+        let shifted = self.c.shift(m, 1, 0, core.DEPTH)?
+        let v = self.c.add(core.Term.Var(0), sp)?
+        let applied = self.c.add(core.Term.App(shifted, v), sp)?
+        let body = self.c.normal(applied, core.DEPTH)?
+        let last = names.len == 1
+        // The result's name binds a value whose annotation the kernel compares.
+        let domain = match annotation {
+            Some(a) if last => self.c.shift(a, 1, 0, core.DEPTH)?
+            _ => body
+        }
+        self.push(if last { result } else { "&" }, domain, erased)
+        let inner = match expected {
+            Some(e) => Some(self.c.shift(e, 2, 0, core.DEPTH)?)
+            None => None
+        }
+        let r = if last { self.lets(stmts, tail, inner, depth - 1) } else {
+            let x = self.c.add(core.Term.Var(0), sp)?
+            let a = match annotation {
+                Some(a) => Some(self.c.shift(a, 2, 0, core.DEPTH)?)
+                None => None
+            }
+            self.taking(x, body, names[1..], result, a, stmts, tail, inner, depth - 1)
+        }
+        // The result's binder and the owner, if the rest does not use them.
+        let r: Result(u32, diag.Diag) = match r {
+            Ok(b) => {
+                let ghost = match inner { Some(t) => self.proposition(t), None => false }
+                if ghost { Ok(b) } else { self.settle(b, 2) }
+            }
+            Err(d) => Err(d)
+        }
+        self.pop()
+        self.pop()
+        let k = self.c.add(core.Term.Lam(erased, domain, r?), sp)?
+        let k = self.c.add(core.Term.Lam(false, t, k), sp)?
+        self.c.add(core.Term.Take(value, k), sp)
+    }
+
+    // The names of `&x` arguments, which must be able to change here.
+    fn changed(inout self, args: [ast.Expr]) -> Result(Vec(String), diag.Diag) {
+        var names = Vec(String).new()
+        for a in args {
+            let Some(inner) = addressed(a) else { continue }
+            let ast.ExprKind.Name(n) = inner.kind else {
+                return Err(error(a.span, "&x takes a named variable"))
+            }
+            if self.ghost > 0 { return Err(error(a.span, "types and evidence change nothing")) }
+            for m in names { if m == n { return Err(error(
+                a.span,
+                "an owner is passed as &x once in a call"
+            )) } }
+            var i = self.names.len()
+            var found: Option(i64) = None
+            while i > 0 {
+                i -= 1
+                if self.names[i] == n { found = Some(i); break }
+            }
+            let Some(i) = found else { return Err(error(
+                a.span,
+                ("unknown name: " + n).as_str()
+            )) }
+            if !self.mutable[i] { return Err(error(
+                a.span,
+                ("&" + n + " needs a var or an inout parameter").as_str()
+            )) }
+            if i < self.barrier { return Err(error(
+                a.span,
+                ("cannot change " + n + " here: only a let statement or a block's value can, outside a let's value or a loop").as_str()
+            )) }
+            names.push(n.clone())
+        }
+        Ok(names)
+    }
+
+    // `let name = v` statements and calls that change their arguments, then
+    // the tail. A let whose value borrows an owned local lends it, and the
+    // rest sees the owner again.
     fn lets(
         inout self,
         stmts: [ast.Stmt],
@@ -289,13 +508,51 @@ impl Elaborator {
         depth: u32
     ) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(tail.span, "elaboration nesting limit reached")) }
-        if stmts.len == 0 { return self.scope_expr(tail, expected, depth) }
+        if stmts.len == 0 {
+            if !is_changing(tail) { return self.scope_expr(tail, expected, depth) }
+            // `store(&b, ...)` or `f(&x)` as a block's value.
+            let synthetic = if is_store(tail) { unit_value(tail.span) } else {
+                ast.Expr { kind: ast.ExprKind.Name("&result".to_string()), span: tail.span }
+            }
+            return self.statement(
+                "&result",
+                None,
+                tail,
+                [],
+                synthetic,
+                expected,
+                tail.span,
+                false,
+                depth
+            )
+        }
         let stmt = stmts[0]
+        match stmt.kind {
+            Expr(e) => {
+                if !is_changing(e) { return Err(error(
+                    stmt.span,
+                    "dependent_core blocks contain let statements, calls that change an argument and a value"
+                )) }
+                return self.statement(
+                    "_",
+                    None,
+                    e,
+                    stmts[1..],
+                    tail,
+                    expected,
+                    stmt.span,
+                    false,
+                    depth
+                )
+            }
+            _ => {}
+        }
         let ast.StmtKind.Let(l) = stmt.kind else { return Err(error(
             stmt.span,
             "dependent_core blocks contain let statements and a value"
         )) }
-        let plain = match l.kind { Let => true, _ => false }
+        let is_var = match l.kind { Var => true, _ => false }
+        let plain = match l.kind { Let | Var => true, _ => false }
         if l.els.is_some() || !plain { return Err(error(
             stmt.span,
             "dependent_core has plain let statements"
@@ -309,9 +566,139 @@ impl Elaborator {
             Some(t) => Some(self.ty(t, core.DEPTH)?)
             None => None
         }
-        let sp = stmt.span
+        self.statement(
+            name.as_str(),
+            annotation,
+            l.value,
+            stmts[1..],
+            tail,
+            expected,
+            stmt.span,
+            is_var,
+            depth
+        )
+    }
+
+    // A let of `name` to `value` (or a statement, whose value is named `_`),
+    // then the rest.
+    fn statement(
+        inout self,
+        name: str,
+        annotation: Option(u32),
+        value_expr: ast.Expr,
+        stmts: [ast.Stmt],
+        tail: ast.Expr,
+        expected: Option(u32),
+        sp: diag.Span,
+        is_var: bool,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let changing = is_changing(value_expr)
         let ghost = match expected { Some(t) => self.proposition(t), None => false }
-        let (value, info) = self.frame(l.value, annotation, depth - 1)?
+        // store(&b, ...) gives the buffer itself, rebound to its name.
+        let store_name = if is_store(value_expr) {
+            let ast.ExprKind.Call(_, args) = value_expr.kind else { return Err(error(
+                sp,
+                "unreachable"
+            )) }
+            let names = self.changed(args.as_slice())?
+            if names.len() != 1 { return Err(error(sp, "store(&b, ...) changes one buffer")) }
+            Some(names[0].clone())
+        } else { None }
+        let rebound = store_name.is_some()
+        if rebound && (is_var || annotation.is_some()) { return Err(error(
+            sp,
+            "store(&b, ...) changes b and has no value to bind"
+        )) }
+        let bound: String = match store_name {
+            Some(n) => n.clone()
+            None => name.to_string()
+        }
+        let name = bound.as_str()
+        var names = Vec(String).new()
+        if changing && !rebound {
+            let ast.ExprKind.Call(_, args) = value_expr.kind else { return Err(error(
+                sp,
+                "unreachable"
+            )) }
+            names = self.changed(args.as_slice())?
+        }
+        let saved = self.barrier
+        if !changing { self.barrier = self.ctx.len() }
+        self.allowed = changing
+        let framed = self.frame(
+            value_expr,
+            if changing && !rebound { None } else { annotation },
+            depth - 1
+        )
+        self.allowed = false
+        self.barrier = saved
+        let (value, info) = framed?
+        if changing && !rebound {
+            return match info {
+                None => {
+                    let ty = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+                    self.taking(
+                        value,
+                        ty,
+                        names.as_slice(),
+                        name,
+                        annotation,
+                        stmts,
+                        tail,
+                        expected,
+                        depth
+                    )
+                }
+                Some((o, a)) => {
+                    let t = self.type_at(o)?
+                    let r = self.c.add(core.Term.Ref(t), sp)?
+                    let f = self.c.add(core.Term.Lam(false, r, value), sp)?
+                    let back = self.c.shift(t, 1, 0, core.DEPTH)?
+                    self.push("&", a, false)
+                    let inner = match expected {
+                        Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
+                        None => None
+                    }
+                    let x = self.c.add(core.Term.Var(0), sp)?
+                    let shifted = self.c.shift(a, 1, 0, core.DEPTH)?
+                    let note = match annotation {
+                        Some(n) => Some(self.c.shift(n, 1, 0, core.DEPTH)?)
+                        None => None
+                    }
+                    let taken = self.taking(
+                        x,
+                        shifted,
+                        names.as_slice(),
+                        name,
+                        note,
+                        stmts,
+                        tail,
+                        inner,
+                        depth
+                    )
+                    let taken: Result(u32, diag.Diag) = match taken {
+                        Ok(b) => if ghost { Ok(b) } else {
+                            let v = (self.ctx.len() - 1 - o) as u32
+                            match self.c.runtime_uses(b, v, self.ctx.as_slice(), []) {
+                                Ok(0) => {
+                                    let ty = self.type_at(o)?
+                                    self.release(v, ty, b)
+                                }
+                                _ => Ok(b)
+                            }
+                        }
+                        Err(d) => Err(d)
+                    }
+                    self.pop()
+                    let g = self.c.shift(taken?, 1, 0, core.DEPTH)?
+                    let g = self.c.add(core.Term.Lam(false, back, g), sp)?
+                    let g = self.c.add(core.Term.Lam(false, a, g), sp)?
+                    let x = self.c.add(core.Term.Var((self.ctx.len() - 1 - o) as u32), sp)?
+                    self.c.add(core.Term.Lend(x, f, g), sp)
+                }
+            }
+        }
         match info {
             None => {
                 let a = match annotation {
@@ -319,12 +706,20 @@ impl Elaborator {
                     None => self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
                 }
                 let erased = self.proposition(a)
-                self.push(name.as_str(), a, erased)
+                self.push(name, a, erased)
+                let at = self.ctx.len() - 1
+                if is_var || rebound {
+                    if !rebound && self.owner(at).is_none() {
+                        self.pop()
+                        return Err(error(sp, "a var holds a buffer or heap data"))
+                    }
+                    self.mutable[at] = true
+                }
                 let inner = match expected {
                     Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                     None => None
                 }
-                let rest = self.lets(stmts[1..], tail, inner, depth - 1)
+                let rest = self.lets(stmts, tail, inner, depth - 1)
                 let rest: Result(u32, diag.Diag) = match rest {
                     Ok(r) => if ghost { Ok(r) } else { self.settle(r, 1) }
                     Err(d) => Err(d)
@@ -340,12 +735,20 @@ impl Elaborator {
                 let r = self.c.add(core.Term.Ref(t), sp)?
                 let f = self.c.add(core.Term.Lam(false, r, value), sp)?
                 let back = self.c.shift(t, 1, 0, core.DEPTH)?
-                self.push(name.as_str(), a, false)
+                self.push(name, a, false)
+                if is_var {
+                    let at = self.ctx.len() - 1
+                    if self.owner(at).is_none() {
+                        self.pop()
+                        return Err(error(sp, "a var holds a buffer or heap data"))
+                    }
+                    self.mutable[at] = true
+                }
                 let inner = match expected {
                     Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                     None => None
                 }
-                let rest = self.lets(stmts[1..], tail, inner, depth - 1)
+                let rest = self.lets(stmts, tail, inner, depth - 1)
                 let rest: Result(u32, diag.Diag) = match rest {
                     Ok(r) => if ghost { Ok(r) } else { self.give_back(r, o) }
                     Err(d) => Err(d)
@@ -1134,10 +1537,12 @@ impl Elaborator {
         expected: Option(u32),
         depth: u32
     ) -> Result(u32, diag.Diag) {
-        let Some(tail) = b.tail else { return Err(error(
-            b.span,
-            "dependent_core blocks require a value"
-        )) }
+        let Some(tail) = b.tail else {
+            // A function with no result gives back evidence of nothing.
+            if !self.unit { return Err(error(b.span, "dependent_core blocks require a value")) }
+            let value = unit_value(b.span)
+            return self.lets(b.stmts.as_slice(), value, expected, depth)
+        }
         self.lets(b.stmts.as_slice(), tail.deref(), expected, depth)
     }
 
@@ -1236,6 +1641,10 @@ impl Elaborator {
 
     // An expression of a proposition is evidence, which never runs.
     fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
+        match self.giving(e, expected)? {
+            Some(t) => return self.give(e, t, depth)
+            None => {}
+        }
         let evidence = self.ghost == 0 && match expected {
             Some(t) => self.proposition(t)
             None => false
@@ -1268,6 +1677,7 @@ impl Elaborator {
         var function = f
         var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
         for a in args {
+            let a = match addressed(a) { Some(inner) => inner, None => a }
             let normal = self.c.normal(ty, core.DEPTH)?
             let core.Term.Pi(erased, domain, result) = self.c.term(normal) else {
                 return Err(error(sp, "application requires a dependent function"))
@@ -1408,6 +1818,13 @@ impl Elaborator {
                 self.c.add(core.Term.Arith(arith, a, b), sp)
             }
             Call(f, args) => {
+                let permitted = mem.replace(&self.allowed, false)
+                if !permitted {
+                    for a in args { if addressed(a).is_some() { return Err(error(
+                        a.span,
+                        "a call with &x is a let's value, a statement or a block's value"
+                    )) } }
+                }
                 match self.find_variant(f.deref()) {
                     Some((family, k)) => return self.construct(
                         family,
@@ -1425,6 +1842,20 @@ impl Elaborator {
                     if !is_call { return Err(error(f.span, "calls require a named function")) }
                     let function = self.expr(f.deref(), None, depth - 1)?
                     return self.apply(function, args.as_slice(), sp, depth)
+                }
+                if n == "old" {
+                    if args.len() != 1 { return Err(error(sp, "old requires a variable")) }
+                    if self.ghost == 0 { return Err(error(sp, "old is evidence only")) }
+                    let ast.ExprKind.Name(x) = args[0].kind else {
+                        return Err(error(sp, "old requires a variable"))
+                    }
+                    // The outermost binding of the name: what it started as.
+                    for i, m in self.names {
+                        if m == x {
+                            return self.c.add(core.Term.Var((self.names.len() - 1 - i) as u32), sp)
+                        }
+                    }
+                    return Err(error(sp, ("unknown name: " + x).as_str()))
                 }
                 if n == "absurd" {
                     if args.len() != 1 { return Err(error(
@@ -1490,7 +1921,15 @@ impl Elaborator {
                         sp,
                         "index requires array, index and evidence"
                     )) }
-                    let a = self.expr(args[0], None, depth - 1)?
+                    // An owned buffer is lent for the read.
+                    let lent = match args[0].kind {
+                        Name(x) if self.ghost == 0 => self.borrow(x.as_str(), args[0].span)?
+                        _ => None
+                    }
+                    let a = match lent {
+                        Some(r) => r
+                        None => self.expr(args[0], None, depth - 1)?
+                    }
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let p = self.evidence(args[2], None, depth - 1)?
@@ -1542,7 +1981,8 @@ impl Elaborator {
                         sp,
                         "store requires a buffer, an index, a value and evidence"
                     )) }
-                    let b = self.expr(args[0], None, depth - 1)?
+                    let target = match addressed(args[0]) { Some(inner) => inner, None => args[0] }
+                    let b = self.expr(target, None, depth - 1)?
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let t = self.c.add(core.Term.I64, sp)?
@@ -1639,10 +2079,12 @@ impl Elaborator {
                     let first = self.c.add(core.Term.App(t, zero), sp)?
                     let init = self.expr(args[2], Some(first), depth - 1)
                     let ty = self.c.loop_body_type(count, t, proof, sp, core.DEPTH)
+                    let saved = mem.replace(&self.barrier, self.ctx.len())
                     let body = match ty {
                         Ok(ty) => self.proof_case(args[3], ty, 3, depth - 1)
                         Err(d) => Err(d)
                     }
+                    self.barrier = saved
                     if proof { self.ghost -= 1 }
                     return self.c.add(core.Term.Loop(count, t, init?, body?), sp)
                 }
@@ -1661,8 +2103,10 @@ impl Elaborator {
                     let init = self.expr(args[1], Some(acc), depth - 1)?
                     let acc = self.c.infer(init, self.ctx.as_slice(), true, core.DEPTH)?
                     let ty = self.c.fold_body_type(count, acc, sp, core.DEPTH)?
-                    let body = self.proof_case(args[2], ty, 3, depth - 1)?
-                    return self.c.add(core.Term.Fold(count, init, body), sp)
+                    let saved = mem.replace(&self.barrier, self.ctx.len())
+                    let body = self.proof_case(args[2], ty, 3, depth - 1)
+                    self.barrier = saved
+                    return self.c.add(core.Term.Fold(count, init, body?), sp)
                 }
                 if n == "induct" {
                     if args.len() < 2 { return Err(error(
@@ -1724,7 +2168,12 @@ impl Elaborator {
                             arity += 1
                             rest = inner
                         }
-                        cases.push(self.proof_case(args[k + 1], expected, arity, depth - 1)?)
+                        // A recursion's case runs once per node; flat data's, once.
+                        let saved = self.barrier
+                        if data && self.c.is_boxed(f) { self.barrier = self.ctx.len() }
+                        let case = self.proof_case(args[k + 1], expected, arity, depth - 1)
+                        self.barrier = saved
+                        cases.push(case?)
                         arities.push(arity)
                     }
                     // Case analysis of flat data into a type runs one case.
@@ -1774,6 +2223,14 @@ impl Elaborator {
                             sp,
                             "wrong argument count (evidence is explicit)"
                         )) }
+                        for j, a in args {
+                            let changes = self.inouts[g as i64][j]
+                            if changes != addressed(a).is_some() { return Err(error(
+                                a.span,
+                                if changes { "an inout parameter takes &x" }
+                                else { "only an inout parameter takes &x" }
+                            )) }
+                        }
                     }
                     // A recursion's result in its case.
                     Var(_) => {
@@ -1991,10 +2448,13 @@ impl Elaborator {
         )) }
         if self.taken(f.name.as_str()) { return Err(error(f.name_span, "duplicate definition")) }
         var domains = Vec((bool, u32)).new()
+        var flags = Vec(bool).new()
+        var changing = Vec(i64).new()
         for p in f.params {
-            if p.mode != ast.Mode.Let || p.bounds.len() != 0 { return Err(error(
+            let inout_param = p.mode == ast.Mode.Inout
+            if (p.mode != ast.Mode.Let && !inout_param) || p.bounds.len() != 0 { return Err(error(
                 p.span,
-                "use erased(P) for evidence; comptime, sink and inout are unsupported"
+                "use erased(P) for evidence; comptime and sink are unsupported"
             )) }
             if reserved(p.name.as_str()) { return Err(error(p.span, "reserved dependent_core name")) }
             for name in self.names {
@@ -2004,11 +2464,50 @@ impl Elaborator {
             let (erased, domain) = self.domain(t)?
             domains.push((erased, domain))
             self.push(p.name.as_str(), domain, erased)
+            flags.push(inout_param)
+            if inout_param {
+                let at = self.ctx.len() - 1
+                if erased || self.owner(at).is_none() { return Err(error(
+                    p.span,
+                    "an inout parameter is a buffer or heap data"
+                )) }
+                self.mutable[at] = true
+                changing.push(at)
+                self.givers.push(p.name.clone())
+            }
         }
-        let Some(ret) = f.ret else { return Err(error(item.span, "result needs an explicit type")) }
-        let mut_ret = self.ty(ret, core.DEPTH)?
+        // The result's type sees each inout parameter as it ends, and
+        // old(x) as it started.
+        var owners = Vec(u32).new()
+        for at in changing {
+            let t = self.type_at(at)?
+            owners.push(t)
+            let name = self.names[at].clone()
+            self.push(name.as_str(), t, false)
+        }
+        self.unit = f.ret.is_none() && changing.len() > 0
+        let mut_ret = match f.ret {
+            Some(ret) => self.ty(ret, core.DEPTH)?
+            None => {
+                if !self.unit { return Err(error(item.span, "result needs an explicit type")) }
+                let zero = self.c.add(core.Term.Natural(0), item.span)?
+                let one = self.c.add(core.Term.Natural(1), item.span)?
+                self.c.add(core.Term.Lt(zero, one), item.span)?
+            }
+        }
+        var mut_ret = mut_ret
+        var j = owners.len()
+        while j > 0 {
+            j -= 1
+            let erased = self.proposition(mut_ret)
+            self.pop()
+            let m = self.c.add(core.Term.Lam(false, owners[j], mut_ret), item.span)?
+            mut_ret = self.c.add(core.Term.Back(erased, owners[j], m), item.span)?
+        }
         let Some(body) = f.body else { return Err(error(item.span, "function needs a body")) }
         var mut_body = self.block(body, Some(mut_ret), core.DEPTH)?
+        self.unit = false
+        self.givers = Vec(String).new()
         // A parameter the body does not use is freed.
         if !self.proposition(mut_ret) { mut_body = self.settle(mut_body, domains.len())? }
         var ty = mut_ret
@@ -2032,6 +2531,7 @@ impl Elaborator {
             span: item.span
         })
         self.arities.push(f.params.len())
+        self.inouts.push(flags)
         // Make previously checked definitions available for type-directed
         // application elaboration. Lowering independently rechecks all terms.
         self.c.check()
@@ -2049,6 +2549,35 @@ fn variant_name(p: ast.Pat, family: str) -> Option(String) {
         }
         _ => None
     }
+}
+
+// x in `&x`.
+fn addressed(e: ast.Expr) -> Option(ref ast.Expr) {
+    match e.kind {
+        Unary(ast.UnOp.Addr, inner) => Some(inner.deref())
+        _ => None
+    }
+}
+
+fn is_changing(e: ast.Expr) -> bool {
+    let ast.ExprKind.Call(_, args) = e.kind else { return false }
+    for a in args { if addressed(a).is_some() { return true } }
+    false
+}
+
+fn is_store(e: ast.Expr) -> bool {
+    let ast.ExprKind.Call(f, _) = e.kind else { return false }
+    if !is_changing(e) { return false }
+    match f.kind { Name(n) => n == "store", _ => false }
+}
+
+// decide_lt(0, 1): the evidence a function with no result gives back.
+fn unit_value(sp: diag.Span) -> ast.Expr {
+    var args = Vec(ast.Expr).new()
+    args.push(ast.Expr { kind: ast.ExprKind.Int(0), span: sp })
+    args.push(ast.Expr { kind: ast.ExprKind.Int(1), span: sp })
+    let f = ast.Expr { kind: ast.ExprKind.Name("decide_lt".to_string()), span: sp }
+    ast.Expr { kind: ast.ExprKind.Call(Box.new(f), args), span: sp }
 }
 
 fn let_erased(t: ast.Ty) -> bool {
@@ -2074,7 +2603,13 @@ pub fn compile(
         ctx: Vec(core.Binding).new(),
         arities: Vec(i64).new(),
         frames: Vec(Frame).new(),
-        ghost: 0
+        ghost: 0,
+        mutable: Vec(bool).new(),
+        inouts: Vec(Vec(bool)).new(),
+        givers: Vec(String).new(),
+        barrier: 0,
+        allowed: false,
+        unit: false
     }
     for item in module.items { e.definition(item, !library)? }
     var p = core_lower.compile(mem.replace(&e.c, core.Core.new()), tgt)?

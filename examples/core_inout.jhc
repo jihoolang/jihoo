@@ -1,0 +1,57 @@
+; Changing a value in place, written out: core_inout.jh compiles to the same
+; MIR. A function with an inout parameter takes the owner and returns
+; (Back T (lam x T A)), the owner given back with a result that may mention it;
+; (give M x a) makes one and (take e (lam x T (lam a A rest))) takes it apart.
+; With a proposition for A, the forms are Back0 and give0, and a is erased.
+(def bump
+  (pi0 n U64 (pi b (Buffer n) (pi i U64 (pi0 p (Lt i n) (pi by I64
+    (Back (Buffer n) (lam x (Buffer n) I64)))))))
+  (lam0 n U64 (lam b (Buffer n) (lam i U64 (lam0 p (Lt i n) (lam by I64
+    (lend b (lam r (Ref (Buffer n)) (index r i p))
+      (lam before I64 (lam y (Buffer n)
+        (app (lam c (Buffer n) (give (lam x (Buffer n) I64) c before))
+          (store b i (add before by) p)))))))))))
+
+(def clear
+  (pi0 n U64 (pi b (Buffer n) (pi i U64 (pi0 p (Lt i n)
+    (Back0 (Buffer n) (lam x (Buffer n) (Lt 0 1)))))))
+  (lam0 n U64 (lam b (Buffer n) (lam i U64 (lam0 p (Lt i n)
+    (app (lam c (Buffer n) (give0 (lam x (Buffer n) (Lt 0 1)) c (decide-lt 0 1)))
+      (store b i (int 0) p)))))))
+
+(def transfer
+  (pi from (Buffer 4) (pi to (Buffer 4) (pi i U64 (pi0 p (Lt i 4)
+    (Back (Buffer 4) (lam f (Buffer 4) (Back (Buffer 4) (lam t (Buffer 4) I64))))))))
+  (lam from (Buffer 4) (lam to (Buffer 4) (lam i U64 (lam0 p (Lt i 4)
+    (lend from (lam r (Ref (Buffer 4)) (index r i p))
+      (lam amount I64 (lam y (Buffer 4)
+        (app (lam f (Buffer 4)
+          (take (app bump 4 to i p amount)
+            (lam t (Buffer 4) (lam v I64
+              (give (lam f (Buffer 4) (Back (Buffer 4) (lam t (Buffer 4) I64))) f
+                (give (lam t (Buffer 4) I64) t v))))))
+          (store from i (int 0) p))))))))))
+
+(export demo
+  (pi x I64 I64)
+  (lam x I64
+    (app (lam b0 (Buffer 4)
+      (app (lam c0 (Buffer 4)
+        (take (app bump 4 b0 2 (decide-lt 2 4) (int 10))
+      (lam b1 (Buffer 4) (lam first I64
+        (take (app bump 4 b1 2 (decide-lt 2 4) (int 10))
+          (lam b2 (Buffer 4) (lam second I64
+            (take (app clear 4 b2 0 (decide-lt 0 4))
+              (lam b3 (Buffer 4) (lam0 u (Lt 0 1)
+                (take (app transfer b3 c0 3 (decide-lt 3 4))
+                  (lam b4 (Buffer 4) (lam rest (Back (Buffer 4) (lam t (Buffer 4) I64))
+                    (take rest (lam c1 (Buffer 4) (lam moved I64
+                      (lend b4 (lam r (Ref (Buffer 4)) (index r 0 (decide-lt 0 4)))
+                        (lam cleared I64 (lam y (Buffer 4)
+                          (free b4
+                            (lend c1 (lam r (Ref (Buffer 4))
+                            (add (add (add (add first second) cleared)
+                              (index r 3 (decide-lt 3 4))) moved))
+                            (lam a I64 (lam z (Buffer 4) (free z a))))))))))))))))))))))))
+        (alloc 4 (int 1))))
+      (alloc 4 x))))

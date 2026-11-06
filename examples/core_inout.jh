@@ -1,0 +1,39 @@
+// Changing a value in place. An `inout` parameter changes a buffer that its
+// caller keeps: `bump` adds to one element and returns what was there, `f(&b)`
+// shows that b may change, and evidence about b's length stays valid because
+// the type says its length is the same. In the kernel, the function takes the
+// owner and gives it back with its result, so nothing else can reach the
+// buffer while it changes. Indices have evidence, so there are no bounds
+// checks. main returns 15.
+#![dependent_core]
+
+fn bump(n: erased(u64), inout b: buffer(n), i: u64, p: erased(Lt(i, n)), by: i64) -> i64 {
+    let before = index(b, i, p)
+    store(&b, i, before + by, p)
+    before
+}
+
+// No result: the block ends the function.
+fn clear(n: erased(u64), inout b: buffer(n), i: u64, p: erased(Lt(i, n))) {
+    store(&b, i, 0, p)
+}
+
+// Two owners, one after the other, and a call in tail position.
+fn transfer(inout from: buffer(4), inout to: buffer(4), i: u64, p: erased(Lt(i, 4))) -> i64 {
+    let amount = index(from, i, p)
+    store(&from, i, 0, p)
+    bump(4, &to, i, p, amount)
+}
+
+export fn demo(x: i64) -> i64 {
+    var b = alloc(4, x)
+    var c = alloc(4, 1)
+    let first = bump(4, &b, 2, decide_lt(2, 4), 10)
+    let second = bump(4, &b, 2, decide_lt(2, 4), 10)
+    clear(4, &b, 0, decide_lt(0, 4))
+    let moved = transfer(&b, &c, 3, decide_lt(3, 4))
+    let cleared = index(b, 0, decide_lt(0, 4))
+    first + second + cleared + index(c, 3, decide_lt(3, 4)) + moved
+}
+
+fn main() -> i64 { demo(2) - 3 }

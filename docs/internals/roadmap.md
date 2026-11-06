@@ -586,6 +586,17 @@ invariant, with no bounds check, and proves `Even(n + n)`; its MIR equals the
 and 12 core rejections with their reasons and kernel tests run in the `core`
 suite.
 
+Implemented inout parameters
+([design](dependent-core.md#inout-parameters)): `inout b: buffer(n)` changes a
+value its caller keeps, `f(&b)` rebinds it and `old(b)` is its first value in
+types and evidence. A function takes the owner and gives it back with its
+result, through three kernel terms, `Back`, `Give` and `Take`; the owner moves
+in and out, so the existing count of uses is the safety argument and the kernel
+gains no mutable reference. `examples/core_inout.jh` changes buffers in place
+with no bounds check; its MIR equals the `.jhc`'s, and programs with branches,
+two owners and heap data run natively with counted allocations, with 21 source
+and 22 core rejections with their reasons in the `core` suite.
+
 #### The 0.5.0 release gate for the native core
 
 0.5.0 is the completion of dependent types: what programs can state and check
@@ -618,8 +629,10 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    ([design](dependent-core.md#views-whose-result-depends-on-the-borrow)),
    such as reading the i-th element with evidence that i is below the
    length. Done: (d) loops whose invariants are types
-   ([design](dependent-core.md#loops-whose-invariants-are-types)). Remaining,
-   in order: (e) mutable borrows and in-place updates of heap data; (f) a
+   ([design](dependent-core.md#loops-whose-invariants-are-types)). Started: (e)
+   [inout parameters](dependent-core.md#inout-parameters), done for buffers;
+   assigning to heap data and proofs about it remain. Remaining, in order after
+   it: (f) a
    `std` slice in the core (a vector as an owned buffer with its length and
    capacity), with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,

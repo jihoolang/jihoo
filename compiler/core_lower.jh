@@ -257,6 +257,46 @@ impl Lower {
                 scope.push(Some(x))
                 self.expr(c, rest, scope.as_slice(), depth - 1)
             }
+            // The owner alone when the result is erased, else both, unboxed.
+            Give(e, _, x, a) => {
+                let x = self.expr(c, x, env, depth - 1)?
+                if e { return Ok(x) }
+                let a = self.expr(c, a, env, depth - 1)?
+                var parts = Vec(u32).new()
+                parts.push(x.ty)
+                parts.push(a.ty)
+                let ty = self.types.tuple(parts)
+                var ops = Vec(mir.Operand).new()
+                ops.push(x.op.clone())
+                ops.push(a.op.clone())
+                Ok(self.value(ty, mir.Rvalue.Aggregate(mir.Agg.Struct(ty), ops), sp))
+            }
+            Take(x, k) => {
+                let x = self.expr(c, x, env, depth - 1)?
+                let core.Term.Lam(false, _, inner) = c.term(k) else {
+                    return Err(c.error(k, "take needs fn(x, a) { ... }"))
+                }
+                let core.Term.Lam(erased, _, rest) = c.term(inner) else {
+                    return Err(c.error(k, "take needs fn(x, a) { ... }"))
+                }
+                var scope = copy_env(env)
+                if erased {
+                    scope.push(Some(x))
+                    scope.push(None)
+                    return self.expr(c, rest, scope.as_slice(), depth - 1)
+                }
+                let types.TyKind.Tuple(parts) = self.types.kind(x.ty) else {
+                    return Err(c.error(id, "layout of an owner given back"))
+                }
+                let parts = parts.clone()
+                let whole = self.local(x.ty, mir.LocalKind.Temp, sp)
+                self.assign(whole, mir.Rvalue.Use(x.op.clone()), sp)
+                for j, ty in parts {
+                    let place = mir.Place.local(whole).with(mir.Proj.Field(j as u32))
+                    scope.push(Some(self.value(ty, mir.Rvalue.Use(mir.Operand.Copy(place)), sp)))
+                }
+                self.expr(c, rest, scope.as_slice(), depth - 1)
+            }
             // A redex the normalizer kept binds an argument that touches
             // memory: evaluated once, then the body.
             App(f, a) => {
@@ -670,6 +710,16 @@ impl Lower {
             I64 => Some(types.I64)
             Buffer(_) | Ref(_) => Some(self.pointer())
             Ind(f, _) if c.is_boxed(f) => Some(self.pointer())
+            Back(true, t, _) => self.runtime(c, t)
+            Back(false, t, m) => {
+                let core.Term.Lam(_, _, body) = c.term(m) else { return None }
+                let owner = self.runtime(c, t)?
+                let result = self.runtime(c, body)?
+                var parts = Vec(u32).new()
+                parts.push(owner)
+                parts.push(result)
+                Some(self.types.tuple(parts))
+            }
             _ => None
         }
     }

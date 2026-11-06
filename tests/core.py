@@ -677,6 +677,9 @@ def main():
         from core_nth import validate_nth
         validate_nth(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                      NODES)
+        from core_inout import validate_inout
+        validate_inout(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
+                       NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)
