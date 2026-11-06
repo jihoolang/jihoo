@@ -10,7 +10,7 @@ described: they are untrusted, since the kernel checks their output.
 
 **Status.** Nothing here is mechanically proved. The properties in
 [What is intended](#what-is-intended) rest on the independent evaluator, the
-rejection suites and reviews. A proof in Agda of these rules comes after 0.5.0
+rejection suites and reviews. A proof in Lean 4 of these rules comes after 0.5.0
 ([roadmap](roadmap.md#the-050-release-gate-for-the-native-core)), starting from this
 page. Do not describe the kernel as verified.
 

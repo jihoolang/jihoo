@@ -143,8 +143,7 @@ External calls remain unavailable during evaluation.
 records evaluator steps, cumulative allocations and per-function costs;
 failures report resource use and the originating compile-time obligation.
 
-Proof checking at compile time (a Horn certificate kernel, general theorems
-by induction, and enum codecs bound to checked tables) is developed in the
+Proof checking at compile time (general theorems by induction, and enum codecs bound to checked tables) is developed in the
 separate [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs)
 repository. [Verification](docs/reference/command-line.md#verification)
 is in the compiler: `jihoo verify` proves bounds and overflow checks,
@@ -157,21 +156,8 @@ that a small trusted checker accepts. Every build verifies: it removes
 the proved checks, and an unproved contract is a compile error
 (`--no-verify` keeps every check). It runs on the compiler's own source
 (`jihoo verify compiler/main.jh`), and CI fails if it proves fewer; no
-check is left in the trusted checker itself, and the checker is proved
-sound: [`lib/proof`](lib/proof/refine.jh) checks a Horn proof, from the
-rules `jihoo emit-horn` writes for its code, that when it accepts a
-certificate no integer point satisfies the facts and the negated claim,
-and [`agda/`](agda/Certified.agda) checks that proof in Agda with Horn's
-proved checker and reads it in the integers. The translation of the code
-into rules is still trusted, and the composed proof of the verifier
-(execution semantics, condition generation, check removal) is pending.
-Agda currently connects exported scalar helpers, direct callers and an
-[accumulator loop](agda/MirLoopCorrespondence.agda) to their generated Horn
-relations, with inductive invariants for arbitrary finite loop executions.
-A [typed Vec backing-store specification](agda/VecMemory.agda) also
-connects initialized prefixes, capacity-checked pushes and copying
-relocation to the list relations; connecting the library's actual MIR,
-allocator and pointer/borrow behavior remains required.
+check is left in the trusted checker itself. The verifier is not proved
+sound.
 
 The replacement direction is a [native dependent core](docs/internals/dependent-core.md)
 that checks programs and proofs together and emits MIR directly from the
@@ -179,7 +165,7 @@ checked terms. The experimental `#![dependent_core]` source subset
 compiles [`examples/core_index.jh`](examples/core_index.jh) through the
 ordinary AST into the same core as [`core_index.jhc`](examples/core_index.jhc):
 a runtime array lookup whose proof is erased before code generation,
-without Horn, Agda or legacy VC generation. The
+without legacy VC generation. The
 [equality example](examples/core_equality.jh) adds erased U64 equality
 and proposition-only transport, with user-written lemmas rewriting the
 runtime bound to the array length. Programs declare their own

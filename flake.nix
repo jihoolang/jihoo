@@ -2,13 +2,8 @@
   description = "jihoo: a systems language as fast as C, memory-safe without lifetimes";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # Horn's Agda development (agda/), which agda/Adequacy.agda builds on.
-  inputs.horn = {
-    url = "github:jihoo12/horn";
-    flake = false;
-  };
 
-  outputs = { self, nixpkgs, horn }:
+  outputs = { self, nixpkgs }:
     let
       lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" ];
@@ -57,13 +52,6 @@
       # LLVM's C API optimizes IR and emits objects in process. Keep the
       # shared library at major version 21, as checked by both backends.
       llvmFor = pkgs: pkgs.llvmPackages_21;
-
-      hornCheckerFor = pkgs: pkgs.rustPlatform.buildRustPackage {
-        pname = "jihoo-horn-checker";
-        version = "0.3.0";
-        src = horn;
-        cargoLock.lockFile = "${horn}/Cargo.lock";
-      };
 
       # Ship the standard library, libLLVM, and native/freestanding linkers.
       wrapCompiler = llvm: ''
@@ -176,107 +164,8 @@
           llvm = llvmFor pkgs;
           jihoo = self.packages.${pkgs.stdenv.hostPlatform.system}.jihoo;
           otherTarget = if pkgs.stdenv.hostPlatform.isx86_64 then "aarch64" else "x86_64";
-          hornChecker = hornCheckerFor pkgs;
         in
         {
-          # A semantic specification for the VC generator and local
-          # erasure, independent of the compiler and the Horn certificate.
-          # Loops, opaque effects and retained failures are covered; bad
-          # proposed conditions must be rejected by Agda's type checker.
-          check-removal = pkgs.runCommand "jihoo-check-removal" {
-            nativeBuildInputs = [ pkgs.agda ];
-          } ''
-            cp -R ${./agda} agda
-            chmod -R u+w agda
-            export HOME=$TMPDIR LC_ALL=C.UTF-8
-            HORN=${horn} bash agda/check-removal.sh
-            touch $out
-          '';
-
-          # Execution-to-model bridge for the checker's three list sorts,
-          # against the current emit-horn output, with malformed-rule tests.
-          list-execution = pkgs.runCommand "jihoo-list-execution" {
-            nativeBuildInputs = [ jihoo pkgs.agda ];
-          } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR LC_ALL=C.UTF-8
-            HORN=${horn} bash agda/check-lists.sh
-            touch $out
-          '';
-
-          # Typed backing storage, initialized prefixes, capacity and
-          # relocation, composed with the three generated list relations.
-          vec-memory = pkgs.runCommand "jihoo-vec-memory" {
-            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
-          } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            export JIHOO_PATH=$PWD/lib LC_ALL=C.UTF-8
-            HORN=${horn} bash agda/check-vec.sh
-            touch $out
-          '';
-
-          scalar-execution = pkgs.runCommand "jihoo-scalar-execution" {
-            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
-          } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR LC_ALL=C.UTF-8
-            HORN=${horn} bash agda/check-scalars.sh
-            touch $out
-          '';
-
-          # Retain both targets' exported MIR and Horn theory for review.
-          # The proof runs actual callee graphs and checks an inductive
-          # invariant against the exported loop and its Horn cut rules.
-          mir-execution = pkgs.runCommand "jihoo-mir-execution" {
-            nativeBuildInputs = [ jihoo pkgs.agda pkgs.python3 ];
-          } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            export JIHOO_PATH=$PWD/lib LC_ALL=C.UTF-8
-            HORN=${horn} MIR_PROOF_OUT="$out" bash agda/check-mir.sh
-          '';
-
-          # Retain the actual proof for independent consumers: the theory,
-          # goals and certificate, checked again by Horn's Rust checker, and
-          # their Agda export, which the `adequacy` check has Agda check.
-          certificate = pkgs.runCommand "jihoo-soundness-certificate" {
-            nativeBuildInputs = [ jihoo hornChecker ];
-          } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            export JIHOO_PATH=$PWD/lib
-            mkdir -p "$out"
-            jihoo emit-horn --lib compiler/linear.jh --fn check > "$out/check.horn"
-            jihoo run agda/certificate.jh -- "$out/check.horn" "$out"
-            schematic-kernel "$out/check.theory" "$out/check.goals" "$out/check.proof" > "$out/checked.txt"
-            schematic-kernel --agda CheckCertificate "$out/check.theory" "$out/check.goals" "$out/check.proof" \
-              "$out/CheckCertificate.agda" > /dev/null
-            # Fail if a missing result or a result pointing at the wrong
-            # fact is accepted. Keep the original proof intact.
-            sed '/^(result /d' "$out/check.proof" > missing.proof
-            sed 's/^(result check_sound [0-9]*)$/(result check_sound 0)/' "$out/check.proof" > wrong.proof
-            for bad in missing wrong; do
-              if schematic-kernel "$out/check.theory" "$out/check.goals" "$bad.proof" > "$bad.log" 2>&1; then
-                echo "accepted corrupted certificate: $bad" >&2
-                exit 1
-              fi
-              cp "$bad.log" "$out/$bad-rejected.txt"
-            done
-          '';
-
           # tests/runner.jh, built and run by the installed compiler, tests
           # it: the programs of tests/run, tests/fail and examples, the
           # backend, that it builds a compiler that writes the same IR, and
@@ -292,21 +181,6 @@
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);
-
-          # agda/check.sh: the certificate lib/proof/refine.jh produces that
-          # the linear checker is sound, checked by Agda running Horn's
-          # proved checker (agda/ImplicationCheck.agda), and the theorem read
-          # in the integers.
-          adequacy = pkgs.runCommand "jihoo-adequacy" { nativeBuildInputs = [ jihoo pkgs.agda hornChecker ]; } ''
-            cp -R ${src}/. src
-            chmod -R u+w src
-            cp -R ${./agda} src/agda
-            cd src
-            # Agda's messages contain Unicode.
-            export JIHOO_PATH=$PWD/lib HOME=$TMPDIR LC_ALL=C.UTF-8
-            HORN=${horn} JIHOO=jihoo bash agda/check.sh
-            touch $out
-          '';
 
           toolchain = pkgs.runCommand "jihoo-toolchain-check" { nativeBuildInputs = [ jihoo ]; } ''
             cp ${./examples}/*.jh .
@@ -346,13 +220,6 @@
         in
         {
           default = pkgs.mkShell shell;
-
-          # All tools for agda/check.sh and agda/check-removal.sh, with the
-          # same Horn input and Agda as the proof checks in CI.
-          proofs = pkgs.mkShell (shell // {
-            nativeBuildInputs = shell.nativeBuildInputs ++ [ pkgs.agda (hornCheckerFor pkgs) ];
-            HORN = "${horn}";
-          });
 
           # The default shell with QEMU, OVMF and the UEFI shell, which the
           # uefi suite of tests/runner.jh runs UEFI programs with (x86_64).

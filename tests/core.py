@@ -429,7 +429,7 @@ def source_frontend(compiler, root, temporary, environment):
     assert len(re.findall(r"let mut", mir)) == 7, mir
     assert "assert" not in mir and "call" not in mir and "Lt" not in mir
     assert mir.count("switch ") == 1 and mir.count("[_") == 1
-    for legacy in ("verify", "emit-horn", "emit-obligations", "test"):
+    for legacy in ("verify", "emit-obligations", "test"):
         rejected = command(legacy, example, "--error-format=json", success=False)
         assert rejected.returncode == 1 and "core:" in rejected.stderr
         assert json.loads(rejected.stderr)
@@ -625,8 +625,7 @@ def main():
     compiler = str(Path(args.compiler).resolve())
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
-    environment = {**os.environ, "HORN": "/unavailable", "AGDA": "/unavailable",
-                   "SCHEMATIC_KERNEL": "/unavailable"}
+    environment = dict(os.environ)
     with tempfile.TemporaryDirectory(prefix="jihoo-core-") as directory:
         temporary = Path(directory)
 

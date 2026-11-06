@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "horn": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1793693953,
-        "narHash": "sha256-hrPZ2G9eLEjVkkPsfsARXlGbYkXKICgW30J56kwbIXw=",
-        "owner": "jihoo12",
-        "repo": "horn",
-        "rev": "cf9e6cfa2a945689095d75e28197dfbb02e33853",
-        "type": "github"
-      },
-      "original": {
-        "owner": "jihoo12",
-        "repo": "horn",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1791456040,
@@ -34,7 +18,6 @@
     },
     "root": {
       "inputs": {
-        "horn": "horn",
         "nixpkgs": "nixpkgs"
       }
     }

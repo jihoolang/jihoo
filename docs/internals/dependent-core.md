@@ -5,13 +5,10 @@ This page is the design. What the kernel accepts is specified in
 
 The replacement direction for verification is to check the program and
 its proofs in one native core, then erase and lower that checked program.
-It does not require reconstructing the program's execution as Horn rules:
-Horn's checker is small, but a translation of jihoo programs into Horn
-would itself be trusted, and would be much larger than this kernel. The
-kernel stays small by providing general rules (such as declared inductive
-propositions) rather than built-in special cases.
-Horn's theory, exporter and certificate format are not compatibility
-requirements for the new core.
+It does not reconstruct the program's execution in another proof system:
+such a translation would itself be trusted, and would be much larger than this
+kernel. The kernel stays small by providing general rules (such as declared
+inductive propositions) rather than built-in special cases.
 
 The executable slice is experimental. Ordinary `.jh` files opt into a
 small source subset with `#![dependent_core]`; `compiler/core_elab.jh`
@@ -30,8 +27,8 @@ core frontend.
   -> LLVM -> object
 ```
 
-The core path calls neither the existing verification-condition generator
-nor Horn/Agda. Unmarked `.jh` files retain the existing verifier and its
+The core path does not call the existing verification-condition generator.
+Unmarked `.jh` files retain the existing verifier and its
 checks during migration; the new kernel is not yet formally proved
 sound. Source elaboration, erasure and lowering are not yet proved to
 preserve typing or behavior. Passing the prototype's tests does not
@@ -194,7 +191,7 @@ and borrow checks and LLVM backend then run on that MIR. The branch proof
 has no MIR argument or local, and `index` adds no bounds assertion.
 `--no-verify`, `--release` and debug MIR switches never bypass proof
 checking. `check --verify` still checks this same core. Legacy `verify`,
-`emit-horn`, `emit-obligations` and the `test` harness are explicitly
+`emit-obligations` and the `test` harness are explicitly
 unsupported for marked files; compilation does not call their VC machinery.
 
 ## U64 equality and proof transport
@@ -1794,7 +1791,7 @@ The next stages of the replacement are:
    and erasure rules before enabling them.
 3. Add runtime operations with explicit ownership/effect rules, including
    borrowed and mutable memory and dynamic allocation. Extend the direct
-   lowering of checked programs rather than adding a separate Horn model.
+   lowering of checked programs rather than adding a separate model.
 4. Establish the kernel's metatheory and the preservation obligations for
    source elaboration, erasure and lowering. External proof tools may
    validate this small trusted foundation; they are not a required user compilation stage.

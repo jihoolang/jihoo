@@ -4,9 +4,10 @@ The replacement direction is a [native dependent core](dependent-core.md):
 check the program and its proofs together, then erase and lower those
 same terms. The first executable `.jhc` slice is available through
 `jihoo core`. Ordinary `.jh` elaboration has not yet moved to that core.
-The implementation, principles and unfinished proof connections below
-describe the existing verifier while that migration is in progress;
-its Horn encoding is not a compatibility requirement on the replacement.
+The implementation and principles below describe the existing verifier while
+that migration is in progress. Its checker and generator are tested, not proved:
+an earlier proof of the checker, through Horn and Agda, was removed with that
+path before 0.5.0 and is in the repository's history.
 
 Status: research. The compiler proves checks and
 [contracts](../language/contracts.md) itself
@@ -27,14 +28,12 @@ jihoo 0.6 makes proofs importable libraries over the native core: lemmas
 about integers, sequences and the program's own data, proved by induction
 and used in program specifications. Mathematics beyond what programs need
 grows from there through the same core's types and proofs, erased before
-runtime code generation. The earlier Horn library remains part of the
-existing verifier's development, not a required API for these libraries.
+runtime code generation.
 
 ## Principles
 
 - **A small checker trusts nothing the prover produced**, the way the
-  [borrow kernel](redesign.md) trusts nothing sema decided and Horn's kernel
-  trusts nothing its engine produced. Provers are untrusted and may be large,
+  [borrow kernel](redesign.md) trusts nothing sema decided. Provers are untrusted and may be large,
   heuristic or external; their bugs lose proofs, never soundness.
 - **Obligations come from MIR**, after `elab` and `check`, where every move,
   borrow, check and drop is explicit. Ownership does most of the work that
@@ -65,14 +64,13 @@ or a loop head, to a check, a return or a loop head gives the goals on that
 path.
 
 Goals that need induction (a property of every element, of every `n`) are
-0.6's: the [Horn](https://github.com/jihoo12/horn) kernel's schematic
-certificates, already ported to jihoo in jihoo-proofs, check them.
+0.6's, in the [native core](dependent-core.md).
 
 ## What is trusted
 
 | Part | Trusted | Why |
 | --- | --- | --- |
-| The checker (`linear.jh`, 155 lines; later the Horn kernel) | yes | it accepts the proof |
+| The checker (`linear.jh`, 155 lines) | yes | it accepts the proof |
 | The obligation generator (`vc.jh`, 1,670 lines, the model `obligations.jh` builds from MIR, 2,250, and the arithmetic on forms in `forms.jh`, 53) | yes | it states what MIR means: a wrong rule proves a false thing |
 | What a proof rests on, what is removed and which contracts are errors (`verify.jh`, 840) | yes | a proof under an unproved assumption must not count |
 | MIR itself and `check.jh` | yes, already | obligations assume a well-borrowed program, and that `unreachable` blocks are not reached |
@@ -81,8 +79,7 @@ certificates, already ported to jihoo in jihoo-proofs, check them.
 
 Line counts leave out comments, blank lines and tests.
 
-The generator is the hard part, as Horn's rules are for cubical type theory.
-It is tested against the interpreter, which already executes MIR: on random
+The generator is the hard part. It is tested against the interpreter, which already executes MIR: on random
 inputs that satisfy a function's `requires`, a check the generator proved must
 never fail and an `ensures` must hold. The build's overflow mode is part of
 the semantics: with `--release`, `+` wraps and gives no obligation.
@@ -434,358 +431,6 @@ generator's arithmetic on forms, which traps on overflow, moved to
 `linear.jh`, and `tests/verify/compiler.proved` says so with a `clean`
 line, which the `verify` suite checks.
 
-### The checker's soundness
-
-The last part of 6.6 is to prove, in jihoo, that the checker is sound:
-when `check` accepts a certificate, no integer point satisfies the facts
-and the negated claim. It is stated and proved in Horn rules, and
-[`lib/proof`](../../lib/proof/schematic.jh) checks the proof: Horn's
-schematic checker in jihoo, with implication goals, rule hypotheses,
-application, induction under hypotheses and inversion, whose algorithm
-Horn's Agda development proves sound.
-
-The theory ([`lib/proof/farkas.jh`](../../lib/proof/farkas.jh)) has two
-parts.
-
-- **The integers**, as the axioms of an ordered commutative ring
-  ([`lib/proof/ring.jh`](../../lib/proof/ring.jh)): `eq` with congruence,
-  the ring laws, `le` with addition, products of non-negatives and
-  `0 <= 1`, and `1 <= 0` gives `false`. A sort `Z` of expressions, never
-  inducted on or inverted, so the value of a form at a point
-  (`val l x`, `ev t x`, `look x v`) is an expression with defining
-  equations, and needs no proof that it exists. Defining the integers by
-  rules instead, as functions on numerals, makes every ring law an
-  induction, and Horn's proof search does not find them: an intermediate
-  result has to exist, which a relational encoding cannot state.
-- **The checker**: `ms n a b w r` merges two term lists as
-  `Lin.add_scaled` does, one rule per branch of its loop, with `n`
-  counting the iterations; `push` keeps a coefficient or drops one that
-  is zero; `as` is `add_scaled` on forms; `sums` is the loop over the
-  facts, skipping zero weights; and `accepts` is what `check` tests before
-  it returns `Ok`: non-negative weights, the negated claim
-  `-1 - claim`, the weighted sum, a constant `c` with `c + 1 <= 0`. The
-  model admits more than the code (any order of variables, sums with a
-  zero weight), which only makes the theorem stronger.
-
-The theorem: `accepts fs cl ws wc`, `sat fs x` (every fact is
-non-negative at `x`) and `val cl x + 1 <= 0` give `false`. The proof
-(1,687 steps, checked in under a second) shows that a merge evaluates to
-`a + w * b` by induction on its iterations, and that a weighted sum of
-non-negative facts stays non-negative by induction on the facts. Its
-ring identities come from a prover that normalizes both sides to sorted
-sums of monomials and writes each rewrite as a step; like the rest of the
-certificate's construction (`lib/proof/cert.jh`), it is not trusted. A
-checker without the test of the sum's sign, or of any weight's, is not
-proved by the same certificate, and neither is a merge that adds the
-coefficients of two different variables.
-
-What was left before the theorem is about the code itself:
-
-1. **Adequacy.** Done ([`agda/`](../../agda/Adequacy.agda)). What the
-   schematic checker establishes is that the goal holds in every model
-   of the rules: Horn's Agda development proves each form of a
-   certificate sound in any set of ground judgments closed under the
-   rules and supported by them (each member is the conclusion of a rule
-   instance whose premises are members), not only for derivability, the
-   least such set. Induction is on sorts, whose ground terms do not
-   depend on the model, and inversion needs only the support.
-   `Adequacy.agda` gives a model in an ordered commutative ring: `eq`,
-   `le` and `false` are equality, order and falsity of values, and every
-   other judgment holds when the rules derive it from true comparisons,
-   which is what `emit-horn`'s rules say of a run of the code. The rules
-   that conclude a comparison are the ring's axioms, the defining
-   equations of `look`, `ev` and `val`, and `efq` rules, and each holds
-   in the ring; Agda checks by evaluation that no other rule of the
-   theory concludes one, and rejects the theory with a rule `le z1 z0`
-   added. The theory reaches Agda as the checker parses it:
-   `proof.schematic.agda` writes it, numbered as the checker numbers it,
-   and `agda/theory.jh` builds it from `emit-horn`'s rules as
-   `refine.check` does. `Integers.agda` shows the integers (differences
-   of naturals) are such a ring, with a small normalizer to Horn form for
-   the identities. The theorem: when `check` returns `Ok` for facts `fs`,
-   claim `cl` and weights `ws`, no integer point makes every fact
-   non-negative and the claim negative. A point (sort `X`) is built by
-   `pt` from the values of finitely many variables; `X` had no
-   constructor before, and a sort without ground terms makes every
-   statement about its values hold vacuously. `nix flake check` runs it
-   (`agda/check.sh`, which also checks the certificate in Agda, a few
-   minutes).
-2. **The code.** Done ([below](#the-proof-of-the-code)): the rules
-   `jihoo emit-horn` writes for `linear.jh` give `accepts` when `check`
-   returns `Ok`.
-3. **Compile time.** The check runs as compiled code in the test; at
-   compile time it exceeds the interpreter's million steps (0.6, step 3).
-
-### The code as Horn rules
-
-The soundness proof is about a model of `check`, and step 6.6.3 ties it to
-the code: `jihoo emit-horn` ([`horn.jh`](../../compiler/horn.jh)) states
-in Horn rules what a function's MIR computes, and a proof in Horn then
-shows that `check` returning `Ok` gives `accepts`. Like `vc.jh`, the
-translation is trusted: it says what MIR means.
-
-It runs each path of a function symbolically, from the entry or a loop
-head (a target of a back edge) to a return or a loop head, and writes one
-rule per path. A function `f` is the predicate `fn.f(args, result)`; a
-loop head `K` is `fn.f@K(n, live locals, result)`, which holds when the
-function, from `K` with those values, returns that result after passing
-loop heads at most `n` times (the fuel the proof inducts on). Values are
-terms: integers are exact ring expressions (a checked `+` that overflows
-traps, and a path that traps, panics or reaches `unreachable` has no
-rule), comparisons become `le` and `eq` premises, a bool that leaves a
-path becomes `B.tt` or `B.ff` case by case, structs and enums are
-constructors (a variable is replaced by its constructor where a field is
-read, and a `switch` on a discriminant takes one rule per variant), a
-shared borrow is the value it borrows (nothing changes it while it
-lives), and a mutable one is the place, which `push` updates. `Vec` is a
-list, with `len`, `nth` and `snoc` relations that say what `std`'s `Vec`
-does; that `std` does it is assumed, as the verifier assumes `std`'s
-`ensures`. `overflowing_mul(a, b)` is `(a * b, false)` or `(anything,
-true)`, so `linear.jh` uses it rather than the bit tricks it had.
-
-What is outside the fragment is an error, never an approximation. A
-loop head's state is the locals that may be read before they are set
-from there on; within a path, `len` and `index` of the same arguments
-give one result (they are functions), and a path that takes a comparison
-and one that contradicts it (its negation, or `<` against `==`) has no
-rule. A struct argument is its constructor of new variables. `check`
-and the five functions it calls are 126 rules.
-
-### The proof of the code
-
-[`lib/proof/refine.jh`](../../lib/proof/refine.jh) proves, from those
-rules, the model and the ring axioms:
-
-```text
-fn.check (Goal.mk fs cl) (Certificate.mk ws) (Ok m), sat fs x,
-val cl x + 1 <= 0  ⊢  false
-```
-
-that is, when the compiled `check` accepts a certificate, no point
-satisfies its facts and negated claim. It is 36,631 steps with 45
-inductions, built in under a second; `lib/proof` checks it, and so does
-Horn's own checker. Its parts:
-
-- **Lists**: for each of `linear.jh`'s list sorts, lemmas about lengths,
-  `nth` and suffixes (`sfx l i s`: `s` is `l` without its first `i`
-  elements), proved by induction on lists; and appending.
-- **`add_scaled`'s loop**, by induction on the fuel of its head: from
-  indices `i`, `j` and the output so far, the result is the output
-  followed by a merge (`ms`) of the two suffixes. Each pass is a lemma of
-  its own (from the left, the right or both, pushing a term or dropping
-  a zero), and every rule of the loop head is either one of those passes,
-  its end, or a path whose comparisons add up to a contradiction (the
-  proof finds the combination). Then a call returning `Some` gives `as`.
-- **`check`'s loops**: the weights loop leaves non-negative weights, the
-  sum loop leaves a sum whose rest is `good`, and both feed `accepts`.
-
-Horn certificates cannot take a derived fact apart (only a hypothesis is
-inverted), so what a loop has left to do is a predicate whose
-definition hides its witnesses (`ares`, `g80`, `g45`), and a lemma whose
-hypothesis is that predicate takes it apart outside the induction.
-
-The `verify` suite translates `check` and checks the proof, and also
-translates two broken copies of `linear.jh`, one without the test of the
-sum's sign and one without the test of the weights', whose proofs do not
-go through. `check` now reads the next fact on every pass of the sum
-loop, so that the proof knows it when its weight is zero.
-
-What this rests on: the translation (`horn.jh`, trusted as `vc.jh` is) and
-`std`'s `Vec` being a list as `len`, `nth` and `snoc` say. The certificate
-itself is checked by Agda, running Horn's checker for implicational
-certificates, which Horn's Agda development proves sound in every model of
-the rules; [`agda/Certified.agda`](../../agda/Certified.agda) reads the
-result in ℤ ([above](#the-checkers-soundness)), so neither `lib/proof`'s
-checker nor Horn's Rust one is trusted for it.
-
-The translation and `Vec` are tested against the code they describe
-([`tests/horn/differential`](../../tests/horn/differential/check.py)):
-`cases.jh` runs the compiled `check`, `Lin.add_scaled`, `add` and `mul` on
-random inputs (certificates built to be accepted, then often broken: a
-weight changed or negative, a form unsorted, numbers near the ends of
-i128), and `check.py`, a Horn solver of its own in Python, enumerates what
-the rules derive for the same inputs. What the code returns must be among
-them, and the only value besides overflow results (`None`, an error,
-which the rules' exact `add` and `mul` may always give); a result only the
-rules give must be one exact arithmetic allows where an i128 overflowed,
-which an exact model of `add_scaled` checks. The `verify` suite runs 321
-cases. Of the 108 rules `emit-horn` writes for the code, their
-derivations use all 62 that a run can reach; each of the other 46 has a
-premise the run cannot meet (an index past its list's length, which the
-loop's invariant excludes, a negative weight after the weights are
-checked, a negative length). Of 64 random mutants of the rules, as a
-translation bug would make them, the test catches every one that changes
-a reachable rule so that it loses what the code returns; those it misses
-only add derivations (a
-weaker comparison, a premise dropped where a later `nth` still bounds
-the index), are equivalent (a swapped comparison next to an equality),
-or change a rule no run reaches. A search that does not end (a rule that
-leaves a list unbound) fails after 10 seconds.
-
-### Execution bridge for list primitives
-
-[`agda/ListExecution.agda`](../../agda/ListExecution.agda) begins the
-execution-to-Horn proof with the three list sorts used by `linear.check`:
-terms, facts and weights. Its executable operations are finite-list
-length, recursive lookup and appending one element. For every list of
-well-sorted ground values, it proves that each operation's result derives
-the matching `len`, `nth` or `snoc` judgment in `Adequacy`'s model. A
-lookup's index may be any ground integer expression with the appropriate
-value; it is not required to have the syntax of a canonical numeral.
-
-The proof uses six rule schemas per sort. Agda checks that each schema,
-including its premises and variable sorts, is present in the theory
-generated from the current `linear.jh`. They are not additional axioms.
-The `list-execution` Nix check regenerates that theory, checks concrete
-integer examples and requires rejection of three incorrect generated
-rules: an off-by-one length, an off-by-one index and a lost push result.
-
-This establishes finite-list primitive correspondence, not a native
-`std.Vec` memory model. Its representation, allocation, capacity bounds,
-pointer accesses and borrowing still need a simulation into these lists.
-The checker's MIR arithmetic, overflow, calls and control-flow translation
-also remain to be connected before its execution implies the Horn
-relation required by `Certified.check-sound`. Differential testing remains
-a regression check, and this partial bridge does not complete the 0.5.0
-execution-correspondence release gate.
-
-### Typed backing storage and list refinement
-
-[`agda/VecMemory.agda`](../../agda/VecMemory.agda) gives the list bridge
-a typed backing-store specification. Its descriptor carries length and
-capacity; backing cells can be initialized or uninitialized. A
-representation relation identifies the initialized prefix with a list,
-without treating spare cells as elements. It also permits zero-capacity
-borrowed storage with a nonzero length, as used by `String.from_static`.
-
-Reads coincide with list lookup. An in-place push can succeed only when
-its write is inside capacity and reaches an existing cell; it appends the
-element and preserves every other backing cell. Relocation copies the
-initialized prefix into storage of the requested capacity. Short sources
-or destinations cannot succeed, and constructive theorems give successful
-relocation and push executions for every prefix with sufficient capacity.
-`VecHornExecution.agda` composes these operations with the actual generated
-`len`, `nth` and `snoc` rules for the checker's three list sorts.
-
-The `vec-memory` Nix check regenerates the theory for both targets. It
-checks the examples and requires proof rejection when reads expose spare
-storage, pushes use a wrong position/capacity/length, or relocation loses
-a prefix element or invents capacity.
-
-The actual `std.Vec` implementation and the checker's list-processing MIR
-loops still need a simulation into this specification. Allocation success,
-byte/pointer layout, separation between allocations, borrow enforcement,
-growth policy and bounded machine arithmetic remain explicit obligations.
-The model's `reserve-to` describes a successful copying relocation, not
-all branches of the library's `reserve` or allocator failure. This does
-not complete the whole-checker execution correspondence.
-
-### Execution bridge for scalar helpers
-
-[`agda/ScalarExecution.agda`](../../agda/ScalarExecution.agda) defines
-executable exact addition and multiplication with inclusive integer
-bounds. Success gives an in-range exact value; rejection means the exact
-value lies outside the bounds. The theorems quantify over the bounds, so
-signed i128 is an instance rather than an enumeration of values.
-
-The MIR intrinsic contract says a false overflow flag gives the exact
-result. A true flag says that result did not fit, with an in-range wrapped
-value. `linear.add` and `linear.mul` discard that value, returning `None`;
-the semantic projection therefore leaves its bits unspecified.
-`projection-correct` proves that this flag branch agrees, up to integer
-equality, with the executable checked operation. `checked-execution` and
-`intrinsic-execution` give Horn witnesses representing each helper's
-result numerically. Agda finds the actual generated rules by their
-premises, conclusions and variable sorts, without depending on their
-fresh identifiers. The Horn model may additionally derive spurious
-overflow rejections; this proves the execution-to-model direction.
-
-The `scalar-execution` Nix check regenerates the theory and checks the
-proof and concrete boundary cases, and rejects rules with the wrong
-arithmetic operation or a missing overflow result. Independent tests in
-`tests/horn/scalars.py` read signed and unsigned boundary constants and
-solve switch cases for both targets, also in the ordinary `verify` suite.
-They found two bugs in numeral translation: taking i128's minimum's
-magnitude overflowed in the compiler, and upper-half u128 bit patterns
-were interpreted as negative values. Both now have regressions.
-
-This does not yet prove observable wrapping behavior or the LLVM
-implementation of overflowing intrinsics. The checker's general MIR
-paths, calls and memory operations still need a simulation before the
-whole execution-to-Horn theorem can be composed with its checked
-soundness certificate. The source-to-MIR and MIR-to-LLVM boundaries remain
-as stated in the roadmap.
-
-### Execution of exported MIR graphs
-
-[`agda/MirExecution.agda`](../../agda/MirExecution.agda) defines scalar
-MIR execution over local frames, with copies, tuple fields, Option
-construction, lifetime markers, jumps, boolean switches, overflowing
-intrinsics and direct calls. Invalid reads/projections and stopped blocks
-have no returning execution. Direct calls run the selected function's
-graph in a fresh frame and resume with its result; the call relation
-contains that execution derivation. It can describe arbitrary finite
-executions and recursive calls. `wp-sound` proves finite symbolic
-execution sound, with its fuel limiting the proof rather than the
-execution relation. `Paths` and `paths-sound` also support inductive
-invariants at selected blocks: each finite proof follows a path to a return
-or an invariant, and executing an annotated block must re-establish these
-conditions. Induction on a returning execution proves the postcondition
-without fuel or a termination premise. Direct calls still require their
-actual execution derivations. Proofs for recursive programs remain further
-work.
-
-[`agda/export-mir.jh`](../../agda/export-mir.jh) loads and compiles the
-current `linear.jh` with two appended direct callers and an accumulator
-loop, performs borrow/drop checking and serializes the actual MIR objects. It preserves every block,
-statement and terminator of the selected functions, checks frame/graph
-bounds, signatures and supported types, and rejects unsupported operations.
-It is a trusted data serializer, not a certified translation of the
-compiler frontend or an untrusted certificate producer.
-
-`MirCorrespondence.agda` checks metadata and evaluates these exported
-graphs in Agda. It proves every helper return has the intrinsic's flag
-projection and constructs executions for all permitted intrinsic outcomes.
-Callers compose their actual callee's execution proof. Those results have
-numerical representations in the actual generated helper and caller Horn
-rules, whose complete schemas and variable sorts Agda checks. `InI128`
-specializes the intrinsic contract to signed i128. The wrapped result
-still need not be modeled bit for bit because the helpers discard it on
-overflow, which is now established by their exported control flow.
-
-[`agda/MirLoopCorrespondence.agda`](../../agda/MirLoopCorrespondence.agda)
-connects an inductive invariant to the actual exported `mir_loop` graph.
-Starting with an in-range accumulator, the loop repeatedly adds a fixed
-step, and returns the previous accumulator when the intrinsic reports
-overflow. Every returning execution gives an in-range value whose next
-addition is out of range. Its invariant also carries a numerical Horn
-representation of the accumulator and a history that composes the
-generated loop rules back to the function's entry. The proof checks the
-entry, back-edge and exit schemas and their variable sorts; the back-edge
-rule adds `fuel1`, and the exit starts at `fuel0`. No fixed iteration
-bound is imposed. Every finite sequence of permitted intrinsic outcomes
-also constructs an actual graph execution. The theorem is partial
-correctness: a zero step need not terminate, and no termination result is
-claimed.
-
-The `mir-execution` Nix check regenerates data for both targets, checks
-positive returning executions, and rejects changes to the operation,
-overflow return, direct callee, local lifetime and caller rule. It also
-requires rejection of an incorrect loop operation, return, accumulator
-update, overflow branch or Horn step, and a missing Horn exit. Positive
-examples exercise zero and multiple back edges, both overflow directions,
-numerically equal integer representations and a cycle without a returning
-execution. An unsupported wrapping operation must fail export. Its output
-retains each target's MIR data, theory and Horn rules for review.
-
-The proof depends on the serializer faithfully reading MIR and on the
-stated MIR intrinsic contract. Other MIR operations, invariants for the
-checker's list-processing loops, borrow/pointer and `Vec` memory semantics,
-observable wrapping and the LLVM
-intrinsic implementation remain separate obligations. This does not
-establish execution correspondence for the whole checker or preservation
-from source to MIR and from MIR to LLVM.
-
 ### Slices
 
 The last of step 5 was slicing, `s[lo..hi]` of a `str`, slice, array,
@@ -876,52 +521,6 @@ more than it was asked. Both modes prove every instance, and the `verify`
 suite checks that `jihoo verify --release compiler/main.jh` reports no
 unproved contract. With `reserve`'s shorter fast path the compiler proves
 1,145 of its 2,681 bounds and overflow checks.
-
-### Semantic check-removal specification
-
-[`agda/CheckRemoval.agda`](../../agda/CheckRemoval.agda) starts the
-verification-condition and check-removal proof required for 0.5.0. Its
-small-step semantics describes a graph of assertions, checked primitive
-operations, branches, jumps, returns and traps. `vc` constructs local
-conditions from a proposed invariant at every program point and a mask
-of checks to remove. A removed guard must hold in every invariant state;
-each possible successful step must preserve the next invariant. A
-return establishes the postcondition. A retained check may still fail.
-
-When all these conditions hold, the original and erased graphs have
-matching steps from invariant states, in both directions. The proof
-preserves every finite trace, including observable effects, and the
-entire final state or retained failure. It works on cyclic graphs
-without a fuel bound or a termination assumption. Primitive operations
-may change arbitrary state nondeterministically: their continuation
-condition must cover every transition, which prevents reusing a fact
-after an opaque write without proving it still holds.
-
-[`agda/CertifiedRemoval.agda`](../../agda/CertifiedRemoval.agda) connects
-this guard condition to `Certified.check-sound`: if the generated Horn
-relation for the checker accepts, the path's facts hold in every
-invariant state, and failure of the guard makes the claim negative, the
-guard always holds there. Continuing to the next invariant remains a
-separate obligation. This composition uses the certificate Agda checks,
-not a trusted prover or jihoo's Horn checker.
-
-`nix flake check` checks these theorems. The `check-removal` check also
-checks an observable countdown loop, arbitrary writes and retained
-failures, and requires Agda to reject conditions that remove a false
-guard, preserve an invalid invariant after a write, omit a branch or
-return without establishing a postcondition.
-`nix develop .#proofs` supplies the same tools and pinned Horn input.
-
-The specification is not yet connected to the implementation's
-conditions in `obligations.jh` and `vc.jh`, or all erasures in `verify.jh`.
-Checked primitives are defined as guarded unchecked operations; relating
-this to exact machine arithmetic, overflow and memory is still a proof
-obligation. Execution-to-Horn correspondence, contract and recursive-call
-dependencies, mutable borrows, type invariants, incomplete analysis,
-panic removal and call retargeting remain required for 0.5.0. Neither
-these proofs nor self-verification tests establish preservation from
-source to MIR or from MIR to LLVM; those are separate obligations and
-LLVM remains trusted.
 
 ## Open questions
 

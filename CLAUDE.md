@@ -131,19 +131,6 @@ IR for `compiler/main.jh`. See `docs/internals/self-hosting.md`.
 `sys.freestanding.jh` (syscalls + allocator), `sysno.<target>.jh`. Std modules
 see each other's private items.
 
-`lib/proof/` is the proof library (0.6, pulled ahead of 0.5.0):
-`schematic.jh` ports Horn's schematic checker (`../horn/src/schematic.rs`,
-proved sound in `../horn/agda`), `import proof.schematic`; its tests are
-Horn's. `cert.jh` builds certificates (untrusted), `ring.jh` has the
-ordered-ring axioms and a ring-identity prover, `farkas.jh` proves the
-model of `compiler/linear.jh` sound, and `refine.jh` proves the rules
-`jihoo emit-horn` (`compiler/horn.jh`) writes for its `check` sound (the
-`verify` suite runs it through `tests/horn/linear.jh`). `agda/` checks
-that certificate in Agda with Horn's proved checker (`../horn/agda`, the
-flake input `horn`) and reads the theorem in the integers, with no
-premise: `agda/check.sh` (needs `agda` and Horn's `schematic-kernel` on
-`PATH`), or `nix build .#checks.x86_64-linux.adequacy`.
-
 ## Docs and website
 
 `docs/` is the website's source (one Markdown file per page) along with `examples/*.jh`

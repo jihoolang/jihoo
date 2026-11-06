@@ -10,7 +10,6 @@ jihoo build <file.jh> [-o out] [link inputs]  compile a program
 jihoo test <file.jh> [link inputs] [-- names]  run the file's #[test] functions
 jihoo emit-mir <file.jh>                      print the compiler's MIR
 jihoo emit-obligations <file.jh>              print MIR as the verification model
-jihoo emit-horn <file.jh> --fn <name>...      print what functions compute, as Horn rules
 jihoo verify <file.jh> [--all]                list the checks verification cannot remove
 jihoo emit-llvm <file.jh> [-o out]            print LLVM IR
 jihoo emit-obj <file.jh> [-o out.o]           emit an object with LLVM
@@ -564,26 +563,6 @@ the model does not follow is `(any blocks...)`. Each check ends with
 failing: an `assert`, and a `set` whose `+ - *` checks for overflow. The format is research and
 may change; [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs/tree/main/obligations)
 reads it.
-
-## Horn rules of code
-
-`jihoo emit-horn file.jh --fn NAME` prints what the function `NAME`, and
-every function it calls, computes, as rules for the proof library
-([`lib/proof`](../internals/verification.md#the-code-as-horn-rules)):
-`--fn` may be given several times, and `--lib` checks a module without an
-entry point. Each function is a predicate `fn.NAME` over its arguments
-and its result, and each loop head `K` a predicate `fn.NAME@K` over fuel,
-the live locals and the result. Values are terms: integers are ring
-expressions over `z0`, `z1`, `add`, `mul` and `neg`, structs, tuples and
-enums are constructors, and a `Vec` is a list with the relations `len`,
-`nth` and `snoc`. The sorts come first, then the declarations, then the
-rules; the ring's are not included (`proof.code.theory` adds them).
-
-A function outside the fragment is an error that names it and the block
-where the translation stopped: floats, pointers, division, bit
-operations, wrapping arithmetic (and `--release`), arrays, closures and
-calls of `std` functions other than `Vec`'s `new`, `with_capacity`,
-`len`, `index`, `push` and `clone`.
 
 ## Environment
 

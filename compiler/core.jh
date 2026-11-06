@@ -1,7 +1,6 @@
 // The dependent core's kernel: its terms, normalization and type checker.
 // Programs and proofs share this syntax; core_lower emits MIR from the checked
-// terms themselves. No Horn model or external proof checker participates in
-// this path. docs/internals/core-spec.md is the specification of these rules,
+// terms themselves. No external proof checker participates in this path. docs/internals/core-spec.md is the specification of these rules,
 // and docs/internals/dependent-core.md their design.
 //
 // There is no general recursion, axiom, unsafe operation or elimination of

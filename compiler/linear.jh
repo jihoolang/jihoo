@@ -6,7 +6,7 @@
 // `mul`, which report overflow (with the `overflowing_*` builtins, whose
 // meaning is exact), and a certificate whose sum does not fit an i128 is
 // rejected. Its loops are `while` loops, without the wrapping counters of
-// range `for`, so that lib/proof's model of it follows the code. `jihoo verify compiler/main.jh` keeps no check in
+// range `for`. `jihoo verify compiler/main.jh` keeps no check in
 // this file, and the verify suite tests that it stays so. The generator's
 // arithmetic on forms, which traps, is `forms.jh`.
 
@@ -169,8 +169,7 @@ pub fn check(g: Goal, c: Certificate) -> Result(i64, str) {
     while i < n
         invariant 0 <= i && c.weights.len() == n + 1 && g.facts.len() == n
     {
-        // Both are read on every pass, so that the proof of the code
-        // (lib/proof/refine.jh) knows the next fact even when it is skipped.
+        // Both are read on every pass, even when the fact is skipped.
         let f = g.facts[i]
         let w = c.weights[i]
         if w != 0 {

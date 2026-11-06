@@ -6,5 +6,4 @@
 .cache/
 vgcore.*
 __pycache__/
-*.agdai
 _build/
