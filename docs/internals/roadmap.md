@@ -620,9 +620,9 @@ types wait for type parameters in the core, after 0.5.0.
 
 #### The 0.5.0 release gate for the native core
 
-0.5.0 is the completion of dependent types: what programs can state and check
-in the core. Proofs about the kernel itself come after it, by the decision of
-2026-11-06 to release 0.5.0 sooner.
+0.5.0, released on 2026-11-06, is the completion of dependent types: what programs
+can state and check in the core. Proofs about the kernel itself come after it, by
+the decision of the same day to release it sooner.
 
 With the native core, what must be trusted is the kernel (`compiler/core.jh`),
 erasure and lowering (`core_lower.jh`), so the gate is stated for them. The
