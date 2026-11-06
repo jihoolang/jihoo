@@ -1,0 +1,14 @@
+; Conversion ignores subtraction evidence, including when sorting nested
+; terms in sums. Exchanging p and q must not reorder the distinct c/d atoms.
+(def sum_proof_irrelevance
+  (pi a U64 (pi b U64 (pi c U64 (pi d U64
+    (pi0 p (Lt b (uadd a 1)) (pi0 q (Lt b (uadd a 1))
+      (pi0 r (Lt c (uadd (usub a b p) 1))
+        (pi0 s (Lt d (uadd (usub a b p) 1))
+          (Eq (uadd (usub (usub a b p) c r) (usub (usub a b q) d s))
+              (uadd (usub (usub a b q) c r) (usub (usub a b p) d s)))))))))))
+  (lam a U64 (lam b U64 (lam c U64 (lam d U64
+    (lam0 p (Lt b (uadd a 1)) (lam0 q (Lt b (uadd a 1))
+      (lam0 r (Lt c (uadd (usub a b p) 1))
+        (lam0 s (Lt d (uadd (usub a b p) 1))
+          (refl (uadd (usub (usub a b p) c r) (usub (usub a b q) d s))))))))))))
