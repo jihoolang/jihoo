@@ -323,6 +323,10 @@ README's Status and the language pages describe 0.4.
 
 ### 6. Verification (0.5)
 
+0.5.0 is the completion of dependent types in jihoo itself: jihoo no
+longer depends on Horn for this, and formally verifying the compiler
+comes after 0.5.0.
+
 Direction revised: the replacement is a
 [native dependent core](dependent-core.md). Programs and their proofs
 are checked together, then erased and lowered directly from those terms
@@ -559,6 +563,19 @@ length(xs)` for a borrowed list and uses it to read a buffer at
 native execution against the evaluator, a lemma about borrowed trees, 6
 source and 5 core rejections and kernel tests run in the `core` suite.
 
+Implemented views whose result depends on the borrow
+([design](dependent-core.md#views-whose-result-depends-on-the-borrow)): a
+view's result may be a motive over the borrow, whose cases compute it at the
+node they read, and may be a function, so arguments change along a recursion;
+a `match` on a borrowed variable refines the evidence that mentions it, and
+into a proposition is a proof by cases. `absurd(p)`, from evidence of `Lt(i,
+0)`, closes a case that cannot run. `examples/core_nth.jh` reads the i-th
+element and the head of a list with evidence and no bounds check, and counts
+nodes in a recursion that returns its evidence; its MIR equals the `.jhc`'s,
+and native execution against the evaluator, counted allocations, 11 source and
+14 core rejections with their reasons and kernel tests run in the `core`
+suite.
+
 #### The 0.5.0 release gate for the native core
 
 The direction changed after the gate in step 6 below was written: that
@@ -582,14 +599,14 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    the lend, and a borrowing call's result type may mention the owner.
    Done: (b) proofs by induction over a borrow
    ([design](dependent-core.md#induction-over-a-borrow)), an induction
-   over the value the borrow reads. Remaining, in order:
-   (c) case analysis and recursion over a borrow at run time whose
-   result type depends on it, such as reading the i-th element with
-   evidence that i is below the length; (d) loops with a dependent
-   accumulator (an invariant); (e) mutable borrows and in-place updates
-   of heap data; (f) a `std` slice in the core (a vector as an owned
-   buffer with its length and capacity), with its contracts stated as
-   types.
+   over the value the borrow reads. Done: (c) case analysis and recursion
+   over a borrow whose result type depends on it
+   ([design](dependent-core.md#views-whose-result-depends-on-the-borrow)),
+   such as reading the i-th element with evidence that i is below the
+   length. Remaining, in order: (d) loops with a dependent accumulator (an
+   invariant); (e) mutable borrows and in-place updates of heap data; (f) a
+   `std` slice in the core (a vector as an owned buffer with its length and
+   capacity), with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,
    typing with quantities (erased, owned, scalar) and the ghost position,
    the pure model's reductions (including views, lends and `Borrow`) and

@@ -16,6 +16,35 @@ struct Value {
     ty: u32
 }
 
+// A value's `ty` when it is a recursion's result that is a function: its
+// `op` is an index into `Lower.hypotheses`.
+const HYPOTHESIS: u32 = 0xffffffff
+
+// A recursive field's result when the recursion's result is a function: a
+// call of the recursion on that field, made when the case gives it its
+// arguments, which may differ from the case's own.
+struct Hypothesis {
+    function: u32
+    node: mir.Operand
+    extra: Vec(mir.Operand)
+    // The types of the node and of extra.
+    types: Vec(u32)
+    // Per argument, whether it is erased.
+    erased: Vec(bool)
+    ret: u32
+}
+
+// The recursion a dispatch belongs to: its function, the outer values it
+// passes on with their types, its result's type and, when that result is a
+// function, whether each argument is erased.
+struct Recursing {
+    function: u32
+    extra: Vec(mir.Operand)
+    types: Vec(u32)
+    ret: u32
+    erased: Vec(bool)
+}
+
 struct Lower {
     body: mir.Body
     types: types.Types
@@ -30,6 +59,7 @@ struct Lower {
     generated: Vec(mir.Function)
     // Per boxed family, the generated function that frees a value of it.
     drops: Map(u32, u32)
+    hypotheses: Vec(Hypothesis)
 }
 
 impl Lower {
@@ -74,6 +104,10 @@ impl Lower {
             Var(k) => {
                 if k as i64 >= env.len { return Err(c.error(id, "unbound lowering variable")) }
                 match env[env.len - 1 - k as i64] {
+                    Some(v) if v.ty == HYPOTHESIS => Err(c.error(
+                        id,
+                        "a recursion's function result is called with all its arguments"
+                    ))
                     Some(v) => Ok(Value { op: v.op.clone(), ty: v.ty })
                     None => Err(c.error(id, "erased evidence reached runtime lowering"))
                 }
@@ -176,17 +210,23 @@ impl Lower {
             }
             Case(f, _, cases, x) => {
                 let x = self.expr(c, x, env, depth - 1)?
-                self.dispatch(c, id, f, cases.as_slice(), x, env, None, false, depth)
+                self.dispatch(c, id, f, cases.as_slice(), x, env, None, false, [], depth)
             }
             Elim(f, _, cases, x) if c.is_boxed(f) => {
                 let x = self.expr(c, x, env, depth - 1)?
-                self.recursion(c, id, f, cases.as_slice(), x, env, false, depth)
+                self.recursion(c, id, f, cases.as_slice(), x, env, false, [], depth)
             }
             // Reading borrowed heap data frees nothing.
-            View(recursive, f, _, cases, x) => {
-                let x = self.expr(c, x, env, depth - 1)?
-                if recursive { self.recursion(c, id, f, cases.as_slice(), x, env, true, depth) }
-                else { self.dispatch(c, id, f, cases.as_slice(), x, env, None, true, depth) }
+            View(_, _, _, _, _) => self.view(c, id, [], env, depth)
+            // It cannot be reached: the kernel has checked evidence of Lt(i, 0).
+            Absurd(t, _) => {
+                let Some(ty) = self.runtime(c, t) else {
+                    return Err(c.error(t, "absurd's type has no runtime representation"))
+                }
+                self.term(mir.Term.Unreachable)
+                self.block = self.block()
+                let local = self.local(ty, mir.LocalKind.Temp, sp)
+                Ok(Value { op: mir.Operand.Copy(mir.Place.local(local)), ty })
             }
             // A borrow of an owner inside its lend's reader, which the kernel
             // allows only of a variable: the owner's pointer, read in place.
@@ -220,6 +260,34 @@ impl Lower {
             // A redex the normalizer kept binds an argument that touches
             // memory: evaluated once, then the body.
             App(f, a) => {
+                var args = Vec(u32).new()
+                var head = id
+                loop {
+                    let App(g, b) = c.term(head) else { break }
+                    args.insert(0, b)
+                    head = g
+                }
+                match c.term(head) {
+                    View(_, _, _, _, _) => return self.view(c, head, args.as_slice(), env, depth)
+                    Var(k) if k as i64 < env.len => {
+                        let hypothesis = match env[env.len - 1 - k as i64] {
+                            Some(v) if v.ty == HYPOTHESIS => Some(hypothesis_index(v))
+                            _ => None
+                        }
+                        match hypothesis {
+                            Some(h) => return self.call_hypothesis(
+                                c,
+                                id,
+                                h,
+                                args.as_slice(),
+                                env,
+                                depth
+                            )
+                            None => {}
+                        }
+                    }
+                    _ => {}
+                }
                 let core.Term.Lam(false, _, body) = c.term(f) else {
                     return Err(c.error(
                         id,
@@ -454,6 +522,86 @@ impl Lower {
 }
 
 impl Lower {
+    // A view applied to its result's arguments: the node, then the arguments,
+    // then the cases or the recursion's first call.
+    fn view(
+        inout self,
+        c: core.Core,
+        id: u32,
+        args: [u32],
+        env: [Option(Value)],
+        depth: u32
+    ) -> Result(Value, diag.Diag) {
+        let View(recursive, f, t, cases, x) = c.term(id) else {
+            return Err(c.error(id, "expected a view"))
+        }
+        let (erased, _) = self.telescope(c, t)
+        if erased.len() != args.len { return Err(c.error(
+            id,
+            "a view's function result is called with all its arguments"
+        )) }
+        let x = self.expr(c, x, env, depth - 1)?
+        var applied = Vec(Option(Value)).new()
+        for j, a in args {
+            if erased[j] { applied.push(None) }
+            else { applied.push(Some(self.expr(c, a, env, depth - 1)?)) }
+        }
+        if recursive {
+            self.recursion(c, id, f, cases.as_slice(), x, env, true, applied.as_slice(), depth)
+        } else {
+            self.dispatch(c, id, f, cases.as_slice(), x, env, None, true, applied.as_slice(), depth)
+        }
+    }
+
+    // A call of a recursion on a recursive field, with the case's arguments.
+    fn call_hypothesis(
+        inout self,
+        c: core.Core,
+        id: u32,
+        h: i64,
+        args: [u32],
+        env: [Option(Value)],
+        depth: u32
+    ) -> Result(Value, diag.Diag) {
+        let sp = c.nodes[id as i64].span
+        if args.len != self.hypotheses[h].erased.len() { return Err(c.error(
+            id,
+            "a recursion's function result is called with all its arguments"
+        )) }
+        var ops = Vec(mir.Operand).new()
+        ops.push(self.hypotheses[h].node.clone())
+        for e in self.hypotheses[h].extra { ops.push(e.clone()) }
+        for j, a in args {
+            if self.hypotheses[h].erased[j] { continue }
+            let v = self.expr(c, a, env, depth - 1)?
+            ops.push(v.op.clone())
+        }
+        let ret = self.hypotheses[h].ret
+        let function = self.hypotheses[h].function
+        let r = self.local(ret, mir.LocalKind.Temp, sp)
+        let next = self.block()
+        self.term(mir.Term.Call(mir.Callee.Fn(function), ops, mir.Place.local(r), next, sp))
+        self.block = next
+        Ok(Value { op: mir.Operand.Copy(mir.Place.local(r)), ty: ret })
+    }
+
+    // A view's result, without its motive's binder: whether each argument
+    // of a function result is erased, and their runtime types, None for an
+    // erased one, then the result's own type last.
+    fn telescope(inout self, c: core.Core, t: u32) -> (Vec(bool), Vec(Option(u32))) {
+        var ty = match c.term(t) { Lam(_, _, body) => body, _ => t }
+        var erased = Vec(bool).new()
+        var kinds = Vec(Option(u32)).new()
+        loop {
+            let core.Term.Pi(e, domain, rest) = c.term(ty) else { break }
+            erased.push(e)
+            kinds.push(if e { None } else { self.runtime(c, domain) })
+            ty = rest
+        }
+        kinds.push(self.runtime(c, ty))
+        (erased, kinds)
+    }
+
     // The runtime type of a buffer: a pointer to its first I64.
     fn pointer(inout self) -> u32 { self.types.intern(types.TyKind.Ptr(types.I64)) }
 
@@ -538,8 +686,9 @@ impl Lower {
         cases: [u32],
         x: Value,
         env: [Option(Value)],
-        recursion: Option((u32, Vec(mir.Operand), u32)),
+        recursion: Option(Recursing),
         borrowed: bool,
+        applied: [Option(Value)],
         depth: u32
     ) -> Result(Value, diag.Diag) {
         if depth == 0 { return Err(c.error(id, "lowering nesting limit reached")) }
@@ -583,14 +732,29 @@ impl Lower {
                     let inner = match c.term(domain) { Ref(t) => t, _ => domain }
                     let own = match c.term(inner) { Ind(g, _) => g == f, _ => false }
                     match recursion {
-                        Some((function, extra, ret)) if own => {
+                        // The result is a function: the case calls it.
+                        Some(r) if own && r.erased.len() > 0 => {
+                            let index = self.hypotheses.len()
+                            self.hypotheses.push(Hypothesis {
+                                function: r.function
+                                node: v.op.clone()
+                                extra: r.extra.clone()
+                                types: r.types.clone()
+                                erased: r.erased.clone()
+                                ret: r.ret
+                            })
+                            results.push(hypothesis_value(index))
+                            bound.push(Some(v))
+                        }
+                        Some(recursing) if own => {
+                            let ret = recursing.ret
                             let r = self.local(ret, mir.LocalKind.Temp, sp)
                             var args = Vec(mir.Operand).new()
                             args.push(v.op.clone())
-                            for e in extra { args.push(e.clone()) }
+                            for e in recursing.extra { args.push(e.clone()) }
                             let next = self.block()
                             self.term(mir.Term.Call(
-                                mir.Callee.Fn(function),
+                                mir.Callee.Fn(recursing.function),
                                 args,
                                 mir.Place.local(r),
                                 next,
@@ -621,6 +785,17 @@ impl Lower {
                     return Err(c.error(case, "a case needs one binder per result"))
                 }
                 scope.push(Some(Value { op: r.op.clone(), ty: r.ty }))
+                body = rest
+            }
+            // A function result's arguments, given once to the one case.
+            for a in applied {
+                let core.Term.Lam(_, _, rest) = c.term(body) else {
+                    return Err(c.error(case, "a case with a function result ends in fn(...)"))
+                }
+                scope.push(match a {
+                    Some(v) => Some(Value { op: v.op.clone(), ty: v.ty })
+                    None => None
+                })
                 body = rest
             }
             let v = self.expr(c, body, scope.as_slice(), depth - 1)?
@@ -662,9 +837,16 @@ impl Lower {
         x: Value,
         env: [Option(Value)],
         borrowed: bool,
+        applied: [Option(Value)],
         depth: u32
     ) -> Result(Value, diag.Diag) {
         let sp = c.nodes[id as i64].span
+        // A function result's arguments: parameters of the function, passed
+        // on by the case that calls its hypothesis.
+        let (arguments_erased, kinds) = match c.term(id) {
+            View(_, _, t, _, _) => self.telescope(c, t)
+            _ => (Vec(bool).new(), Vec(Option(u32)).new())
+        }
         // The result's type: a case's first hypothesis.
         var ret: Option(u32) = None
         for k, case in cases {
@@ -678,13 +860,18 @@ impl Lower {
             var own = false
             for j in 0..erased.len() { if !erased[j] && recursive_field(c, f, k as u32, j) { own = true } }
             if !own { continue }
+            if arguments_erased.len() > 0 {
+                ret = kinds[arguments_erased.len()]
+                if ret.is_none() { return Err(c.error(id, "recursion has no runtime result")) }
+                break
+            }
             let core.Term.Lam(_, domain, _) = c.term(body) else { continue }
             ret = self.runtime(c, domain)
             break
         }
         let Some(ret) = ret else {
             // No recursive field: one level of case analysis.
-            return self.dispatch(c, id, f, cases, x, env, None, borrowed, depth)
+            return self.dispatch(c, id, f, cases, x, env, None, borrowed, applied, depth)
         }
         // Reserve the function's id, then build its body in place of ours.
         let function = self.free + 1 + self.generated.len() as u32
@@ -707,6 +894,32 @@ impl Lower {
         var outside = Vec(mir.Operand).new()
         for e in env {
             match e {
+                // A hypothesis of an enclosing recursion: its call's operands
+                // become parameters here.
+                Some(v) if v.ty == HYPOTHESIS => {
+                    let h = hypothesis_index(v)
+                    let tys = self.hypotheses[h].types.clone()
+                    var operands = Vec(mir.Operand).new()
+                    outside.push(self.hypotheses[h].node.clone())
+                    for o in self.hypotheses[h].extra { outside.push(o.clone()) }
+                    for ty in tys {
+                        let local = self.local(ty, mir.LocalKind.Arg, sp)
+                        params.push(ty)
+                        extra.push(mir.Operand.Copy(mir.Place.local(local)))
+                        operands.push(mir.Operand.Copy(mir.Place.local(local)))
+                    }
+                    let node = operands.remove(0)
+                    let index = self.hypotheses.len()
+                    self.hypotheses.push(Hypothesis {
+                        function: self.hypotheses[h].function
+                        node
+                        extra: operands
+                        types: tys
+                        erased: self.hypotheses[h].erased.clone()
+                        ret: self.hypotheses[h].ret
+                    })
+                    inner.push(Some(hypothesis_value(index)))
+                }
                 Some(v) => {
                     let local = self.local(v.ty, mir.LocalKind.Arg, sp)
                     params.push(v.ty)
@@ -720,6 +933,18 @@ impl Lower {
                 None => inner.push(None)
             }
         }
+        let types = params.clone()
+        var arguments = Vec(Option(Value)).new()
+        for j, e in arguments_erased {
+            if e { arguments.push(None); continue }
+            let Some(ty) = kinds[j] else { return Err(c.error(
+                id,
+                "a recursion's argument has no runtime representation"
+            )) }
+            let local = self.local(ty, mir.LocalKind.Arg, sp)
+            params.push(ty)
+            arguments.push(Some(Value { op: mir.Operand.Copy(mir.Place.local(local)), ty }))
+        }
         self.body.arg_count = params.len()
         let argument = Value { op: mir.Operand.Copy(mir.Place.local(node)), ty: x.ty }
         let v = self.dispatch(
@@ -729,8 +954,9 @@ impl Lower {
             cases,
             argument,
             inner.as_slice(),
-            Some((function, extra, ret)),
+            Some(Recursing { function, extra, types, ret, erased: arguments_erased.clone() }),
             borrowed,
+            arguments.as_slice(),
             depth
         )?
         if v.ty != ret { return Err(c.error(id, "recursion layout mismatch")) }
@@ -753,6 +979,9 @@ impl Lower {
         var args = Vec(mir.Operand).new()
         args.push(x.op.clone())
         for o in outside { args.push(o.clone()) }
+        for a in applied {
+            match a { Some(v) => args.push(v.op.clone()), None => {} }
+        }
         let next = self.block()
         self.term(mir.Term.Call(mir.Callee.Fn(function), args, mir.Place.local(r), next, sp))
         self.block = next
@@ -958,6 +1187,17 @@ fn recursive_field(c: core.Core, f: u32, k: u32, j: i64) -> bool {
     }
 }
 
+fn hypothesis_value(index: i64) -> Value {
+    Value { op: mir.Operand.Const(mir.Const.Int(index as i128, types.I64)), ty: HYPOTHESIS }
+}
+
+fn hypothesis_index(v: Value) -> i64 {
+    match v.op {
+        Const(Int(index, _)) => index as i64
+        _ => panic("a hypothesis is an index")
+    }
+}
+
 fn copy_env(env: [Option(Value)]) -> Vec(Option(Value)) {
     var out = Vec(Option(Value)).new()
     for x in env {
@@ -1017,6 +1257,7 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
             heap: false
             generated: mem.take(&generated)
             drops: mem.take(&drops)
+            hypotheses: Vec(Hypothesis).new()
         }
         lower.local(types.UNIT, mir.LocalKind.Ret, sp)
         lower.block()

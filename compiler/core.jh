@@ -111,11 +111,15 @@ pub enum Term {
     // Deref(Borrow(x)) is x and Borrow(Deref(r)) is r.
     Deref(u32)
     // Reading borrowed heap data of a family with no true indices: whether
-    // it is a recursion, the family, the result type, one case per
-    // constructor and the borrow. Nothing is freed; each case receives the
-    // fields, those on the heap as borrows, then, in a recursion, the
-    // result for each recursive field.
+    // it is a recursion, the family, the result type or a motive fn(r) {
+    // T(r) } over the borrow, one case per constructor and the borrow.
+    // Nothing is freed; each case receives the fields, those on the heap as
+    // borrows, then, in a recursion, the result for each recursive field. A
+    // function result is called once its arguments are known: a recursion
+    // whose arguments change.
     View(bool, u32, u32, Vec(u32), u32)
+    // A type and evidence of Lt(i, 0): code that cannot run has any type.
+    Absurd(u32, u32)
     // Family, motive, one case per constructor and a value of a boxed data
     // type: one level of case analysis. The node is freed and each case
     // receives all of its fields, recursive ones as owned values. Elim on a
@@ -263,6 +267,12 @@ impl Core {
         let term = match self.term(id) {
             Var(k) => {
                 match replacement {
+                    // See `rewrite`: every binder stays.
+                    Some(value) if delta < 0 => {
+                        if k != cutoff { return Ok(id) }
+                        let root = (-delta - 1) as u32
+                        return self.shift(value, (cutoff - root) as i64, 0, depth - 1)
+                    }
                     Some(value) => {
                         if k == cutoff { return self.shift(value, cutoff as i64, 0, depth - 1) }
                         Term.Var(if k > cutoff { k - 1 } else { k })
@@ -368,6 +378,10 @@ impl Core {
             Ref(t) => Term.Ref(self.transform(t, cutoff, delta, replacement, depth - 1)?)
             Borrow(x) => Term.Borrow(self.transform(x, cutoff, delta, replacement, depth - 1)?)
             Deref(r) => Term.Deref(self.transform(r, cutoff, delta, replacement, depth - 1)?)
+            Absurd(t, p) => Term.Absurd(
+                self.transform(t, cutoff, delta, replacement, depth - 1)?,
+                self.transform(p, cutoff, delta, replacement, depth - 1)?
+            )
             Lend(x, f, g) => Term.Lend(self.transform(x, cutoff, delta, replacement, depth - 1)?,
                 self.transform(f, cutoff, delta, replacement, depth - 1)?,
                 self.transform(g, cutoff, delta, replacement, depth - 1)?)
@@ -404,6 +418,8 @@ impl Core {
             )?)
             t => t
         }
+        // An unchanged term is the same node: most of a type shifts to itself.
+        if term == self.nodes[id as i64].term { return Ok(id) }
         self.add(term, sp)
     }
 
@@ -440,6 +456,29 @@ impl Core {
         self.transform(body, 0, 0, Some(value), depth)
     }
 
+    // Every occurrence of Var(k) in body becomes value, a term of body's own
+    // context, and no binder is removed. For the source elaborator, which
+    // abstracts a type over a variable to build a motive; the kernel never
+    // calls it, and checks the motive it builds.
+    pub fn rewrite(
+        inout self,
+        body: u32,
+        k: u32,
+        value: u32,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.transform(body, k, -(k as i64) - 1, Some(value), depth)
+    }
+
+    // A term under a binder for a heap field, with that field read through a
+    // borrow instead: Var(0) becomes Deref(Var(0)).
+    pub fn reading(inout self, body: u32, depth: u32) -> Result(u32, diag.Diag) {
+        let sp = self.nodes[body as i64].span
+        let r = self.add(Term.Var(0), sp)?
+        let value = self.add(Term.Deref(r), sp)?
+        self.rewrite(body, 0, value, depth)
+    }
+
     // Normalization is computation in the finite core, including beta
     // reduction. Resource exhaustion is rejection, never proof acceptance.
     pub fn normal(inout self, id: u32, depth: u32) -> Result(u32, diag.Diag) {
@@ -457,7 +496,9 @@ impl Core {
                 match self.term(f) {
                     // An argument that allocates, frees or touches memory is
                     // not substituted: the redex binds it, evaluated once.
-                    Lam(false, domain, body) if self.runtime && self.effectful(a, depth - 1) => {
+                    Lam(false, domain, body) if self.runtime && (
+                        self.effectful(a, depth - 1) || self.reads(a, depth - 1)
+                    ) => {
                         let body = self.normal(body, depth - 1)?
                         let lam = self.add(Term.Lam(false, domain, body), sp)?
                         return self.add(Term.App(lam, a), sp)
@@ -769,6 +810,7 @@ impl Core {
             }
             Lend(x, f, g) => Term.Lend(self.normal(x, depth - 1)?, self.normal(f, depth - 1)?,
                 self.normal(g, depth - 1)?)
+            Absurd(t, p) => Term.Absurd(self.normal(t, depth - 1)?, self.normal(p, depth - 1)?)
             View(r, f, t, cases, x) => {
                 let t = self.normal(t, depth - 1)?
                 let cases = self.normal_all(cases.as_slice(), depth)?
@@ -811,6 +853,7 @@ impl Core {
             Elements(xs) => Term.Elements(self.normal_all(xs.as_slice(), depth)?)
             t => return Ok(id)
         }
+        if term == self.nodes[id as i64].term { return Ok(id) }
         self.add(term, sp)
     }
 
@@ -1109,7 +1152,10 @@ impl Core {
             // Only a refinement's witness is evaluated; its predicate and
             // evidence are erased.
             Pack(_, a, _) => self.may_trap(a, depth - 1)
-            Refine(_) | Proof(_) => false
+            Refine(_) | Proof(_) | Absurd(_, _) => false
+            // At run time the only function a variable holds is a recursion's
+            // result, and a recursion may trap.
+            App(_, _) if self.runtime && self.calls_variable(id) => true
             t => {
                 for child in children(t) { if self.may_trap(child, depth - 1) { return true } }
                 false
@@ -1130,9 +1176,53 @@ impl Core {
             ) => true
             // Building a heap node allocates; recursion over one frees it.
             Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
+            Absurd(_, _) => false
             t => {
                 for child in children(t) { if self.effectful(child, depth - 1) { return true } }
                 false
+            }
+        }
+    }
+
+    // Whether evaluating a term walks borrowed data, which a let binds once
+    // rather than repeating the walk at each use.
+    fn reads(self, id: u32, depth: u32) -> bool {
+        if depth == 0 { return true }
+        match self.term(id) {
+            // A function result is a value; reading happens when it is called.
+            View(_, _, t, _, _) => {
+                let result = match self.term(t) { Lam(_, _, body) => body, _ => t }
+                match self.term(result) { Pi(_, _, _) => false, _ => true }
+            }
+            App(_, _) if self.calls_variable(id) || self.calls_view(id) => true
+            Lam(_, _, _) | Absurd(_, _) => false
+            t => {
+                for child in children(t) { if self.reads(child, depth - 1) { return true } }
+                false
+            }
+        }
+    }
+
+    // Whether the head of an application spine is a view.
+    fn calls_view(self, id: u32) -> bool {
+        var head = id
+        loop {
+            match self.term(head) {
+                App(f, _) => head = f
+                View(_, _, _, _, _) => return true
+                _ => return false
+            }
+        }
+    }
+
+    // Whether the head of an application spine is a variable.
+    fn calls_variable(self, id: u32) -> bool {
+        var head = id
+        loop {
+            match self.term(head) {
+                App(f, _) => head = f
+                Var(_) => return true
+                _ => return false
             }
         }
     }
@@ -1176,6 +1266,8 @@ impl Core {
                 f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
             (Ref(a), Ref(b)) | (Borrow(a), Borrow(b)) | (Deref(a), Deref(b)) =>
                 self.identical(a, b, depth - 1)
+            (Absurd(a, p), Absurd(b, q)) =>
+                self.identical(a, b, depth - 1) && self.identical(p, q, depth - 1)
             (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
                 self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
             (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
@@ -1442,9 +1534,32 @@ impl Core {
         Ok(result)
     }
 
+    // Whether a view's result is a motive fn(r) { T(r) } over the borrow,
+    // rather than one type: a type's normal form is never a lambda.
+    fn dependent_view(inout self, t: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let t = self.normal(t, depth)?
+        Ok(match self.term(t) { Lam(_, _, _) => true, _ => false })
+    }
+
+    // The binders of a case for constructor k, without a function result's
+    // own: the fields, then, in a recursion, one result per recursive field.
+    pub fn case_arity(self, f: u32, k: u32, recursion: bool) -> i64 {
+        var count = self.signatures[f as i64][k as i64].fields.len() -
+            self.families[f as i64].params as i64
+        if recursion {
+            for field in self.signatures[f as i64][k as i64].fields {
+                if field.recursive.is_some() { count += 1 }
+            }
+        }
+        count
+    }
+
     // The case for constructor k of a view of borrowed data with parameters
     // ps: (fields..., heap ones borrowed) -> [in a recursion, (ih : T) per
-    // recursive field] -> T.
+    // recursive field] -> T. With a motive, ih_j : T(r_j) for the recursive
+    // field r_j, and the case's own result is T at a borrow of the node it
+    // reads, whose heap fields are what their borrows read, so the type
+    // computes: Borrow(Deref(r)) is r.
     pub fn view_case_type(
         inout self,
         f: u32,
@@ -1469,7 +1584,8 @@ impl Core {
             ty = self.substitute(rest, q, depth)?
         }
         var fields = Vec((bool, u32)).new()
-        var recursive: i64 = 0
+        var borrowed = Vec(bool).new()
+        var positions = Vec(i64).new()
         loop {
             let Pi(erased, domain, rest) = self.term(ty) else { break }
             let normal = self.normal(domain, depth)?
@@ -1478,18 +1594,41 @@ impl Core {
                 _ => (false, false)
             }
             if heap && !erased {
-                if own { recursive += 1 }
+                if own { positions.push(fields.len()) }
+                borrowed.push(true)
                 fields.push((false, self.add(Term.Ref(domain), sp)?))
-            } else { fields.push((erased, domain)) }
-            ty = rest
+                // A later field's type reads this one through its borrow.
+                ty = self.reading(rest, depth)?
+            } else {
+                borrowed.push(false)
+                fields.push((erased, domain))
+                ty = rest
+            }
         }
         let m = fields.len()
-        let extra = if recursion { recursive } else { 0 }
+        let extra = if recursion { positions.len() } else { 0 }
+        let dependent = self.dependent_view(t, depth)?
         var result = self.shift(t, m + extra, 0, depth)?
+        if dependent {
+            var values = Vec(u32).new()
+            for q in ps { values.push(self.shift(q, m + extra, 0, depth)?) }
+            for j in 0..m {
+                var field = self.add(Term.Var((m - 1 - j + extra) as u32), sp)?
+                if borrowed[j] { field = self.add(Term.Deref(field), sp)? }
+                values.push(field)
+            }
+            let node = self.add(Term.Con(f, k, values), sp)?
+            let node = self.add(Term.Borrow(node), sp)?
+            result = self.add(Term.App(result, node), sp)?
+        }
         var j = extra
         while j > 0 {
             j -= 1
-            let ih = self.shift(t, m + j, 0, depth)?
+            var ih = self.shift(t, m + j, 0, depth)?
+            if dependent {
+                let field = self.add(Term.Var((m + j - 1 - positions[j]) as u32), sp)?
+                ih = self.add(Term.App(ih, field), sp)?
+            }
             result = self.add(Term.Pi(false, ih, result), sp)?
         }
         var i = m
@@ -2096,10 +2235,21 @@ impl Core {
                 }
                 if g != f { return Err(self.error(x, "a view reads a borrow of its type")) }
                 let sort = self.infer(t, ctx, true, depth - 1)?
-                if self.sort(sort, depth - 1)? != 0 {
+                let dependent = self.dependent_view(t, depth - 1)?
+                if dependent {
+                    let sort = self.normal(sort, depth - 1)?
+                    let Pi(false, domain, level) = self.term(sort) else {
+                        return Err(self.error(t, "a view's motive is fn(r) { T }"))
+                    }
+                    if !self.equal(domain, ty, depth - 1)? {
+                        return Err(self.error(t, "a view's motive takes the borrow it reads"))
+                    }
+                    if self.sort(level, depth - 1)? != 0 {
+                        return Err(self.error(t, "a view's result is runtime data"))
+                    }
+                } else if self.sort(sort, depth - 1)? != 0 {
                     return Err(self.error(t, "a view's result is runtime data"))
                 }
-                self.not_function(t, t, depth - 1)?
                 for k, case in cases {
                     let expected = self.view_case_type(
                         f,
@@ -2111,6 +2261,23 @@ impl Core {
                         depth - 1
                     )?
                     self.require(case, expected, ctx, ghost, depth - 1)?
+                }
+                if dependent { Term.App(t, x) } else { return Ok(t) }
+            }
+            // Code with evidence of Lt(i, 0) cannot run. Its type holds no
+            // function, so that nothing it gives is called with arguments.
+            Absurd(t, p) => {
+                let sort = self.infer(t, ctx, true, depth - 1)?
+                self.sort(sort, depth - 1)?
+                self.not_function(t, t, depth - 1)?
+                let evidence = self.infer(p, ctx, true, depth - 1)?
+                let evidence = self.normal(evidence, depth - 1)?
+                let Lt(_, n) = self.term(evidence) else {
+                    return Err(self.error(p, "absurd needs evidence of Lt(i, 0)"))
+                }
+                let n = self.normal(n, depth - 1)?
+                if self.term(n) != Term.Natural(0) {
+                    return Err(self.error(p, "absurd needs evidence of Lt(i, 0)"))
                 }
                 return Ok(t)
             }
@@ -2413,7 +2580,20 @@ impl Core {
                     j += 1
                 }
                 if j > 0 { total += self.uses_under(body, v, ctx, binders.as_slice(), depth)? }
-                else { total += self.uses(head, v, ctx, depth - 1)? }
+                else {
+                    total += match self.term(head) {
+                        // A case given its arguments runs once, like a lambda
+                        // head; a partial application is rejected below.
+                        View(_, _, _, _, _) => self.uses_view(
+                            head,
+                            args.len(),
+                            v,
+                            ctx,
+                            depth
+                        )?
+                        _ => self.uses(head, v, ctx, depth - 1)?
+                    }
+                }
                 if j < args.len() {
                     var ty = if j == 0 { self.infer(head, ctx, true, depth - 1)? }
                     else { self.infer(nodes[j - 1], ctx, true, depth - 1)? }
@@ -2516,33 +2696,7 @@ impl Core {
                     )
                 }
             }
-            View(recursion, f, _, cases, x) => {
-                let total = self.uses(x, v, ctx, depth - 1)?
-                // One case runs, or, in a recursion, each once per node.
-                var common: Option(u32) = None
-                for k, case in cases {
-                    var count = self.signatures[f as i64][k].fields.len() -
-                        self.families[f as i64].params as i64
-                    if recursion {
-                        for field in self.signatures[f as i64][k].fields {
-                            if field.recursive.is_some() { count += 1 }
-                        }
-                    }
-                    let n = self.uses_case(case, count, v, ctx, depth)?
-                    if recursion && n > 0 { return Err(self.error(
-                        id,
-                        "a recursion's cases run once per node: they cannot use an outer owned value"
-                    )) }
-                    match common {
-                        Some(m) => if m != n { return Err(self.error(
-                            id,
-                            "every case must use an owned value alike"
-                        )) }
-                        None => common = Some(n)
-                    }
-                }
-                match common { Some(m) => Ok(total + m), None => Ok(total) }
-            }
+            View(_, _, _, _, _) => self.uses_view(id, 0, v, ctx, depth)
             Fold(n, init, body) => {
                 let first = self.uses(n, v, ctx, depth - 1)? + self.uses(init, v, ctx, depth - 1)?
                 if self.uses_case(body, 3, v, ctx, depth)? > 0 { return Err(self.error(
@@ -2579,6 +2733,40 @@ impl Core {
             }
             _ => Ok(0)
         }
+    }
+
+    // Uses of v by a view applied to `applied` arguments: its cases' binders
+    // for those arguments are part of the one run of the case. One case runs,
+    // or, in a recursion, each once per node.
+    fn uses_view(
+        inout self,
+        id: u32,
+        applied: i64,
+        v: u32,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let View(recursion, f, _, cases, x) = self.term(id) else {
+            return Err(self.error(id, "expected a view"))
+        }
+        let total = self.uses(x, v, ctx, depth - 1)?
+        var common: Option(u32) = None
+        for k, case in cases {
+            let count = self.case_arity(f, k as u32, recursion) + applied
+            let n = self.uses_case(case, count, v, ctx, depth)?
+            if recursion && n > 0 { return Err(self.error(
+                id,
+                "a recursion's cases run once per node: they cannot use an outer owned value"
+            )) }
+            match common {
+                Some(m) => if m != n { return Err(self.error(
+                    id,
+                    "every case must use an owned value alike"
+                )) }
+                None => common = Some(n)
+            }
+        }
+        match common { Some(m) => Ok(total + m), None => Ok(total) }
     }
 
     // A dependent lend: x a variable, f = fn(r) { body } and g = fn(a, y)
@@ -2873,7 +3061,7 @@ fn rank(term: Term) -> u32 {
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
         Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46,
-        Borrow(_) => 47, Deref(_) => 48
+        Borrow(_) => 47, Deref(_) => 48, Absurd(_, _) => 49
     }
 }
 
@@ -2901,7 +3089,10 @@ pub fn children(term: Term) -> Vec(u32) {
     var out = Vec(u32).new()
     match term {
         Array(n) | Refl(n) => out.push(n)
-        Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) => {
+        Eq(a, b) | Lt(a, b) | App(a, b) | Decide(a, b) | Pi(_, a, b) | Lam(_, a, b) | Absurd(
+            a,
+            b
+        ) => {
             out.push(a)
             out.push(b)
         }
@@ -4264,4 +4455,131 @@ fn derefs_are_the_values_borrows_read() {
     let ty = c.add(Term.Pi(false, ref_b, ty_b), sp).unwrap()
     c.definitions.push(Definition { name: "d".to_string(), ty, value, exported: false, span: sp })
     assert(c.check().is_err(), "a borrow's value is evidence only")
+}
+
+// B with a view of type ty at the borrow in Var(0), from the given motive
+// or type t and cases, as a definition whose body is that view.
+fn dependent_viewing(t: fn(inout Core) -> u32, zero: fn(inout Core) -> u32) -> Core {
+    var c = Core.new()
+    let sp = diag.Span.nowhere()
+    bit_family(&c, 0, true)
+    c.check().unwrap()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let r = c.add(Term.Ref(b), sp).unwrap()
+    let motive = t(&c)
+    let z = zero(&c)
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let ih = c.add(Term.Var(0), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    let step = c.add(Term.Lam(false, u, ih), sp).unwrap()
+    let step = c.add(Term.Lam(false, r, step), sp).unwrap()
+    var cases = Vec(u32).new()
+    cases.push(z)
+    cases.push(step)
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let view = c.add(Term.View(true, 0, motive, cases, x), sp).unwrap()
+    let value = c.add(Term.Lam(false, r, view), sp).unwrap()
+    let ty = c.add(Term.Pi(false, r, u), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    let _ = one
+    c
+}
+
+fn constant_u64(inout c: Core) -> u32 { c.add(Term.U64, diag.Span.nowhere()).unwrap() }
+
+fn zero_value(inout c: Core) -> u32 { c.add(Term.Natural(0), diag.Span.nowhere()).unwrap() }
+
+fn motive_on_borrow(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let r = c.add(Term.Ref(b), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    c.add(Term.Lam(false, r, u), sp).unwrap()
+}
+
+fn motive_on_value(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    c.add(Term.Lam(false, b, u), sp).unwrap()
+}
+
+fn motive_of_types(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    let none = Vec(u32).new()
+    let b = c.add(Term.Ind(0, none), sp).unwrap()
+    let r = c.add(Term.Ref(b), sp).unwrap()
+    let u = c.add(Term.Universe(0), sp).unwrap()
+    c.add(Term.Lam(false, r, u), sp).unwrap()
+}
+
+#[test]
+fn a_views_motive_takes_the_borrow_and_gives_runtime_data() {
+    var c = dependent_viewing(constant_u64, zero_value)
+    assert(c.check().is_ok(), "a constant result")
+    var c = dependent_viewing(motive_on_borrow, zero_value)
+    assert(c.check().is_ok(), "a motive over the borrow")
+    var c = dependent_viewing(motive_on_value, zero_value)
+    assert(c.check().is_err(), "a motive over the value, not the borrow")
+    var c = dependent_viewing(motive_of_types, zero_value)
+    assert(c.check().is_err(), "a view does not compute types")
+}
+
+// Under Var(0) : Lt(i, n), absurd at result type t.
+fn absurd_from(n: u32, t: fn(inout Core) -> u32) -> Core {
+    var c = Core.new()
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let i = c.add(Term.Natural(0), sp).unwrap()
+    let bound = c.add(Term.Natural(n as u64), sp).unwrap()
+    let lt = c.add(Term.Lt(i, bound), sp).unwrap()
+    let result = t(&c)
+    let p = c.add(Term.Var(0), sp).unwrap()
+    let body = c.add(Term.Absurd(result, p), sp).unwrap()
+    let value = c.add(Term.Lam(true, lt, body), sp).unwrap()
+    let ty = c.add(Term.Pi(true, lt, result), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    let _ = u
+    c
+}
+
+fn function_type(inout c: Core) -> u32 {
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    c.add(Term.Pi(false, u, u), sp).unwrap()
+}
+
+#[test]
+fn absurd_needs_evidence_below_zero() {
+    var c = absurd_from(0, constant_u64)
+    assert(c.check().is_ok(), "nothing is below zero")
+    var c = absurd_from(1, constant_u64)
+    assert(c.check().is_err(), "0 < 1 is no contradiction")
+    var c = absurd_from(0, function_type)
+    assert(c.check().is_err(), "absurd gives no function")
+}
+
+#[test]
+fn rewriting_keeps_binders_and_reads_fields() {
+    var c = Core.new()
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let v2 = c.add(Term.Var(2), sp).unwrap()
+    let v1 = c.add(Term.Var(1), sp).unwrap()
+    let sum = c.add(Term.UAdd(v2, v1), sp).unwrap()
+    // Under one more binder, Var(1) is the outer Var(0), which reads Var(1).
+    let under = c.add(Term.Lam(false, u, sum), sp).unwrap()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let out = c.rewrite(under, 1, zero, DEPTH).unwrap()
+    let Lam(_, _, body) = c.term(out) else { panic("the binder stays") }
+    let UAdd(first, second) = c.term(body) else { panic("the sum stays") }
+    assert(c.term(first) == Term.Natural(0), "the variable is rewritten")
+    assert(c.term(second) == Term.Var(1), "others are unchanged")
+    let v0 = c.add(Term.Var(0), sp).unwrap()
+    let read = c.reading(v0, DEPTH).unwrap()
+    let Deref(inner) = c.term(read) else { panic("the field is read through its borrow") }
+    assert(c.term(inner) == Term.Var(0), "the borrow is the same binder")
 }

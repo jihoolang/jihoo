@@ -36,7 +36,7 @@ fn reserved(name: str) -> bool {
         name == "lt_add" || name == "lt_cancel" || name == "lt_le" || name == "sub" ||
         name == "zero_le" || name == "refine" || name == "pack" || name == "witness" ||
         name == "proof" || name == "buffer" || name == "alloc" || name == "load" ||
-        name == "store" || name == "free" ||
+        name == "store" || name == "free" || name == "absurd" ||
         name == "if_lt" ||
         name == "if_eq" || name == "refl" || name == "transport" || name == "index" ||
         name == "decide_lt" || name == "u64" || name == "i64" ||
@@ -396,7 +396,7 @@ impl Elaborator {
         if args.len != count + 2 { return Err(error(sp, "induct requires one case per constructor")) }
         var ps = Vec(u32).new()
         for j in 0..self.c.families[f as i64].params as i64 { ps.push(xs[j]) }
-        let p = self.data_motive(args[0], f, ps.as_slice(), depth - 1)?
+        let p = self.data_motive(args[0], f, ps.as_slice(), true, depth - 1)?
         // Into a proposition: a proof by induction over the value the borrow
         // reads, Deref(r), as over an owned value. Evidence never runs.
         if self.proposition_motive(p)? {
@@ -412,20 +412,26 @@ impl Elaborator {
                     sp,
                     core.DEPTH
                 )?
-                var arity = 0
-                var rest = self.c.normal(expected, core.DEPTH)?
-                loop {
-                    let core.Term.Pi(_, _, inner) = self.c.term(rest) else { break }
-                    arity += 1
-                    rest = inner
-                }
-                cases.push(self.evidence_case(args[k + 1], expected, arity, depth - 1)?)
+                let minimum = self.c.case_arity(f, k as u32, true)
+                self.ghost += 1
+                let case = self.function_case(args[k + 1], expected, minimum, depth - 1)
+                self.ghost -= 1
+                cases.push(case?)
             }
             return self.c.add(core.Term.Elim(f, p, cases, value), sp)
         }
-        let core.Term.Lam(_, _, body) = self.c.term(p) else { return Err(error(sp, "unreachable")) }
-        let Ok(t) = self.c.shift(body, -1, 0, core.DEPTH) else {
-            return Err(error(args[0].span, "a recursion on a borrow has a result type of its own"))
+        let core.Term.Lam(_, family, body) = self.c.term(p) else {
+            return Err(error(sp, "unreachable"))
+        }
+        // A result that mentions the value is a motive over the borrow, which
+        // reads what its value was: fn(t) { T(t) } is fn(r) { T(Deref(r)) }.
+        let t = match self.c.shift(body, -1, 0, core.DEPTH) {
+            Ok(t) => t
+            Err(_) => {
+                let body = self.c.reading(body, core.DEPTH)?
+                let r = self.c.add(core.Term.Ref(family), sp)?
+                self.c.add(core.Term.Lam(false, r, body), sp)?
+            }
         }
         var cases = Vec(u32).new()
         for k in 0..count {
@@ -438,16 +444,105 @@ impl Elaborator {
                 sp,
                 core.DEPTH
             )?
-            var arity = 0
-            var rest = self.c.normal(expected, core.DEPTH)?
-            loop {
-                let core.Term.Pi(_, _, inner) = self.c.term(rest) else { break }
-                arity += 1
-                rest = inner
-            }
-            cases.push(self.proof_case(args[k + 1], expected, arity, depth - 1)?)
+            let minimum = self.c.case_arity(f, k as u32, true)
+            cases.push(self.function_case(args[k + 1], expected, minimum, depth - 1)?)
         }
         self.c.add(core.Term.View(true, f, t, cases, evidence), sp)
+    }
+
+    // A case that gives at least `minimum` binders of its type by name, each
+    // of a function result's arguments either here or by a lambda inside, and
+    // whose function result ends in lambdas, as lowering needs.
+    fn function_case(
+        inout self,
+        e: ast.Expr,
+        expected: u32,
+        minimum: i64,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let arity = match e.kind {
+            Lambda(ps, _, _) => ps.len()
+            _ => minimum
+        }
+        if arity < minimum { return Err(error(e.span, "wrong number of lambda parameters")) }
+        let case = self.proof_case(e, expected, arity, depth)?
+        self.expand(case, expected)
+    }
+
+    // A term of type ty, with one lambda for each of the function type's
+    // arguments.
+    fn expand(inout self, term: u32, ty: u32) -> Result(u32, diag.Diag) {
+        let sp = self.c.nodes[term as i64].span
+        let normal = self.c.normal(ty, core.DEPTH)?
+        let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else { return Ok(term) }
+        match self.c.term(term) {
+            Lam(e, d, body) => {
+                let body = self.expand(body, rest)?
+                self.c.add(core.Term.Lam(e, d, body), sp)
+            }
+            _ => {
+                let shifted = self.c.shift(term, 1, 0, core.DEPTH)?
+                let v = self.c.add(core.Term.Var(0), sp)?
+                let applied = self.c.add(core.Term.App(shifted, v), sp)?
+                let body = self.expand(applied, rest)?
+                self.c.add(core.Term.Lam(erased, domain, body), sp)
+            }
+        }
+    }
+
+    // Whether Var(v) occurs in a term.
+    fn mentions(inout self, t: u32, v: u32) -> bool {
+        self.c.shift(t, -1, v, core.DEPTH).is_err()
+    }
+
+    // A type of the current context under `binders` new binders, the
+    // outermost for the scrutinee at variable v and the next for the
+    // generalized evidence: each occurrence reads the new binder instead.
+    // The scrutinee's binder is a borrow, or, with `owned`, the value a borrow
+    // of it reads.
+    fn abstracted(
+        inout self,
+        t: u32,
+        binders: i64,
+        v: u32,
+        general: [i64],
+        owned: bool,
+        sp: diag.Span
+    ) -> Result(u32, diag.Diag) {
+        var out = self.c.shift(t, binders, 0, core.DEPTH)?
+        var value = self.c.add(core.Term.Var((binders - 1) as u32), sp)?
+        if owned { value = self.c.add(core.Term.Borrow(value), sp)? }
+        out = self.c.rewrite(out, v + binders as u32, value, core.DEPTH)?
+        for j, g in general {
+            if j as i64 >= binders - 1 { break }
+            let old = (self.ctx.len() - 1 - g + binders) as u32
+            let new = self.c.add(core.Term.Var((binders - 2 - j as i64) as u32), sp)?
+            out = self.c.rewrite(out, old, new, core.DEPTH)?
+        }
+        Ok(out)
+    }
+
+    // The motive of a match on a borrow at variable v: fn(r) { (g...) -> t },
+    // over r and the evidence that mentions it, whose types the match refines.
+    fn general_motive(
+        inout self,
+        domain: u32,
+        v: u32,
+        general: [i64],
+        t: u32,
+        owned: bool,
+        sp: diag.Span
+    ) -> Result(u32, diag.Diag) {
+        let n = general.len as i64
+        var body = self.abstracted(t, n + 1, v, general, owned, sp)?
+        var j = n
+        while j > 0 {
+            j -= 1
+            let ty = self.type_at(general[j])?
+            let ty = self.abstracted(ty, j + 1, v, general, owned, sp)?
+            body = self.c.add(core.Term.Pi(true, ty, body), sp)?
+        }
+        self.c.add(core.Term.Lam(false, domain, body), sp)
     }
 
     // Lambdas (erased, domain) around a body.
@@ -609,6 +704,53 @@ impl Elaborator {
         let count = self.c.families[f as i64].constructors.len()
         if arms.len != count { return Err(error(sp, "match requires one arm per variant")) }
         let ghost = self.proposition(t)
+        // A match on a borrowed variable refines what mentions it: the
+        // expected type, and evidence in scope, which each arm sees anew under
+        // its own name.
+        var general = Vec(i64).new()
+        var scrutinee_var: Option(u32) = None
+        if borrowed {
+            match self.c.term(x) {
+                Var(v) => {
+                    scrutinee_var = Some(v)
+                    for i in self.ctx.len() - v as i64..self.ctx.len() {
+                        if !self.ctx[i].erased { continue }
+                        let ty = self.type_at(i)?
+                        var depends = self.mentions(ty, v)
+                        for g in general {
+                            if self.mentions(ty, (self.ctx.len() - 1 - g) as u32) { depends = true }
+                        }
+                        if depends { general.push(i) }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let dependent = match scrutinee_var {
+            Some(v) => general.len() > 0 || self.mentions(t, v)
+            None => false
+        }
+        // A proof by cases reads the value the borrow reads: evidence never
+        // runs, so nothing is lent or freed. Otherwise the view's motive is
+        // over the borrow.
+        let proof_by_cases = borrowed && ghost
+        let family = self.c.add(core.Term.Ind(f, xs.clone()), sp)?
+        let motive = match scrutinee_var {
+            Some(v) if dependent => {
+                let domain = if proof_by_cases { family } else {
+                    self.c.add(core.Term.Ref(family), sp)?
+                }
+                self.general_motive(
+                    domain,
+                    v,
+                    general.as_slice(),
+                    t,
+                    proof_by_cases,
+                    sp
+                )?
+            }
+            _ => if proof_by_cases { p } else { t }
+        }
         var cases = Vec(u32).new()
         var arities = Vec(i64).new()
         for k in 0..count {
@@ -632,8 +774,10 @@ impl Elaborator {
                 Variant(_, pats) => pats.clone()
                 _ => Vec(ast.Pat).new()
             }
-            var result = if borrowed {
-                self.c.view_case_type(f, k as u32, ps.as_slice(), t, false, sp, core.DEPTH)?
+            var result = if proof_by_cases {
+                self.c.data_case_type(f, k as u32, motive, ps.as_slice(), sp, core.DEPTH)?
+            } else if borrowed {
+                self.c.view_case_type(f, k as u32, ps.as_slice(), motive, false, sp, core.DEPTH)?
             } else { self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)? }
             var domains = Vec((bool, u32)).new()
             for b in binders {
@@ -647,6 +791,21 @@ impl Elaborator {
                     return Err(error(b.span, "too many variant fields"))
                 }
                 self.push(binder.as_str(), domain, erased)
+                domains.push((erased, domain))
+                result = rest
+            }
+            if domains.len() != self.c.case_arity(f, k as u32, false) {
+                for _ in 0..domains.len() { self.pop() }
+                return Err(error(arm.span, "a match arm binds every field"))
+            }
+            // The arm sees the evidence the match refines under its own name.
+            for g in general {
+                let normal = self.c.normal(result, core.DEPTH)?
+                let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else {
+                    return Err(error(arm.span, "unreachable"))
+                }
+                let name = self.names[g].clone()
+                self.push(name.as_str(), domain, erased)
                 domains.push((erased, domain))
                 result = rest
             }
@@ -673,7 +832,17 @@ impl Elaborator {
         }
         // One arm runs: what one uses, the others free.
         if !ghost { cases = self.balance_cases(cases.as_slice(), arities.as_slice())? }
-        if borrowed { return self.c.add(core.Term.View(false, f, t, cases, x), sp) }
+        if borrowed {
+            var term = if proof_by_cases {
+                let value = self.c.add(core.Term.Deref(x), sp)?
+                self.c.add(core.Term.Case(f, motive, cases, value), sp)?
+            } else { self.c.add(core.Term.View(false, f, motive, cases, x), sp)? }
+            for g in general {
+                let v = self.c.add(core.Term.Var((self.ctx.len() - 1 - g) as u32), sp)?
+                term = self.c.add(core.Term.App(term, v), sp)?
+            }
+            return Ok(term)
+        }
         // On heap data, one level: the node is freed, its fields are given.
         if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, p, cases, x), sp) }
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
@@ -715,18 +884,22 @@ impl Elaborator {
     }
 
     // fn(x) { P(x) }, a proposition about a value of data type f with
-    // parameters ps; source data types have no other indices.
+    // parameters ps; source data types have no other indices. With
+    // `arguments`, fn(x, a: A, ...) { T } is a motive whose values are
+    // functions of those arguments.
     fn data_motive(
         inout self,
         e: ast.Expr,
         f: u32,
         params: [u32],
+        arguments: bool,
         depth: u32
     ) -> Result(u32, diag.Diag) {
         let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
             return Err(error(e.span, "a data motive requires fn(x) { proposition }"))
         }
-        if ps.len() != 1 || ret.is_some() || ps[0].ty.is_some() || reserved(ps[0].name.as_str()) {
+        if ps.len() == 0 || ret.is_some() || ps[0].ty.is_some() || reserved(ps[0].name.as_str()) ||
+            (ps.len() != 1 && !arguments) {
             return Err(error(e.span, "a data motive has one untyped binder"))
         }
         if body.stmts.len() != 0 { return Err(error(body.span, "a data motive is one proposition")) }
@@ -741,9 +914,40 @@ impl Elaborator {
         for q in params { indices.push(q) }
         let family = self.c.add(core.Term.Ind(f, indices), e.span)?
         self.push(ps[0].name.as_str(), family, false)
-        let proposition = self.type_expr(tail.deref(), depth - 1)
+        var binders = Vec((bool, u32)).new()
+        var failure: Option(diag.Diag) = None
+        for j in 1..ps.len() {
+            let parameter = ps[j]
+            let Some(t) = parameter.ty else {
+                failure = Some(error(parameter.span, "a motive's arguments have types"))
+                break
+            }
+            if reserved(parameter.name.as_str()) {
+                failure = Some(error(parameter.span, "a reserved name binds nothing"))
+                break
+            }
+            match self.domain(t) {
+                Ok((erased, domain)) => {
+                    self.push(parameter.name.as_str(), domain, erased)
+                    binders.push((erased, domain))
+                }
+                Err(d) => { failure = Some(d); break }
+            }
+        }
+        let proposition: Result(u32, diag.Diag) = match failure {
+            Some(d) => Err(d)
+            None => self.type_expr(tail.deref(), depth - 1)
+        }
+        for _ in 0..binders.len() { self.pop() }
         self.pop()
-        self.c.add(core.Term.Lam(false, family, proposition?), e.span)
+        var result = proposition?
+        var j = binders.len()
+        while j > 0 {
+            j -= 1
+            let (erased, domain) = binders[j]
+            result = self.c.add(core.Term.Pi(erased, domain, result), e.span)?
+        }
+        self.c.add(core.Term.Lam(false, family, result), e.span)
     }
 
     fn taken(self, name: str) -> bool {
@@ -810,6 +1014,15 @@ impl Elaborator {
                 match self.find_family(n.as_str()) {
                     Some(family) => return self.indexed(family, args.as_slice(), e.span, depth)
                     None => {}
+                }
+                if n == "refine" && args.len() == 1 {
+                    let p = self.family(args[0], 1, depth - 1)?
+                    return self.c.add(core.Term.Refine(p), e.span)
+                }
+                if n == "buffer" && args.len() == 1 {
+                    let u = self.u64(e.span)?
+                    let length = self.expr(args[0], Some(u), depth - 1)?
+                    return self.c.add(core.Term.Buffer(length), e.span)
                 }
                 if (n != "Lt" && n != "Eq") || args.len() != 2 {
                     return Err(error(
@@ -1043,6 +1256,43 @@ impl Elaborator {
         result
     }
 
+    // A function applied to its arguments, each elaborated at the type the
+    // function gives it.
+    fn apply(
+        inout self,
+        f: u32,
+        args: [ast.Expr],
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        var function = f
+        var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
+        for a in args {
+            let normal = self.c.normal(ty, core.DEPTH)?
+            let core.Term.Pi(erased, domain, result) = self.c.term(normal) else {
+                return Err(error(sp, "application requires a dependent function"))
+            }
+            let lent = self.c.normal(domain, core.DEPTH)?
+            let named = match a.kind { Name(_) => true, _ => false }
+            let arg = match self.c.term(lent) {
+                Ref(inner) if self.ghost > 0 || erased => self.borrowed(
+                    a,
+                    inner,
+                    depth - 1
+                )?
+                Ref(_) if !named => return Err(error(
+                    a.span,
+                    "a borrow is of a named value: bind this one with let first"
+                ))
+                _ if erased => self.evidence(a, Some(domain), depth - 1)?
+                _ => self.expr(a, Some(domain), depth - 1)?
+            }
+            function = self.c.add(core.Term.App(function, arg), sp)?
+            ty = self.c.substitute(result, arg, core.DEPTH)?
+        }
+        Ok(function)
+    }
+
     // In types and evidence, an argument where a borrow is expected: a
     // borrow is passed on, and any other value of the owned type is
     // borrowed in place, since nothing there runs. The kernel checks that
@@ -1108,6 +1358,14 @@ impl Elaborator {
                 self.c.add(core.Term.Elements(xs), sp)
             }
             Block(b) => self.block(b, expected, depth - 1)
+            // A function where its type is known, such as a recursion's result.
+            Lambda(ps, _, _) => {
+                let Some(t) = expected else { return Err(error(
+                    sp,
+                    "unsupported expression in dependent_core"
+                )) }
+                self.proof_case(e, t, ps.len(), depth - 1)
+            }
             Field(_, _) => {
                 let Some((f, k)) = self.find_variant(e) else { return Err(error(
                     sp,
@@ -1161,10 +1419,25 @@ impl Elaborator {
                     )
                     None => {}
                 }
-                let ast.ExprKind.Name(n) = f.kind else { return Err(error(
-                    f.span,
-                    "calls require a named function"
-                )) }
+                let ast.ExprKind.Name(n) = f.kind else {
+                    // A recursion whose result is a function, given its arguments.
+                    let is_call = match f.kind { Call(_, _) => true, _ => false }
+                    if !is_call { return Err(error(f.span, "calls require a named function")) }
+                    let function = self.expr(f.deref(), None, depth - 1)?
+                    return self.apply(function, args.as_slice(), sp, depth)
+                }
+                if n == "absurd" {
+                    if args.len() != 1 { return Err(error(
+                        sp,
+                        "absurd requires evidence of Lt(i, 0)"
+                    )) }
+                    let Some(t) = expected else { return Err(error(
+                        sp,
+                        "absurd needs an expected type"
+                    )) }
+                    let p = self.evidence(args[0], None, depth - 1)?
+                    return self.c.add(core.Term.Absurd(t, p), sp)
+                }
                 if n == "if_lt" || n == "if_eq" {
                     if args.len() != 4 { return Err(error(
                         sp,
@@ -1404,7 +1677,7 @@ impl Elaborator {
                         sp,
                         "induct requires one case per constructor"
                     )) }
-                    let p = if data { self.data_motive(args[0], f, ps.as_slice(), depth - 1)? }
+                    let p = if data { self.data_motive(args[0], f, ps.as_slice(), false, depth - 1)? }
                     else { self.family(args[0], self.c.families[f as i64].arity as i64, depth - 1)? }
                     var cases = Vec(u32).new()
                     var arities = Vec(i64).new()
@@ -1476,39 +1749,25 @@ impl Elaborator {
                     return self.c.add(core.Term.Decide(a, b), sp)
                 }
                 let mut_f = self.name(n.as_str(), f.span)?
-                let core.Term.Global(g) = self.c.term(mut_f) else {
-                    return Err(error(f.span, "only declared functions can be called"))
-                }
-                if args.len() != self.arities[g as i64] { return Err(error(
-                    sp,
-                    "wrong argument count (evidence is explicit)"
-                )) }
-                var function = mut_f
-                var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
-                for a in args {
-                    let normal = self.c.normal(ty, core.DEPTH)?
-                    let core.Term.Pi(erased, domain, result) = self.c.term(normal) else {
-                        return Err(error(sp, "application requires a dependent function"))
+                match self.c.term(mut_f) {
+                    Global(g) => {
+                        if args.len() != self.arities[g as i64] { return Err(error(
+                            sp,
+                            "wrong argument count (evidence is explicit)"
+                        )) }
                     }
-                    let lent = self.c.normal(domain, core.DEPTH)?
-                    let named = match a.kind { Name(_) => true, _ => false }
-                    let arg = match self.c.term(lent) {
-                        Ref(inner) if self.ghost > 0 || erased => self.borrowed(
-                            a,
-                            inner,
-                            depth - 1
-                        )?
-                        Ref(_) if !named => return Err(error(
-                            a.span,
-                            "a borrow is of a named value: bind this one with let first"
-                        ))
-                        _ if erased => self.evidence(a, Some(domain), depth - 1)?
-                        _ => self.expr(a, Some(domain), depth - 1)?
+                    // A recursion's result in its case.
+                    Var(_) => {
+                        let ty = self.c.infer(mut_f, self.ctx.as_slice(), true, core.DEPTH)?
+                        let ty = self.c.normal(ty, core.DEPTH)?
+                        match self.c.term(ty) {
+                            Pi(_, _, _) => {}
+                            _ => return Err(error(f.span, "only declared functions can be called"))
+                        }
                     }
-                    function = self.c.add(core.Term.App(function, arg), sp)?
-                    ty = self.c.substitute(result, arg, core.DEPTH)?
+                    _ => return Err(error(f.span, "only declared functions can be called"))
                 }
-                Ok(function)
+                self.apply(mut_f, args.as_slice(), sp, depth)
             }
             _ => Err(error(sp, "unsupported expression in dependent_core"))
         }

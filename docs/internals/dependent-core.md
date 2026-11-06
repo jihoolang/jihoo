@@ -711,6 +711,8 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(drop F v rest)` | free heap data `v` of type `F` and every node it owns, then `rest` |
 | `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` (of a variable: [dependent](#dependent-lends)) |
 | `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
+| `(view F (lam r (Ref F) T) case... r)` | the same, with a result that [depends on the borrow](#views-whose-result-depends-on-the-borrow); `T` may be a function type, and the view applied to its arguments |
+| `(absurd T p)` | code that cannot run, of type `T`, with `p : Lt i 0` |
 | `(borrow x)` | a borrow of the owned `x`, in types and evidence, or in the reader of a lend of `x` |
 | `(deref r)` | the value a borrow `r` reads, in types and evidence only |
 | `(F a ...)`, `(c x ...)` | a declared proposition; a constructor with all fields |
@@ -737,7 +739,8 @@ compute their universe levels; a function ending in a proposition is a
 proposition. Type-level functions and higher-order beta reduction work,
 but the executable ABI is restricted to U64/I64 arguments and results.
 There are no axioms, casts, unbounded loops or recursion, unsafe memory operations
-or eliminators that inspect evidence to produce runtime data. Data
+or eliminators that inspect evidence to produce runtime data, apart from
+`absurd`, whose evidence is of `Lt(i, 0)` and which produces nothing. Data
 types are eliminated into `Prop` or `Type 0`, never into types.
 
 Erased binders must bind propositions or U64 indices; proof binders
@@ -1423,9 +1426,125 @@ proved by `refl` that needs induction or by a hypothesis alone, evidence
 about another borrow, and a `Deref` in code that runs or of a value that
 is not a borrow.
 
-Not yet supported: case analysis (`match`) of a borrow in a proof, and
-runtime recursion over a borrow whose result type depends on it, such as
-reading the i-th element with evidence that i is below the length.
+## Views whose result depends on the borrow
+
+A recursion or a `match` over a borrow can return what the program needs
+to know about the value it read, and take arguments that change along
+the way:
+
+```jihoo
+fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) {
+    induct(fn(t) { refine(fn(k) { Eq(k, length(t)) }) }, pack(0, refl(0)), fn(x, rest, ih) {
+        pack(witness(ih) + 1, transport(fn(k) { Eq(witness(ih) + 1, k + 1) }, proof(ih),
+            refl(witness(ih) + 1)))
+    }, xs)
+}
+
+fn head(xs: ref List, p: erased(Lt(0, length(xs)))) -> i64 {
+    match xs {
+        Nil => absurd(p)
+        Cons(x, rest) => x
+    }
+}
+
+fn nth(xs: ref List, i: u64, p: erased(Lt(i, length(xs)))) -> i64 {
+    induct(fn(t, i: u64, p: erased(Lt(i, length(t)))) { i64 }, fn(i, p) { absurd(p) },
+        fn(x, rest, ih, i, p) {
+            if_lt(0, i, fn(q) {
+                let e = lt_add(0, i, 1, q)
+                ih(sub(i, 1, e), lt_cancel(sub(i, 1, e), length(rest), 1, p))
+            }, x)
+        }, xs)(i, p)
+}
+```
+
+`View(rec, F, T, cases, r)`'s `T` is either one type of runtime data or a
+motive `fn(s: Ref(F)) { T(s) }`. The kernel's rules for a motive are:
+
+- A case for constructor `c` binds the fields, heap ones as borrows `r_j`,
+  and in a recursion a result `ih_j : T(r_j)` for each recursive field. It
+  gives `T` at `Borrow(c(fields))`, where a heap field is `Deref(r_j)`.
+  Since `Borrow(Deref(r))` is `r`, that type computes: `length` of this node
+  is `length(rest) + 1`. This is the ordinary dependent eliminator of the
+  pure model, where a borrow is the value it reads.
+- A later field's type that mentions an earlier heap field reads it through
+  its borrow, so a data type can carry a proof about its own heap field, and
+  a view gives that proof about the borrow.
+- The view's type is `T(r)`.
+- A motive's domain is exactly the borrow read, and its body is runtime data,
+  of sort `Type 0`: a view computes neither types nor propositions.
+
+`T` may also be a function type, which is how arguments change along a
+recursion. Such a view is runtime code only when applied to all of its
+arguments, and these rules keep its linearity:
+
+- A function's body runs any number of times, so a case's lambdas capture no
+  owned value: the existing `Lam` rule of `uses`. The rule that a
+  continuation's result is not a function does not apply to a view, whose
+  cases receive no owned value.
+- The exception is a one-level view applied to all its arguments. Exactly one
+  case runs, once, so its lambdas for those arguments count as that run, as
+  those of a lambda head do. A partial application that captures is rejected.
+  `head_into` in `tests/core_nth.py` uses a buffer in such an arm.
+- A recursion's cases use no outer owned value, as before; an owned argument
+  is passed through the function result instead, as in `fill` there.
+- A lend's result is still not a function, so no function holding a borrow
+  outlives the lend.
+
+`Absurd(T, p)` (source `absurd(p)`, `.jhc` `(absurd T p)`) has type `T` given
+`p : Lt(i, 0)`, for `T` not a function type, and lowers to `unreachable`.
+Since exports cannot require evidence, reaching it would need a false proof.
+It uses nothing, so an owned value another alternative uses is freed before
+it, as in any branch.
+
+At run time a function result is not a closure. Lowering adds its runtime
+arguments to the recursion's parameters, after the node and the outer values.
+A recursive field's result is then not computed before the case runs: `ih` is
+a call the case makes with its own arguments, zero or many times, so `nth`
+walks only `i` nodes. A call from inside another recursion's case passes that
+call's operands to the inner function as parameters. A hypothesis that is not
+called with all its arguments, and a case that does not end in lambdas for
+them, are lowering errors. The elaborator eta-expands a case against its type,
+so `fn(x, rest, ih) { ih }` and a branch whose alternatives are lambdas lower
+normally.
+
+The elaborator, untrusted, adds:
+
+- `induct(fn(t, a: A, ...) { T }, ...)(args)`: a motive with a value and
+  arguments. It is written over a value `t`, which the elaborator turns into
+  a motive over a borrow by reading `t` as `Deref(s)`. A case may name the
+  arguments with its other binders, or return `fn(a, ...) { ... }`.
+- `match` on a borrowed variable refines the expected type and the erased
+  evidence in scope that mentions the variable. Such evidence becomes
+  arguments of the view's result, each arm rebinding it under its own name, as
+  `p` in `head`. Evidence about another value is not refined.
+- `match` on a borrow into a proposition is a proof by cases about the value
+  the borrow reads, through `Deref`, so nothing is read or lent.
+- `refine(...)` and `buffer(n)` as a motive's result.
+
+Types and proofs stay out of the run: `examples/core_nth.jh` and its
+[core equivalent](../../examples/core_nth.jhc) compile to the same MIR, whose
+only checks are the allocations'. `tests/core_nth.py` runs both against the
+independent evaluator, which recomputes every piece of erased evidence, on
+both targets at `-O0` and `-O2`, for indices in and out of the list, with
+counted allocations and frees. It runs programs with an owned argument through
+a recursion, a hypothesis returned unapplied, a branch with a function
+result, a hypothesis called from another recursion, an owned value used in a
+refining arm, a proof by cases and a data type whose proof reads its own heap
+field, and asserts the reason for each of 11 source and 14 core rejections.
+
+A program of about 150 lines reached the arena's 200,000 term limit, because
+`shift` and `normal` copied terms they did not change. They now return the same
+node for an unchanged term, which does not change any result.
+
+A `let` binds a value that reads borrowed data once rather than repeating the
+walk at each use (`Core.reads`), and `may_trap` treats a call of a recursion's
+result as able to trap, so such a call is kept even when its result is unused.
+
+Not yet supported: dependent case analysis of an owned value with evidence
+in scope (`Case`'s result is still not a function), refining evidence through
+a borrow that is not a variable, and `.jh` syntax for a proof field in an
+`enum` that mentions an earlier field, which `.jhc` declares with named fields.
 
 The next stages of the replacement are:
 

@@ -214,6 +214,10 @@ impl Parser {
         } else if kind == "borrow" {
             // (borrow x): a borrow of x in types and evidence only.
             core.Term.Borrow(self.expr(depth - 1)?)
+        } else if kind == "absurd" {
+            // (absurd T p): code with evidence of Lt(i, 0), of any type.
+            let t = self.expr(depth - 1)?
+            core.Term.Absurd(t, self.expr(depth - 1)?)
         } else if kind == "deref" {
             // (deref r): the value the borrow r reads, in types and evidence only.
             core.Term.Deref(self.expr(depth - 1)?)

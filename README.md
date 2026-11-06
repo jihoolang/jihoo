@@ -217,11 +217,16 @@ precondition about the list its function consumes. A
 reads that list, so such evidence applies to the borrow, and a borrowing
 call's result type may mention the owner, and a proof
 [by induction over a borrow](examples/core_borrow_induct.jh) is about
-the value it reads. Wider `.jh` coverage
+the value it reads. A recursion or `match` over a borrow may
+[depend on it](examples/core_nth.jh): `nth(xs, i, p)` reads the i-th
+element given evidence that `i` is below the length, with no bounds
+check, and a case that cannot happen is `absurd(p)`. Wider `.jh` coverage
 and mechanized proofs of the kernel, erasure and lowering remain
-required before this replaces the existing verifier; the
+required before this replaces the existing verifier. 0.5.0 is the
+completion of these dependent types, and formal verification of the
+compiler itself comes after it; the
 [roadmap](docs/internals/roadmap.md#the-050-release-gate-for-the-native-core)
-states the 0.5.0 gate.
+states the gate.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.

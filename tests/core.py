@@ -343,6 +343,8 @@ def evaluate(term, env):
     if head == "borrow":
         # Evidence only: a borrow of a value built for the type, never freed.
         return ghostly(lambda: Borrow(evaluate(args[0], env)))
+    if head == "absurd":
+        raise AssertionError("code with evidence of Lt(i, 0) ran")
     if head == "deref":
         # Evidence only: the value a borrow reads.
         borrowed = ghostly(lambda: evaluate(args[0], env))
@@ -663,6 +665,9 @@ def main():
         from core_borrow_induct import validate_borrow_induct
         validate_borrow_induct(compiler, root, temporary, environment, run, definitions, evaluate,
                                BUFFERS, NODES)
+        from core_nth import validate_nth
+        validate_nth(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
+                     NODES)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

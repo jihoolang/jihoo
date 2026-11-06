@@ -36,14 +36,14 @@ def validate_inductive(compiler, root, temporary, environment, run, definitions,
         assert result.returncode == 30 and not result.stdout and not result.stderr
 
     # Families without indices, an uninhabited family and a family used
-    # by a later one. `absurd` is accepted because Never has no constructor;
+    # by a later one. `refute` is accepted because Never has no constructor;
     # nothing can call it with evidence.
     extra = prefix + """
 trait Ready {
     fn ready() -> Ready
 }
 trait Never {}
-fn absurd(n: erased(Never)) -> Lt(1, 0) { induct(fn() { Lt(1, 0) }, n) }
+fn refute(n: erased(Never)) -> Lt(1, 0) { induct(fn() { Lt(1, 0) }, n) }
 fn ready_bound(r: erased(Ready)) -> Lt(0, 3) { induct(fn() { Lt(0, 3) }, decide_lt(0, 3), r) }
 trait Walk(b: u64) {
     fn here() -> Walk(0)

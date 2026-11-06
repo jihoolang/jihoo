@@ -82,6 +82,8 @@ alias    = "type" name [ "=" type ]
   and owned values a scope does not use are
   [freed where it ends](../internals/dependent-core.md#frees-where-ownership-ends);
   `ref T` parameters and `let` statements [borrow](../internals/dependent-core.md#borrows),
+  and `induct(fn(t, a: A) { T }, ...)(a)` and `absurd(p)` give
+  [results that depend on a borrow](../internals/dependent-core.md#views-whose-result-depends-on-the-borrow),
   in the existing grammar. `Lt(i, n)` and `Eq(a, b)` are its built-in
   propositions; in it, a `trait` with `u64` parameters and bodiless
   functions declares an [inductive proposition](../internals/dependent-core.md#inductive-propositions)

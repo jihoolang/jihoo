@@ -1,0 +1,69 @@
+// Reading a list where the result's type depends on the borrow. induct
+// over a borrow may return a function of arguments that change along the
+// recursion: nth's motive says that its index is below the length of the
+// rest of the list it reads, each step lowers both, and the empty list's
+// case is `absurd`, since nothing is below 0. match on a borrow refines
+// what mentions it: head's evidence is about xs, so its first arm has
+// Lt(0, 0) and its second needs no check. size counts the nodes in a real
+// recursion and returns its result with evidence, a refinement of the
+// count at each node. main returns 3.
+#![dependent_core]
+
+enum List {
+    Nil
+    Cons(i64, List)
+}
+
+fn head_or(xs: ref List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x
+    }
+}
+
+fn ascending(n: u64, x: i64) -> List {
+    fold(n, List.Nil, fn(i, p, acc) {
+        let top = head_or(acc, x)
+        List.Cons(top + 1, acc)
+    })
+}
+
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+
+fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) {
+    induct(fn(t) { refine(fn(k) { Eq(k, length(t)) }) }, pack(0, refl(0)), fn(x, rest, ih) {
+        pack(witness(ih) + 1, transport(fn(k) { Eq(witness(ih) + 1, k + 1) }, proof(ih),
+            refl(witness(ih) + 1)))
+    }, xs)
+}
+
+fn head(xs: ref List, p: erased(Lt(0, length(xs)))) -> i64 {
+    match xs {
+        Nil => absurd(p)
+        Cons(x, rest) => x
+    }
+}
+
+fn nth(xs: ref List, i: u64, p: erased(Lt(i, length(xs)))) -> i64 {
+    induct(fn(t, i: u64, p: erased(Lt(i, length(t)))) { i64 }, fn(i, p) { absurd(p) },
+        fn(x, rest, ih, i, p) {
+            if_lt(0, i, fn(q) {
+                let e = lt_add(0, i, 1, q)
+                ih(sub(i, 1, e), lt_cancel(sub(i, 1, e), length(rest), 1, p))
+            }, x)
+        }, xs)(i, p)
+}
+
+export fn at(n: u64, i: u64, x: i64) -> i64 {
+    let xs = ascending(n, x)
+    let k = size(xs)
+    if_lt(i, witness(k), fn(q) { nth(xs, i, transport(fn(m) { Lt(i, m) }, proof(k), q)) }, -1)
+}
+
+export fn first(n: u64, x: i64) -> i64 {
+    let xs = ascending(n, x)
+    let k = size(xs)
+    if_lt(0, witness(k), fn(q) { head(xs, transport(fn(m) { Lt(0, m) }, proof(k), q)) }, -1)
+}
+
+fn main() -> i64 { at(5, 2, 0) }
