@@ -27,6 +27,7 @@ same on GitHub.
 - [Generics and traits](language/generics.md)
 - [Compile-time evaluation](language/comptime.md)
 - [Contracts](language/contracts.md)
+- [Dependent types](language/dependent-types.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)

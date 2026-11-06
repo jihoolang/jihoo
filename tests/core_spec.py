@@ -29,6 +29,18 @@ def validate_preservation(compiler, root, environment, run):
             assert result.returncode == 1 and reason in result.stderr, (path, result.stderr)
 
 
+def validate_guide(compiler, root, temporary, environment, run):
+    """Every program on the language page compiles and returns what the page says."""
+    text = (root / "docs/language/dependent-types.md").read_text()
+    programs = re.findall(r"```jihoo\n(.*?)```", text, re.S)
+    assert len(programs) == 4, len(programs)
+    for i, (program, status) in enumerate(zip(programs, (19, 0, 0, 42))):
+        path = temporary / f"guide-{i}.jh"
+        path.write_text(program)
+        result = run([compiler, "run", str(path)], success=status == 0, env=environment)
+        assert result.returncode == status, (i, result.returncode, result.stderr)
+
+
 def validate_spec(root):
     source = (root / "compiler/core.jh").read_text()
     lower = (root / "compiler/core_lower.jh").read_text()

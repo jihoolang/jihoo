@@ -15,6 +15,9 @@ lifetime annotations or a garbage collector.
   inferred at calls, with traits as bounds.
 - **A standard library written in jihoo** (`Vec`, `String`, `Map`, `Box`,
   sorting, files, processes), with or without libc.
+- **Dependent types, as an opt-in subset.** A `#![dependent_core]` module states
+  contracts as types, and its proofs are checked and erased, so a proved access
+  has no bounds check ([guide](docs/language/dependent-types.md)).
 
 Documentation: **<https://jihoolang.github.io/jihoo/>**, built from
 [docs/](docs) and [examples/](examples).
@@ -100,7 +103,7 @@ jihoo run tests/runner.jh                    # the tests
 
 ## Status
 
-Version 0.4: the 0.1 rewrite, which broke compatibility with everything
+Version 0.5: the 0.1 rewrite, which broke compatibility with everything
 before it ([why](docs/internals/redesign.md)), with a self-hosted compiler
 and checking, testing, diagnostic and formatting tools. Native (libc) and
 freestanding (no libc, static) programs for x86_64 and aarch64 Linux, and
@@ -159,63 +162,33 @@ the proved checks, and an unproved contract is a compile error
 check is left in the trusted checker itself. The verifier is not proved
 sound.
 
-The replacement direction is a [native dependent core](docs/internals/dependent-core.md)
-that checks programs and proofs together and emits MIR directly from the
-checked terms. The experimental `#![dependent_core]` source subset
-compiles [`examples/core_index.jh`](examples/core_index.jh) through the
-ordinary AST into the same core as [`core_index.jhc`](examples/core_index.jhc):
-a runtime array lookup whose proof is erased before code generation,
-without legacy VC generation. The
-[equality example](examples/core_equality.jh) adds erased U64 equality
-and proposition-only transport, with user-written lemmas rewriting the
-runtime bound to the array length. Programs declare their own
-strictly positive inductive propositions: the
-[graph example](examples/core_inductive.jh) proves by structural induction
-that every node reachable along its declared edges is in bounds, and the
-[chain example](examples/core_chain.jh) declares equality chains, which
-were built into the kernel before. The recursive proofs are erased before
-the array loads are emitted. The [loop example](examples/core_loop.jh)
-sums arrays of any length with `fold`, whose body has a proof of its
-index's bound, so the loads have no bounds checks. In the
-[order example](examples/core_order.jh), u64 indices are natural numbers
-whose `+` traps instead of wrapping; three kernel rules of their order
-justify loads at `i + 1` and over prefixes, and the
-[subtraction example](examples/core_sub.jh) reads arrays backwards with
-`sub(n, i + 1, p)`, whose evidence shows it cannot underflow. A
-[refinement](examples/core_refine.jh) `refine(fn(j) { Lt(j, n) })` is a
-u64 returned together with its evidence, and is the u64 alone at run time.
-[Data types](examples/core_data.jh) declared as `enum` are taken apart
-with `match`, or proved about by cases, and compile to no tag at all;
-they can be [parameterized](examples/core_indexed.jh) by u64 values such
-as a table's length, which `n: erased(u64)` passes only to types and
-evidence. [Owned buffers](examples/core_buffer.jh) are allocated
-explicitly and freed exactly once, which the kernel checks, with loads
-and stores at proved indices, and [recursive data](examples/core_list.jh)
-lives on the heap, taken apart by `match` or consumed by structural
-recursion, with proofs by induction. An owned value is
-[freed where its scope ends](examples/core_scope.jh) without a written
-`free`, and the kernel checks those frees too, and a `ref List`
-parameter [borrows](examples/core_borrow.jh) a value without consuming
-it. Types and proofs may [borrow any value](examples/core_borrow_proof.jh),
-so a proof by induction can be about `length(xs: ref List)` and a
-precondition about the list its function consumes. A
-[lend](examples/core_lend.jh) of an owned list knows that its borrow
-reads that list, so such evidence applies to the borrow, and a borrowing
-call's result type may mention the owner, and a proof
-[by induction over a borrow](examples/core_borrow_induct.jh) is about
-the value it reads. A recursion or `match` over a borrow may
-[depend on it](examples/core_nth.jh): `nth(xs, i, p)` reads the i-th
-element given evidence that `i` is below the length, with no bounds
-check, and a case that cannot happen is `absurd(p)`. A loop's
-[invariant is a type](examples/core_invariant.jh), and into a proposition
-the same form is a proof by induction on the naturals. Wider `.jh` coverage
-and mechanized proofs of the kernel, erasure and lowering remain
-required before this replaces the existing verifier. 0.5.0 is the
-completion of these dependent types; proofs of the kernel's soundness and
-formal verification of the compiler itself come after it, so until then its
-soundness rests on testing. The
-[roadmap](docs/internals/roadmap.md#the-050-release-gate-for-the-native-core)
-states the gate.
+0.5 adds [dependent types](docs/language/dependent-types.md) in a
+[native dependent core](docs/internals/dependent-core.md), which checks programs
+and proofs together and emits MIR directly from the checked terms, with the proofs
+erased. Modules opt in with `#![dependent_core]`, and
+[the specification](docs/internals/core-spec.md) states its rules. It has:
+
+- evidence about u64 indices, with their order and equality, so that
+  [an index](examples/core_index.jh) needs no bounds check;
+- [refinements](examples/core_refine.jh), [data types](examples/core_data.jh)
+  [parameterized](examples/core_indexed.jh) by values, and
+  [inductive propositions](examples/core_inductive.jh) that programs declare;
+- owned [buffers](examples/core_buffer.jh) and
+  [heap data](examples/core_list.jh), each used exactly once, which the kernel
+  checks, and [freed](examples/core_scope.jh) where their scope ends;
+- [borrows](examples/core_borrow.jh), whose [results](examples/core_lend.jh) and
+  [proofs by induction](examples/core_borrow_induct.jh) can be about what they read,
+  and [reads that depend on them](examples/core_nth.jh);
+- [loops whose invariants are types](examples/core_invariant.jh);
+- [`inout` parameters](examples/core_inout.jh) with `old(x)`, which change values in
+  place, with no mutable reference in the kernel;
+- [a vector](lib/dependent/vec.jh) whose contracts are [types](examples/core_vec.jh).
+
+The kernel is **not verified**: its soundness rests on rejection suites, an independent
+evaluator and independent reviews. A mechanized proof is planned after 0.5, in Lean 4, as is
+formal verification of the compiler itself. The core is a subset, with i64 elements, no type
+parameters and the [other limits](docs/language/dependent-types.md#what-it-does-not-do) its
+guide lists. The existing verifier still proves unmarked programs and the compiler's own source.
 
 Buffered UTF-8 input (`std.io.BufRead`, `StrReader`, `BufReader`) and
 Unicode scalar decoding/iteration (`std.utf8`) support streaming parsers.
