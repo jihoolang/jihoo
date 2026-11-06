@@ -241,8 +241,10 @@ These are evidence, and every part is in ghost position.
   linear value. `Elim` on a proposition has none.
 - **Reduces.** `Elim` on a known constructor is its case applied to the fields, then to the
   `Elim` of each recursive field. `Case` on a known constructor is its case applied to the
-  fields, so the node is never built. `Case`, and `Elim` on data, distribute over `IfLt`, `IfEq`
-  and `Strict` in the scrutinee. A data type's parameters are not given to a case.
+  fields, so the node is never built. Only runtime normalization distributes `Case`, and `Elim`
+  on data, over `IfLt` and `IfEq` in the scrutinee. Pure conversion keeps an elimination on a
+  symbolic branch, including its dependent motive. Both modes distribute over `Strict`.
+  A data type's parameters are not given to a case.
 - **Runs.** A boxed `Con` allocates a node of a tag and one slot per runtime field. `Case` switches
   on the tag, loads the fields and frees the node at the end of the block, and a node of the same
   size built before then reuses it. `Elim` on boxed data is a recursive function that calls itself
@@ -311,8 +313,9 @@ These are evidence, and every part is in ghost position.
 - **Uses.** x, plus one case's uses, equal across cases, with a function result's arguments as binders.
   A recursion's cases may not use an outer linear value. Nothing is consumed by reading.
 - **Reduces.** In the pure model a view of `Borrow(v)` with v a known node is its case applied to the
-  fields, heap ones as `Borrow`, then, if `rec`, the view of each recursive field. It distributes over `IfLt`,
-  `IfEq` and `Strict` in v. In runtime mode, congruence.
+  fields, heap ones as `Borrow`, then, if `rec`, the view of each recursive field. It distributes
+  over `Strict` in v, but stays neutral on symbolic `IfLt` and `IfEq` so its dependent motive is
+  retained. In runtime mode, congruence.
 - **Runs.** The same switch and recursion as for owned data, freeing nothing. A function result's
   arguments are parameters of the recursion, and a hypothesis is a call.
 
@@ -346,7 +349,10 @@ These are evidence, and every part is in ghost position.
 conversion: any argument may be substituted, memory operations are neutral, and lends and views of
 known values compute. **Runtime mode** (`runtime`) is used by lowering on code to run: an
 argument that is effectful or reads stays bound once, traps are kept by `Strict`, and lends and views
-stay.
+stay. Runtime normalization also distributes data eliminations over symbolic branches to remove
+flat data before MIR lowering. Pure conversion does not: a dependent motive may give the alternatives
+different types, while `IfLt` and `IfEq` require one common type. Consequently a symbolic elimination
+and its manually distributed form need not be definitionally equal. Concrete scrutinees still compute.
 
 Three syntactic predicates decide this, each conservative at the depth limit, and otherwise the
 disjunction over a term's children:
@@ -403,13 +409,14 @@ These are the properties the rules are meant to have. They are stated for a clos
 are tested but not proved:
 
 1. **Consistency.** There is no closed evidence of `Lt(0, 0)`.
-2. **Preservation.** The pure model's reductions preserve types, with one known exception. A case on a
-   branch becomes a branch of cases, and `IfLt` and `IfEq` have no motive, so when the result type depends
-   on the value, the branch's alternatives can have different types and the normal form does not check
-   again. `examples/core_data.jhc` and `core_indexed.jhc` do this with evidence. The kernel compares normal
-   forms and never infers their types, so this admits nothing, but a proof of these rules must either give
-   branches a motive or state preservation up to this distribution. `jihoo core preserves FILE` tests the
-   property on a program's definitions, and the `core` suite runs it on the core examples.
+2. **Preservation.** The pure model's reductions are intended to preserve types. Symbolic data
+   elimination and views retain their motives instead of distributing into differently typed branches.
+   This repairs the rechecking failures in `examples/core_data.jhc` and `core_indexed.jhc`, as well as
+   dependent heap cases and views. `jihoo core preserves FILE` rechecks each definition's pure normal
+   form at its declared type in ghost position. The `core` suite requires it to pass on every core
+   example, accepted fixture and preservation regression, without expected failures. This finite check
+   is not a proof of preservation or of runtime quantity soundness. Runtime normalization is a separate
+   lowering transformation whose correctness remains to be established.
 3. **Quantities.** In the erased program every linear value is used exactly once, and no borrow outlives
    its lend. Allocations are freed exactly once on every path that does not trap.
 4. **Safety.** Accesses with evidence are in bounds, and `Absurd` is not reached.

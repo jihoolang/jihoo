@@ -1,0 +1,19 @@
+; App commutation must retain one common dependent function type.
+(def choice
+ (pi n U64 (pi i U64 (pi x U64 (Eq (uadd x n) (uadd x n)))))
+ (lam n U64 (lam i U64
+  (if-lt i n p
+   (lam x U64 (refl (uadd x n)))
+   (lam x U64 (refl (uadd x n)))))))
+(def applied
+ (pi n U64 (pi i U64 (Eq (uadd i n) (uadd i n))))
+ (lam n U64 (lam i U64 (app choice n i i))))
+(def eq_choice
+ (pi n U64 (pi i U64 (pi x U64 (Eq (uadd x n) (uadd x n)))))
+ (lam n U64 (lam i U64
+  (if-eq i n p
+   (lam x U64 (refl (uadd x n)))
+   (lam x U64 (refl (uadd x n)))))))
+(def eq_applied
+ (pi n U64 (pi i U64 (Eq (uadd i n) (uadd i n))))
+ (lam n U64 (lam i U64 (app eq_choice n i i))))

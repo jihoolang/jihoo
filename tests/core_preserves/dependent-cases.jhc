@@ -1,0 +1,48 @@
+; A dependent elimination on a symbolic branch must retain its motive.
+; Test both comparisons, flat/heap data, and an outer variable under the
+; true branch's erased evidence binder.
+(data Bit (Off Bit) (On (pi x U64 Bit)))
+(def bit (pi b Bit U64)
+  (lam b Bit (induct Bit (lam t Bit U64) 0 (lam x U64 x) b)))
+(def flat_lt
+  (pi n U64 (pi i U64
+    (Eq (app bit (if-lt i n p (On n) Off)) (app bit (if-lt i n p (On n) Off)))))
+  (lam n U64 (lam i U64
+    (induct Bit (lam t Bit (Eq (app bit t) (app bit t)))
+      (refl 0) (lam x U64 (refl x)) (if-lt i n p (On n) Off)))))
+(def flat_eq
+  (pi n U64 (pi i U64
+    (Eq (app bit (if-eq i n p (On n) Off)) (app bit (if-eq i n p (On n) Off)))))
+  (lam n U64 (lam i U64
+    (induct Bit (lam t Bit (Eq (app bit t) (app bit t)))
+      (refl 0) (lam x U64 (refl x)) (if-eq i n p (On n) Off)))))
+
+(data B (Empty B) (Next (pi tail B B)))
+(def tag (pi x B U64)
+  (lam x B (case B (lam t B U64) 0 (lam tail B (drop B tail 1)) x)))
+(def heap_lt
+  (pi n U64 (pi i U64
+    (Eq (uadd (app tag (if-lt i n p (Next Empty) Empty)) n)
+        (uadd (app tag (if-lt i n p (Next Empty) Empty)) n))))
+  (lam n U64 (lam i U64
+    (case B (lam t B (Eq (uadd (app tag t) n) (uadd (app tag t) n)))
+      (refl n) (lam tail B (refl (uadd 1 n)))
+      (if-lt i n p (Next Empty) Empty)))))
+(def heap_eq
+  (pi n U64 (pi i U64
+    (Eq (uadd (app tag (if-eq i n p (Next Empty) Empty)) n)
+        (uadd (app tag (if-eq i n p (Next Empty) Empty)) n))))
+  (lam n U64 (lam i U64
+    (case B (lam t B (Eq (uadd (app tag t) n) (uadd (app tag t) n)))
+      (refl n) (lam tail B (refl (uadd 1 n)))
+      (if-eq i n p (Next Empty) Empty)))))
+
+; Concrete choices still compute, for either alternative.
+(def flat_true (Eq 3 3) (app flat_lt 3 0))
+(def flat_false (Eq 0 0) (app flat_lt 3 4))
+(def flat_equal (Eq 3 3) (app flat_eq 3 3))
+(def flat_unequal (Eq 0 0) (app flat_eq 3 4))
+(def heap_true (Eq 4 4) (app heap_lt 3 0))
+(def heap_false (Eq 3 3) (app heap_lt 3 4))
+(def heap_equal (Eq 4 4) (app heap_eq 3 3))
+(def heap_unequal (Eq 3 3) (app heap_eq 3 4))

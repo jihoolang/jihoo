@@ -1,0 +1,7 @@
+; Pure conversion does not identify symbolic cases with their distributed form.
+(data Bit (Off Bit) (On Bit))
+(def value (pi x Bit U64)
+ (lam x Bit (induct Bit (lam t Bit U64) 0 1 x)))
+(def distribution
+ (pi i U64 (Eq (app value (if-lt i 1 p On Off)) (if-lt i 1 p 1 0)))
+ (lam i U64 (refl (if-lt i 1 p 1 0))))

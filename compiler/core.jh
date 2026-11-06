@@ -601,8 +601,10 @@ impl Core {
                     // case on Strict(t, y) evaluates t, then the case on y.
                     // Evaluation still goes the scrutinee, then the case.
                     match self.term(x) {
-                        IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                        IfLt(a, b, yes, no) | IfEq(a, b, yes, no) if self.runtime => {
                             let equality = match self.term(x) { IfEq(_, _, _, _) => true, _ => false }
+                            // Only lowering distributes: in the pure model the
+                            // motive can give each alternative a different type.
                             // The true branch has the evidence binder.
                             let inner = self.shift(p, 1, 0, depth - 1)?
                             var shifted = Vec(u32).new()
@@ -650,8 +652,9 @@ impl Core {
                 let cases = self.normal_all(cases.as_slice(), depth)?
                 let x = self.normal(x, depth - 1)?
                 match self.term(x) {
-                    // As for Elim: a case on a branch is a branch of cases.
-                    IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
+                    // As for Elim, only runtime lowering distributes over a
+                    // branch. Pure conversion retains the dependent motive.
+                    IfLt(a, b, yes, no) | IfEq(a, b, yes, no) if self.runtime => {
                         let equality = match self.term(x) { IfEq(_, _, _, _) => true, _ => false }
                         let inner = self.shift(p, 1, 0, depth - 1)?
                         var shifted = Vec(u32).new()
@@ -928,8 +931,8 @@ impl Core {
     // A view of a borrow of v, normal, in the pure model: a known node is
     // read without being taken apart. Its case receives the fields, those
     // on the heap borrowed, then, in a recursion, the view of each recursive
-    // field; a branch is the branch of the views, and Strict keeps its
-    // traps first. None when v is neutral.
+    // field; Strict keeps its traps first. A symbolic branch stays neutral
+    // so the dependent motive is retained. None when v is neutral.
     fn view_value(
         inout self,
         recursion: bool,
@@ -971,20 +974,8 @@ impl Core {
                 }
                 Ok(Some(self.normal(result, depth - 1)?))
             }
-            IfLt(a, b, yes, no) | IfEq(a, b, yes, no) => {
-                let equality = match self.term(v) { IfEq(_, _, _, _) => true, _ => false }
-                // The true branch has the evidence binder.
-                let inner = self.shift(t, 1, 0, depth - 1)?
-                var shifted = Vec(u32).new()
-                for c in cases { shifted.push(self.shift(c, 1, 0, depth - 1)?) }
-                let y = self.add(Term.Borrow(yes), sp)?
-                let y = self.add(Term.View(recursion, f, inner, shifted, y), sp)?
-                let n = self.add(Term.Borrow(no), sp)?
-                let n = self.add(Term.View(recursion, f, t, cases.clone(), n), sp)?
-                let branch = if equality { Term.IfEq(a, b, y, n) } else { Term.IfLt(a, b, y, n) }
-                let branch = self.add(branch, sp)?
-                Ok(Some(self.normal(branch, depth - 1)?))
-            }
+            // A symbolic branch stays under its motive. Distributing a
+            // dependent view would give IfLt/IfEq differently typed arms.
             Strict(trap, y) => {
                 let y = self.add(Term.Borrow(y), sp)?
                 let view = self.add(Term.View(recursion, f, t, cases.clone(), y), sp)?
@@ -4310,7 +4301,7 @@ fn recursive_data_types_live_on_the_heap() {
 }
 
 #[test]
-fn case_analysis_of_a_branch_is_a_branch() {
+fn case_analysis_of_a_branch_distributes_only_for_runtime() {
     let sp = diag.Span.nowhere()
     var c = Core.new()
     bit_family(&c, 0, false)
@@ -4334,6 +4325,9 @@ fn case_analysis_of_a_branch_is_a_branch() {
     cases.push(seven)
     cases.push(yes_case)
     let elim = c.add(Term.Elim(0, p, cases, branch), sp).unwrap()
+    let normal = c.normal(elim, DEPTH).unwrap()
+    assert(c.term(normal) == c.term(elim), "pure conversion keeps the motive")
+    c.runtime = true
     let normal = c.normal(elim, DEPTH).unwrap()
     let IfLt(_, _, y, n) = c.term(normal) else { panic("a branch of cases") }
     assert(c.term(y) == Term.Var(1) && c.term(n) == Term.Natural(7), "each case on its value")
@@ -5062,4 +5056,91 @@ fn a_loops_type_is_its_invariant() {
     // The first value must satisfy the invariant at 0.
     var c = invariant_loop(1, 0)
     assert(c.check().is_err(), "nothing is below 0: the invariant fails on entry")
+}
+
+// Raw dependent elimination fixture: no parser or elaborator participates.
+fn preservation_analysis(inout c: Core, analysis: bool, motive: u32, cases: [u32], x: u32) -> u32 {
+    let sp = diag.Span.nowhere()
+    var cs = Vec(u32).new()
+    for t in cases { cs.push(t) }
+    c.add(if analysis { Term.Case(0, motive, cs, x) }
+        else { Term.Elim(0, motive, cs, x) }, sp).unwrap()
+}
+
+#[test]
+fn dependent_eliminations_preserve_symbolic_branches_without_frontends() {
+    let sp = diag.Span.nowhere()
+    for analysis in [false, true] {
+        for equality in [false, true] {
+            var c = Core.new()
+            bit_family(&c, 0, analysis)
+            c.check().unwrap()
+            let u = c.add(Term.U64, sp).unwrap()
+            let b = c.add(Term.Ind(0, Vec(u32).new()), sp).unwrap()
+            let field = if analysis { b } else { u }
+            let zero = c.add(Term.Natural(0), sp).unwrap()
+            let one = c.add(Term.Natural(1), sp).unwrap()
+            let two = c.add(Term.Natural(2), sp).unwrap()
+            let no = c.add(Term.Con(0, 0, Vec(u32).new()), sp).unwrap()
+            var fields = Vec(u32).new()
+            fields.push(if analysis { no } else { one })
+            let yes = c.add(Term.Con(0, 1, fields), sp).unwrap()
+            let x = c.add(Term.Var(0), sp).unwrap()
+            let constant = c.add(Term.Lam(false, b, u), sp).unwrap()
+            let tag_yes = c.add(Term.Lam(false, field, one), sp).unwrap()
+            let tag = preservation_analysis(&c, analysis, constant, [zero, tag_yes], x)
+            let proposition = c.add(Term.Eq(tag, tag), sp).unwrap()
+            let motive = c.add(Term.Lam(false, b, proposition), sp).unwrap()
+            let proof_no = c.add(Term.Refl(zero), sp).unwrap()
+            let proof_yes = c.add(Term.Refl(one), sp).unwrap()
+            let good = c.add(Term.Lam(false, field, proof_yes), sp).unwrap()
+            let bad = c.add(Term.Lam(false, field, proof_no), sp).unwrap()
+            let choice = c.add(if equality { Term.IfEq(x, one, yes, no) }
+                else { Term.IfLt(x, one, yes, no) }, sp).unwrap()
+            let term = preservation_analysis(&c, analysis, motive, [proof_no, good], choice)
+            let ctx = [Binding { ty: u, erased: false }]
+            let expected = c.infer(term, ctx, true, DEPTH).unwrap()
+            let normal = c.normal(term, DEPTH).unwrap()
+            c.require(normal, expected, ctx, true, DEPTH).unwrap()
+            assert(match c.term(normal) {
+                Case(_, _, _, _) => analysis
+                Elim(_, _, _, _) => !analysis
+                _ => false
+            }, "pure normalization retains the dependent motive")
+            // Closed comparisons still compute both ways by constructor iota.
+            for holds in [false, true] {
+                let input = if holds { if equality { one } else { zero } } else { two }
+                let closed = c.substitute(term, input, DEPTH).unwrap()
+                let result = c.normal(closed, DEPTH).unwrap()
+                assert(c.term(result) == Term.Refl(if holds { one } else { zero }),
+                    "closed comparisons reduce to the appropriate constructor proof")
+            }
+            let invalid = preservation_analysis(&c, analysis, motive, [proof_no, bad], choice)
+            assert(c.infer(invalid, ctx, true, DEPTH).is_err(),
+                "the wrong constructor proof is rejected")
+            let invalid = c.add(if equality { Term.IfEq(x, one, proof_yes, proof_no) }
+                else { Term.IfLt(x, one, proof_yes, proof_no) }, sp).unwrap()
+            assert(c.infer(invalid, ctx, true, DEPTH).is_err(),
+                "ordinary branches cannot have different proof types")
+            let wrong_domain = c.add(Term.Lam(false, u, proposition), sp).unwrap()
+            let invalid = preservation_analysis(
+                &c,
+                analysis,
+                wrong_domain,
+                [proof_no, good],
+                choice
+            )
+            assert(c.infer(invalid, ctx, true, DEPTH).is_err(),
+                "a motive over the wrong domain is rejected")
+            // Lowering retains its commuting conversion, independently of
+            // pure conversion; runtime normal forms need not recheck.
+            c.runtime = true
+            let runtime = c.normal(term, DEPTH).unwrap()
+            assert(match c.term(runtime) {
+                IfEq(_, _, _, _) => equality
+                IfLt(_, _, _, _) => !equality
+                _ => false
+            }, "runtime normalization distributes over symbolic comparisons")
+        }
+    }
 }

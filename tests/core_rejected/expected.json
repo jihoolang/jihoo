@@ -38,6 +38,7 @@
  "source-loop-step-oob.jh": "type mismatch",
  "source-recursion-owned-result-duplicate.jh": "an owned value is used more than once",
  "source-stale-across-two-inout.jh": "type mismatch",
+ "symbolic-case-distribution.jhc": "type mismatch",
  "take-borrow-escape.jhc": "a borrow cannot outlive its lend",
  "take-dependent-owner-escape.jhc": "take's type depends on neither the owner nor its result",
  "take-dependent-result-escape.jhc": "take's type depends on neither the owner nor its result",
