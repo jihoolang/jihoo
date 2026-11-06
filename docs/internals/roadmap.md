@@ -668,6 +668,11 @@ mechanize its soundness, starting from that specification:
    lowering still distributes data cases. The core examples and preservation
    fixtures must all recheck, with no expected preservation failures. This
    fixes the known branch-normalization gap, not the whole 0.6 milestone.
+   Sum ordering now ignores exactly the evidence that conversion ignores, so
+   replacing an irrelevant proof inside nested subtraction cannot make equal
+   sums fail to convert. Source, textual-core and raw-kernel tests check this
+   congruence boundary while retaining rejection of different runtime operands
+   and malformed proof graphs.
    Continue auditing conversion, substitution, erased indices, indexed
    elimination and ownership boundaries against accepted and rejected programs.
    Record remaining source-subset restrictions and settle the kernel rules

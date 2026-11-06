@@ -1134,7 +1134,9 @@ impl Core {
     }
 
     // A total order on terms by structure, for sorting sums; 0 for
-    // identical terms, ignoring Strict as `identical` does.
+    // identical terms, ignoring Strict and irrelevant evidence as `identical`
+    // does. Otherwise replacing a proof can change the order of unequal atoms
+    // in a sum, so equal operands no longer give equal sums.
     fn compare(self, a: u32, b: u32, depth: u32) -> i64 {
         if depth == 0 || a == b { return 0 }
         match self.term(a) { Strict(_, y) => return self.compare(y, b, depth - 1), _ => {} }
@@ -1148,7 +1150,7 @@ impl Core {
             if px[i] != py[i] { return if px[i] < py[i] { -1 } else { 1 } }
         }
         if px.len() < py.len() { return -1 }
-        let (cx, cy) = (children(x), children(y))
+        let (cx, cy) = (conversion_children(x), conversion_children(y))
         for i in 0..cx.len() {
             if i >= cy.len() { return 1 }
             let c = self.compare(cx[i], cy[i], depth - 1)
@@ -3480,6 +3482,20 @@ fn payload(term: Term) -> Vec(i128) {
     out
 }
 
+// Only comparison omits this evidence. Graph validation, type checking and
+// substitution still traverse every child, including an irrelevant proof.
+fn conversion_children(term: Term) -> Vec(u32) {
+    match term {
+        USub(a, b, _) | Pack(a, b, _) | Give(true, a, b, _) => {
+            var out = Vec(u32).new()
+            out.push(a)
+            out.push(b)
+            out
+        }
+        t => children(t)
+    }
+}
+
 pub fn children(term: Term) -> Vec(u32) {
     var out = Vec(u32).new()
     match term {
@@ -4008,6 +4024,69 @@ fn sums_are_compared_in_the_naturals() {
         span: sp
     })
     assert(c.check().is_err(), "2^64 is not 0 in the naturals")
+}
+
+#[test]
+fn sum_order_ignores_exactly_the_evidence_conversion_ignores() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let a = c.add(Term.Var(0), sp).unwrap()
+    let b = c.add(Term.Var(1), sp).unwrap()
+    let p = c.add(Term.Var(2), sp).unwrap()
+    let q = c.add(Term.Var(3), sp).unwrap()
+    // These are structural comparisons, not typing fixtures. Exercise every
+    // constructor whose evidence `identical` ignores, including under an
+    // unequal parent: checking equal terms alone misses unstable ordering.
+    let sub_p = c.add(Term.USub(a, b, p), sp).unwrap()
+    let sub_q = c.add(Term.USub(a, b, q), sp).unwrap()
+    let pack_p = c.add(Term.Pack(a, b, p), sp).unwrap()
+    let pack_q = c.add(Term.Pack(a, b, q), sp).unwrap()
+    let give_p = c.add(Term.Give(true, a, b, p), sp).unwrap()
+    let give_q = c.add(Term.Give(true, a, b, q), sp).unwrap()
+    for (left, right) in [(sub_p, sub_q), (pack_p, pack_q), (give_p, give_q)] {
+        assert(c.identical(left, right, DEPTH), "the proof is irrelevant")
+        assert(c.compare(left, right, DEPTH) == 0, "equal terms sort together")
+        assert(c.compare(right, left, DEPTH) == 0, "comparison is symmetric at equality")
+        let x = c.add(Term.App(left, a), sp).unwrap()
+        let y = c.add(Term.App(right, b), sp).unwrap()
+        let xx = c.add(Term.App(right, a), sp).unwrap()
+        let yy = c.add(Term.App(left, b), sp).unwrap()
+        assert(!c.identical(x, y, DEPTH), "the relevant arguments differ")
+        assert(c.compare(x, y, DEPTH) < 0, "relevant arguments determine the order")
+        assert(c.compare(xx, yy, DEPTH) < 0, "proof replacement preserves that order")
+        let before = c.add(Term.UAdd(x, y), sp).unwrap()
+        let after = c.add(Term.UAdd(xx, yy), sp).unwrap()
+        assert(c.equal(before, after, DEPTH).unwrap(), "sum conversion is congruent")
+        let reversed = c.add(Term.UAdd(yy, xx), sp).unwrap()
+        assert(
+            c.equal(before, reversed, DEPTH).unwrap(),
+            "commutativity survives proof replacement"
+        )
+        let distinct = c.add(Term.UAdd(xx, xx), sp).unwrap()
+        assert(
+            !c.equal(before, distinct, DEPTH).unwrap(),
+            "relevant arguments still distinguish sums"
+        )
+    }
+    let result_p = c.add(Term.Give(false, a, b, p), sp).unwrap()
+    let result_q = c.add(Term.Give(false, a, b, q), sp).unwrap()
+    assert(!c.identical(result_p, result_q, DEPTH), "a runtime result is relevant")
+    assert(c.compare(result_p, result_q, DEPTH) < 0, "runtime results participate in ordering")
+}
+
+#[test]
+fn irrelevant_evidence_is_still_a_checked_graph_child() {
+    let sp = diag.Span.nowhere()
+    for kind in 0..3 {
+        var c = Core.new()
+        let zero = c.add(Term.Natural(0), sp).unwrap()
+        let cycle = c.nodes.len() as u32
+        let term = if kind == 0 { Term.USub(zero, zero, cycle) }
+        else if kind == 1 { Term.Pack(zero, zero, cycle) }
+        else { Term.Give(true, zero, zero, cycle) }
+        c.add(term, sp).unwrap()
+        assert(c.check().is_err(), "irrelevant evidence is not omitted from graph validation")
+    }
 }
 
 #[test]

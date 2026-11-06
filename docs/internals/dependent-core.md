@@ -839,7 +839,12 @@ execution, cancellation, closed computation and proof irrelevance in
 accepted lemmas, and rejection of missing, strict or reversed evidence,
 underflow, partial cancellation, wrapped results, the `-` operator,
 unchecked `k - 1` loads and runtime uses of evidence. Kernel unit tests
-check cancellation and that `0 - 1` has no evidence.
+check cancellation and that `0 - 1` has no evidence. Conversion orders sum atoms
+without the evidence ignored by equality: replacing a subtraction proof, even
+inside a nested atom, leaves sums convertible. Source and core regressions cover
+nested subtraction with distinct erased proofs and relevant operands that still
+must differ. Raw kernel tests cover the same ordering rule for refinements and
+erased `Give` results, without omitting their evidence from graph checks.
 `tests/core_refine.py` adds refinements: both frontends' MIR and native
 execution, projections, proof irrelevance, repacking with weaker
 evidence and branches of packs; witnesses that trap are evaluated even

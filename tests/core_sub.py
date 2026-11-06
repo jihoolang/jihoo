@@ -55,6 +55,13 @@ fn back(k: u64, p: erased(Lt(0, k))) -> Eq(pred(k, p) + 1, k) { refl(k) }
 fn forth(i: u64) -> Eq(sub(i + 1, 1, lt_add(0, i + 1, 1, zero_le(i))), i) { refl(i) }
 fn closed() -> Eq(sub(5, 2, decide_lt(2, 6)), 3) { refl(3) }
 fn same(k: u64, p: erased(Lt(0, k)), q: erased(Lt(0, k))) -> Eq(pred(k, p), pred(k, q)) { refl(pred(k, p)) }
+fn sum_proof_irrelevance(a: u64, b: u64, c: u64, d: u64,
+    p: erased(Lt(b, a + 1)), q: erased(Lt(b, a + 1)),
+    r: erased(Lt(c, sub(a, b, p) + 1)), s: erased(Lt(d, sub(a, b, p) + 1))) ->
+    Eq(sub(sub(a, b, p), c, r) + sub(sub(a, b, q), d, s),
+        sub(sub(a, b, q), c, r) + sub(sub(a, b, p), d, s)) {
+    refl(sub(sub(a, b, p), c, r) + sub(sub(a, b, q), d, s))
+}
 """
     valid_path = temporary / "sub-valid.jh"
     valid_path.write_text(valid)
@@ -75,6 +82,15 @@ fn same(k: u64, p: erased(Lt(0, k)), q: erased(Lt(0, k))) -> Eq(pred(k, p), pred
         "runtime-evidence": "fn bad(k: u64, p: erased(Lt(0, k))) -> u64 { sub(k, 1, p) + p }",
         "signed": "fn bad(x: i64, p: erased(Lt(0, 1))) -> u64 { sub(x, 0, p) }",
         "arity": "fn bad(k: u64) -> Lt(0, k + 1) { zero_le(k, k) }",
+        "sum-relevant-operands": """
+fn bad(a: u64, b: u64, c: u64, d: u64,
+    p: erased(Lt(b, a + 1)), q: erased(Lt(b, a + 1)),
+    r: erased(Lt(c, sub(a, b, p) + 1)), s: erased(Lt(d, sub(a, b, p) + 1))) ->
+    Eq(sub(sub(a, b, p), c, r) + sub(sub(a, b, q), d, s),
+        sub(sub(a, b, q), c, r) + sub(sub(a, b, p), c, r)) {
+    refl(sub(sub(a, b, p), c, r) + sub(sub(a, b, q), d, s))
+}
+""",
     }
     for name, body in source_invalid.items():
         path = temporary / f"sub-{name}.jh"

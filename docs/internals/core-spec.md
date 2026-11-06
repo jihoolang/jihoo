@@ -371,7 +371,11 @@ Conversion (`identical`) is syntactic equality of normal forms, up to:
 - `Strict(_, y)` being y;
 - evidence being irrelevant in `USub` and `Pack`, and in an erased `Give`.
 
-Other evidence is compared as written.
+Other evidence is compared as written. The structural order used to canonicalize
+sums (`compare`, `conversion_children`) ignores exactly the same evidence, including
+inside otherwise different atoms. Replacing an irrelevant proof must not change
+where an atom sorts relative to another one. All children still participate in
+graph validation, typing and substitution; irrelevance never excuses invalid evidence.
 
 ## Lowering
 
