@@ -712,6 +712,7 @@ object's runtime entry points; helpers are normalized at their uses.
 | `(Ref T)`, `(lend x f g)` | a borrow of an owned `T`; run `f` on a borrow of `x`, then `g` on its result and `x` (of a variable: [dependent](#dependent-lends)) |
 | `(view F T case... r)`, `(view-rec F T case... r)` | read borrowed heap data one level, or recursively, freeing nothing |
 | `(view F (lam r (Ref F) T) case... r)` | the same, with a result that [depends on the borrow](#views-whose-result-depends-on-the-borrow); `T` may be a function type, and the view applied to its arguments |
+| `(loop n T init body)` | a loop [whose invariant is a type](#loops-whose-invariants-are-types), or a proof by induction on the naturals |
 | `(absurd T p)` | code that cannot run, of type `T`, with `p : Lt i 0` |
 | `(borrow x)` | a borrow of the owned `x`, in types and evidence, or in the reader of a lend of `x` |
 | `(deref r)` | the value a borrow `r` reads, in types and evidence only |
@@ -1472,7 +1473,9 @@ motive `fn(s: Ref(F)) { T(s) }`. The kernel's rules for a motive are:
   a view gives that proof about the borrow.
 - The view's type is `T(r)`.
 - A motive's domain is exactly the borrow read, and its body is runtime data,
-  of sort `Type 0`: a view computes neither types nor propositions.
+  of sort `Type 0`: a view computes neither types nor propositions. That
+  body's kind is known at a symbolic borrow, so every case's result has one
+  representation.
 
 `T` may also be a function type, which is how arguments change along a
 recursion. Such a view is runtime code only when applied to all of its
@@ -1531,7 +1534,7 @@ counted allocations and frees. It runs programs with an owned argument through
 a recursion, a hypothesis returned unapplied, a branch with a function
 result, a hypothesis called from another recursion, an owned value used in a
 refining arm, a proof by cases and a data type whose proof reads its own heap
-field, and asserts the reason for each of 11 source and 14 core rejections.
+field, and asserts the reason for each of 11 source and 15 core rejections.
 
 A program of about 150 lines reached the arena's 200,000 term limit, because
 `shift` and `normal` copied terms they did not change. They now return the same
@@ -1545,6 +1548,61 @@ Not yet supported: dependent case analysis of an owned value with evidence
 in scope (`Case`'s result is still not a function), refining evidence through
 a borrow that is not a variable, and `.jh` syntax for a proof field in an
 `enum` that mentions an earlier field, which `.jhc` declares with named fields.
+
+## Loops whose invariants are types
+
+A loop may state how its accumulator's type changes with the iteration:
+
+```jihoo
+fn matches(n: u64, limit: u64) -> refine(fn(c) { Lt(c, n + 1) }) {
+    fold(n, fn(k) { refine(fn(c) { Lt(c, k + 1) }) }, pack(0, decide_lt(0, 1)), fn(i, p, acc) {
+        if_lt(i, limit, fn(q) {
+            pack(witness(acc) + 1, lt_add(witness(acc), i + 1, 1, proof(acc)))
+        }, pack(witness(acc), lt_le(witness(acc), i + 1, i + 2, proof(acc),
+            lt_add(0, 2, i + 1, decide_lt(0, 2)))))
+    })
+}
+
+fn all_even(n: u64) -> Even(n + n) {
+    fold(n, fn(k) { Even(k + k) }, zero(), fn(i, p, acc) { twice(i + i, acc) })
+}
+```
+
+The kernel term is `Loop(n, T, init, body)` (`.jhc`: `(loop n T init body)`),
+with `T : U64 -> Type 0` or `U64 -> Prop`, `init : T(0)` and `body : (i : U64)
+-> (erased p : Lt(i, n)) -> T(i) -> T(i + 1)`, of type `T(n)`. In the pure model
+it is primitive recursion on `n`; the normalizer computes only a count of 0, as
+for `fold`, so a loop's result is known through its type rather than by
+unrolling it.
+
+- Into `Type 0`, `T`'s body is a scalar, a refinement, a buffer or heap data,
+  known at the symbolic index, so that every iteration's accumulator has one
+  representation and ownership. An owned accumulator is used exactly once by
+  the existing rule for a binder, and the body captures no outer owned value.
+- Into `Prop`, it is a proof by induction on the naturals. The accumulator is
+  erased, and the proof erases like any other: `doubled` in the example has no
+  loop.
+
+Lowering is `fold`'s. In source the form has four arguments; the three-argument
+`fold` is unchanged. A dependent view's motive has the same restriction on its
+result, for the same reason.
+
+A heap value can hold a proof about its own field, so a loop can build one and
+keep the invariant: `tests/core_invariant.py` has `Sized(n)`, a list with
+evidence that its length is `n`, built with `T(k) = Sized(k)`. `.jhc` declares
+it; `.jh` has no syntax yet for a proof field that names an earlier field.
+
+A `let` now runs a `fold` or `Loop` once rather than at each use of its value.
+
+[`examples/core_invariant.jh`](../../examples/core_invariant.jh) and its
+[core equivalent](../../examples/core_invariant.jhc) compile to the same MIR,
+with no bounds check. `tests/core_invariant.py` runs both against the evaluator
+on both targets, an owned accumulator with counted frees, and asserts the
+reason for each of 8 source and 12 core rejections: an invariant false on entry
+or not preserved, an off-by-one table, false inductions, a wrong count,
+a representation that depends on the index, a function or borrow accumulator,
+an evidence accumulator kept at run time, an owned accumulator used twice or
+dropped, and a claim that needs a loop to be unrolled.
 
 The next stages of the replacement are:
 

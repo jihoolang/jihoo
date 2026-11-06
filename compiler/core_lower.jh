@@ -463,7 +463,7 @@ impl Lower {
                 // The program is `checked`: overflow traps, as in the kernel.
                 Ok(self.value(types.I64, mir.Rvalue.Bin(op, a.op.clone(), b.op.clone()), sp))
             }
-            Fold(n, init, body) => {
+            Fold(n, init, body) | Loop(n, _, init, body) => {
                 let n = self.expr(c, n, env, depth - 1)?
                 let init = self.expr(c, init, env, depth - 1)?
                 let core.Term.Lam(false, _, body) = c.term(body) else { return Err(c.error(

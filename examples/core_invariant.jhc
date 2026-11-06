@@ -1,0 +1,46 @@
+; Loops whose invariants are types, written out: core_invariant.jh compiles
+; to the same MIR. (loop n T init body) has init : (T 0), a body from (T i)
+; to (T (uadd i 1)) and the result (T n); into a proposition it is a proof by
+; induction on the naturals, with an erased accumulator.
+(inductive Even 1
+  (zero (Even 0))
+  (twice (pi a U64 (pi0 p (Even a) (Even (uadd a 2))))))
+
+(def all_even
+  (pi n U64 (Even (uadd n n)))
+  (lam n U64
+    (loop n (lam k U64 (Even (uadd k k))) zero
+      (lam i U64 (lam0 p (Lt i n) (lam0 acc (Even (uadd i i))
+        (twice (uadd i i) acc)))))))
+
+(def even_value
+  (pi a U64 (pi0 p (Even a) U64))
+  (lam a U64 (lam0 p (Even a) a)))
+
+(def matches
+  (pi n U64 (pi limit U64 (Refine (lam c U64 (Lt c (uadd n 1))))))
+  (lam n U64 (lam limit U64
+    (loop n (lam k U64 (Refine (lam c U64 (Lt c (uadd k 1)))))
+      (pack (lam c U64 (Lt c 1)) 0 (decide-lt 0 1))
+      (lam i U64 (lam0 p (Lt i n) (lam acc (Refine (lam c U64 (Lt c (uadd i 1))))
+        (if-lt i limit q
+          (pack (lam c U64 (Lt c (uadd i 2))) (uadd (witness acc) 1)
+            (lt-add (witness acc) (uadd i 1) 1 (proof acc)))
+          (pack (lam c U64 (Lt c (uadd i 2))) (witness acc)
+            (lt-le (witness acc) (uadd i 1) (uadd i 2) (proof acc)
+              (lt-add 0 2 (uadd i 1) (decide-lt 0 2))))))))))))
+
+(def slot
+  (pi n U64 (pi table (Array (uadd n 1)) (pi limit U64 I64)))
+  (lam n U64 (lam table (Array (uadd n 1)) (lam limit U64
+    (app (lam c (Refine (lam m U64 (Lt m (uadd n 1))))
+        (index table (witness c) (proof c)))
+      (app matches n limit))))))
+
+(export demo
+  (pi limit U64 I64)
+  (lam limit U64 (app slot 3 (array (int 5) (int 6) (int 7) (int 8)) limit)))
+
+(export doubled
+  (pi n U64 U64)
+  (lam n U64 (app even_value (uadd n n) (app all_even n))))

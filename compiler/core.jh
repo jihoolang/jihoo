@@ -118,6 +118,11 @@ pub enum Term {
     // function result is called once its arguments are known: a recursion
     // whose arguments change.
     View(bool, u32, u32, Vec(u32), u32)
+    // n, a motive T : U64 -> Type 0 or Prop, init : T(0) and body : (i : U64)
+    // -> (erased p : Lt(i, n)) -> T(i) -> T(i + 1), of type T(n): a loop whose
+    // accumulator's type is its invariant. Into Prop it is a proof by
+    // induction on the naturals, and its accumulator is erased.
+    Loop(u32, u32, u32, u32)
     // A type and evidence of Lt(i, 0): code that cannot run has any type.
     Absurd(u32, u32)
     // Family, motive, one case per constructor and a value of a boxed data
@@ -407,6 +412,11 @@ impl Core {
                 self.transform(q, cutoff, delta, replacement, depth - 1)?)
             Fold(n, init, body) => Term.Fold(
                 self.transform(n, cutoff, delta, replacement, depth - 1)?,
+                self.transform(init, cutoff, delta, replacement, depth - 1)?,
+                self.transform(body, cutoff, delta, replacement, depth - 1)?)
+            Loop(n, t, init, body) => Term.Loop(
+                self.transform(n, cutoff, delta, replacement, depth - 1)?,
+                self.transform(t, cutoff, delta, replacement, depth - 1)?,
                 self.transform(init, cutoff, delta, replacement, depth - 1)?,
                 self.transform(body, cutoff, delta, replacement, depth - 1)?)
             Elements(xs) => Term.Elements(self.transform_all(
@@ -704,25 +714,14 @@ impl Core {
                 // Loops are not unrolled; only the empty loop computes. Its
                 // body never runs, so neither do the body's traps.
                 if self.term(n) == Term.Natural(0) { return Ok(init) }
-                let normal_body = self.normal(body, depth - 1)?
-                if self.binders(normal_body, 3) {
-                    return self.add(Term.Fold(n, init, normal_body), sp)
-                }
-                // Eta-expand the body, so that lowering finds its binders.
-                // Its annotations are not used after checking.
-                let u = self.add(Term.U64, sp)?
-                let i = self.add(Term.I64, sp)?
-                let x0 = self.add(Term.Var(0), sp)?
-                let x1 = self.add(Term.Var(1), sp)?
-                let x2 = self.add(Term.Var(2), sp)?
-                let bound = self.shift(n, 1, 0, depth - 1)?
-                let lt = self.add(Term.Lt(x0, bound), sp)?
-                var applied = self.shift(body, 3, 0, depth - 1)?
-                for x in [x2, x1, x0] { applied = self.add(Term.App(applied, x), sp)? }
-                let eta = self.add(Term.Lam(false, i, applied), sp)?
-                let eta = self.add(Term.Lam(true, lt, eta), sp)?
-                let eta = self.add(Term.Lam(false, u, eta), sp)?
-                Term.Fold(n, init, self.normal(eta, depth - 1)?)
+                Term.Fold(n, init, self.loop_body(n, body, sp, depth)?)
+            }
+            Loop(n, t, init, body) => {
+                let n = self.normal(n, depth - 1)?
+                let init = self.normal(init, depth - 1)?
+                if self.term(n) == Term.Natural(0) { return Ok(init) }
+                let t = self.normal(t, depth - 1)?
+                Term.Loop(n, t, init, self.loop_body(n, body, sp, depth)?)
             }
             Strict(a, b) => {
                 let a = self.normal(a, depth - 1)?
@@ -855,6 +854,32 @@ impl Core {
         }
         if term == self.nodes[id as i64].term { return Ok(id) }
         self.add(term, sp)
+    }
+
+    // A normal loop body with its three binders, eta-expanded if it is not,
+    // so that lowering finds them. The annotations are not used after checking.
+    fn loop_body(
+        inout self,
+        n: u32,
+        body: u32,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let normal_body = self.normal(body, depth - 1)?
+        if self.binders(normal_body, 3) { return Ok(normal_body) }
+        let u = self.add(Term.U64, sp)?
+        let i = self.add(Term.I64, sp)?
+        let x0 = self.add(Term.Var(0), sp)?
+        let x1 = self.add(Term.Var(1), sp)?
+        let x2 = self.add(Term.Var(2), sp)?
+        let bound = self.shift(n, 1, 0, depth - 1)?
+        let lt = self.add(Term.Lt(x0, bound), sp)?
+        var applied = self.shift(body, 3, 0, depth - 1)?
+        for x in [x2, x1, x0] { applied = self.add(Term.App(applied, x), sp)? }
+        let eta = self.add(Term.Lam(false, i, applied), sp)?
+        let eta = self.add(Term.Lam(true, lt, eta), sp)?
+        let eta = self.add(Term.Lam(false, u, eta), sp)?
+        self.normal(eta, depth - 1)
     }
 
     // A view of a borrow of v, normal, in the pure model: a known node is
@@ -1153,6 +1178,9 @@ impl Core {
             // evidence are erased.
             Pack(_, a, _) => self.may_trap(a, depth - 1)
             Refine(_) | Proof(_) | Absurd(_, _) => false
+            // A type's terms do not run.
+            Loop(n, _, init, body) => self.may_trap(n, depth - 1) ||
+                self.may_trap(init, depth - 1) || self.may_trap(body, depth - 1)
             // At run time the only function a variable holds is a recursion's
             // result, and a recursion may trap.
             App(_, _) if self.runtime && self.calls_variable(id) => true
@@ -1177,6 +1205,8 @@ impl Core {
             // Building a heap node allocates; recursion over one frees it.
             Con(f, _, _) | Elim(f, _, _, _) if self.is_boxed(f) => true
             Absurd(_, _) => false
+            Loop(n, _, init, body) => self.effectful(n, depth - 1) ||
+                self.effectful(init, depth - 1) || self.effectful(body, depth - 1)
             t => {
                 for child in children(t) { if self.effectful(child, depth - 1) { return true } }
                 false
@@ -1196,6 +1226,8 @@ impl Core {
             }
             App(_, _) if self.calls_variable(id) || self.calls_view(id) => true
             Lam(_, _, _) | Absurd(_, _) => false
+            // A loop's work, like a walk, is done once.
+            Fold(_, _, _) | Loop(_, _, _, _) => true
             t => {
                 for child in children(t) { if self.reads(child, depth - 1) { return true } }
                 false
@@ -1298,6 +1330,9 @@ impl Core {
                 self.identical(q, t, depth - 1)
             (Arith(o, a, b), Arith(p, c, d)) =>
                 o == p && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+            (Loop(a, t, b, y), Loop(c, u, d, z)) => self.identical(a, c, depth - 1) &&
+                self.identical(t, u, depth - 1) && self.identical(b, d, depth - 1) &&
+                self.identical(y, z, depth - 1)
             (Fold(a, b, y), Fold(c, d, z)) => self.identical(a, c, depth - 1) &&
                 self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1)
             (Ind(f, xs), Ind(g, ys)) => f == g && self.identical_all(
@@ -1697,6 +1732,33 @@ impl Core {
             result = self.add(Term.Pi(erased, domain, result), sp)?
         }
         Ok(result)
+    }
+
+    // (i : U64) -> (erased p : Lt(i, n)) -> (acc : T(i)) -> T(i + 1), the
+    // accumulator erased in a proof. Also used to elaborate source bodies.
+    pub fn loop_body_type(
+        inout self,
+        n: u32,
+        t: u32,
+        proof: bool,
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let u = self.add(Term.U64, sp)?
+        let x0 = self.add(Term.Var(0), sp)?
+        let x1 = self.add(Term.Var(1), sp)?
+        let x2 = self.add(Term.Var(2), sp)?
+        let one = self.add(Term.Natural(1), sp)?
+        let bound = self.shift(n, 1, 0, depth)?
+        let lt = self.add(Term.Lt(x0, bound), sp)?
+        let before = self.shift(t, 2, 0, depth)?
+        let before = self.add(Term.App(before, x1), sp)?
+        let next = self.add(Term.UAdd(x2, one), sp)?
+        let after = self.shift(t, 3, 0, depth)?
+        let after = self.add(Term.App(after, next), sp)?
+        let ty = self.add(Term.Pi(proof, before, after), sp)?
+        let ty = self.add(Term.Pi(true, lt, ty), sp)?
+        self.add(Term.Pi(false, u, ty), sp)
     }
 
     // (i : U64) -> (erased p : Lt(i, n)) -> (acc : T) -> T, with n and the
@@ -2247,6 +2309,25 @@ impl Core {
                     if self.sort(level, depth - 1)? != 0 {
                         return Err(self.error(t, "a view's result is runtime data"))
                     }
+                    // Each case's result has the same representation: the kind
+                    // of type does not depend on the value read.
+                    let normal = self.normal(t, depth - 1)?
+                    let Lam(_, _, result) = self.term(normal) else {
+                        return Err(self.error(t, "a view's motive is fn(r) { T }"))
+                    }
+                    var result = result
+                    loop {
+                        let Pi(_, _, rest) = self.term(result) else { break }
+                        result = rest
+                    }
+                    let known = match self.term(result) {
+                        I64 | U64 | Refine(_) | Buffer(_) | Array(_) | Ind(_, _) => true
+                        _ => false
+                    }
+                    if !known { return Err(self.error(
+                        t,
+                        "a view's result has one representation for every value it reads"
+                    )) }
                 } else if self.sort(sort, depth - 1)? != 0 {
                     return Err(self.error(t, "a view's result is runtime data"))
                 }
@@ -2340,6 +2421,53 @@ impl Core {
                     ))
                 }
                 return Ok(acc)
+            }
+            Loop(n, t, init, body) => {
+                let u = self.add(Term.U64, sp)?
+                let sort = self.infer(t, ctx, true, depth - 1)?
+                let sort = self.normal(sort, depth - 1)?
+                let Pi(false, domain, level) = self.term(sort) else {
+                    return Err(self.error(t, "a loop's motive is fn(k) { T }"))
+                }
+                if !self.equal(domain, u, depth - 1)? {
+                    return Err(self.error(t, "a loop's motive takes its index"))
+                }
+                let proof = match self.sort(level, depth - 1)? {
+                    -1 => true
+                    0 => false
+                    _ => return Err(self.error(t, "a loop's motive gives runtime data or evidence"))
+                }
+                // Each iteration's accumulator has the same representation:
+                // the kind of type does not depend on the index.
+                if !proof {
+                    let normal = self.normal(t, depth - 1)?
+                    let Lam(_, _, result) = self.term(normal) else {
+                        return Err(self.error(t, "a loop's motive is fn(k) { T }"))
+                    }
+                    let known = match self.term(result) {
+                        I64 | U64 | Refine(_) | Buffer(_) => true
+                        Ind(g, _) => self.is_boxed(g)
+                        _ => false
+                    }
+                    if !known { return Err(self.error(
+                        t,
+                        "a loop accumulator is a scalar, a refinement or an owned value"
+                    )) }
+                }
+                let inner = ghost || proof
+                self.require(n, u, ctx, inner, depth - 1)?
+                let zero = self.add(Term.Natural(0), sp)?
+                let first = self.add(Term.App(t, zero), sp)?
+                self.require(init, first, ctx, inner, depth - 1)?
+                let ty = self.loop_body_type(n, t, proof, sp, depth - 1)?
+                self.require(body, ty, ctx, inner, depth - 1)?
+                if !self.binders(body, 3) && self.effectful(body, depth - 1) {
+                    return Err(self.error(
+                        body,
+                        "a loop body that touches memory is fn(i, p, acc) { ... }"
+                    ))
+                }
+                Term.App(t, n)
             }
             Transport(family, evidence, proof) => {
                 // Restrict equality elimination to propositions. In
@@ -2697,7 +2825,7 @@ impl Core {
                 }
             }
             View(_, _, _, _, _) => self.uses_view(id, 0, v, ctx, depth)
-            Fold(n, init, body) => {
+            Fold(n, init, body) | Loop(n, _, init, body) => {
                 let first = self.uses(n, v, ctx, depth - 1)? + self.uses(init, v, ctx, depth - 1)?
                 if self.uses_case(body, 3, v, ctx, depth)? > 0 { return Err(self.error(
                     body,
@@ -3061,7 +3189,7 @@ fn rank(term: Term) -> u32 {
         App(_, _) => 35, Natural(_) => 36, Integer(_) => 37, Elements(_) => 38,
         Index(_, _, _) => 39, Decide(_, _) => 40, IfLt(_, _, _, _) => 41, IfEq(_, _, _, _) => 42,
         Drop(_, _, _) => 43, Ref(_) => 44, Lend(_, _, _) => 45, View(_, _, _, _, _) => 46,
-        Borrow(_) => 47, Deref(_) => 48, Absurd(_, _) => 49
+        Borrow(_) => 47, Deref(_) => 48, Absurd(_, _) => 49, Loop(_, _, _, _) => 50
     }
 }
 
@@ -3111,7 +3239,12 @@ pub fn children(term: Term) -> Vec(u32) {
             for c in cases { out.push(c) }
             out.push(x)
         }
-        Load(a, b, c, d) | Store(a, b, c, d) => { out.push(a); out.push(b); out.push(c); out.push(d) }
+        Load(a, b, c, d) | Store(a, b, c, d) | Loop(a, b, c, d) => {
+            out.push(a)
+            out.push(b)
+            out.push(c)
+            out.push(d)
+        }
         Pack(p, a, q) => { out.push(p); out.push(a); out.push(q) }
         Index(a, i, p) | Transport(a, i, p) | Fold(a, i, p) => { out.push(a); out.push(i); out.push(
             p
@@ -4582,4 +4715,71 @@ fn rewriting_keeps_binders_and_reads_fields() {
     let read = c.reading(v0, DEPTH).unwrap()
     let Deref(inner) = c.term(read) else { panic("the field is read through its borrow") }
     assert(c.term(inner) == Term.Var(0), "the borrow is the same binder")
+}
+
+// A loop of three iterations with motive `t` and the given first value, whose
+// body gives Natural(k + 1) in a refinement: the accumulator's bound grows.
+fn invariant_loop(step: u64, bound: u64) -> Core {
+    var c = Core.new()
+    let sp = diag.Span.nowhere()
+    let u = c.add(Term.U64, sp).unwrap()
+    let three = c.add(Term.Natural(3), sp).unwrap()
+    // fn(k) { refine(fn(a) { Lt(a, k + bound) }) }
+    let a = c.add(Term.Var(0), sp).unwrap()
+    let k = c.add(Term.Var(1), sp).unwrap()
+    let b = c.add(Term.Natural(bound), sp).unwrap()
+    let sum = c.add(Term.UAdd(k, b), sp).unwrap()
+    let lt = c.add(Term.Lt(a, sum), sp).unwrap()
+    let p = c.add(Term.Lam(false, u, lt), sp).unwrap()
+    let refine = c.add(Term.Refine(p), sp).unwrap()
+    let t = c.add(Term.Lam(false, u, refine), sp).unwrap()
+    // pack(0, ...) : T(0), by computation: 0 < bound.
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let decided = c.add(Term.Decide(zero, b), sp).unwrap()
+    let a0 = c.add(Term.Var(0), sp).unwrap()
+    let first = c.add(Term.Lt(a0, b), sp).unwrap()
+    let first = c.add(Term.Lam(false, u, first), sp).unwrap()
+    let init = c.add(Term.Pack(first, zero, decided), sp).unwrap()
+    // fn(i, q, acc) { pack(witness(acc) + step, lt_add(witness(acc), i + bound, step, proof(acc))) }
+    let i = c.add(Term.Var(2), sp).unwrap()
+    let acc = c.add(Term.Var(0), sp).unwrap()
+    let w = c.add(Term.Witness(acc), sp).unwrap()
+    let e = c.add(Term.Proof(acc), sp).unwrap()
+    let by = c.add(Term.Natural(step), sp).unwrap()
+    let w1 = c.add(Term.UAdd(w, by), sp).unwrap()
+    let before = c.add(Term.UAdd(i, b), sp).unwrap()
+    let evidence = c.add(Term.LtAdd(w, before, by, e), sp).unwrap()
+    // The predicate at i + 1, under the body's three binders.
+    let v0 = c.add(Term.Var(0), sp).unwrap()
+    let v3 = c.add(Term.Var(3), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let next = c.add(Term.UAdd(v3, one), sp).unwrap()
+    let next = c.add(Term.UAdd(next, b), sp).unwrap()
+    let next = c.add(Term.Lt(v0, next), sp).unwrap()
+    let q = c.add(Term.Lam(false, u, next), sp).unwrap()
+    let packed = c.add(Term.Pack(q, w1, evidence), sp).unwrap()
+    // The accumulator's type, and the bound's evidence.
+    let v1 = c.add(Term.Var(1), sp).unwrap()
+    let domain = c.add(Term.App(t, v1), sp).unwrap()
+    let body = c.add(Term.Lam(false, domain, packed), sp).unwrap()
+    let x0 = c.add(Term.Var(0), sp).unwrap()
+    let below = c.add(Term.Lt(x0, three), sp).unwrap()
+    let body = c.add(Term.Lam(true, below, body), sp).unwrap()
+    let body = c.add(Term.Lam(false, u, body), sp).unwrap()
+    let value = c.add(Term.Loop(three, t, init, body), sp).unwrap()
+    let ty = c.add(Term.App(t, three), sp).unwrap()
+    c.definitions.push(Definition { name: "f".to_string(), ty, value, exported: false, span: sp })
+    c
+}
+
+#[test]
+fn a_loops_type_is_its_invariant() {
+    var c = invariant_loop(1, 1)
+    assert(c.check().is_ok(), "the bound grows with the index")
+    // Adding 2 per iteration breaks an invariant that grows by 1.
+    var c = invariant_loop(2, 1)
+    assert(c.check().is_err(), "the body must establish the next invariant")
+    // The first value must satisfy the invariant at 0.
+    var c = invariant_loop(1, 0)
+    assert(c.check().is_err(), "nothing is below 0: the invariant fails on entry")
 }

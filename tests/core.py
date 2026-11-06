@@ -327,6 +327,12 @@ def evaluate(term, env):
         for i in range(n):
             acc = body(i)((i, n))(acc)
         return acc
+    if head == "loop":
+        n = evaluate(args[0], env)
+        acc, body = evaluate(args[2], env), evaluate(args[3], env)
+        for i in range(n):
+            acc = body(i)((i, n))(acc)
+        return acc
     if head == "decide-lt":
         a, b = (evaluate(x, env) for x in args)
         assert a < b
@@ -665,6 +671,9 @@ def main():
         from core_borrow_induct import validate_borrow_induct
         validate_borrow_induct(compiler, root, temporary, environment, run, definitions, evaluate,
                                BUFFERS, NODES)
+        from core_invariant import validate_invariant
+        validate_invariant(compiler, root, temporary, environment, run, definitions, evaluate,
+                           BUFFERS, NODES)
         from core_nth import validate_nth
         validate_nth(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                      NODES)

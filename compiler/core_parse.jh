@@ -214,6 +214,12 @@ impl Parser {
         } else if kind == "borrow" {
             // (borrow x): a borrow of x in types and evidence only.
             core.Term.Borrow(self.expr(depth - 1)?)
+        } else if kind == "loop" {
+            // (loop n T init body): T(k) is the accumulator's type after k steps.
+            let n = self.expr(depth - 1)?
+            let t = self.expr(depth - 1)?
+            let init = self.expr(depth - 1)?
+            core.Term.Loop(n, t, init, self.expr(depth - 1)?)
         } else if kind == "absurd" {
             // (absurd T p): code with evidence of Lt(i, 0), of any type.
             let t = self.expr(depth - 1)?

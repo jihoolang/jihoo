@@ -42,6 +42,7 @@ CORE_INVALID = {
     "absurd-function": "(def bad (pi0 p (Lt 0 0) (pi i U64 I64)) (lam0 p (Lt 0 0) (absurd (pi i U64 I64) p)))",
     "absurd-one": "(def bad (pi0 p (Lt 0 1) I64) (lam0 p (Lt 0 1) (absurd I64 p)))",
     "absurd-evidence-at-runtime": "(def bad (pi i U64 (pi0 p (Lt i i) I64)) (lam i U64 (lam0 p (Lt i i) (absurd I64 p))))",
+    "layout-by-value": "(def bad (pi xs (Ref List) (if-lt (app length xs) 1 q U64 I64)) (lam xs (Ref List) (view List (lam r (Ref List) (if-lt (app length r) 1 q U64 I64)) 0 (lam x I64 (lam rest (Ref List) x)) xs)))",
     "wrong-node": "(def bad (pi xs (Ref List) (Refine (lam k U64 (Eq k (app length xs))))) (lam xs (Ref List) (view List (lam r (Ref List) (Refine (lam k U64 (Eq k (app length r))))) (pack (lam k U64 (Eq k 0)) 0 (refl 0)) (lam x I64 (lam rest (Ref List) (pack (lam k U64 (Eq k (app length rest))) (app length rest) (refl (app length rest))))) xs)))",
 }
 
@@ -75,6 +76,7 @@ REASONS = {
     "absurd-function": "result is not a function",
     "absurd-one": "absurd needs evidence",
     "absurd-evidence-at-runtime": "absurd needs evidence",
+    "layout-by-value": "one representation",
     "wrong-node": "type mismatch",
     "case-not-a-lambda": "ends in fn(...)",
 }

@@ -1,0 +1,40 @@
+// Loops whose invariants are types. fold(n, fn(k) { T(k) }, init, body) has
+// an accumulator of type T(k) after k iterations: init has type T(0), and
+// the body turns T(i) into T(i + 1), so the loop's result has type T(n).
+// matches counts in a refinement that says the count is at most the number
+// of iterations so far, which lets slot read a table of n + 1 values at it
+// with no bounds check. Into a proposition, the same form is a proof by
+// induction on the naturals: all_even proves Even(n + n) for every n. main
+// returns 7.
+#![dependent_core]
+
+trait Even(a: u64) {
+    fn zero() -> Even(0)
+    fn twice(a: u64, p: erased(Even(a))) -> Even(a + 2)
+}
+
+fn all_even(n: u64) -> Even(n + n) {
+    fold(n, fn(k) { Even(k + k) }, zero(), fn(i, p, acc) { twice(i + i, acc) })
+}
+
+fn even_value(a: u64, p: erased(Even(a))) -> u64 { a }
+
+fn matches(n: u64, limit: u64) -> refine(fn(c) { Lt(c, n + 1) }) {
+    fold(n, fn(k) { refine(fn(c) { Lt(c, k + 1) }) }, pack(0, decide_lt(0, 1)), fn(i, p, acc) {
+        if_lt(i, limit, fn(q) {
+            pack(witness(acc) + 1, lt_add(witness(acc), i + 1, 1, proof(acc)))
+        }, pack(witness(acc), lt_le(witness(acc), i + 1, i + 2, proof(acc),
+            lt_add(0, 2, i + 1, decide_lt(0, 2)))))
+    })
+}
+
+fn slot(n: u64, table: [i64; n + 1], limit: u64) -> i64 {
+    let c = matches(n, limit)
+    index(table, witness(c), proof(c))
+}
+
+export fn demo(limit: u64) -> i64 { slot(3, [5, 6, 7, 8], limit) }
+
+export fn doubled(n: u64) -> u64 { even_value(n + n, all_even(n)) }
+
+fn main() -> i64 { demo(1) + 1 }

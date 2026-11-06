@@ -220,11 +220,14 @@ call's result type may mention the owner, and a proof
 the value it reads. A recursion or `match` over a borrow may
 [depend on it](examples/core_nth.jh): `nth(xs, i, p)` reads the i-th
 element given evidence that `i` is below the length, with no bounds
-check, and a case that cannot happen is `absurd(p)`. Wider `.jh` coverage
+check, and a case that cannot happen is `absurd(p)`. A loop's
+[invariant is a type](examples/core_invariant.jh), and into a proposition
+the same form is a proof by induction on the naturals. Wider `.jh` coverage
 and mechanized proofs of the kernel, erasure and lowering remain
 required before this replaces the existing verifier. 0.5.0 is the
-completion of these dependent types, and formal verification of the
-compiler itself comes after it; the
+completion of these dependent types; proofs of the kernel's soundness and
+formal verification of the compiler itself come after it, so until then its
+soundness rests on testing. The
 [roadmap](docs/internals/roadmap.md#the-050-release-gate-for-the-native-core)
 states the gate.
 

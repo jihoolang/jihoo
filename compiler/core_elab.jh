@@ -1627,6 +1627,25 @@ impl Elaborator {
                     else { core.Term.LtLe(xs[0], xs[1], xs[2], xs[3], xs[4]) }
                     return self.c.add(rule, sp)
                 }
+                if n == "fold" && args.len() == 4 {
+                    // fold(n, fn(k) { T }, init, fn(i, p, acc) { ... }): T(k)
+                    // is the accumulator's type after k iterations.
+                    let u = self.u64(sp)?
+                    let count = self.expr(args[0], Some(u), depth - 1)?
+                    let t = self.family(args[1], 1, depth - 1)?
+                    let proof = self.proposition_motive(t)?
+                    if proof { self.ghost += 1 }
+                    let zero = self.c.add(core.Term.Natural(0), sp)?
+                    let first = self.c.add(core.Term.App(t, zero), sp)?
+                    let init = self.expr(args[2], Some(first), depth - 1)
+                    let ty = self.c.loop_body_type(count, t, proof, sp, core.DEPTH)
+                    let body = match ty {
+                        Ok(ty) => self.proof_case(args[3], ty, 3, depth - 1)
+                        Err(d) => Err(d)
+                    }
+                    if proof { self.ghost -= 1 }
+                    return self.c.add(core.Term.Loop(count, t, init?, body?), sp)
+                }
                 if n == "fold" {
                     if args.len() != 3 { return Err(error(
                         sp,

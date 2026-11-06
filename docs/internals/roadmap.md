@@ -573,10 +573,24 @@ into a proposition is a proof by cases. `absurd(p)`, from evidence of `Lt(i,
 element and the head of a list with evidence and no bounds check, and counts
 nodes in a recursion that returns its evidence; its MIR equals the `.jhc`'s,
 and native execution against the evaluator, counted allocations, 11 source and
-14 core rejections with their reasons and kernel tests run in the `core`
+15 core rejections with their reasons and kernel tests run in the `core`
+suite.
+
+Implemented loops whose invariants are types
+([design](dependent-core.md#loops-whose-invariants-are-types)):
+`fold(n, fn(k) { T(k) }, init, body)` turns `T(i)` into `T(i + 1)`, and into a
+proposition is a proof by induction on the naturals.
+`examples/core_invariant.jh` reads a table at a count bounded by its loop's
+invariant, with no bounds check, and proves `Even(n + n)`; its MIR equals the
+`.jhc`'s, and native execution against the evaluator, counted frees, 8 source
+and 12 core rejections with their reasons and kernel tests run in the `core`
 suite.
 
 #### The 0.5.0 release gate for the native core
+
+0.5.0 is the completion of dependent types: what programs can state and check
+in the core. Proofs about the kernel itself come after it, by the decision of
+2026-11-06 to release 0.5.0 sooner.
 
 The direction changed after the gate in step 6 below was written: that
 gate proves a Horn translation of the existing verifier sound. With the
@@ -603,8 +617,9 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    over a borrow whose result type depends on it
    ([design](dependent-core.md#views-whose-result-depends-on-the-borrow)),
    such as reading the i-th element with evidence that i is below the
-   length. Remaining, in order: (d) loops with a dependent accumulator (an
-   invariant); (e) mutable borrows and in-place updates of heap data; (f) a
+   length. Done: (d) [loops whose invariants are
+   types](dependent-core.md#loops-whose-invariants-are-types). Remaining, in
+   order: (e) mutable borrows and in-place updates of heap data; (f) a
    `std` slice in the core (a vector as an owned buffer with its length and
    capacity), with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,
@@ -613,7 +628,10 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    erasure, with every rule of `infer` and `normal` listed against it.
    Today each slice's rules are described in
    [dependent-core.md](dependent-core.md), not consolidated.
-3. **Kernel soundness, mechanized.** A proof in Agda, checked in CI, of
+
+After 0.5.0, in this order, starting from that specification:
+
+1. **Kernel soundness, mechanized.** A proof in Agda, checked in CI, of
    the specified rules: logical consistency (no closed evidence of
    `Lt(0, 0)`), preservation of types by the pure model's reductions, and
    quantity soundness: in the erased program every owned value is used
@@ -621,20 +639,24 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    implementation is tested against the specification (independent
    evaluator, rejection suites, independent reviews), and remains
    trusted to implement it.
-4. **Erasure and lowering.** A proof that the erased program computes
+2. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    the MIR semantics of [`agda/MirExecution.agda`](../../agda/MirExecution.agda),
    proved for the core's runtime fragment (scalars, arrays, buffers,
    heap nodes, cases, recursions, views, lends, frees). Differential
    tests remain regression checks, not this proof.
-5. **The published theorem.** What an accepted core program is
+3. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
    kernel's implementation, lowering where not proved, MIR to LLVM, LLVM
    and the runtime. The elaborator is untrusted, since the kernel checks
    its output. Until source-to-MIR and MIR-to-LLVM preservation are
    proved, this is not described as verification of whole executables.
 
-Self-verification moves after 0.5.0: the compiler verifying its own
+Until those are done, 0.5.0's soundness rests on testing: the independent
+evaluator, rejection suites with their reasons, and reviews. Its release notes
+say so, and it is not described as a verified kernel.
+
+Self-verification also comes after 0.5.0: the compiler verifying its own
 source with the existing verifier continues in CI, and the compiler's
 code moves into the core only once the core covers it (item 1).
 
