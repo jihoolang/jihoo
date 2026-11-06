@@ -1,5 +1,8 @@
 # Native dependent core
 
+This page is the design. What the kernel accepts is specified in
+[the core specification](core-spec.md).
+
 The replacement direction for verification is to check the program and
 its proofs in one native core, then erase and lower that checked program.
 It does not require reconstructing the program's execution as Horn rules:

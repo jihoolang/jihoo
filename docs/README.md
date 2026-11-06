@@ -54,6 +54,7 @@ same on GitHub.
 - [Design: closures that own what they capture](internals/move-closures.md)
 - [Design: verification and proofs](internals/verification.md)
 - [Design: native dependent core](internals/dependent-core.md)
+- [Core specification](internals/core-spec.md)
 - [Self-hosting](internals/self-hosting.md)
 - [Testing](internals/testing.md)
 - [Roadmap](internals/roadmap.md)

@@ -1,21 +1,11 @@
-// Experimental dependent core. Programs and proofs share this syntax;
-// core_lower emits MIR from the checked terms themselves. No Horn model
-// or external proof checker participates in this path.
+// The dependent core's kernel: its terms, normalization and type checker.
+// Programs and proofs share this syntax; core_lower emits MIR from the checked
+// terms themselves. No Horn model or external proof checker participates in
+// this path. docs/internals/core-spec.md is the specification of these rules,
+// and docs/internals/dependent-core.md their design.
 //
-// This finite fragment has levelled universes, dependent functions,
-// immutable I64 arrays indexed by U64 lengths, Lt, U64 equality and
-// declared U64-indexed inductive propositions, and refinements {x : U64 |
-// P x}, a U64 with erased evidence, data types, and owned heap buffers,
-// which the kernel checks are used exactly once, and borrows of them,
-// which cannot outlive the lend that made them. Equality and structural
-// induction eliminate only into Prop. Runtime code has I64 arithmetic,
-// which traps on overflow, and bounded loops whose body has evidence of
-// its index's bound. U64 terms denote natural numbers: their addition
-// traps at run time rather than wrap, so every computed value is its
-// meaning, and Lt has the rules of the order of the naturals.
-// There is no general recursion, axiom,
-// unsafe operation or elimination of evidence into runtime data.
-// Erased binders must be propositions and cannot occur in runtime terms.
+// There is no general recursion, axiom, unsafe operation or elimination of
+// evidence into runtime data, and erased binders cannot occur in runtime terms.
 import diag
 
 pub const LIMIT: i64 = 200000
@@ -47,8 +37,9 @@ pub enum Term {
     Ind(u32, Vec(u32))
     // Family, constructor and all of the constructor's fields.
     Con(u32, u32, Vec(u32))
-    // Family, motive (U64 -> ... -> Prop), one case per constructor and
-    // the evidence eliminated. Only into propositions.
+    // Family, motive, one case per constructor and the value eliminated: a
+    // proposition's evidence, only into propositions; flat data; or structural
+    // recursion on heap data.
     Elim(u32, u32, Vec(u32), u32)
     // I64 arithmetic. Overflow traps at runtime and is never folded.
     Arith(Arith, u32, u32)
@@ -177,8 +168,7 @@ pub struct Constructor {
 // `globals` definitions and may use them and earlier families.
 pub struct Family {
     pub name: String
-    // A data type, of Type 0, rather than a proposition. Data types have
-    // no recursive fields yet.
+    // A data type, of Type 0, rather than a proposition.
     pub data: bool
     // The first `params` of a data type's indices are parameters: each
     // constructor binds them first, erased, and returns them unchanged, so
@@ -907,8 +897,8 @@ impl Core {
         self.add(term, sp)
     }
 
-    // A normal loop body with its three binders, eta-expanded if it is not,
-    // so that lowering finds them. The annotations are not used after checking.
+    // A normal loop body, in runtime mode with its three binders, eta-expanded if
+    // it has not, so that lowering finds them. It does not read the annotations.
     fn loop_body(
         inout self,
         n: u32,
@@ -917,7 +907,10 @@ impl Core {
         depth: u32
     ) -> Result(u32, diag.Diag) {
         let normal_body = self.normal(body, depth - 1)?
-        if self.binders(normal_body, 3) { return Ok(normal_body) }
+        // Only lowering needs the binders. Conversion keeps the body as it is:
+        // the annotations below are not its types, so the pure model's normal
+        // form would not check again.
+        if !self.runtime || self.binders(normal_body, 3) { return Ok(normal_body) }
         let u = self.add(Term.U64, sp)?
         let i = self.add(Term.I64, sp)?
         let x0 = self.add(Term.Var(0), sp)?
@@ -2540,7 +2533,7 @@ impl Core {
             Fold(n, init, body) => {
                 let u = self.add(Term.U64, sp)?
                 self.require(n, u, ctx, ghost, depth - 1)?
-                // The accumulator is an I64 or an owned buffer.
+                // The accumulator is an I64 or an owned value.
                 let acc = self.infer(init, ctx, ghost, depth - 1)?
                 let acc = self.normal(acc, depth - 1)?
                 let owned = self.owned(acc, depth - 1)?
@@ -3395,6 +3388,20 @@ impl Core {
         self.checked_definitions = 0
         self.checked_families = 0
         self.extend()
+    }
+
+    // Whether every definition's pure normal form has the definition's type, as
+    // the specification intends. For tests: the kernel never relies on it.
+    pub fn preserves(inout self) -> Result((), diag.Diag) {
+        self.check()?
+        for i in 0..self.definitions.len() {
+            let ty = self.definitions[i].ty
+            let value = self.definitions[i].value
+            let normal = self.normal(value, DEPTH)?
+            self.steps = 0
+            self.require(normal, ty, [], true, DEPTH)?
+        }
+        Ok(())
     }
 
     // Check what was added since the last check: the elaborator's way of

@@ -681,6 +681,9 @@ def main():
         from core_inout import validate_inout
         validate_inout(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                        NODES)
+        from core_spec import validate_preservation, validate_spec
+        validate_spec(root)
+        validate_preservation(compiler, root, environment, run)
         from core_vec import validate_vec
         validate_vec(compiler, root, temporary, environment, run)
 

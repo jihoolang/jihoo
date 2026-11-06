@@ -655,12 +655,15 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    and heap data in place. Done: (f)
    [a vector](dependent-core.md#a-vector-with-contracts-as-types) as an owned
    buffer with its length and capacity, with its contracts stated as types.
-2. **Specification.** One normative description of the core: its terms,
-   typing with quantities (erased, owned, scalar) and the ghost position,
-   the pure model's reductions (including views, lends and `Borrow`) and
-   erasure, with every rule of `infer` and `normal` listed against it.
-   Today each slice's rules are described in
-   [dependent-core.md](dependent-core.md), not consolidated.
+2. **Specification.** Done: [the core specification](core-spec.md) describes the
+   terms, typing with quantities (erased, owned, scalar) and the ghost position,
+   the pure model's reductions and erasure, one entry per term of `infer` and
+   `normal`. `tests/core_spec.py` fails on a term without an entry and tests
+   preservation on the core examples. An independent review (Codex) against the code
+   gave 28 corrections and two findings in the code: loop eta-expansion that made
+   normal forms ill-typed, fixed, and branches without a motive, whose normal forms
+   may not check again. The second admits nothing, since normal forms are only
+   compared, and is left for the kernel's proof to decide.
 
 After 0.5.0, in this order, starting from that specification:
 

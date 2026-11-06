@@ -13,7 +13,7 @@ import std.fs
 import std.sys
 import std.env
 
-const USAGE = "usage: jihoo core <check|emit-mir|emit-llvm|emit-obj> FILE.jhc [-o PATH] [--target x86_64|aarch64] [-O0|-O1|-O2|-O3] [--error-format=text|json]"
+const USAGE = "usage: jihoo core <check|preserves|emit-mir|emit-llvm|emit-obj> FILE.jhc [-o PATH] [--target x86_64|aarch64] [-O0|-O1|-O2|-O3] [--error-format=text|json]"
 
 fn usage(message: str) -> never {
     var json = false
@@ -35,6 +35,7 @@ fn perform(
 ) -> Result((), diag.Diag) {
     var c = core_parse.parse(text, file)?
     if action == "check" { return c.check() }
+    if action == "preserves" { return c.preserves() }
     var program = core_lower.compile(c, tgt)?
     var timer = timing.Timer.start()
     check.program(&program, &timer)?
@@ -67,7 +68,8 @@ pub fn drive(args: [str]) {
     if args.len == 3 && (args[2] == "--help" || args[2] == "-h") { println(USAGE); return }
     if args.len < 4 { usage("expected an action and core input") }
     let action = args[2]
-    if action != "check" && action != "emit-mir" && action != "emit-llvm" && action != "emit-obj" {
+    if action != "check" && action != "preserves" && action != "emit-mir" && action != "emit-llvm" &&
+        action != "emit-obj" {
         usage("unknown core action")
     }
     var output: Option(str) = None

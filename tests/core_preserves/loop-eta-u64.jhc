@@ -1,0 +1,5 @@
+(export f (pi n U64 U64) (lam n U64
+ (loop n (lam k U64 U64) 0
+  (if-lt n 2 q
+   (lam i U64 (lam0 p (Lt i n) (lam a U64 (uadd a 1))))
+   (lam i U64 (lam0 p (Lt i n) (lam a U64 a)))))))
