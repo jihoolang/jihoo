@@ -1,0 +1,2 @@
+(data Bad (BadMk (pi0 n U64 (pi0 b (Buffer n) Bad))))
+(export good I64 (int 0))

@@ -183,8 +183,11 @@ impl Lower {
                 let join = self.block()
                 var cases = Vec(mir.SwitchTarget).new()
                 cases.push(mir.SwitchTarget { value: 0, block: no_block })
+                // A node waiting to be freed goes down both branches.
+                let pending = mem.replace(&self.pending, None)
                 self.term(mir.Term.Switch(condition.op.clone(), cases, yes_block))
                 self.block = yes_block
+                self.pending = pending
                 var inner = Vec(Option(Value)).new()
                 for x in env {
                     inner.push(match x { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None })
@@ -195,6 +198,7 @@ impl Lower {
                 self.assign(result, mir.Rvalue.Use(y.op.clone()), sp)
                 self.term(mir.Term.Goto(join))
                 self.block = no_block
+                self.pending = pending
                 let n = self.expr(c, no, env, depth - 1)?
                 if n.ty != y.ty { return Err(c.error(id, "branch layout mismatch")) }
                 self.assign(result, mir.Rvalue.Use(n.op.clone()), sp)
@@ -322,6 +326,24 @@ impl Lower {
                 }
                 match c.term(head) {
                     View(_, _, _, _, _) => return self.view(c, head, args.as_slice(), env, depth)
+                    // A match that refines evidence: its arguments are erased.
+                    Case(g, _, cases, x) => {
+                        let x = self.expr(c, x, env, depth - 1)?
+                        var applied = Vec(Option(Value)).new()
+                        for _ in args { applied.push(None) }
+                        return self.dispatch(
+                            c,
+                            head,
+                            g,
+                            cases.as_slice(),
+                            x,
+                            env,
+                            None,
+                            false,
+                            applied.as_slice(),
+                            depth
+                        )
+                    }
                     Var(k) if k as i64 < env.len => {
                         let hypothesis = match env[env.len - 1 - k as i64] {
                             Some(v) if v.ty == HYPOTHESIS => Some(hypothesis_index(v))
@@ -1108,6 +1130,7 @@ impl Lower {
             for k in 0..count {
                 self.block = blocks[k]
                 var owned = Vec((u32, Value)).new()
+                var buffers = Vec(Value).new()
                 var slot: u64 = 1
                 var ty = c.families[f as i64].constructors[k].ty
                 var j = 0
@@ -1119,6 +1142,7 @@ impl Lower {
                                 let v = self.get(node, slot, ptr, sp)
                                 owned.push((g, v))
                             }
+                            Buffer(_) => buffers.push(self.get(node, slot, ptr, sp))
                             _ => {}
                         }
                         slot += 1
@@ -1127,6 +1151,11 @@ impl Lower {
                     ty = rest
                 }
                 self.release(node, sp)
+                for v in buffers {
+                    let at = self.local(ptr, mir.LocalKind.Temp, sp)
+                    self.assign(at, mir.Rvalue.Use(v.op.clone()), sp)
+                    self.release(at, sp)
+                }
                 for (g, v) in owned {
                     let inner = self.drop_glue(c, g, sp)?
                     let unit = self.local(types.UNIT, mir.LocalKind.Temp, sp)
@@ -1305,6 +1334,15 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
     var c = c
     // This entry point always checks, even if called without the parser.
     c.check()?
+    // A field's type may be written as an alias or a computation; layout and
+    // drop glue read the types themselves.
+    for f in 0..c.families.len() {
+        for k in 0..c.families[f].constructors.len() {
+            let ty = c.families[f].constructors[k].ty
+            let ty = c.normal(ty, core.DEPTH)?
+            c.families[f].constructors[k].ty = ty
+        }
+    }
     var out = Vec(mir.Function).new()
     var runtime_types = types.Types.new()
     let count = c.definitions.len()

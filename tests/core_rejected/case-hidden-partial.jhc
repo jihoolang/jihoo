@@ -1,0 +1,8 @@
+(data Cell (Mk (pi b (Buffer 1) Cell)))
+(def bad (pi x Cell (pi0 q (Lt 0 2) I64))
+ (lam x Cell
+  (app (lam f (pi0 p (Lt 0 1) (pi0 q (Lt 0 2) I64))
+        (app f (decide-lt 0 1)))
+   (case Cell (lam y Cell (pi0 p (Lt 0 1) (pi0 q (Lt 0 2) I64)))
+    (lam b (Buffer 1) (lam0 p (Lt 0 1) (lam0 q (Lt 0 2) (free b (int 0))))) x))))
+(export good I64 (int 0))

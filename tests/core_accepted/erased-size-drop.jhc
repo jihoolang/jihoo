@@ -1,0 +1,3 @@
+(data Bad (BadMk (pi0 n U64 (pi b (Buffer n) Bad))))
+(def bad Bad (BadMk 2 (alloc 2 (int 7))))
+(export main I64 (drop Bad bad (int 0)))

@@ -1,0 +1,4 @@
+#![dependent_core]
+import dependent.vec
+fn bad(v: vec.Vec, w: vec.Vec, p: erased(Lt(0, vec.len(w)))) -> i64 { match v { vec.Vec { len, cap, data, room } => load(data, 0, p, fn(x, b) { free(b, x) }) } }
+export fn good() -> i64 { 0 }

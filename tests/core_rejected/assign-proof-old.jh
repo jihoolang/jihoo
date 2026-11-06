@@ -1,0 +1,5 @@
+#![dependent_core]
+import dependent.vec
+fn bad(inout v: vec.Vec) -> Eq(vec.len(v), vec.len(old(v))) { v = vec.new()
+ refl(vec.len(old(v))) }
+export fn good() -> i64 { 0 }

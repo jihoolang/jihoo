@@ -1,0 +1,23 @@
+#![dependent_core]
+import dependent.vec
+fn trim(inout v: vec.Vec, p: erased(Eq(vec.len(v), 1))) -> Eq(vec.len(v), 0) {
+ match v { vec.Vec { len, cap, data, room } => {
+  v = vec.Vec { len: 0, cap, data, room: zero_le(cap) }
+  refl(0)
+ } }
+}
+fn read_zero(v: ref vec.Vec, e: erased(Eq(vec.len(v), 0))) -> i64 {
+ if_lt(0, vec.len(v), fn(p) {
+  absurd(transport(fn(n) { Lt(0, n) }, e, p))
+ }, 23)
+}
+export fn test() -> i64 {
+ var v = vec.new()
+ let e = vec.clear(&v)
+ let p = vec.push(&v, 7)
+ let one = transport(fn(n) { Eq(vec.len(v), n + 1) }, e, p)
+ let zero = trim(&v, one)
+ read_zero(v, zero) - 23
+}
+
+fn main() -> i64 { test() }

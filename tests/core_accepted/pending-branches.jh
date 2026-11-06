@@ -1,0 +1,50 @@
+#![dependent_core]
+fn head(n: u64, b: ref buffer(n)) -> i64 { if_lt(0, n, fn(q) { index(b, 0, q) }, 0) }
+struct Pair {
+    n: u64
+    m: u64
+    left: buffer(n)
+    right: buffer(m)
+    tag: i64
+}
+fn fresh(x: i64) -> Pair {
+    Pair { n: 1, m: 2, left: alloc(1, x), right: alloc(2, x + 10), tag: x + 100 }
+}
+fn read(p: ref Pair) -> i64 {
+    match p { Pair { tag, .. } => tag }
+}
+fn change(i: u64, inout p: Pair) -> i64 {
+    match p { Pair { n, m, left, right, tag } => {
+        let before = head(n, left)
+        if_lt(i, 3, fn(q) {
+            if_eq(i, 1, fn(e) {
+                p = Pair { n: m, m: n, left: right, right: left, tag: tag + 1 }
+                before + tag
+            }, {
+                // A buffer allocation flushes the old node before rebuilding.
+                let scratch = alloc(1, 99)
+                let v = index(scratch, 0, decide_lt(0, 1))
+                p = Pair { n, m, left, right, tag: tag + v }
+                before + tag
+            })
+        }, {
+            // Lend and view a different node while p's node is pending.
+            let other = fresh(7)
+            let v = read(other)
+            let repeated = fold(i, tag, fn(j, q, acc) { acc + 1 })
+            p = Pair { n, m, left, right, tag: repeated + v }
+            before + tag
+        })
+    } }
+}
+export fn test(i: u64) -> i64 {
+    var p = fresh(5)
+    let previous = change(i, &p)
+    previous * 1000 + read(p)
+}
+fn main() -> i64 {
+    fold(7, 0, fn(i, q, acc) {
+        let wanted = if_lt(i, 3, fn(p) { if_eq(i, 1, fn(e) { 110106 }, 110204) }, 110212 + fold(i, 0, fn(j, p, n) { n + 1 }))
+        acc + test(i) - wanted
+    })
+}

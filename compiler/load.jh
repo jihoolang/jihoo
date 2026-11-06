@@ -464,7 +464,7 @@ impl Loader {
         let toks = lex.lex(file, sources.files[file as i64].text.as_str())?
         let module = parse.parse_module(file, toks)?
         let dependent = has_dependent_core(module)
-        if dependent && self.modules.len() != 0 {
+        if dependent && self.modules.len() != 0 && !has_dependent_core(self.modules[0].ast) {
             return Err(Diag.new(
                 at,
                 "core: dependent_core modules cannot be imported by the legacy frontend"
@@ -483,9 +483,6 @@ impl Loader {
                 })
                 _ => {}
             }
-        }
-        if dependent && wanted.len() != 0 {
-            return Err(Diag.new(wanted[0].span, "core: imports are unsupported in dependent_core"))
         }
         self.modules.push(ModuleAst {
             name: name.to_string(),

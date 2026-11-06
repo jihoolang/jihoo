@@ -1,0 +1,7 @@
+#![dependent_core]
+import dependent.vec
+fn pretend(inout v: vec.Vec, p: erased(Lt(0, vec.len(v)))) -> i64 {
+ let c = vec.clear(&v)
+ vec.get(v, 0, p)
+}
+export fn good() -> i64 { 0 }

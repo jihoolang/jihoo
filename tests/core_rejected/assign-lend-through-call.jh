@@ -1,0 +1,5 @@
+#![dependent_core]
+import dependent.vec
+fn bad(inout v: vec.Vec) -> u64 { v = vec.new()
+ vec.capacity(v) }
+export fn good() -> i64 { 0 }

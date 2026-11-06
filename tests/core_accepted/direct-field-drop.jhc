@@ -1,0 +1,2 @@
+(data Box (Mk (pi n U64 (pi b (Buffer n) Box))))
+(export main I64 (drop Box (Mk 3 (alloc 3 (int 9))) (int 0)))

@@ -1,0 +1,6 @@
+(data Cell (Mk (pi b (Buffer 1) Cell)))
+(def consume (pi x Cell (pi0 p (Lt 0 0) I64))
+ (lam x Cell (lam0 p (Lt 0 0)
+  (app (case Cell (lam y Cell (pi0 q (Lt 0 0) I64))
+   (lam b (Buffer 1) (lam0 q (Lt 0 0) (free b (int 0)))) x) p))))
+(export main I64 (app consume (Mk (alloc 1 (int 7))) (decide-lt 0 0)))

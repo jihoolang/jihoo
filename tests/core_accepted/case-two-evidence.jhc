@@ -1,0 +1,12 @@
+(data Cell (Mk (pi n U64 (pi b (Buffer n) Cell))))
+(def size (pi r (Ref Cell) U64)
+ (lam r (Ref Cell) (view Cell U64 (lam n U64 (lam b (Ref (Buffer n)) n)) r)))
+(def consume
+ (pi x Cell (pi outer (Buffer 1) (pi0 p (Lt 0 (app size (borrow x))) (pi0 q (Eq (app size (borrow x)) 2) I64))))
+ (lam x Cell (lam outer (Buffer 1) (lam0 p (Lt 0 (app size (borrow x))) (lam0 q (Eq (app size (borrow x)) 2)
+  (app (case Cell
+   (lam y Cell (pi0 p (Lt 0 (app size (borrow y))) (pi0 q (Eq (app size (borrow y)) 2) I64)))
+   (lam n U64 (lam b (Buffer n) (lam0 p (Lt 0 n) (lam0 q (Eq n 2)
+    (load b 0 p (lam v I64 (lam b (Buffer n) (free b (free outer v)))))))))
+   x) p q))))))
+(export main I64 (sub (app consume (Mk 2 (alloc 2 (int 17))) (alloc 1 (int 9)) (decide-lt 0 2) (refl 2)) (int 17)))

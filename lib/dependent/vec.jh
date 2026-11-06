@@ -1,0 +1,153 @@
+// A growable vector in the dependent core: an owned buffer of i64 with its
+// length and capacity, whose contracts are types. `get` and `set` need evidence
+// that the index is below the length and have no bounds checks, and `push` and
+// `drop_last` state what they do to the length, so that a caller's evidence
+// follows the vector as it changes. Import it from a `#![dependent_core]` module.
+//
+// Elements are i64: the core has no type parameters yet. The room field keeps
+// the length within the capacity, which is what lets `get` read the buffer.
+#![dependent_core]
+
+pub struct Vec {
+    len: u64
+    cap: u64
+    data: buffer(cap)
+    room: erased(Lt(len, cap + 1))
+}
+
+// An empty vector with room for `cap` elements.
+pub fn with_capacity(cap: u64) -> Vec {
+    Vec { len: 0, cap, data: alloc(cap, 0), room: zero_le(cap) }
+}
+
+pub fn new() -> Vec { with_capacity(0) }
+
+pub fn len(v: ref Vec) -> u64 {
+    match v { Vec { len, .. } => len }
+}
+
+pub fn capacity(v: ref Vec) -> u64 {
+    match v { Vec { cap, .. } => cap }
+}
+
+pub fn get(v: ref Vec, i: u64, p: erased(Lt(i, len(v)))) -> i64 {
+    match v {
+        Vec { len, cap, data, room } => index(data, i, lt_le(i, len, cap, p, room))
+    }
+}
+
+pub fn set(inout v: Vec, i: u64, x: i64, p: erased(Lt(i, len(v)))) -> Eq(len(v), len(old(v))) {
+    match v {
+        Vec { len, cap, data, room } => {
+            store(&data, i, x, lt_le(i, len, cap, p, room))
+            v = Vec { len, cap, data, room }
+            refl(len)
+        }
+    }
+}
+
+// Empties the vector and keeps its buffer.
+pub fn clear(inout v: Vec) -> Eq(len(v), 0) {
+    match v {
+        Vec { cap, data, .. } => {
+            v = Vec { len: 0, cap, data, room: zero_le(cap) }
+            refl(0)
+        }
+    }
+}
+
+// The length as a value that says so, for a loop's bound.
+pub fn size(v: ref Vec) -> refine(fn(k) { Eq(k, len(v)) }) {
+    pack(len(v), refl(len(v)))
+}
+
+pub fn eq_sym(a: u64, b: u64, p: erased(Eq(a, b))) -> Eq(b, a) {
+    transport(fn(m) { Eq(m, a) }, p, refl(a))
+}
+
+// The first `n` elements of `from` in a new buffer of `to` elements.
+fn copied(
+    n: u64,
+    cap: u64,
+    to: u64,
+    from: ref buffer(cap),
+    fits: erased(Lt(n, cap + 1)),
+    room: erased(Lt(n, to + 1))
+) -> buffer(to) {
+    fold(n, alloc(to, 0), fn(i, p, acc) {
+        store(acc, i, index(from, i, lt_le(i, n, cap, p, fits)), lt_le(i, n, to, p, room))
+    })
+}
+
+// len <= cap gives len < 2 * cap + 1.
+fn grown_room(len: u64, cap: u64, room: erased(Lt(len, cap + 1))) -> Lt(len, cap + cap + 1) {
+    lt_le(len, cap + 1, cap + cap + 1, room, lt_add(0, cap + 1, cap + 1, zero_le(cap)))
+}
+
+fn weaken(a: u64, b: u64, p: erased(Lt(a, b))) -> Lt(a, b + 1) {
+    lt_le(a, b, b + 1, p, lt_add(0, 2, b, decide_lt(0, 2)))
+}
+
+pub fn push(inout v: Vec, x: i64) -> Eq(len(v), len(old(v)) + 1) {
+    match v {
+        Vec { len, cap, data, room } => if_lt(len, cap, fn(q) {
+            store(&data, len, x, q)
+            v = Vec { len: len + 1, cap, data, room: lt_add(len, cap, 1, q) }
+            refl(len + 1)
+        }, {
+            // Full: a new buffer of twice the size and one more.
+            let grown = copied(
+                len,
+                cap,
+                cap + cap + 1,
+                data,
+                room,
+                weaken(len, cap + cap + 1, grown_room(len, cap, room))
+            )
+            v = Vec {
+                len: len + 1,
+                cap: cap + cap + 1,
+                data: store(grown, len, x, grown_room(len, cap, room)),
+                room: lt_add(len, cap + cap + 1, 1, grown_room(len, cap, room))
+            }
+            refl(len + 1)
+        })
+    }
+}
+
+// 0 < a gives 1 <= a, what sub(a, 1, ...) needs.
+fn positive(a: u64, p: erased(Lt(0, a))) -> Lt(1, a + 1) { lt_add(0, a, 1, p) }
+
+// The element before the end, which evidence says exists.
+pub fn last(v: ref Vec, p: erased(Lt(0, len(v)))) -> i64 {
+    match v {
+        Vec { len, cap, data, room } => index(data, sub(len, 1, positive(len, p)), lt_le(
+            sub(len, 1, positive(len, p)),
+            len,
+            cap,
+            lt_add(0, 1, sub(len, 1, positive(len, p)), decide_lt(0, 1)),
+            room
+        ))
+    }
+}
+
+// Removes the last element; the length falls by one.
+pub fn drop_last(inout v: Vec, p: erased(Lt(0, len(v)))) -> Eq(len(v) + 1, len(old(v))) {
+    match v {
+        Vec { len, cap, data, room } => {
+            v = Vec {
+                len: sub(len, 1, positive(len, p)),
+                cap,
+                data,
+                room: lt_le(
+                    sub(len, 1, positive(len, p)),
+                    len,
+                    cap + 1,
+                    lt_add(0, 1, sub(len, 1, positive(len, p)), decide_lt(0, 1)),
+                    weaken(len, cap + 1, room)
+                )
+            }
+            refl(len)
+        }
+    }
+}

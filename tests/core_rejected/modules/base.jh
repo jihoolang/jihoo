@@ -1,0 +1,4 @@
+#![dependent_core]
+pub struct Bundle { n: u64, data: buffer(n) }
+pub fn make_bundle(n: u64, x: i64) -> Bundle { Bundle { n, data: alloc(n, x) } }
+pub fn bundle_first(x: ref Bundle) -> i64 { match x { Bundle { n, data } => if_lt(0, n, fn(p) { index(data, 0, p) }, 0) } }

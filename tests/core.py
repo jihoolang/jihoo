@@ -493,7 +493,8 @@ def source_frontend(compiler, root, temporary, environment):
         result = command("check", path, *options, "--error-format=json", success=False)
         diagnostic = json.loads(result.stderr)
         assert result.returncode == 1 and diagnostic, result.stderr
-        if name != "u64-overflow":
+        # A module that cannot be found is the loader's error, as anywhere.
+        if name not in ("u64-overflow", "import"):
             assert "core:" in result.stderr, (name, result.stderr)
         # The diagnostic must identify the .jh source, not a temporary core input.
         assert str(path) in result.stderr, (name, result.stderr)
@@ -680,6 +681,8 @@ def main():
         from core_inout import validate_inout
         validate_inout(compiler, root, temporary, environment, run, definitions, evaluate, BUFFERS,
                        NODES)
+        from core_vec import validate_vec
+        validate_vec(compiler, root, temporary, environment, run)
 
         example = root / "examples/core_index.jhc"
         command("check", example)

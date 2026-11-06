@@ -1,0 +1,8 @@
+(data Cell (Mk (pi b (Buffer 1) Cell)))
+; A fully erased argument may mention an owner in evidence, but cannot
+; supply a second runtime copy of that owner to the selected branch.
+(def bad (pi x Cell (pi b (Buffer 1) I64))
+ (lam x Cell (lam b (Buffer 1)
+  (app (case Cell (lam y Cell (pi0 q (Eq 0 0) I64))
+   (lam field (Buffer 1) (lam0 q (Eq 0 0) (free field (free b (free b (int 0)))))) x) (refl 0)))))
+(export good I64 (int 0))

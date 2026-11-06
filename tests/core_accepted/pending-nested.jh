@@ -1,0 +1,29 @@
+#![dependent_core]
+fn head(n: u64, b: ref buffer(n)) -> i64 { if_lt(0, n, fn(q) { index(b, 0, q) }, 0) }
+struct Inner { n: u64, data: buffer(n), value: i64 }
+struct Outer { child: Inner, tail: Inner, value: i64 }
+fn inner(x: i64) -> Inner { Inner { n: 1, data: alloc(1, x), value: x } }
+fn peek(x: ref Inner) -> i64 { match x { Inner { value, .. } => value } }
+fn rotate(i: u64, x: Outer) -> Outer {
+    match x { Outer { child, tail, value } => {
+        let saved = peek(tail)
+        match child { Inner { n, data, value: h } => {
+            let got = head(n, data)
+            let rebuilt = Inner { n, data, value: h + got + saved }
+            if_eq(i, 0, fn(p) {
+                Outer { child: tail, tail: rebuilt, value: value + saved }
+            }, {
+                Outer { child: rebuilt, tail, value: value + saved }
+            })
+        } }
+    } }
+}
+fn total(x: ref Outer) -> i64 {
+    match x { Outer { child, tail, value } => peek(child) + peek(tail) + value }
+}
+export fn test(i: u64) -> i64 {
+    let x = Outer { child: inner(3), tail: inner(7), value: 11 }
+    let y = rotate(i, x)
+    total(y)
+}
+fn main() -> i64 { fold(6, 0, fn(i, p, acc) { acc + test(i) - 38 }) }

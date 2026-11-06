@@ -1,0 +1,7 @@
+(data Chain
+ (End (pi n U64 (pi b (Buffer n) Chain)))
+ (More (pi n U64 (pi0 p (Lt 0 (uadd n 1)) (pi b (Buffer n) (pi rest Chain Chain))))))
+(def make (pi n U64 Chain)
+ (lam n U64 (fold n (End 2 (alloc 2 (int 8)))
+  (lam i U64 (lam0 p (Lt i n) (lam acc Chain (More i (zero-le i) (alloc i (int 7)) acc)))))))
+(export main I64 (drop Chain (app make 20) (int 0)))

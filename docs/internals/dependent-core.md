@@ -173,7 +173,7 @@ are still checked. A compilation needs at least one runtime export or an
 entry point. `check` validates this executable subset, including its ABI,
 without LLVM or a linker.
 
-Imports, item attributes, contracts, foreign declarations, other profiles,
+Imports of ordinary modules, item attributes, contracts, foreign declarations, other profiles,
 local statements, implicit proof search, ordinary `if`/index syntax,
 u64 products, the `-` operator on u64 (use `sub`), division and comparison operators, general runtime
 closures/recursion, recursive data types and mutable memory are outside
@@ -1033,8 +1033,8 @@ overflowing size traps; the extra element keeps an empty buffer a
 distinct allocation), stops the program with "allocation failed" when
 it returns null, and fills the elements; `load` and `store` are offsets;
 `free` calls `free`. `malloc` and `free` are declared after the exports
-when a buffer is used. Exports cannot take or return buffers, data
-types cannot hold them and arrays cannot contain them.
+when a buffer is used. Exports cannot take or return buffers and arrays
+cannot contain them; [a data type can hold one](#a-vector-with-contracts-as-types).
 
 [`examples/core_buffer.jh`](../../examples/core_buffer.jh) and its
 [core equivalent](../../examples/core_buffer.jhc) compute running sums
@@ -1252,8 +1252,8 @@ value: see [borrows in types and evidence](#borrows-in-types-and-evidence).
 Not yet supported for heap data: mutual recursion, recursion depth
 beyond the machine stack, and heap data in exports.
 
-Not yet supported: buffers of other element types, and buffers in data
-types, exports and arrays. A data value
+Not yet supported: buffers of other element types, and buffers in
+exports and arrays. A data value
 whose fields touch memory cannot yet be passed to a function: the
 argument is bound once, and data has no runtime representation, so
 lowering reports an error rather than evaluating it twice.
@@ -1704,6 +1704,79 @@ the borrow and of loops whose invariants are types found no unsound case and one
 program the kernel accepted and lowering rejected: a dependent view whose arrays
 differ in length, now rejected by the kernel. Its negative programs are kept in
 `tests/core_rejected`.
+
+## A vector with contracts as types
+
+[`lib/dependent/vec.jh`](../../lib/dependent/vec.jh) is a growable vector of i64
+in the core, `import dependent.vec`:
+
+```jihoo
+pub struct Vec {
+    len: u64
+    cap: u64
+    data: buffer(cap)
+    room: erased(Lt(len, cap + 1))
+}
+
+pub fn get(v: ref Vec, i: u64, p: erased(Lt(i, len(v)))) -> i64
+pub fn set(inout v: Vec, i: u64, x: i64, p: erased(Lt(i, len(v)))) -> Eq(len(v), len(old(v)))
+pub fn push(inout v: Vec, x: i64) -> Eq(len(v), len(old(v)) + 1)
+pub fn drop_last(inout v: Vec, p: erased(Lt(0, len(v)))) -> Eq(len(v) + 1, len(old(v)))
+pub fn clear(inout v: Vec) -> Eq(len(v), 0)
+```
+
+A `requires` is a parameter of erased evidence and an `ensures` is the result
+type, so a caller's evidence follows the vector through its changes and a read
+has no bounds check. `size` gives the length as a refinement, a loop's bound with
+evidence that it is the length; `with_capacity`, `new`, `len`, `capacity` and
+`last` complete it. A `let` of an owned value keeps only its type, so `var v =
+vec.new()` knows nothing about the length until `clear` says it is 0.
+
+This needed four things, each usable on its own:
+
+- A data type may hold a buffer, which makes it heap data, and a field's type may
+  name the fields before it. Dropping such a value frees its buffers; a `match`
+  on a borrow gives the buffer borrowed. Source writes these as `struct S { a: u64,
+  b: buffer(a), p: erased(Lt(0, a)) }`, built with `S { a, b, p }` and taken apart
+  with `match s { S { a, b, .. } => ... }`.
+- A `match` on an owned variable refines the evidence that mentions it, as one on
+  a borrow does. The term is `Case` with a motive whose result is a function of
+  erased evidence, applied to that evidence. This is the kernel's one new rule:
+  `Case` may have such a result only as the head of an application that supplies
+  all of it, so nothing is left that could hold the owned values its cases receive
+  and run twice. Lowering calls the case with its evidence erased. A field taken
+  from an owned value may be changed with `&` in its arm.
+- A marked module may import marked modules. Each is elaborated after those it
+  imports, `alias.name` reaches their functions, types and variants, and only the
+  root has an entry point. They share one namespace and `pub` is not yet enforced.
+- A node waiting to be freed goes down both branches of an `if_lt`, so a push with
+  room allocates nothing.
+
+The elaborator now checks only what each definition adds, and the kernel's step
+limit is per definition. The full check before lowering is unchanged.
+
+Elements are i64: the core has no type parameters, and a vector of another type
+is written again. A `pop` that returns the element and states the new length
+would need a result that is a value with evidence, so `last` and `drop_last` are
+separate.
+
+[`examples/core_vec.jh`](../../examples/core_vec.jh) has no check but the
+allocations'. `tests/core_vec.py` compares a script with a model on lists and
+loops that grow from nothing with counted allocations, a push with room allocating
+nothing, and asserts the reason for each of 16 source, 2 module and 10 core
+rejections: a read with no evidence, at the length or about another vector, a
+fact kept across `clear` or `drop_last`, a false `room`, a buffer of the wrong
+length, a field used twice or dropped, a borrowed buffer freed or written, and a
+`Case` with a runtime argument or only part of its evidence.
+
+An independent review (Codex) of this section and of the rest of inout found no
+unsound case and no wrong result, and one defect, in lowering: a field whose type
+was written as an alias or a computation, such as `Buf` for `(Buffer 1)`, was not
+freed with its node. Lowering now normalizes the constructors' types first; this
+predates buffers in data, since it also applied to a heap field of another type.
+The review's programs are in `tests/core_rejected` and `tests/core_accepted`, the
+latter linked with a count that fails a program whose allocations are not all
+freed.
 
 The next stages of the replacement are:
 

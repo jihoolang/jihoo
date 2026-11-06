@@ -230,6 +230,10 @@ pub struct Core {
     // its lend is checked: inside the lend's reader, a borrow of one is the
     // reader's own borrow, which code may use.
     lent: Vec((i64, u32))
+    // What `extend` has already checked.
+    checked_nodes: i64
+    checked_definitions: i64
+    checked_families: i64
 }
 
 impl Core {
@@ -245,7 +249,10 @@ impl Core {
             visible_families: 0,
             spine: false,
             runtime: false,
-            lent: Vec((i64, u32)).new()
+            lent: Vec((i64, u32)).new(),
+            checked_nodes: 0,
+            checked_definitions: 0,
+            checked_families: 0
         }
     }
 
@@ -1011,6 +1018,7 @@ impl Core {
             let Pi(erased, domain, rest) = self.term(ty) else { break }
             let normal = self.normal(domain, depth)?
             let (heap, own) = match self.term(normal) {
+                Buffer(_) => (true, false)
                 Ind(g, _) => (g == f || self.is_boxed(g), g == f)
                 _ => (false, false)
             }
@@ -1678,6 +1686,7 @@ impl Core {
             let Pi(erased, domain, rest) = self.term(ty) else { break }
             let normal = self.normal(domain, depth)?
             let (heap, own) = match self.term(normal) {
+                Buffer(_) => (true, false)
                 Ind(g, _) => (g == f || self.is_boxed(g), g == f)
                 _ => (false, false)
             }
@@ -1903,16 +1912,17 @@ impl Core {
                     if !erased && !self.is_data(f) && self.term(domain) != Term.U64 {
                         return Err(self.error(domain, "constructor data fields must be u64"))
                     }
-                    // Data types hold first-order values: scalars,
-                    // refinements and earlier data types.
+                    // Data types hold scalars, refinements, earlier data types
+                    // and buffers, whose length an earlier field may give.
                     let first_order = match self.term(domain) {
                         U64 | I64 | Refine(_) => true
+                        Buffer(_) => self.is_data(f)
                         Ind(g, _) => self.is_data(g)
                         _ => false
                     } || recursive.is_some()
                     if !erased && !first_order { return Err(self.error(
                         domain,
-                        "data fields are u64, i64, refinements or data types"
+                        "data fields are u64, i64, refinements, buffers or data types"
                     )) }
                     fields.push(Field { erased, domain, recursive })
                     ctx.push(Binding { ty: domain, erased })
@@ -1968,6 +1978,7 @@ impl Core {
                 if field.erased { continue }
                 if field.recursive.is_some() { boxed = true; continue }
                 match self.term(field.domain) {
+                    Buffer(_) => boxed = true
                     Ind(g, _) => if self.is_boxed(g) { boxed = true } else { flat = true }
                     _ => {}
                 }
@@ -2076,6 +2087,7 @@ impl Core {
                     x,
                     ctx,
                     ghost,
+                    false,
                     depth
                 ) }
                 let motive = self.motive_type(f, sp)?
@@ -2103,7 +2115,21 @@ impl Core {
                 if cases.len() != self.families[f as i64].constructors.len() {
                     return Err(self.error(id, "case analysis needs one case per constructor"))
                 }
-                return self.eliminate(true, id, f, p, cases.as_slice(), x, ctx, ghost, depth)
+                // Applied to erased evidence, its result may be a function of
+                // that evidence: a match refines the evidence it takes apart.
+                let ty = self.eliminate(
+                    true,
+                    id,
+                    f,
+                    p,
+                    cases.as_slice(),
+                    x,
+                    ctx,
+                    ghost,
+                    head,
+                    depth
+                )?
+                return Ok(ty)
             }
             Arith(_, a, b) => {
                 let i = self.add(Term.I64, sp)?
@@ -2653,7 +2679,21 @@ impl Core {
                 if !head && !ghost {
                     let normal = self.normal(result, depth - 1)?
                     match self.term(normal) {
-                        Pi(_, _, _) => self.unsaturated(id, ctx, depth)?
+                        Pi(_, _, _) => {
+                            var at = id
+                            loop {
+                                let App(g, _) = self.term(at) else { break }
+                                at = g
+                            }
+                            match self.term(at) {
+                                Case(_, _, _, _) => return Err(self.error(
+                                    id,
+                                    "case analysis is given all of its evidence"
+                                ))
+                                _ => {}
+                            }
+                            self.unsaturated(id, ctx, depth)?
+                        }
                         _ => {}
                     }
                 }
@@ -2763,6 +2803,23 @@ impl Core {
         match self.term(t) {
             Pi(_, _, _) => Err(self.error(at, "a continuation's result is not a function")),
             _ => Ok(())
+        }
+    }
+
+    // A case analysis given its evidence: a function of erased arguments only,
+    // ending in what the whole may be. Nothing is left to hold the owned values
+    // its cases receive: the application's top checks that it has them all.
+    fn erased_function(inout self, at: u32, ty: u32, depth: u32) -> Result((), diag.Diag) {
+        var t = self.normal(ty, depth)?
+        loop {
+            match self.term(t) {
+                Pi(true, _, rest) => t = rest
+                Pi(false, _, _) => return Err(self.error(
+                    at,
+                    "a continuation's result is not a function"
+                ))
+                _ => return Ok(())
+            }
         }
     }
 
@@ -2884,11 +2941,16 @@ impl Core {
                             ctx,
                             depth
                         )?
+                        Case(_, _, _, _) => self.uses_cases(head, args.len(), v, ctx, depth)?
                         _ => self.uses(head, v, ctx, depth - 1)?
                     }
                 }
                 if j < args.len() {
-                    var ty = if j == 0 { self.infer(head, ctx, true, depth - 1)? }
+                    var ty = if j == 0 {
+                        // The head of this spine, given its arguments below.
+                        self.spine = true
+                        self.infer(head, ctx, true, depth - 1)?
+                    }
                     else { self.infer(nodes[j - 1], ctx, true, depth - 1)? }
                     for k in j..args.len() {
                         let normal = self.normal(ty, depth - 1)?
@@ -2936,37 +2998,7 @@ impl Core {
                 )) }
                 Ok(first + y)
             }
-            Elim(f, _, cases, x) | Case(f, _, cases, x) => {
-                var total = self.uses(x, v, ctx, depth - 1)?
-                if !self.is_data(f) { return Ok(0) }
-                let recursion = self.is_boxed(f) && match self.term(id) { Elim(_, _, _, _) => true, _ => false }
-                // Exactly one case runs; each must use the value alike. A
-                // recursion's cases run once per node: they capture nothing.
-                let params = self.families[f as i64].params as i64
-                var common: Option(u32) = None
-                for k, case in cases {
-                    var count = self.signatures[f as i64][k].fields.len() - params
-                    if recursion {
-                        for field in self.signatures[f as i64][k].fields {
-                            if field.recursive.is_some() { count += 1 }
-                        }
-                    }
-                    let n = self.uses_case(case, count, v, ctx, depth)?
-                    if recursion && n > 0 { return Err(self.error(
-                        id,
-                        "a recursion's cases run once per node: they cannot use an outer owned value"
-                    )) }
-                    match common {
-                        Some(m) => if m != n { return Err(self.error(
-                            id,
-                            "every case must use an owned value alike"
-                        )) }
-                        None => common = Some(n)
-                    }
-                }
-                match common { Some(m) => total += m, None => {} }
-                Ok(total)
-            }
+            Elim(_, _, _, _) | Case(_, _, _, _) => self.uses_cases(id, 0, v, ctx, depth)
             Load(b, i, _, k) => {
                 let first = self.uses(b, v, ctx, depth - 1)? + self.uses(i, v, ctx, depth - 1)?
                 Ok(first + self.uses_case(k, 2, v, ctx, depth)?)
@@ -3033,6 +3065,51 @@ impl Core {
             }
             _ => Ok(0)
         }
+    }
+
+    // Uses of v by an elimination applied to `applied` erased arguments, which
+    // are binders of each case.
+    fn uses_cases(
+        inout self,
+        id: u32,
+        applied: i64,
+        v: u32,
+        ctx: [Binding],
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let (f, cases, x) = match self.term(id) {
+            Elim(f, _, cases, x) | Case(f, _, cases, x) => (f, cases, x)
+            _ => return Err(self.error(id, "expected an elimination"))
+        }
+        var total = self.uses(x, v, ctx, depth - 1)?
+        if !self.is_data(f) { return Ok(0) }
+        let recursion = self.is_boxed(f) && match self.term(id) { Elim(_, _, _, _) => true, _ => false }
+        // Exactly one case runs; each must use the value alike. A
+        // recursion's cases run once per node: they capture nothing.
+        let params = self.families[f as i64].params as i64
+        var common: Option(u32) = None
+        for k, case in cases {
+            var count = self.signatures[f as i64][k].fields.len() - params + applied
+            if recursion {
+                for field in self.signatures[f as i64][k].fields {
+                    if field.recursive.is_some() { count += 1 }
+                }
+            }
+            let n = self.uses_case(case, count, v, ctx, depth)?
+            if recursion && n > 0 { return Err(self.error(
+                id,
+                "a recursion's cases run once per node: they cannot use an outer owned value"
+            )) }
+            match common {
+                Some(m) => if m != n { return Err(self.error(
+                    id,
+                    "every case must use an owned value alike"
+                )) }
+                None => common = Some(n)
+            }
+        }
+        match common { Some(m) => total += m, None => {} }
+        Ok(total)
     }
 
     // Uses of v by a view applied to `applied` arguments: its cases' binders
@@ -3240,6 +3317,7 @@ impl Core {
         x: u32,
         ctx: [Binding],
         ghost: bool,
+        applied: bool,
         depth: u32
     ) -> Result(u32, diag.Diag) {
         let sp = self.nodes[id as i64].span
@@ -3301,18 +3379,30 @@ impl Core {
         var result = p
         for j in params..xs.len() { result = self.add(Term.App(result, xs[j]), sp)? }
         let result = self.add(Term.App(result, x), sp)?
-        if !proof { self.not_function(p, result, depth - 1)? }
+        if !proof {
+            if applied { self.erased_function(p, result, depth - 1)? }
+            else { self.not_function(p, result, depth - 1)? }
+        }
         Ok(result)
     }
 
     // Check graph integrity independently of the parser. Definitions are
     // checked in order; no definition can use itself or a later one.
     pub fn check(inout self) -> Result((), diag.Diag) {
-        self.steps = 0
         self.signatures = Vec(Vec(Signature)).new()
         self.boxed = Vec(bool).new()
+        self.checked_nodes = 0
+        self.checked_definitions = 0
+        self.checked_families = 0
+        self.extend()
+    }
+
+    // Check what was added since the last check: the elaborator's way of
+    // making a definition available to the next, which a full check repeats.
+    pub fn extend(inout self) -> Result((), diag.Diag) {
+        self.steps = 0
         if self.nodes.len() > LIMIT { return Err(self.error(0, "term limit reached")) }
-        for i in 0..self.nodes.len() {
+        for i in self.checked_nodes..self.nodes.len() {
             for child in children(self.nodes[i].term) {
                 if child as i64 >= i { return Err(self.error(
                     i as u32,
@@ -3321,8 +3411,9 @@ impl Core {
             }
         }
         let count = self.definitions.len()
-        var f = 0
-        for i in 0..count + 1 {
+        var f = self.checked_families
+        for i in self.checked_definitions..count + 1 {
+            self.steps = 0
             while f < self.families.len() && self.families[f].globals as i64 == i {
                 self.visible = i as u32
                 self.visible_families = f as u32
@@ -3344,6 +3435,9 @@ impl Core {
         )) }
         self.visible = count as u32
         self.visible_families = f as u32
+        self.checked_nodes = self.nodes.len()
+        self.checked_definitions = count
+        self.checked_families = f
         Ok(())
     }
 }

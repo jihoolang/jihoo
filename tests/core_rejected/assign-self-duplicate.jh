@@ -1,0 +1,5 @@
+#![dependent_core]
+import dependent.vec
+fn bad(inout v: vec.Vec) -> i64 { v = v
+ free(v, 0) }
+export fn good() -> i64 { 0 }

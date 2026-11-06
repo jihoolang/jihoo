@@ -1,0 +1,8 @@
+(data Box 1 1 (Mk (pi0 n U64 (pi b (Buffer n) (Box n)))))
+(def read (pi0 n U64 (pi r (Ref (Box n)) (pi0 p (Lt 0 n) I64)))
+ (lam0 n U64 (lam r (Ref (Box n)) (lam0 p (Lt 0 n)
+  (view Box I64 (lam b (Ref (Buffer n)) (index b 0 p)) r)))))
+(export main I64
+ (lend (Mk 2 (alloc 2 (int 11)))
+  (lam r (Ref (Box 2)) (app read 2 r (decide-lt 0 2)))
+  (lam v I64 (lam x (Box 2) (drop Box x (sub v (int 11)))))))

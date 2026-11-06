@@ -1,0 +1,20 @@
+#![dependent_core]
+struct Cell { a: i64, b: i64, data: buffer(1) }
+enum Choice { Large(i64, buffer(1), i64), Small(buffer(1)) }
+fn convert(i: u64, x: Cell) -> Choice {
+ match x { Cell { a, b, data } => if_eq(i, 0, fn(e) {
+  // Same slot count, different family and field order: both old scalars
+  // must be copied before writing the reused node.
+  Choice.Large(b, data, a)
+ }, Choice.Small(data)) }
+}
+fn take(c: Choice) -> i64 {
+ match c {
+  Large(b, data, a) => load(data, 0, decide_lt(0, 1), fn(x, rest) { free(rest, a * 100 + b * 10 + x) })
+  Small(data) => load(data, 0, decide_lt(0, 1), fn(x, rest) { free(rest, x) })
+ }
+}
+export fn test(i: u64) -> i64 {
+ take(convert(i, Cell { a: 3, b: 7, data: alloc(1, 9) }))
+}
+fn main() -> i64 { fold(8, 0, fn(i, p, acc) { acc + test(i) - if_eq(i, 0, fn(e) { 379 }, 9) }) }

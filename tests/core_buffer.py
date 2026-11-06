@@ -120,7 +120,6 @@ export fn calls(x: i64, i: u64) -> i64 {
         "erased-buffer": "fn bad(b: erased(buffer(3))) -> i64 { 0 }",
         "export-argument": "export fn bad(b: buffer(3)) -> i64 { free(b, 0) }",
         "export-result": "export fn bad() -> buffer(3) { alloc(3, 0) }",
-        "data-field": "enum Holder {\n    Has(buffer(3))\n}",
         "array-element": "fn bad() -> i64 { index([alloc(1, 0)], 0, decide_lt(0, 1)) }",
         "u64-accumulator": "fn bad() -> u64 { fold(3, 0, fn(i, p, acc) { acc }) }",
         "signed-length": "fn bad(x: i64) -> i64 { free(alloc(x, 0), 0) }",

@@ -1,0 +1,51 @@
+// A vector whose contracts are types, from the library `dependent.vec`.
+// Each change says what it does to the length, so the evidence for a read
+// follows the vector: after `clear` and two `push`es the length is 2, and
+// reading index 1 needs no bounds check. `sum` loops up to the length it reads,
+// with evidence for each index. The vector grows when it is full, copying its
+// elements into a larger buffer that the old one is freed for. main returns 43.
+#![dependent_core]
+
+import dependent.vec
+
+fn sum(v: ref vec.Vec) -> i64 {
+    let n = vec.size(v)
+    fold(witness(n), 0, fn(i, p, acc) {
+        acc + vec.get(v, i, transport(fn(m) { Lt(i, m) }, proof(n), p))
+    })
+}
+
+fn pushed_sum(inout v: vec.Vec, x: i64) -> i64 {
+    let a = vec.push(&v, x)
+    let b = vec.push(&v, x + 1)
+    let c = vec.push(&v, x + 2)
+    sum(v)
+}
+
+export fn second(x: i64, y: i64) -> i64 {
+    var v = vec.new()
+    let empty = vec.clear(&v)
+    let a = vec.push(&v, x)
+    let one = transport(fn(m) { Eq(vec.len(v), m + 1) }, empty, a)
+    let b = vec.push(&v, y)
+    let two = transport(fn(m) { Eq(vec.len(v), m + 1) }, one, b)
+    let read = vec.get(
+        v,
+        1,
+        transport(fn(m) { Lt(1, m) }, vec.eq_sym(vec.len(v), 2, two), decide_lt(1, 2))
+    )
+    let c = vec.set(
+        &v,
+        1,
+        read + 1,
+        transport(fn(m) { Lt(1, m) }, vec.eq_sym(vec.len(v), 2, two), decide_lt(1, 2))
+    )
+    read * 100 + sum(v)
+}
+
+export fn summed(x: i64) -> i64 {
+    var v = vec.new()
+    pushed_sum(&v, x)
+}
+
+fn main() -> i64 { second(0, 21) - 2100 + summed(6) }

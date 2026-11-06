@@ -1,0 +1,4 @@
+(data Inner (In (pi b (Buffer 1) Inner)))
+(def Hidden (Type 0) Inner)
+(data Outer (Out (pi x Hidden Outer)))
+(export main I64 (drop Outer (Out (In (alloc 1 (int 9)))) (int 0)))

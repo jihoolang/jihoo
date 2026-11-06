@@ -604,6 +604,20 @@ program only lowering rejected, now the kernel's, run in the `core` suite.
 Changing the i-th element of a list still walks all of it, since a recursion on
 owned data has no function result; a buffer changes any element directly.
 
+Implemented a vector with contracts as types
+([design](dependent-core.md#a-vector-with-contracts-as-types)):
+`lib/dependent/vec.jh` is a growable vector of i64, an owned buffer with its
+length and capacity, whose `get`, `set`, `push`, `drop_last` and `clear` state
+their `requires` as erased evidence and `ensures` as result types. Data may hold
+buffers, source has `struct`s whose fields name earlier fields, a `match` on an
+owned variable refines evidence, and marked modules import marked modules.
+`examples/core_vec.jh` reads and writes with no bounds check; native runs against
+a model with counted allocations, valgrind on the example, and 16 source, 2 module
+and 10 core rejections with their reasons run in the `core` suite, with 23
+rejections and 15 accepted programs from an independent review (Codex) that found
+no unsound case and one leak in lowering, now fixed. Vectors of other element
+types wait for type parameters in the core, after 0.5.0.
+
 #### The 0.5.0 release gate for the native core
 
 0.5.0 is the completion of dependent types: what programs can state and check
@@ -638,9 +652,9 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    length. Done: (d) loops whose invariants are types
    ([design](dependent-core.md#loops-whose-invariants-are-types)). Done: (e)
    [inout parameters](dependent-core.md#inout-parameters), which change buffers
-   and heap data in place. Remaining: (f) a
-   `std` slice in the core (a vector as an owned buffer with its length and
-   capacity), with its contracts stated as types.
+   and heap data in place. Done: (f)
+   [a vector](dependent-core.md#a-vector-with-contracts-as-types) as an owned
+   buffer with its length and capacity, with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,
    typing with quantities (erased, owned, scalar) and the ghost position,
    the pure model's reductions (including views, lends and `Borrow`) and

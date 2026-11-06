@@ -1,0 +1,12 @@
+(data Box (Mk
+ (pi s (Refine (lam n U64 (Lt 0 n)))
+  (pi b (Buffer (witness s)) Box))))
+(def read (pi r (Ref Box) I64)
+ (lam r (Ref Box)
+  (view Box I64
+   (lam s (Refine (lam n U64 (Lt 0 n)))
+    (lam b (Ref (Buffer (witness s))) (index b 0 (proof s)))) r)))
+(export main I64
+ (lend (Mk (pack (lam n U64 (Lt 0 n)) 2 (decide-lt 0 2)) (alloc 2 (int 19)))
+  (lam r (Ref Box) (app read r))
+  (lam v I64 (lam x Box (drop Box x (sub v (int 19)))))))

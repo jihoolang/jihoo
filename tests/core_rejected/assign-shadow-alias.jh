@@ -1,0 +1,6 @@
+#![dependent_core]
+import dependent.vec
+fn bad(inout v: vec.Vec) -> Eq(vec.len(v), 0) { v = vec.new()
+ { let v = vec.with_capacity(2)
+ refl(vec.len(v)) } }
+export fn good() -> i64 { 0 }

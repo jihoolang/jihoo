@@ -1,0 +1,8 @@
+(data Holder (Mk (pi b (Buffer 1) Holder)))
+(def bad (pi x Holder (Ref (Buffer 1)))
+ (lam x Holder
+  (lend x
+   (lam r (Ref Holder)
+    (view Holder (Ref (Buffer 1)) (lam b (Ref (Buffer 1)) b) r))
+   (lam r (Ref (Buffer 1)) (lam y Holder (drop Holder y r))))))
+(export good I64 (int 0))

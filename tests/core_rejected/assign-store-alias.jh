@@ -1,0 +1,5 @@
+#![dependent_core]
+import dependent.vec
+fn bad(inout b: buffer(1)) -> i64 { b = alloc(1, 7)
+ index(b, 0, decide_lt(0, 1)) }
+export fn good() -> i64 { 0 }

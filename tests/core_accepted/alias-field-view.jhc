@@ -1,0 +1,7 @@
+(def Buf (Type 0) (Buffer 1))
+(data Box (Mk (pi b Buf Box)))
+(def read (pi r (Ref Box) I64)
+ (lam r (Ref Box) (view Box I64 (lam b (Ref Buf) (index b 0 (decide-lt 0 1))) r)))
+(export main I64
+ (lend (Mk (alloc 1 (int 7))) (lam r (Ref Box) (app read r))
+ (lam a I64 (lam x Box (drop Box x (sub a (int 7)))))))

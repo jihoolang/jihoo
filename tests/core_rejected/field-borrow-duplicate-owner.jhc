@@ -1,0 +1,3 @@
+(data Box (Mk (pi n U64 (pi b (Buffer n) (pi0 p (Lt 0 n) Box)))))
+(def bad (pi x Box I64) (lam x Box (case Box (lam y Box I64) (lam n U64 (lam b (Buffer n) (lam0 p (Lt 0 n) (free b (drop Box x (int 0)))))) x)))
+(export good I64 (int 0))
