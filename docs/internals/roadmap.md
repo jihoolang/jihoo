@@ -617,9 +617,9 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    over a borrow whose result type depends on it
    ([design](dependent-core.md#views-whose-result-depends-on-the-borrow)),
    such as reading the i-th element with evidence that i is below the
-   length. Done: (d) [loops whose invariants are
-   types](dependent-core.md#loops-whose-invariants-are-types). Remaining, in
-   order: (e) mutable borrows and in-place updates of heap data; (f) a
+   length. Done: (d) loops whose invariants are types
+   ([design](dependent-core.md#loops-whose-invariants-are-types)). Remaining,
+   in order: (e) mutable borrows and in-place updates of heap data; (f) a
    `std` slice in the core (a vector as an owned buffer with its length and
    capacity), with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,
