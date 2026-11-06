@@ -165,7 +165,9 @@ export fn more(x: i64) -> i64 { sum_pair(x) + head_doubled(pair(x), decide_lt(0,
                         # removes one allocation at -O2). Those built for
                         # evidence are not program memory.
                         made = allocations.value - before
-                        assert made == len(nodes) - created == 3 + 2 * (n + 2) or (
-                            level == "-O2" and made < len(nodes) - created), (n, x, made)
+                        # Never more than the pure model's nodes: lowering
+                        # reuses a node a case took apart, and -O2 removes more.
+                        assert len(nodes) - created == 3 + 2 * (n + 2), (n, x)
+                        assert 0 < made <= len(nodes) - created, (n, x, made)
                         assert allocations.value == frees.value
     print(f"dependent borrows in proofs: paired source/core execution, counted frees, {len(SOURCE_INVALID)} source and {len(CORE_INVALID)} core rejections passed")

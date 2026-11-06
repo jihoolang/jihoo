@@ -1,0 +1,2 @@
+(def bad (Buffer 3) (loop 2 (lam k U64 (Buffer (uadd k 1))) (alloc 1 (int 0)) (lam i U64 (lam0 p (Lt i 2) (lam a (Buffer (uadd i 1)) a)))))
+(export good I64 (int 0))

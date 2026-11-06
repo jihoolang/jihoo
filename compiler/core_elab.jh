@@ -76,6 +76,10 @@ struct Elaborator {
     // Set for the one call that may take `&x`: a let's value, a statement or
     // a block's value.
     allowed: bool
+    // Assignments to inout parameters at the end of a block: the name, the
+    // context length there and the value. The value is what is given back, so
+    // the block's value can prove facts about it by computing.
+    aliases: Vec((String, i64, u32))
     // The current function has inout parameters and no result: a block
     // without a value ends it.
     unit: bool
@@ -182,6 +186,10 @@ impl Elaborator {
     // A borrow of the owned local `name`, through the innermost frame that
     // lends it; None if `name` is not an owned local.
     fn borrow(inout self, name: str, sp: diag.Span) -> Result(Option(u32), diag.Diag) {
+        if self.assigned(name).is_some() { return Err(error(
+            sp,
+            ("cannot read " + name + " after assigning it as a block's last statement").as_str()
+        )) }
         var i = self.names.len()
         var found: Option(i64) = None
         while i > 0 {
@@ -528,6 +536,15 @@ impl Elaborator {
         }
         let stmt = stmts[0]
         match stmt.kind {
+            Assign(place, value) => return self.assignment(
+                place,
+                value,
+                stmts[1..],
+                tail,
+                expected,
+                stmt.span,
+                depth
+            )
             Expr(e) => {
                 if !is_changing(e) { return Err(error(
                     stmt.span,
@@ -577,6 +594,60 @@ impl Elaborator {
             is_var,
             depth
         )
+    }
+
+    // `x = v`: x is rebound, and its old value freed if nothing uses it. As an
+    // inout parameter's last assignment in a block, x is v itself for the rest,
+    // so evidence there can compute with it; only the Give that ends the
+    // function evaluates v.
+    fn assignment(
+        inout self,
+        place: ast.Expr,
+        value: ast.Expr,
+        stmts: [ast.Stmt],
+        tail: ast.Expr,
+        expected: Option(u32),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let ast.ExprKind.Name(n) = place.kind else { return Err(error(
+            place.span,
+            "dependent_core assigns to a variable"
+        )) }
+        var i = self.names.len()
+        var found: Option(i64) = None
+        while i > 0 {
+            i -= 1
+            if self.names[i] == n { found = Some(i); break }
+        }
+        let Some(i) = found else { return Err(error(
+            place.span,
+            ("unknown name: " + n).as_str()
+        )) }
+        if !self.mutable[i] { return Err(error(
+            place.span,
+            (n + " needs a var or an inout parameter to be assigned").as_str()
+        )) }
+        if i < self.barrier { return Err(error(
+            place.span,
+            ("cannot change " + n + " here: only a let statement or a block's value can, outside a let's value or a loop").as_str()
+        )) }
+        let ty = self.type_at(i)?
+        var giver = false
+        for g in self.givers { if g == n { giver = true } }
+        if stmts.len == 0 && giver {
+            let saved = mem.replace(&self.barrier, self.ctx.len())
+            let framed = self.frame(value, Some(ty), depth - 1)
+            self.barrier = saved
+            let (term, info) = framed?
+            if info.is_none() {
+                self.aliases.push((n.clone(), self.ctx.len(), term))
+                let result = self.lets(stmts, tail, expected, depth - 1)
+                self.aliases.pop()
+                return result
+            }
+        }
+        self.statement(n.as_str(), Some(ty), value, stmts, tail, expected, sp, true, depth)
     }
 
     // A let of `name` to `value` (or a statement, whose value is named `_`),
@@ -987,7 +1058,29 @@ impl Elaborator {
         Ok(out)
     }
 
+    // The value assigned to `name` that no later binder shadows, if any: its
+    // context length and term.
+    fn assigned(self, name: str) -> Option((i64, u32)) {
+        var i = self.names.len()
+        var binder: i64 = -1
+        while i > 0 {
+            i -= 1
+            if self.names[i] == name { binder = i; break }
+        }
+        var j = self.aliases.len()
+        while j > 0 {
+            j -= 1
+            let (n, at, term) = self.aliases[j]
+            if n == name { return if at > binder { Some((at, term)) } else { None } }
+        }
+        None
+    }
+
     fn name(inout self, name: str, sp: diag.Span) -> Result(u32, diag.Diag) {
+        match self.assigned(name) {
+            Some((at, term)) => return self.c.shift(term, self.ctx.len() - at, 0, core.DEPTH)
+            None => {}
+        }
         var i = self.names.len()
         while i > 0 {
             i -= 1
@@ -1154,6 +1247,17 @@ impl Elaborator {
             }
             _ => if proof_by_cases { p } else { t }
         }
+        // A match on an owned variable of heap data takes it apart: the
+        // expected type then reads the node, so an arm can prove what the
+        // function promises about the value it started with.
+        let owned_motive = match self.c.term(x) {
+            Var(v) if !borrowed && self.c.is_boxed(f) && params_only(self.c.families[f as i64]) &&
+                self.mentions(t, v) => {
+                let body = self.abstracted(t, 1, v, [], false, sp)?
+                self.c.add(core.Term.Lam(false, family, body), sp)?
+            }
+            _ => p
+        }
         var cases = Vec(u32).new()
         var arities = Vec(i64).new()
         for k in 0..count {
@@ -1181,7 +1285,14 @@ impl Elaborator {
                 self.c.data_case_type(f, k as u32, motive, ps.as_slice(), sp, core.DEPTH)?
             } else if borrowed {
                 self.c.view_case_type(f, k as u32, ps.as_slice(), motive, false, sp, core.DEPTH)?
-            } else { self.c.data_case_type(f, k as u32, p, ps.as_slice(), sp, core.DEPTH)? }
+            } else { self.c.data_case_type(
+                f,
+                k as u32,
+                owned_motive,
+                ps.as_slice(),
+                sp,
+                core.DEPTH
+            )? }
             var domains = Vec((bool, u32)).new()
             for b in binders {
                 let binder = match b.kind {
@@ -1247,7 +1358,7 @@ impl Elaborator {
             return Ok(term)
         }
         // On heap data, one level: the node is freed, its fields are given.
-        if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, p, cases, x), sp) }
+        if self.c.is_boxed(f) { return self.c.add(core.Term.Case(f, owned_motive, cases, x), sp) }
         self.c.add(core.Term.Elim(f, p, cases, x), sp)
     }
 
@@ -2551,6 +2662,9 @@ fn variant_name(p: ast.Pat, family: str) -> Option(String) {
     }
 }
 
+// Whether a family has parameters and no true indices.
+fn params_only(f: core.Family) -> bool { f.arity == f.params }
+
 // x in `&x`.
 fn addressed(e: ast.Expr) -> Option(ref ast.Expr) {
     match e.kind {
@@ -2609,6 +2723,7 @@ pub fn compile(
         givers: Vec(String).new(),
         barrier: 0,
         allowed: false,
+        aliases: Vec((String, i64, u32)).new(),
         unit: false
     }
     for item in module.items { e.definition(item, !library)? }

@@ -1,0 +1,7 @@
+#![dependent_core]
+enum List { Nil, Cons(i64, List) }
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+fn head(xs: ref List, ys: ref List, p: erased(Lt(0, length(ys)))) -> i64 {
+ match xs { Nil => absurd(p), Cons(x, rest) => x }
+}
+export fn good() -> i64 { 0 }

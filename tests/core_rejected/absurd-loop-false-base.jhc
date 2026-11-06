@@ -1,0 +1,2 @@
+(def bad I64 (absurd I64 (loop 0 (lam k U64 (Lt 0 0)) (decide-lt 0 1) (lam i U64 (lam0 p (Lt i 0) (lam0 a (Lt 0 0) a))))))
+(export good I64 (int 0))

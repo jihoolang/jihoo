@@ -7,6 +7,7 @@ existing count of uses checks it. f(&x) rebinds x, and old(x) is its first
 value in types and evidence.
 """
 import ctypes
+import json
 import random
 import shlex
 import os
@@ -45,6 +46,14 @@ SOURCE_INVALID = {
     "false-ensures": ("fn bad(inout xs: List) -> Eq(length(xs), length(old(xs)) + 1) { refl(length(old(xs))) }", "core:"),
     "new-is-not-old": ("fn grow(inout xs: List) -> Lt(0, 1) { decide_lt(0, 1) }\nfn bad(inout xs: List) -> Eq(length(xs), length(old(xs))) {\n let q = grow(&xs)\n refl(length(xs))\n}", "core:"),
     "stale-fact": ("fn grow(inout xs: List) -> Lt(0, 1) { decide_lt(0, 1) }\nfn need(xs: ref List, p: erased(Eq(length(xs), 0))) -> i64 { 0 }\nfn bad(xs0: List, p: erased(Eq(length(xs0), 0))) -> i64 {\n var xs = xs0\n let q = grow(&xs)\n need(xs, p)\n}", "core:"),
+    "assign-let": ("fn bad() -> i64 { let b = alloc(4, 0)\n b = alloc(4, 1)\n 0 }", "needs a var or an inout"),
+    "assign-other-type": ("fn bad(inout b: buffer(4)) { b = alloc(5, 0)\n}", "core:"),
+    "assign-in-let": ("fn bad(i: u64, inout xs: List) -> i64 {\n let v = if_lt(i, 4, fn(q) {\n xs = List.Nil\n 1\n }, 0)\n v\n}", "cannot change xs here"),
+    "assign-in-loop": ("fn bad(n: u64, inout xs: List) { let v = fold(n, 0, fn(i, p, acc) {\n xs = List.Nil\n acc\n })\n}", "cannot change xs here"),
+    "assign-read": ("fn bad(inout xs: List) -> u64 {\n xs = List.Nil\n length(xs)\n}", "after assigning"),
+    "assign-reuse-old": ("fn bad(inout xs: List) {\n xs = List.Cons(1, xs)\n xs = List.Cons(1, xs)\n free(xs, 0)\n}", "core:"),
+    "match-without-assign": ("fn bad(inout xs: List) -> i64 {\n match xs {\n Nil => 0\n Cons(h, t) => h\n }\n}", "core:"),
+    "false-after-match": ("fn bad(inout xs: List) -> Eq(length(xs), 0) {\n match xs {\n Nil => {\n xs = List.Nil\n refl(0)\n }\n Cons(h, t) => {\n xs = t\n refl(0)\n }\n }\n}", "core:"),
     "var-scalar": ("fn bad() -> i64 { var x = 1\n x }", "a var holds"),
     "statement": ("fn bad() -> i64 { 1\n 2 }", "dependent_core blocks"),
     "reserved": ("fn old(x: i64) -> i64 { x }", "reserved"),
@@ -133,6 +142,67 @@ export fn listed(n: u64, x: i64) -> i64 {
     let q = same(&xs)
     total(xs)
 }
+fn push(inout xs: List, x: i64) -> Eq(length(xs), length(old(xs)) + 1) {
+    xs = List.Cons(x, xs)
+    refl(length(old(xs)) + 1)
+}
+fn twice(inout xs: List, x: i64) -> Eq(length(xs), length(old(xs)) + 2) {
+    let p = push(&xs, x)
+    let q = push(&xs, x)
+    transport(fn(m) { Eq(length(xs), m + 1) }, p, q)
+}
+fn set_head(inout xs: List, v: i64) -> Eq(length(xs), length(old(xs))) {
+    match xs {
+        Nil => {
+            xs = List.Nil
+            refl(0)
+        }
+        Cons(h, t) => {
+            xs = List.Cons(v, t)
+            refl(length(t) + 1)
+        }
+    }
+}
+fn pop(inout xs: List, missing: i64) -> i64 {
+    match xs {
+        Nil => {
+            xs = List.Nil
+            missing
+        }
+        Cons(h, t) => {
+            xs = t
+            h
+        }
+    }
+}
+fn add_all(inout xs: List, by: i64) {
+    xs = induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(x + by, ih) }, xs)
+}
+// Assigning before the last statement frees the old value and goes on.
+fn reset(inout xs: List, x: i64) -> i64 {
+    xs = List.Nil
+    let p = push(&xs, x)
+    total(xs)
+}
+export fn lists(x: i64) -> i64 {
+    var xs = List.Nil
+    let p = push(&xs, x)
+    let q = twice(&xs, x + 1)
+    let r = set_head(&xs, 100)
+    let top = pop(&xs, -1)
+    let s = total(xs)
+    top * 1000 + s
+}
+export fn rebuilt(n: u64, x: i64) -> i64 {
+    var xs = cons(n, x)
+    let r = set_head(&xs, 7)
+    add_all(&xs, 1)
+    total(xs)
+}
+export fn assigned(n: u64, x: i64) -> i64 {
+    var xs = cons(n, x)
+    reset(&xs, x)
+}
 export fn unused_after(x: i64) -> i64 {
     var b = alloc(4, x)
     bump(4, &b, 0, decide_lt(0, 4), 1)
@@ -201,6 +271,16 @@ def validate_inout(compiler, root, temporary, environment, run, definitions, eva
         diagnostic = command("check", path, source=False, success=False)
         if diagnostic.returncode != 1 or "core:" not in diagnostic.stderr or reason not in diagnostic.stderr:
             failures.append((name, diagnostic.returncode, diagnostic.stderr))
+    # Rejections written by an independent review of these rules.
+    rejected = root / "tests/core_rejected"
+    for name, reason in json.loads((rejected / "expected.json").read_text()).items():
+        path = rejected / name
+        if name.endswith(".jh"):
+            diagnostic = command("check", path, "--lib", success=False)
+        else:
+            diagnostic = command("check", path, source=False, success=False)
+        if diagnostic.returncode != 1 or reason not in diagnostic.stderr:
+            failures.append((name, diagnostic.returncode, diagnostic.stderr))
     assert not failures, "\n".join(f"{n} exit {c}: {e}" for n, c, e in failures)
 
     path = temporary / "inout-valid.jh"
@@ -215,6 +295,9 @@ def validate_inout(compiler, root, temporary, environment, run, definitions, eva
                             ("swapped", [ctypes.c_int64, ctypes.c_int64]),
                             ("listed", [ctypes.c_uint64, ctypes.c_int64]),
                             ("copied", [ctypes.c_int64, ctypes.c_int64]),
+                            ("lists", [ctypes.c_int64]),
+                            ("rebuilt", [ctypes.c_uint64, ctypes.c_int64]),
+                            ("assigned", [ctypes.c_uint64, ctypes.c_int64]),
                             ("unused_after", [ctypes.c_int64])):
             getattr(native, name).argtypes = types
             getattr(native, name).restype = ctypes.c_int64
@@ -234,6 +317,20 @@ def validate_inout(compiler, root, temporary, environment, run, definitions, eva
             assert native.listed(n, x) == n * x
             assert allocations.value == frees.value
             assert native.copied(x, y) == y * 100 + y * 10 + x + y, (x, y)
+            assert allocations.value == frees.value
+            ls = [x + 1, x + 1, x]
+            ls[0] = 100
+            top = ls.pop(0)
+            assert native.lists(x) == top * 1000 + sum(ls), x
+            assert allocations.value == frees.value
+            # A node rebuilt at its own size is changed in place: only the
+            # n + 1 nodes of the list, with its Nil, are allocated.
+            before = allocations.value
+            expected = (x + 1) * (n - 1) + 8 if n > 0 else 0
+            assert native.rebuilt(n, x) == expected, (n, x)
+            assert allocations.value - before == n + 1, (n, allocations.value - before)
+            assert allocations.value == frees.value
+            assert native.assigned(n, x) == x, (n, x)
             assert allocations.value == frees.value
             assert native.unused_after(x) == x
             assert allocations.value == frees.value

@@ -1664,6 +1664,15 @@ writes the terms:
   branches, `match` arms, `load` and `free`. If the value borrows, it is lent
   around the `Give`, so a function may end with a read of what it changes.
 
+- `x = v` assigns, and the old value is freed if nothing uses it. As an inout
+  parameter's last assignment in a block, x is v itself for the block's value,
+  so evidence there computes with it: `xs = List.Cons(x, xs)` and then
+  `refl(length(old(xs)) + 1)` proves `Eq(length(xs), length(old(xs)) + 1)`. Such
+  an x cannot be lent; an earlier assignment rebinds x as a `let` would, with
+  only what its type says.
+- A `match` on an owned variable of heap data refines the expected type, so an
+  arm proves what the function promises about the value it took apart.
+
 A change inside a `let`'s value, a loop body or a recursion's case is an error:
 such code would need to return the new owner to what follows. Call a function
 with `&x` there, or pass the owner as the accumulator.
@@ -1673,14 +1682,28 @@ tuple of the owner and the result, in registers or on the stack, never on the
 heap. Helpers are inlined, so most `Take(Give(...))` pairs meet in the optimizer;
 a tuple stays only where it crosses a branch or a recursion's call.
 
+When a case takes a node apart, lowering frees it at the end of the block, and
+a node of the same size built before then reuses it. So rebuilding a node
+changes it in place, as `set_head` does, and a recursion that rebuilds a list
+allocates nothing. This is an optimization of lowering alone: the kernel still
+sees a free and an allocation. A recursion on owned data cannot yet have a
+function result, so changing the i-th element of a list walks all of it; use a
+buffer for that.
+
 [`examples/core_inout.jh`](../../examples/core_inout.jh) and its
 [core equivalent](../../examples/core_inout.jhc) compile to the same MIR, whose
 only checks are the allocations'. `tests/core_inout.py` runs programs with
 branches, two owners, a read of another owner and heap data at `-O0` and `-O2`
-with counted allocations, and asserts the reason for each of 21 source and 22
+with counted allocations, and asserts the reason for each of 29 source and 22
 core rejections: passing an owner both ways, a false or stale fact, an owner
 consumed, used twice or dropped, a borrow or function as the result, a value of
 `Back` lent, freed or used as a loop accumulator, and a wrong erased flag.
+
+An independent review (Codex) of this section, of views whose result depends on
+the borrow and of loops whose invariants are types found no unsound case and one
+program the kernel accepted and lowering rejected: a dependent view whose arrays
+differ in length, now rejected by the kernel. Its negative programs are kept in
+`tests/core_rejected`.
 
 The next stages of the replacement are:
 

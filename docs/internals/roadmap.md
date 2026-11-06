@@ -594,8 +594,15 @@ result, through three kernel terms, `Back`, `Give` and `Take`; the owner moves
 in and out, so the existing count of uses is the safety argument and the kernel
 gains no mutable reference. `examples/core_inout.jh` changes buffers in place
 with no bounds check; its MIR equals the `.jhc`'s, and programs with branches,
-two owners and heap data run natively with counted allocations, with 21 source
-and 22 core rejections with their reasons in the `core` suite.
+two owners and heap data run natively with counted allocations. `xs =
+List.Cons(x, xs)` assigns, a `match` on an owned list refines what the function
+promises, and a node rebuilt at its own size is reused in place, so `push` and
+`pop` prove what they do to a list's length and a recursion that rebuilds a list
+allocates nothing. 29 source and 22 core rejections with their reasons, and 26
+more from an independent review (Codex) that found no unsound case and one
+program only lowering rejected, now the kernel's, run in the `core` suite.
+Changing the i-th element of a list still walks all of it, since a recursion on
+owned data has no function result; a buffer changes any element directly.
 
 #### The 0.5.0 release gate for the native core
 
@@ -629,10 +636,9 @@ compiler's own source until the core replaces it. 0.5.0 requires:
    ([design](dependent-core.md#views-whose-result-depends-on-the-borrow)),
    such as reading the i-th element with evidence that i is below the
    length. Done: (d) loops whose invariants are types
-   ([design](dependent-core.md#loops-whose-invariants-are-types)). Started: (e)
-   [inout parameters](dependent-core.md#inout-parameters), done for buffers;
-   assigning to heap data and proofs about it remain. Remaining, in order after
-   it: (f) a
+   ([design](dependent-core.md#loops-whose-invariants-are-types)). Done: (e)
+   [inout parameters](dependent-core.md#inout-parameters), which change buffers
+   and heap data in place. Remaining: (f) a
    `std` slice in the core (a vector as an owned buffer with its length and
    capacity), with its contracts stated as types.
 2. **Specification.** One normative description of the core: its terms,

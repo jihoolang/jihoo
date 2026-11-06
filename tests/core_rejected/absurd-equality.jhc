@@ -1,0 +1,2 @@
+(def bad (pi0 p (Eq 0 0) I64) (lam0 p (Eq 0 0) (absurd I64 p)))
+(export good I64 (int 0))

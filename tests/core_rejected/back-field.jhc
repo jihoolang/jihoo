@@ -1,0 +1,2 @@
+(data Box (Boxed (pi e (Back (Buffer 1) (lam x (Buffer 1) I64)) Box)))
+(export good I64 (int 0))

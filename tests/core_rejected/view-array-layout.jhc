@@ -1,0 +1,16 @@
+; The motive has a known outer Array form, but different storage sizes.
+(data List (Nil List) (Cons (pi x I64 (pi xs List List))))
+(def width (pi r (Ref List) U64)
+  (lam r (Ref List) (view List U64 0
+    (lam x I64 (lam xs (Ref List) 1)) r)))
+(def read (pi r (Ref List) (Array (app width r)))
+  (lam r (Ref List)
+    (view List (lam s (Ref List) (Array (app width s)))
+      (array) (lam x I64 (lam xs (Ref List) (array x))) r)))
+(export test (pi n U64 I64)
+  (lam n U64
+    (app (lam x List
+      (lend x (lam r (Ref List)
+        (app (lam a (Array (app width r)) (int 9)) (app read r)))
+        (lam a I64 (lam y List (drop List y a)))))
+      (if-lt n 1 p Nil (Cons (int 7) Nil)))))

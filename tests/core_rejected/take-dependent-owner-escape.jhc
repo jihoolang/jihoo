@@ -1,0 +1,6 @@
+(data List (Nil List) (Cons (pi x I64 (pi xs List List))))
+(def length (pi xs (Ref List) U64) (lam xs (Ref List) (view-rec List U64 0 (lam x I64 (lam rest (Ref List) (lam ih U64 (uadd ih 1)))) xs)))
+(def bad (pi e (Back0 List (lam xs List (Lt 0 1))) (Eq 0 0))
+ (lam e (Back0 List (lam xs List (Lt 0 1)))
+  (take e (lam xs List (lam0 p (Lt 0 1) (drop List xs (refl (app length (borrow xs)))))))))
+(export good I64 (int 0))

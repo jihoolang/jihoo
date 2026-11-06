@@ -60,6 +60,10 @@ struct Lower {
     // Per boxed family, the generated function that frees a value of it.
     drops: Map(u32, u32)
     hypotheses: Vec(Hypothesis)
+    // A node a case has taken apart and not yet freed: its local, its slots
+    // and where. The next node of that size reuses it, so rebuilding a node
+    // changes it in place; anything that ends the block frees it first.
+    pending: Option((u32, u64, diag.Span))
 }
 
 impl Lower {
@@ -75,7 +79,16 @@ impl Lower {
         id
     }
 
-    fn term(inout self, sink t: mir.Term) { self.body.blocks[self.block as i64].term = t }
+    fn term(inout self, sink t: mir.Term) {
+        self.flush()
+        self.body.blocks[self.block as i64].term = t
+    }
+
+    // Free the node a case took apart, if no allocation has reused it.
+    fn flush(inout self) {
+        let Some((at, _, sp)) = mem.replace(&self.pending, None) else { return }
+        self.release(at, sp)
+    }
 
     fn assign(inout self, local: u32, sink rv: mir.Rvalue, sp: diag.Span) {
         self.body.blocks[self.block as i64].stmts.push(mir.Stmt.Assign(
@@ -657,6 +670,14 @@ impl Lower {
     fn allocate(inout self, slots: u64, sp: diag.Span) -> u32 {
         let ptr = self.pointer()
         let at = self.local(ptr, mir.LocalKind.Temp, sp)
+        match self.pending {
+            Some((node, size, _)) if size == slots => {
+                self.pending = None
+                self.assign(at, mir.Rvalue.Use(mir.Operand.Copy(mir.Place.local(node))), sp)
+                return at
+            }
+            _ => {}
+        }
         let next = self.block()
         var args = Vec(mir.Operand).new()
         args.push(mir.Operand.Const(mir.Const.Int((slots * 8) as i128, types.U64)))
@@ -824,7 +845,10 @@ impl Lower {
             }
             // Every field is loaded: the node is freed before the case runs,
             // unless it is borrowed.
-            if !borrowed { self.release(at, sp) }
+            if !borrowed {
+                self.flush()
+                self.pending = Some((at, slot, sp))
+            }
             for b in bound {
                 scope.push(
                     match b { Some(v) => Some(Value { op: v.op.clone(), ty: v.ty }), None => None }
@@ -891,6 +915,8 @@ impl Lower {
         depth: u32
     ) -> Result(Value, diag.Diag) {
         let sp = c.nodes[id as i64].span
+        // The function is built in another body, which cannot free this node.
+        self.flush()
         // A function result's arguments: parameters of the function, passed
         // on by the case that calls its hypothesis.
         let (arguments_erased, kinds) = match c.term(id) {
@@ -1043,6 +1069,7 @@ impl Lower {
     // each of them. Made once per family; its depth is the data's.
     fn drop_glue(inout self, c: core.Core, f: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
         match self.drops.get(f) { Some(function) => return Ok(function), None => {} }
+        self.flush()
         let function = self.free + 1 + self.generated.len() as u32
         self.drops.insert(f, function)
         let name = c.families[f as i64].name.clone()
@@ -1307,7 +1334,8 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
             heap: false
             generated: mem.take(&generated)
             drops: mem.take(&drops)
-            hypotheses: Vec(Hypothesis).new()
+            hypotheses: Vec(Hypothesis).new(),
+            pending: None
         }
         lower.local(types.UNIT, mir.LocalKind.Ret, sp)
         lower.block()

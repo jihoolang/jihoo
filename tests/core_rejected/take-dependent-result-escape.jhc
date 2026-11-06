@@ -1,0 +1,2 @@
+(def bad (pi e (Back (Buffer 1) (lam x (Buffer 1) U64)) (Eq 0 0)) (lam e (Back (Buffer 1) (lam x (Buffer 1) U64)) (take e (lam x (Buffer 1) (lam a U64 (free x (refl a)))))))
+(export good I64 (int 0))

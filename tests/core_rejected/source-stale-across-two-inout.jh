@@ -1,0 +1,12 @@
+#![dependent_core]
+enum List { Nil, Cons(i64, List) }
+fn length(xs: ref List) -> u64 { induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs) }
+fn touch(inout xs: List) -> Lt(0, 1) { decide_lt(0, 1) }
+fn need(xs: ref List, p: erased(Eq(length(xs), 0))) -> i64 { 1 }
+fn bad(xs: List, p: erased(Eq(length(xs), 0))) -> i64 {
+ var ys = xs
+ let a = touch(&ys)
+ let b = touch(&ys)
+ need(ys, p)
+}
+export fn good() -> i64 { 0 }

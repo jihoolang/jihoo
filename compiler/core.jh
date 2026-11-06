@@ -2427,12 +2427,16 @@ impl Core {
                         return Err(self.error(t, "a view's motive is fn(r) { T }"))
                     }
                     var result = result
+                    var binders: i64 = 1
                     loop {
                         let Pi(_, _, rest) = self.term(result) else { break }
                         result = rest
+                        binders += 1
                     }
                     let known = match self.term(result) {
-                        I64 | U64 | Refine(_) | Buffer(_) | Array(_) | Ind(_, _) => true
+                        I64 | U64 | Refine(_) | Buffer(_) | Ind(_, _) => true
+                        // An array's layout is its length, which must not vary.
+                        Array(n) => self.shift(n, -binders, 0, depth - 1).is_ok()
                         _ => false
                     }
                     if !known { return Err(self.error(

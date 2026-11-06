@@ -242,9 +242,10 @@ def validate_scope(compiler, root, temporary, environment, run, definitions, eva
                                         (1 if n else 0))
                             assert native.total(n, x, i) == checked("total", n, x, i) == expected
                             # Three lists of n + 1 nodes (Nil is one), a buffer,
-                            # and firsts' Nil and two nodes per element, of
-                            # which it frees all but the last two.
-                            made = 3 * (n + 1) + 1 + 2 * n + 1
+                            # and firsts' two nodes per element, of which it
+                            # frees all but the last two. Its Nil reuses the
+                            # Nil it takes apart.
+                            made = 3 * (n + 1) + 1 + 2 * n
                             assert allocations.value - before == made, (n, x, i)
                             assert allocations.value == frees.value
     print(f"dependent scopes: paired source/core execution, {len(PAIRS)} implicit/explicit pairs, counted frees, {len(SOURCE_INVALID)} source and {len(CORE_INVALID)} core rejections passed")

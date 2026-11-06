@@ -200,8 +200,8 @@ export fn mixed(n: u64, x: i64, i: u64) -> i64 {
                     for x in xs[:4]:
                         before = allocations.value
                         assert native.total(n, x) == checked("total", n, x) == 2 * n * x, (n, x)
-                        # repeat and doubled each build n + 1 nodes.
-                        assert allocations.value - before == 2 * (n + 1) and allocations.value == frees.value
+                        # repeat builds n + 1 nodes, which doubled reuses in place.
+                        assert allocations.value - before == n + 1 and allocations.value == frees.value
                         assert native.first(n, x) == checked("first", n, x) == (x if n > 0 else -1)
                         assert allocations.value == frees.value
                     assert native.count(n) == checked("count", n) == n
