@@ -32,6 +32,7 @@
           sources
           ./docs/internals/core-spec.md
           ./docs/language/dependent-types.md
+          ./docs/language/dependent-functions.md
         ];
       };
 
