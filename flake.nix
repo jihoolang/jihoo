@@ -182,6 +182,28 @@
           # it: the programs of tests/run, tests/fail and examples, the
           # backend, that it builds a compiler that writes the same IR, and
           # UEFI programs in QEMU.
+          # Independent specification fragment, not a verified compiler.
+          # The toolchain version is checked against proofs/lean-toolchain.
+          lean-proofs = pkgs.runCommand "jihoo-lean-proofs" {
+            nativeBuildInputs = [ pkgs.lean4 pkgs.python3 ];
+          } ''
+            cp -r ${lib.fileset.toSource {
+              root = ./proofs;
+              fileset = lib.fileset.unions [
+                ./proofs/Jihoo
+                ./proofs/Jihoo.lean
+                ./proofs/Audit.lean
+                ./proofs/lean-toolchain
+                ./proofs/lakefile.toml
+                ./proofs/lake-manifest.json
+                ./proofs/check.sh
+              ];
+            }} proofs
+            chmod -R u+w proofs
+            bash proofs/check.sh
+            touch $out
+          '';
+
           tests = pkgs.stdenv.mkDerivation ({
             pname = "jihoo-tests";
             inherit version;

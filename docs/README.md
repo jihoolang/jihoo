@@ -56,6 +56,7 @@ same on GitHub.
 - [Design: verification and proofs](internals/verification.md)
 - [Design: native dependent core](internals/dependent-core.md)
 - [Core specification](internals/core-spec.md)
+- [Lean proof boundary](internals/lean-proofs.md)
 - [Self-hosting](internals/self-hosting.md)
 - [Testing](internals/testing.md)
 - [Roadmap](internals/roadmap.md)
