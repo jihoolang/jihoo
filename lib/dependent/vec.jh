@@ -9,10 +9,10 @@
 #![dependent_core]
 
 pub struct Vec {
-    len: u64
-    cap: u64
-    data: buffer(cap)
-    room: erased(Lt(len, cap + 1))
+    pub len: u64
+    pub cap: u64
+    pub data: buffer(cap)
+    pub room: erased(Lt(len, cap + 1))
 }
 
 // An empty vector with room for `cap` elements.

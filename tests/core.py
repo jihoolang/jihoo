@@ -634,6 +634,8 @@ def main():
                        success=success, env=environment)
 
         source_frontend(compiler, root, temporary, environment)
+        from core_modules import validate_modules
+        validate_modules(compiler, root, temporary, environment, run)
         from core_context import validate_context
         validate_context(compiler, root, temporary, environment, run)
         from core_equality import validate_equality

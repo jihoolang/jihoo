@@ -147,6 +147,34 @@ acc) { ... })` is a loop whose body has evidence of `Lt(i, n)`, so each read nee
 is how a loop's invariant is stated, and into a proposition the same form is a proof by
 induction: see [the invariant example](../../examples/core_invariant.jh).
 
+## Module boundaries
+
+A marked module imports other marked modules with `import a.b` or `import a.b as c`.
+Use the direct import's alias to name its public declarations: `c.helper(...)`,
+`c.Proposition(n)`, `c.constructor(...)`, `c.Record { ... }` or `c.Enum.Variant(...)`.
+Qualified patterns resolve the same way. Imports do not put another module's
+names into the local namespace, and one alias cannot reach another module's items.
+Different modules may reuse helper, type and constructor names.
+
+Items and struct fields are private unless marked `pub`. A public proposition's
+constructors and a public enum's variants are public members of that type.
+A public factory can return a private type that callers pass back to its public
+API, but callers cannot inspect it with `match` or `induct`. Constructing a struct
+or inducting over it exposes all its fields, so those operations require access
+to every field. A named `match` may select public fields and leave private ones
+with `..`; discarded fields still get the usual ownership cleanup. `_` is a
+discarded binding, not a name that can recover one of those fields.
+
+`dependent.vec.Vec` keeps its checked representation public: all four fields are
+explicitly `pub`, so existing proof-oriented construction and destructuring work.
+Visibility does not replace type or ownership checking.
+
+Only direct imports are visible. Even `pub import` does not re-export a module
+alias, matching ordinary module lookup; marked modules have no prelude or wildcard
+imports. Definitions are still checked in declaration order, and only the root
+module supplies the executable entry point. An `export fn` chooses a foreign
+symbol independently of `pub`; two exported symbols cannot have the same name.
+
 ## What it does not do
 
 - **It is not verified.** The kernel's soundness is not mechanically proved. It rests on
@@ -161,7 +189,6 @@ induction: see [the invariant example](../../examples/core_invariant.jh).
 - **Changing the i-th element of a list walks all of it.** A buffer changes any element directly.
 - **Recursion is structural**, over declared data, and a program that checks may still be rejected
   while compiling in [a few listed cases](../internals/core-spec.md#lowering).
-- **Modules share one namespace**, and `pub` is not yet enforced between them.
 
 The examples named `core_*`, such as [the vector](../../examples/core_vec.jh), show each part in a
 complete program, and the ordinary [contracts](contracts.md) remain the way to state and prove properties of unmarked code.
