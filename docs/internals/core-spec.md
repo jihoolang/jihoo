@@ -369,7 +369,12 @@ reassociates `Strict(Strict(prefix, value), b)` to
 `Strict(prefix, Strict(value, b))`. This allows arithmetic captured by a partial
 application without a runtime closure, while retaining capture-time overflow
 traps even when the function is unused. Applying the function still normalizes
-its body under the ordinary runtime rules. This exception is local to application and
+its body under the ordinary runtime rules. A retained redex representing an
+effectful capture is floated out of a runtime lambda's argument position, with
+the consumer shifted under its binder. Discarding such a redex similarly moves
+the discard under that binder. The effectful argument is never substituted or
+duplicated; only its bound value is reused. This handles called and unused partial
+applications such as `f(free(alloc(n, 7), 5))` without runtime closure allocation. This exception is local to application and
 `Strict`: the predicates below still inspect lambda bodies when analyzing invoked
 loop and induction cases. Runtime normalization is not covered by a general
 formal preservation or compiler refinement theorem.

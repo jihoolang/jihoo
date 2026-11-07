@@ -11,6 +11,10 @@ PREFIX = '''#![dependent_core]
 enum Slot(n: u64) { Empty; Full(refine(fn(j) { Lt(j, n) })) }
 '''
 PROGRAM = PREFIX + '''
+export fn nested_effect_partial(n: u64) -> i64 { let f = fn(x: i64, y: i64, z: i64) -> i64 { x + y + z }; let g = f(free(alloc(n, 7), 5)); let h = g(free(alloc(n + 1, 7), 6)); h(2) }
+export fn effect_partial(n: u64) -> i64 { let f = fn(x: i64, y: i64) -> i64 { x + y }; let g = f(free(alloc(n, 7), 5)); g(2) }
+export fn unused_effect_partial(n: u64) -> i64 { let f = fn(x: i64, y: i64) -> i64 { free(alloc(n + 1, 7), x + y) }; let g = f(free(alloc(n, 7), 5)); 0 }
+export fn ordered_effect_partial(n: u64) -> i64 { let f = fn(x: i64, y: i64) -> i64 { free(alloc(n + 1, 7), x + y) }; let g = f(free(alloc(n, 7), 5)); g(2) + g(3) }
 export fn captured_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); g(2) }
 export fn unused_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); 0 }
 export fn repeated_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); g(2) + g(3) }
@@ -48,6 +52,10 @@ export fn unused_owner() -> i64 { let ignore = fn(b: buffer(1)) -> i64 { 9 }; ig
 export fn shadow(n: u64) -> u64 { let f = fn(n: u64, p: erased(Eq(n, n))) -> u64 { n }; f(n, refl(n)) }
 '''
 REFERENCE = PREFIX + '''
+export fn nested_effect_partial(n: u64) -> i64 { let x = free(alloc(n, 7), 5); let y = free(alloc(n + 1, 7), 6); x + y + 2 }
+export fn effect_partial(n: u64) -> i64 { let x = free(alloc(n, 7), 5); x + 2 }
+export fn unused_effect_partial(n: u64) -> i64 { let x = free(alloc(n, 7), 5); 0 }
+export fn ordered_effect_partial(n: u64) -> i64 { let x = free(alloc(n, 7), 5); free(alloc(n + 1, 7), x + 2) + free(alloc(n + 1, 7), x + 3) }
 export fn captured_partial(n: u64) -> u64 { let x = n + 1; x + 2 }
 export fn unused_partial(n: u64) -> u64 { let x = n + 1; 0 }
 export fn repeated_partial(n: u64) -> u64 { let x = n + 1; (x + 2) + (x + 3) }
@@ -110,7 +118,9 @@ def validate_lambdas(compiler, root, temporary, environment, run):
     formatted = temporary / 'lambdas-formatted.jh'; formatted.write_text(command('fmt', source).stdout)
     assert command('fmt', formatted).stdout == formatted.read_text()
     assert command('emit-mir', formatted, '--lib').stdout == mir
-    counter = temporary / 'lambdas-counter.c'; counter.write_text(COUNTER)
+    counter = temporary / 'lambdas-counter.c'; counter.write_text(COUNTER.replace('long allocations, frees;', 'long allocations, frees; long events[64], event_count;')
+        .replace('allocations++;', 'allocations++; if (event_count < 64) events[event_count++] = (long)n;')
+        .replace('frees++;', 'frees++; if (event_count < 64) events[event_count++] = -1;'))
     host = 'aarch64' if platform.machine() in ('aarch64', 'arm64') else 'x86_64'
     for target, machine in (('x86_64', 62), ('aarch64', 183)):
         for level in ('-O0', '-O2'):
@@ -134,6 +144,19 @@ def validate_lambdas(compiler, root, temporary, environment, run):
                 assert native.family(n) == 7
                 assert native.captured_partial(n) == n + 3 and native.unused_partial(n) == 0
                 assert native.repeated_partial(n) == 2*n + 7
+            for name, expected, events in (
+                ('effect_partial', 7, [32, -1]),
+                ('nested_effect_partial', 13, [32, -1, 40, -1]),
+                ('unused_effect_partial', 0, [32, -1]),
+                ('ordered_effect_partial', 15, [32, -1, 40, -1, 40, -1]),
+            ):
+                fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_int64
+                ctypes.c_long.in_dll(native, 'event_count').value = 0
+                assert fn(3) == expected
+                if level == '-O0':
+                    count = ctypes.c_long.in_dll(native, 'event_count').value
+                    observed = list((ctypes.c_long * 64).in_dll(native, 'events'))[:count]
+                    assert observed == events, (name, observed)
             assert native.unused_partial((1 << 64) - 2) == 0
             for x in (-19, 0, 100):
                 assert native.dependent(x) == x
@@ -160,6 +183,14 @@ def validate_lambdas(compiler, root, temporary, environment, run):
         capture = temporary / f'lambda-capture-trap-{name}.jh'
         capture.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: u64, y: i64) -> i64 { y }; '
                            'let g = f(18446744073709551615 + 1); ' + result + ' }')
+        for level in ('-O0', '-O2'):
+            assert command('run', capture, level, success=False).returncode == 132
+    # An effectful capture whose scalar result traps must still trap, even
+    # when the partially applied function is unused.
+    for name, result in (('called', 'g(2)'), ('unused', '0')):
+        capture = temporary / f'lambda-effect-capture-trap-{name}.jh'
+        capture.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: i64, y: i64) -> i64 { y }; '
+                           'let g = f(free(alloc(1, 7), 9223372036854775807 + 1)); ' + result + ' }')
         for level in ('-O0', '-O2'):
             assert command('run', capture, level, success=False).returncode == 132
     flags = ('--lib', '--no-verify', '--release', '--error-format=json')

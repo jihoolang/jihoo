@@ -537,6 +537,21 @@ impl Core {
                             let ordered = self.add(Term.Strict(first, applied), sp)?
                             return self.normal(ordered, depth - 1)
                         }
+                        // Float a retained scalar/owned argument binding out
+                        // of this argument position. Shift the consumer under
+                        // that binder; never substitute or duplicate its effect.
+                        App(g, effect) => {
+                            match self.term(g) {
+                                Lam(false, domain, value) => {
+                                    let consumer = self.shift(f, 1, 0, depth - 1)?
+                                    let inner = self.add(Term.App(consumer, value), sp)?
+                                    let inner = self.normal(inner, depth - 1)?
+                                    let lam = self.add(Term.Lam(false, domain, inner), sp)?
+                                    return self.add(Term.App(lam, effect), sp)
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -775,6 +790,21 @@ impl Core {
                             let rest = self.add(Term.Strict(value, b), sp)?
                             let ordered = self.add(Term.Strict(first, rest), sp)?
                             return self.normal(ordered, depth - 1)
+                        }
+                        // Discard the result inside its retained binding, so
+                        // effectful captures run once even if the result is a
+                        // lambda with no runtime representation of its own.
+                        App(g, effect) => {
+                            match self.term(g) {
+                                Lam(false, domain, value) => {
+                                    let rest = self.shift(b, 1, 0, depth - 1)?
+                                    let inner = self.add(Term.Strict(value, rest), sp)?
+                                    let inner = self.normal(inner, depth - 1)?
+                                    let lam = self.add(Term.Lam(false, domain, inner), sp)?
+                                    return self.add(Term.App(lam, effect), sp)
+                                }
+                                _ => {}
+                            }
                         }
                         _ => {}
                     }
@@ -4634,6 +4664,41 @@ fn lambda_arguments_do_not_evaluate_their_bodies() {
         let Free(_, _) = c.term(first) else { panic("discarding keeps allocation and free") }
         assert(c.term(rest) == Term.Integer(0), "discarding does not evaluate the body")
         c.require(result, i, [], false, DEPTH).unwrap()
+    }
+}
+
+#[test]
+fn partial_application_keeps_effectful_captures_bound_once() {
+    var c = Core.new()
+    let sp = diag.Span.nowhere()
+    let i = c.add(Term.I64, sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let zero = c.add(Term.Integer(0), sp).unwrap()
+    let two = c.add(Term.Integer(2), sp).unwrap()
+    let x = c.add(Term.Var(1), sp).unwrap()
+    let y = c.add(Term.Var(0), sp).unwrap()
+    let sum = c.add(Term.Arith(Arith.Add, x, y), sp).unwrap()
+    let inner = c.add(Term.Lam(false, i, sum), sp).unwrap()
+    let function = c.add(Term.Lam(false, i, inner), sp).unwrap()
+    let made = c.add(Term.Alloc(one, zero), sp).unwrap()
+    let capture = c.add(Term.Free(made, zero), sp).unwrap()
+    let partial = c.add(Term.App(function, capture), sp).unwrap()
+    let ty = c.infer(partial, [], false, DEPTH).unwrap()
+    let g = c.add(Term.Var(0), sp).unwrap()
+    let call = c.add(Term.App(g, two), sp).unwrap()
+    let twice = c.add(Term.Arith(Arith.Add, call, call), sp).unwrap()
+    let consumer = c.add(Term.Lam(false, ty, twice), sp).unwrap()
+    let used = c.add(Term.App(consumer, partial), sp).unwrap()
+    let unused = c.add(Term.Strict(partial, two), sp).unwrap()
+    for term in [used, unused] {
+        c.require(term, i, [], false, DEPTH).unwrap()
+        c.runtime = true
+        let result = c.normal(term, DEPTH).unwrap()
+        c.require(result, i, [], false, DEPTH).unwrap()
+        let App(lam, effect) = c.term(result) else { panic("capture stays bound once") }
+        let Free(_, _) = c.term(effect) else { panic("capture allocation and free are retained") }
+        let Lam(false, _, body) = c.term(lam) else { panic("capture has one binder") }
+        assert(!c.effectful(body, DEPTH), "capture effect is not copied into calls or discard")
     }
 }
 
