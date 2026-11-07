@@ -692,6 +692,8 @@ def main():
         validate_spec(root)
         validate_guide(compiler, root, temporary, environment, run)
         validate_preservation(compiler, root, environment, run)
+        from core_nat import validate_nat
+        validate_nat(compiler, root, temporary, environment, run)
         from core_vec import validate_vec
         validate_vec(compiler, root, temporary, environment, run)
 

@@ -891,6 +891,18 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+`dependent.nat` now supplies reusable equality, order and subtraction lemmas,
+plus a finite `Steps` relation with structurally proved bounds and translation.
+The executable `core_nat` example uses imported induction to derive an array bound
+from a runtime loop's dependent invariant. Tests compare its erased MIR with an
+independent primitive-proof implementation, check both object targets and u64
+boundaries, and reject invalid evidence and unused malformed induction cases
+with exact diagnostics and exported positive controls. `dependent.vec` reuses the
+shared lemmas without removing its existing API. This advances typed library
+specifications; ordinary `requires`/`ensures` syntax remains unsupported in marked
+modules, and no full native-core or compiler soundness theorem is claimed.
+
+
 Fully annotated local dependent functions now synthesize their Pi telescope and
 can be called directly or partially applied. Their domains, result and body are
 checked, including discarded evidence and unused functions. Runtime normalization

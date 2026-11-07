@@ -248,6 +248,27 @@ imports. Definitions are still checked in declaration order, and only the root
 module supplies the executable entry point. An `export fn` chooses a foreign
 symbol independently of `pub`; two exported symbols cannot have the same name.
 
+## Imported natural-index proofs
+
+`dependent.nat` provides equality transport, order and subtraction lemmas and
+finite nondecreasing traces proved by structural induction:
+
+```jihoo
+#![dependent_core]
+import dependent.nat
+
+fn main() -> i64 {
+    let path = nat.advance(1, 1)
+    index([10, 20, 30], 1, nat.steps_lt(1, 2, 3, path, decide_lt(2, 3)))
+}
+```
+
+This returns `20`. The [proof library guide](natural-proofs.md) describes the API
+and its limits. [A complete loop example](../../examples/core_nat.jh) uses an
+imported induction theorem to justify a table access from its dependent loop
+invariant. These proofs are checked and erased by the existing core; they add no
+new trusted rules or guarantee that runtime arithmetic cannot overflow.
+
 ## What it does not do
 
 - **It is not verified.** The kernel's soundness is not mechanically proved. It rests on
