@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of eighty-three selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of ninety-nine selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -318,6 +318,15 @@ dependent application and mixed value/index binders. Closed corollaries remove
 context-correspondence premises and connect source typing to the earlier calculus.
 The target is ghost-mode and universe-free. Executable-checker correspondence,
 target preservation and runtime correctness remain separate obligations.
+
+## Graph artifact certificates
+
+A [separate certificate check](graph-certificates.md) validates decoded snapshots
+of actual core shifts and substitutions against the unified formal operations.
+It checks the entire original graph remains a prefix of the final graph. This
+certifies specific exported artifacts, not every compiler execution or typing of
+those artifacts. Exporter fidelity and association with the invoked implementation
+remain trusted.
 
 ## Remaining obligations
 

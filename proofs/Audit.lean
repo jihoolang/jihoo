@@ -83,3 +83,20 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.wrongAnnotation_rejected
 #print axioms Jihoo.CoreBridge.generatedExamples_typed
 #print axioms Jihoo.CoreBridge.generatedExamples_target
+
+#print axioms Jihoo.GraphCertificates.rawEqual_iff
+#print axioms Jihoo.GraphCertificates.Node.valid_payload
+#print axioms Jihoo.GraphCertificates.Node.valid_backward
+#print axioms Jihoo.GraphCertificates.traverse_sound
+#print axioms Jihoo.GraphCertificates.unfoldGraph_sound
+#print axioms Jihoo.GraphCertificates.graphValid_bounds
+#print axioms Jihoo.GraphCertificates.decode_sound
+#print axioms Jihoo.GraphCertificates.decode_graph_bounds
+#print axioms Jihoo.GraphCertificates.decode_root_bound
+#print axioms Jihoo.GraphCertificates.validate_sound
+#print axioms Jihoo.GraphCertificates.validate_shift
+#print axioms Jihoo.GraphCertificates.validate_substitute
+#print axioms Jihoo.GraphCertificates.shiftExample_accepted
+#print axioms Jihoo.GraphCertificates.mixedExample_accepted
+#print axioms Jihoo.GraphCertificates.malformedRoot_rejected
+#print axioms Jihoo.GraphCertificates.changedPrefix_rejected

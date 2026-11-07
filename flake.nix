@@ -207,6 +207,32 @@
             touch $out
           '';
 
+          # Build the exporter against this exact compiler/core.jh, execute
+          # real transforms, and feed their snapshots to the Lean validator.
+          # This is an integration check, not a proof of exporter fidelity.
+          graph-certificates = pkgs.runCommand "jihoo-graph-certificates" {
+            nativeBuildInputs = [ jihoo pkgs.lean4 pkgs.python3 ];
+          } ''
+            cp -r ${lib.fileset.toSource {
+              root = ./.;
+              fileset = lib.fileset.unions [
+                sources
+                ./proofs/Jihoo
+                ./proofs/Jihoo.lean
+                ./proofs/CheckGraph.lean
+                ./proofs/lean-toolchain
+                ./proofs/lakefile.toml
+                ./proofs/lake-manifest.json
+              ];
+            }} source
+            chmod -R u+w source
+            cd source
+            export JIHOO_PATH=$PWD/lib
+            (cd proofs && lake build --wfail)
+            python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
+            touch $out
+          '';
+
           tests = pkgs.stdenv.mkDerivation ({
             pname = "jihoo-tests";
             inherit version;
