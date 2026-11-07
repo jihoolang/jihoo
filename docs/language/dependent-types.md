@@ -72,10 +72,22 @@ have distinct names. Inner lambdas may still shadow outer names.
 
 The same optional parameter annotations work in `if_lt`/`if_eq` branches, proof
 families such as `fn(k: u64) { Eq(k, k) }`, and data motives such as
-`fn(t: List) { i64 }`. Loop and induction cases also allow result annotations.
-Families, motives and conditional branches still omit result annotations. No
+`fn(t: List) { i64 }`. Loop, induction and conditional cases also allow result annotations.
+Families and motives still omit result annotations. No
 proof search is implied, and all annotations are checked, including evidence
 inside an annotation that computation would otherwise discard.
+
+Without an expected type, `if_lt` and `if_eq` infer their result from the
+proof-bearing branch (or its result annotation), then check the other branch
+against it. A `match` infers its result from the first variant in the type's
+**declaration order**, regardless of arm order, and checks the remaining arms.
+Literal-only branches default to `i64`; use a local or branch annotation when
+another numeric type is intended. No signed/unsigned coercion is inserted.
+An inferred match type cannot mention the first arm's local fields. Dependent
+motives, proofs by borrowed cases, and empty matches still need an expected
+type, usually a `let` or function result annotation. Inference does not search
+other arms or speculate by elaborating an expression twice.
+
 
 ## Owned memory
 

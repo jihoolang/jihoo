@@ -558,8 +558,9 @@ MIR has the comparisons, one subtraction and the loads: no pairs,
 evidence or bounds assertions. In `.jhc` the forms are `(Refine P)`,
 `(pack P a p)`, `(witness s)` and `(proof s)`.
 
-Refinements carry U64 values only; dependent pairs of other types, and
-refinements as loop accumulators, are future work.
+Refinements carry U64 values only; dependent pairs of other types remain future
+work. Refinement accumulators are supported by the dependent loops described
+below in "Loops whose invariants are types".
 
 ## Data types
 
@@ -630,8 +631,9 @@ has the two comparisons, a product, a sum and a load. In `.jhc`,
 telescopes ending in `E`, and `(induct E P case ... v)` with
 `P = (lam x E T)` takes a value apart.
 
-Not yet supported: recursive data types and structural recursion, data
-in exports and loop accumulators, and runtime representations of data.
+Recursive data, structural recursion, data accumulators and runtime layouts
+are implemented in the later sections below. Data in exported signatures
+remains subject to the supported ABI described by the core specification.
 
 ## Erased indices and parameters
 
@@ -1568,9 +1570,9 @@ A `let` binds a value that reads borrowed data once rather than repeating the
 walk at each use (`Core.reads`), and `may_trap` treats a call of a recursion's
 result as able to trap, so such a call is kept even when its result is unused.
 
-Not yet supported: dependent case analysis of an owned value with evidence
-in scope (`Case`'s result is still not a function), refining evidence through
-a borrow that is not a variable, and `.jh` syntax for a proof field in an
+Owned case analysis may generalize evidence into erased function arguments,
+as described in the later inout section. Still unsupported: refining evidence
+through a borrow that is not a variable, and `.jh` syntax for a proof field in an
 `enum` that mentions an earlier field, which `.jhc` declares with named fields.
 
 ## Loops whose invariants are types

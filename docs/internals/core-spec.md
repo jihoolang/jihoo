@@ -387,7 +387,8 @@ Its normal form has a lambda for each parameter. Its body is normalized in runti
 reaching one is an internal error.
 
 Lowering may **reject** a checked program with a diagnostic. It does not emit code for one that
-it cannot represent, so a program that checks need not compile. Known cases are:
+it cannot represent, so a program accepted by `core check` need not compile.
+The marked `.jh` frontend's `check` also checks executable lowering. Known core cases are:
 
 - a term with no runtime form, such as flat data computed at run time by a view;
 - a recursion whose result is an array, since `runtime` has no layout for one;
@@ -429,3 +430,23 @@ are tested but not proved:
 
 What stays trusted is the kernel's implementation of these rules, `core_lower.jh`, MIR to LLVM, LLVM and
 the runtime.
+
+
+## Formalization boundary
+
+The specification above, rather than historical feature snapshots in the design
+notes, is the intended starting point for a Lean formalization. There is not yet
+a machine-checked soundness proof. A useful order is typing and capture-avoiding
+substitution, conversion and pure preservation, quantities and borrow lifetimes,
+then runtime normalization and erasure adequacy. Each theorem must state which
+term forms and reduction rules it covers.
+
+Pure ghost normalization is not runtime evaluation: it can erase evidence and
+ignore resource use. Rechecking pure normal forms is regression evidence only;
+it does not establish linearity, trap preservation, allocation behavior or the
+correctness of lowering. The executable semantics must account for those
+separately. A proof of the core calculus alone does not verify the source
+elaborator, the implementation of its checker, MIR to LLVM, LLVM or the runtime.
+Partial lowering and documented source inference restrictions are not additional
+core typing rules and should not silently narrow a theorem advertised for the
+whole core.

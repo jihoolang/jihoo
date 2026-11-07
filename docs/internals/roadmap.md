@@ -855,6 +855,13 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+The final source stabilization pass infers constant match results and conditional
+results without a local annotation, validates conditional result annotations,
+and reconciles historical design notes with the normative core specification.
+Dependent motives still require context; no kernel term or typing rule changes.
+Formalization starts with the explicit boundary in `core-spec.md`, not a claim
+that the current tests prove soundness.
+
 The first step is stabilizing dependent types and their source ergonomics;
 mechanized soundness in Lean 4 follows that stabilization, before claiming the
 kernel is verified. Completed preparation includes preservation of dependent
