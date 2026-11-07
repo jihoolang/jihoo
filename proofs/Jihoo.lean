@@ -54,3 +54,8 @@ import Jihoo.HeadNormalizationExamples
 
 import Jihoo.TypeIndexNormalizationCodec
 import Jihoo.TypeIndexNormalizationExamples
+
+import Jihoo.CoreBridgeSimpleErasure
+import Jihoo.CoreBridgeSimpleSimulation
+import Jihoo.TypingSimpleErasure
+import Jihoo.SimpleErasureExamples

@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 332 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 368 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -484,3 +484,59 @@ reduction witness reaching it is explicit; normalization of all typed terms is
 not proved. The existing `Indexed.HasType.realize` remains a theorem about its
 separate Nat-index calculus, not a semantic interpretation of arbitrary
 higher-order `Raw.Beta` arguments.
+
+
+## Conversion-stable higher-order simple erasure
+
+`CoreBridgeSimpleErasure.lean` proves a structural theorem for the unchanged
+`Raw.Beta.HasType`, including arbitrary higher-order domains and internal
+conversion rules. It supplies a foundation for a later normalization proof;
+it does not reuse the natural-index-only `Indexed.HasType.realize` theorem.
+
+A direct syntactic skeleton cannot type every intermediate result: for example,
+`(lambda x : U64. U64) 0` beta-converts to `U64` but is not itself a formed type.
+`Arity A a` instead means that A converts to a structural representative with
+simple type a. Structural representatives collapse U64, I64, arrays, Eq and Lt
+to one base type and retain Pi domains and codomains as arrows. Arity is proved
+unique using the existing Church–Rosser head discrimination and Pi injectivity.
+It is stable under the full existing conversion relation, renaming and arbitrary
+raw substitution, including replacement beneath binders. No normalization or
+semantic soundness of arbitrary conversion is postulated.
+
+The simple term erasure retains variables, lambdas and applications. All other
+constructors become an inert atom; annotations and binder flags are discarded.
+`typed_erasure` proves that a declarative typing derivation erases to a simply
+typed term when each accessible raw context entry has the assigned Arity.
+`ContextMatch.extend` accounts for the dependent context's weakening of both
+new and existing entries. The closed theorem has no context assumption, and
+the result type need not be syntactically formed. Application uses Arity Pi
+inversion, uniqueness and substitution stability rather than assuming its
+result has the required simple type.
+
+`CoreBridgeSimpleSimulation.lean` proves erasure commutes with renaming,
+simultaneous capture-avoiding substitution and beta instantiation. Its `HeadStep`
+is precisely root beta plus function-spine closure. Each such step maps to one
+simple beta step. `TypingSimpleErasure.selected_head_step` connects this relation
+to successful contracts selected by the existing `HeadNormalization.headPath`.
+`trace_simulation` preserves the exact certificate trace length; no successful
+head contraction disappears as a reflexive step. `validate_head_simulation`
+combines the accepted trace with simple typings of both endpoints at the same
+simple type. `validate_erasure` derives closed simple typing from the exact
+snapshot-bound typing certificate.
+
+`accessibility_transfer` transfers accessibility of the erased term to the raw
+head relation. Its accessibility premise is explicit. This work does **not**
+prove accessibility/normalization of all simply typed terms, existence of a
+normal form for every raw typing derivation, or unconditional false-evidence
+exclusion. Those remain the next mathematical obligations. The regression proofs
+exclude self-application and the standard closed Omega term through simple
+typing, cover higher-order arguments and capture avoidance, and show that an
+unformed expanded result still has Arity.
+
+This erasure cannot establish arithmetic truth, array bounds or runtime behavior:
+zero and one have the same erased atom, as do all evidence constructors. A beta
+step beneath Refl or an annotation may disappear, so the one-step simulation is
+not asserted for arbitrary contextual beta or `Core.normal`. There is no claim
+about actual ghost-mode normalization, symbolic sum/subtraction canonicalization,
+compiler erasure, generated code, exporter fidelity or full checker soundness.
+No production checker, certificate format or admissible typing rule is changed.
