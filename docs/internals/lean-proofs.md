@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 126 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 176 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -344,3 +344,57 @@ Finite rejection, preservation and differential tests remain implementation
 regressions. They are not replaced by these proofs, and they do not discharge the
 missing correspondence. The [roadmap](roadmap.md#the-050-release-gate-for-the-native-core)
 continues to distinguish these obligations and their trusted implementation boundary.
+
+## Target substitution and head beta
+
+The unified target judgment can be studied without changing its rules or claiming
+that the executable core checker implements them. Renaming and typed substitution
+transport a derivation through a precisely stated context relation. Substitution
+requires each replaced variable to have its substituted type in the destination
+context; it does not assume typing of the final transformed term.
+
+The useful beta statement is **head beta**: a typed application of a lambda to a
+typed argument can be replaced by capture-avoiding substitution into its body.
+Its result type is instantiated by the same substitution. This is separate from
+an unrestricted contextual-reduction theorem.
+
+### Why unrestricted contextual preservation is not claimed
+
+The target's deliberately small `Raw.Conv` has numeral addition and selected type
+congruence, but no beta or application conversion. In the empty context, write:
+
+```text
+a = (lambda y : U64. y) 0
+f = lambda x : U64. refl x
+```
+
+The term `f a` has target type `Eq(a, a)`. Reducing its argument gives `f 0`, with
+result type `Eq(0, 0)`. The current target conversion cannot identify those two
+types. Thus full fixed-type contextual beta preservation is false for these
+unchanged rules. This is a limitation of the selected declarative target, not a
+counterexample to the implementation's richer normalization-based conversion.
+A broader preservation theorem needs a justified richer conversion model or a
+statement that explicitly transforms types as well; neither is silently assumed.
+
+Arbitrary target contexts also need not contain well-formed types. A context that
+maps variable zero to the raw numeral zero allows that variable to be typed at a
+non-type. Structural transport can remain valid under its exact context premises,
+but does not establish general type-formation regularity or consistency. Likewise,
+proposition classification is stable under substitution of a formed type, not of
+an arbitrary raw term: replacing a raw variable with an equality changes that
+classification.
+
+The paired executable-core fixture
+`tests/core_preserves/lean-target-contextual-boundary.jhc` checks both expressions
+against the same unreduced equality type. The actual checker and preservation
+regression accept both, exercising precisely the richer conversion omitted from
+the target judgment.
+
+The public transport endpoints are `Raw.IsType.renaming/substitution` and
+`Raw.HasType.renaming/substitution/instantiate/head_beta`. The examples include an
+open replacement under mixed ordinary/erased binders, a nonreflexive arithmetic
+conversion around a head application, and accepted typed shift/substitution
+certificates. `dependent_after_not_original_type` kernel-checks the closed
+contextual limitation above as failure of the original typing judgment, not only
+failure to find a conversion proof. The existing judgment and conversion
+definitions are unchanged.

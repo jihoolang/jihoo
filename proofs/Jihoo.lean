@@ -23,3 +23,8 @@ import Jihoo.GraphCertificateLimits
 import Jihoo.GraphCertificateCodec
 import Jihoo.GraphCertificateReplay
 import Jihoo.GraphCertificateReplayExamples
+
+import Jihoo.CoreBridgeSubstitutionAlgebra
+import Jihoo.CoreBridgeMetatheory
+import Jihoo.GraphCertificateTyping
+import Jihoo.CoreBridgeMetatheoryExamples

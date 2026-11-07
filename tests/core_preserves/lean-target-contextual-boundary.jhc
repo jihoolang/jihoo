@@ -1,0 +1,9 @@
+; The executable core has beta conversion; the restricted Lean Raw.Conv does not.
+; This fixture documents that the target-model contextual-preservation limitation
+; is not a claim of an implementation counterexample.
+(def before
+  (Eq (app (lam y U64 y) 0) (app (lam y U64 y) 0))
+  (app (lam x U64 (refl x)) (app (lam y U64 y) 0)))
+(def after
+  (Eq (app (lam y U64 y) 0) (app (lam y U64 y) 0))
+  (app (lam x U64 (refl x)) 0))
