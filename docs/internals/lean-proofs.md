@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 266 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 293 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -460,3 +460,27 @@ irrelevance. Conversely, the Lean relation is not a decision procedure for the
 implementation. The runtime mode also retains certain effectful arguments and
 tracks traps with `Strict`; the pure beta theorem does not model that evaluator,
 erasure, lowering, or generated machine code. Full compiler soundness remains open.
+
+## Formed type shapes and conditional literal evidence
+
+`CoreBridgeBetaShapes.lean` derives rigid-head separation and equality, bound,
+array and numeral injectivity from the existing Church–Rosser theorem. It also
+retains the complete higher-order Pi structure and binder flags in a type
+skeleton while erasing scalar indices. `IsType.skeleton_conversion` proves that
+conversion preserves this skeleton **when both endpoints are independently
+formed types**. It does not interpret Pi as a function space or assume semantic
+conversion soundness.
+
+That qualification is necessary: the raw beta expansion
+`(lambda x: U64. U64) 0` converts to `U64` but is not an `IsType`-formed type and
+has no syntactic type skeleton. `expanded_type_not_formed` and
+`arbitrary_expansion_changes_skeleton` check this boundary in Lean. No arbitrary
+raw-conversion shape-invariance axiom is introduced.
+
+`CoreBridgeBetaEvidence.lean` proves closed weak-head canonical forms and literal
+truth for equality/bound evidence. The [typed snapshot observer](typing-certificates.md#closed-literal-evidence-observations)
+connects those results to accepted exact bytes. Head normality or a finite
+reduction witness reaching it is explicit; normalization of all typed terms is
+not proved. The existing `Indexed.HasType.realize` remains a theorem about its
+separate Nat-index calculus, not a semantic interpretation of arbitrary
+higher-order `Raw.Beta` arguments.

@@ -168,3 +168,51 @@ consistency and all-program checker refinement remain open.
 The grouped `lean-proofs` and `graph-certificates` Nix checks now include this
 interface, executable constructor coverage, actual-Core positive examples,
 canonical/association mutations, resource rejections and both handoff gates.
+
+## Closed literal evidence observations
+
+A further optional observer checks a requested literal equality or strict bound
+against a typed snapshot. `Typing.Evidence.validateBytes_sound` binds the complete
+canonical snapshot and typing artifact, checks the exact requested type root's
+decoded term, and establishes `Realized`: closed typing, type formation,
+weak-head normality, and truth of the requested mathematical relation. In
+particular, accepted `Eq m n` evidence implies `m = n`, and accepted `Lt m n`
+evidence implies `m < n`. The checker does **not** decide that arithmetic relation
+as its acceptance test. Truth follows from the canonical-evidence theorem.
+
+The observer accepts only literal endpoint types and closed evidence with no
+beta redex on its function spine. It is deliberately not a normalizer. Lambda
+bodies and constructor indices need not be normal: `refl ((lambda x: U64. x) 7)`
+can be observed at the literal type `Eq 7 7` through a valid conversion proof.
+Conversely, `(lambda x: U64. refl x) 7` is well typed but is rejected until its
+head beta reduction is performed. A nonliteral requested type is also rejected,
+even when its indices are convertible to literals. This is a specified
+observation subset, not a restriction silently added to `Raw.Beta.HasType`.
+
+The new canonical-form theorem is derived from the existing typing rules,
+including conversion anywhere in a derivation. Church–Rosser supplies separation
+of formed type heads, injectivity of equality/bound/array indices, and rigidity
+of distinct numerals. A closed head-normal function must be a lambda; therefore
+a closed typed head-normal application cannot be stuck. Closed equality evidence
+is reflexivity and closed strict-bound evidence is literal `decide`, up to
+conversion of their types. These facts imply the observed literal truth.
+
+`Typing.Evidence.replay_realized` composes this result with typed beta replay:
+if the validated output passes the observer, its semantic conclusion follows
+without an independently supplied output typing certificate. The general
+`HasType.reduces_literal_eq/lt` lemmas also accept an explicit finite beta-reduction
+witness reaching a head-normal output. They do not assume that such a witness
+exists for every well-typed term.
+
+The shared IO byte, graph, proof and token limits remain in force; CLI endpoints
+are bounded U64 numerals. Run `lake env lean --run CheckEvidence.lean eq 7 7`
+(or `lt 1 2`) with `snapshot LF typing-artifact` on stdin. The grouped Nix checks
+exercise actual-Core exports, higher-order index expressions, unnormalized
+indices, independently typed unsupported observations, wrong requests, exact
+snapshot substitutions, malformed bytes, and false claims.
+
+**Remaining obligation:** these are conditional canonical-evidence results,
+not full semantic realization of arbitrary higher-order terms or an unconditional
+consistency theorem for `Raw.Beta`. Universal weak-head normalization, a full
+relational semantics, operational adequacy, exporter fidelity, checker refinement,
+and runtime/compiler soundness remain unproved.

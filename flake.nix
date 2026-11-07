@@ -225,6 +225,7 @@
                 ./proofs/CheckArtifact.lean
                 ./proofs/CheckTyping.lean
                 ./proofs/CheckBetaReplay.lean
+                ./proofs/CheckEvidence.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -238,6 +239,7 @@
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typing_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typed_beta_replay.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_literal_evidence.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 

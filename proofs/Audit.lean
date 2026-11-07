@@ -276,3 +276,32 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.TypedBeta.Examples.no_redex
 #print axioms Jihoo.GraphCertificates.TypedBeta.Examples.wrong_path_rejected
 #print axioms Jihoo.GraphCertificates.TypedBeta.Examples.replay_roundtrip
+
+-- Formed type skeletons and conditional closed literal evidence truth.
+#print axioms Jihoo.CoreBridge.Raw.Beta.Par.type_head
+#print axioms Jihoo.CoreBridge.Raw.Beta.Star.type_head
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.rigid_head
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.eq_injective
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.lt_injective
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.array_injective
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.natural_injective
+#print axioms Jihoo.CoreBridge.Raw.Beta.IsType.skeleton_conversion
+#print axioms Jihoo.CoreBridge.Raw.Beta.IsType.skeleton_exists
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_canonical
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_literal_lt
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_literal_eq
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.reduces_literal_lt
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.reduces_literal_eq
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.observe_sound
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.validate_sound
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.validate_truth
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.false_claim_rejected
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.validateBytes_truth
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.replay_realized
+#print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.expanded_type_not_formed
+#print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.arbitrary_expansion_changes_skeleton
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.Examples.false_equality_rejected
+#print axioms Jihoo.GraphCertificates.Typing.Evidence.Examples.false_bound_rejected
+#print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.nonnormal_index_evidence
+#print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.nonnormal_index_truth
