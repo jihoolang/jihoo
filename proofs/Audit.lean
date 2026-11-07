@@ -263,3 +263,16 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.Typing.wrong_root_rejected
 #print axioms Jihoo.GraphCertificates.Typing.literal_roundtrip
 #print axioms Jihoo.GraphCertificates.Typing.snapshot_literal_accepted
+
+-- Closed typed contextual beta replay and exact canonical association.
+#print axioms Jihoo.GraphCertificates.TypedBeta.validate_sound
+#print axioms Jihoo.GraphCertificates.TypedBeta.Wire.parse_encode
+#print axioms Jihoo.GraphCertificates.TypedBeta.Wire.decode_encode
+#print axioms Jihoo.GraphCertificates.TypedBeta.Wire.encode_injective
+#print axioms Jihoo.GraphCertificates.TypedBeta.Wire.decode_exact
+#print axioms Jihoo.GraphCertificates.TypedBeta.Wire.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.TypedBeta.Examples.head_contract
+#print axioms Jihoo.GraphCertificates.TypedBeta.Examples.output_typed
+#print axioms Jihoo.GraphCertificates.TypedBeta.Examples.no_redex
+#print axioms Jihoo.GraphCertificates.TypedBeta.Examples.wrong_path_rejected
+#print axioms Jihoo.GraphCertificates.TypedBeta.Examples.replay_roundtrip

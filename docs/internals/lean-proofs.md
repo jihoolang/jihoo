@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 255 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 266 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still

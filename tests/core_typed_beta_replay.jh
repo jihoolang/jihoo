@@ -1,0 +1,325 @@
+// Test-only contextual beta replay of a once-retained typed snapshot.
+// Reconstruct and re-export all actual Core nodes, then invoke Core.substitute
+// at exactly the requested path. The caller validates input before invocation
+// and the returned output before downstream use. This importer/IO is not proved.
+import std.env
+import std.os
+import core
+import diag
+
+fn token(inout out: String, value: u64) {
+    var n = value
+    while n > 0 {
+        out.push(if n % 2 == 0 { '0' } else { '1' })
+        n /= 2
+    }
+    out.push(';')
+}
+
+fn fields(inout out: String, values: [u64]) {
+    for value in values { token(&out, value) }
+}
+
+fn write_node(inout out: String, term: core.Term) -> Result((), String) {
+    match term {
+        Var(k) => fields(&out, [0, k as u64])
+        Natural(n) => fields(&out, [1, n])
+        Integer(n) => fields(&out, [2, if n < 0 { 1 } else { 0 },
+            if n < 0 { (0 -% n) as u64 } else { n as u64 }])
+        U64 => token(&out, 3)
+        I64 => token(&out, 4)
+        Array(a) => fields(&out, [5, a as u64])
+        Lt(a, b) => fields(&out, [6, a as u64, b as u64])
+        Eq(a, b) => fields(&out, [7, a as u64, b as u64])
+        Pi(e, a, b) => fields(&out, [8, if e { 1 } else { 0 }, a as u64, b as u64])
+        Lam(e, a, b) => fields(&out, [9, if e { 1 } else { 0 }, a as u64, b as u64])
+        App(a, b) => fields(&out, [10, a as u64, b as u64])
+        Elements(xs) => {
+            fields(&out, [11, xs.len() as u64])
+            for x in xs { token(&out, x as u64) }
+        }
+        Index(a, b, p) => fields(&out, [12, a as u64, b as u64, p as u64])
+        Refl(a) => fields(&out, [13, a as u64])
+        ZeroLe(a) => fields(&out, [14, a as u64])
+        Decide(a, b) => fields(&out, [15, a as u64, b as u64])
+        UAdd(a, b) => fields(&out, [16, a as u64, b as u64])
+        USub(a, b, p) => fields(&out, [17, a as u64, b as u64, p as u64])
+        Prop => token(&out, 18)
+        Universe(level) => {
+            if level > 32 { return Err("universe level exceeds transport bound".to_string()) }
+            fields(&out, [19, level as u64])
+        }
+        _ => return Err("unsupported canonical constructor".to_string())
+    }
+    Ok(())
+}
+
+fn write_graph(inout out: String, graph: core.Core) -> Result((), String) {
+    token(&out, graph.nodes.len() as u64)
+    for n in graph.nodes { write_node(&out, n.term)? }
+    Ok(())
+}
+
+struct Reader {
+    text: str
+    pos: i64
+}
+
+impl Reader {
+    fn number(inout self) -> Result(u64, String) {
+        var value: u64 = 0
+        var count: u64 = 0
+        var last = ';'
+        while self.pos < self.text.len {
+            let b = self.text[self.pos]
+            self.pos += 1
+            if b == ';' {
+                if count > 0 && last != '1' {
+                    return Err("noncanonical natural".to_string())
+                }
+                return Ok(value)
+            }
+            if (b != '0' && b != '1') || count >= 64 {
+                return Err("invalid or excessive canonical natural".to_string())
+            }
+            if b == '1' { value |= (1 as u64) << count }
+            count += 1
+            last = b
+        }
+        Err("truncated canonical natural".to_string())
+    }
+
+    fn bounded(inout self, maximum: u64) -> Result(u64, String) {
+        let n = self.number()?
+        if n > maximum { return Err("canonical number out of range".to_string()) }
+        Ok(n)
+    }
+
+    fn child(inout self, index: u32) -> Result(u32, String) {
+        let n = self.bounded(0xffffffff)?
+        if n >= index as u64 { return Err("canonical child must point backwards".to_string()) }
+        Ok(n as u32)
+    }
+
+    fn read_node(inout self, index: u32) -> Result(core.Term, String) {
+        let tag = self.number()?
+        let term = match tag {
+            0 => core.Term.Var(self.bounded(0xffffffff)? as u32)
+            1 => core.Term.Natural(self.number()?)
+            2 => {
+                let sign = self.bounded(1)?
+                let magnitude = self.bounded(
+                    if sign == 0 { 0x7fffffffffffffff } else { 0x8000000000000000 }
+                )?
+                if sign == 1 && magnitude == 0 { return Err("negative zero".to_string()) }
+                core.Term.Integer(
+                    if sign == 0 { magnitude as i64 } else { (0 as i64) -% magnitude as i64 }
+                )
+            }
+            3 => core.Term.U64
+            4 => core.Term.I64
+            5 => core.Term.Array(self.child(index)?)
+            6 => core.Term.Lt(self.child(index)?, self.child(index)?)
+            7 => core.Term.Eq(self.child(index)?, self.child(index)?)
+            8 => core.Term.Pi(self.bounded(1)? == 1, self.child(index)?, self.child(index)?)
+            9 => core.Term.Lam(self.bounded(1)? == 1, self.child(index)?, self.child(index)?)
+            10 => core.Term.App(self.child(index)?, self.child(index)?)
+            11 => {
+                let count = self.bounded(4096)?
+                var children = Vec(u32).new()
+                for _ in 0..count as i64 { children.push(self.child(index)?) }
+                core.Term.Elements(children)
+            }
+            12 => core.Term.Index(self.child(index)?, self.child(index)?, self.child(index)?)
+            13 => core.Term.Refl(self.child(index)?)
+            14 => core.Term.ZeroLe(self.child(index)?)
+            15 => core.Term.Decide(self.child(index)?, self.child(index)?)
+            16 => core.Term.UAdd(self.child(index)?, self.child(index)?)
+            17 => core.Term.USub(self.child(index)?, self.child(index)?, self.child(index)?)
+            18 => core.Term.Prop
+            19 => core.Term.Universe(self.bounded(32)? as u32)
+            _ => return Err("unsupported canonical constructor".to_string())
+        }
+        Ok(term)
+    }
+
+    fn read_graph(inout self) -> Result(core.Core, String) {
+        let count = self.bounded(4096)?
+        var c = core.Core.new()
+        for index in 0..count as i64 {
+            let term = self.read_node(index as u32)?
+            match c.add(term, diag.Span.nowhere()) {
+                Ok(actual) => {
+                    if actual != index as u32 { return Err(
+                        "reconstruction changed node indices".to_string()
+                    ) }
+                }
+                Err(e) => return Err(e.msg.clone())
+            }
+        }
+        Ok(c)
+    }
+}
+
+fn stdin_once() -> Result(String, String) {
+    var source = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 8 * 1024 * 1024
+    loop {
+        let n = match source.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read canonical artifact".to_string())
+        }
+        if bytes.len() > limit { return Err("canonical artifact exceeds 8 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+// One selected contraction; Core.substitute does capture-avoiding work.
+// Context traversal rebuilds only the selected path, without normalization.
+fn contract(inout c: core.Core, root: u32, path: [u32], at: i64) -> Result(u32, String) {
+    if at == path.len {
+        let core.Term.App(f, a) = c.term(root) else { return Err("not an application".to_string()) }
+        let core.Term.Lam(_, _, body) = c.term(f) else { return Err("not a beta redex".to_string()) }
+        return match c.substitute(body, a, core.DEPTH) {
+            Ok(n) => Ok(n)
+            Err(e) => Err(e.msg.clone())
+        }
+    }
+    let child = path[at]
+    let term = match c.term(root) {
+        Array(a) => {
+            if child >= 1 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            core.Term.Array(a2)
+        }
+        Lt(a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.Lt(a2, b2)
+        }
+        Eq(a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.Eq(a2, b2)
+        }
+        Pi(e, a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.Pi(e, a2, b2)
+        }
+        Lam(e, a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.Lam(e, a2, b2)
+        }
+        App(a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.App(a2, b2)
+        }
+        Index(a, b, p) => {
+            if child >= 3 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            let p2 = if child == 2 { contract(&c, p, path, at + 1)? } else { p }
+            core.Term.Index(a2, b2, p2)
+        }
+        Refl(a) => {
+            if child >= 1 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            core.Term.Refl(a2)
+        }
+        ZeroLe(a) => {
+            if child >= 1 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            core.Term.ZeroLe(a2)
+        }
+        Decide(a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.Decide(a2, b2)
+        }
+        UAdd(a, b) => {
+            if child >= 2 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            core.Term.UAdd(a2, b2)
+        }
+        USub(a, b, p) => {
+            if child >= 3 { return Err("invalid child index".to_string()) }
+            let a2 = if child == 0 { contract(&c, a, path, at + 1)? } else { a }
+            let b2 = if child == 1 { contract(&c, b, path, at + 1)? } else { b }
+            let p2 = if child == 2 { contract(&c, p, path, at + 1)? } else { p }
+            core.Term.USub(a2, b2, p2)
+        }
+        Elements(xs) => {
+            if child as i64 >= xs.len() { return Err("invalid element index".to_string()) }
+            var out = Vec(u32).new()
+            for i, x in xs {
+                out.push(if i == child as i64 { contract(&c, x, path, at + 1)? } else { x })
+            }
+            core.Term.Elements(out)
+        }
+        _ => return Err("constructor has no selected child".to_string())
+    }
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(n) => Ok(n)
+        Err(e) => Err(e.msg.clone())
+    }
+}
+
+fn replay(path: [u32]) -> Result(String, String) {
+    let text = stdin_once()?
+    var r = Reader { text: text.as_str(), pos: 0 }
+    if r.number()? != 3 { return Err("expected snapshot schema".to_string()) }
+    let root = r.bounded(0xffffffff)? as u32
+    let ty = r.bounded(0xffffffff)? as u32
+    var c = r.read_graph()?
+    if r.pos != text.len() || root as i64 >= c.nodes.len() || ty as i64 >= c.nodes.len() {
+        return Err("invalid snapshot roots or trailing data".to_string())
+    }
+    var before = String.new()
+    fields(&before, [3, root as u64, ty as u64])
+    write_graph(&before, c)?
+    if before != text { return Err("reconstructed snapshot mismatch".to_string()) }
+    let output = contract(&c, root, path, 0)?
+    var after = String.new()
+    fields(&after, [3, output as u64, ty as u64])
+    write_graph(&after, c)?
+    // Return separately retained actual output plus the data-only replay record.
+    var out = String.new()
+    out.push_str(after.as_str())
+    out.push('\n')
+    token(&out, 4)
+    out.push_str(before.as_str())
+    out.push_str(after.as_str())
+    token(&out, path.len as u64)
+    for i in path { token(&out, i as u64) }
+    Ok(out)
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() > 129 { eprintln("path exceeds 128"); return 2 }
+    var path = Vec(u32).new()
+    for i in 1..args.len() {
+        let Some(n) = args[i].parse_int() else { eprintln("invalid child index"); return 2 }
+        if n < 0 || n >= 4096 { eprintln("child index out of bounds"); return 2 }
+        path.push(n as u32)
+    }
+    match replay(path.as_slice()) {
+        Ok(bytes) => { print(bytes); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}
