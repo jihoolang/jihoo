@@ -687,9 +687,11 @@ mechanize its soundness, starting from that specification:
    trusted to implement it. Started: [the Lean arithmetic fragment](lean-proofs.md)
    proves open-context evidence soundness, absence of closed `Lt(0, 0)`, and
    semantic soundness and substitution stability of a selected conversion
-   relation. CI checks these proofs and their axioms. This is not full-core
-   consistency, dependent type preservation, quantity soundness or a refinement
-   proof for `core.jh`; those remain open.
+   relation. A second extrinsically typed index-dependent calculus proves
+   capture-avoiding index substitution and beta preservation, including nested
+   binders and dependent result instantiation. CI checks the proofs and their
+   axioms. This is not full-core consistency or preservation, quantity soundness
+   or a refinement proof for `core.jh`; those remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

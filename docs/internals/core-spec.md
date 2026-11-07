@@ -9,9 +9,11 @@ elaborator (`core_elab.jh`) and the textual parser (`core_parse.jh`) are not
 described: they are untrusted, since the kernel checks their output.
 
 **Status.** The full properties in [What is intended](#what-is-intended) are
-not mechanically proved. A [first Lean 4 formalization](lean-proofs.md) proves
-consistency and semantic conversion soundness for a separate arithmetic evidence
-fragment, not this whole calculus or the implementation. The remaining properties
+not mechanically proved. The [Lean 4 formalization](lean-proofs.md) proves
+arithmetic-fragment consistency and semantic conversion soundness, plus
+capture-avoiding index substitution and beta preservation for a separate
+index-dependent function calculus. These are not proofs of this whole calculus
+or the implementation. The remaining properties
 rest on the independent evaluator, rejection suites and reviews. The
 [roadmap](roadmap.md#the-050-release-gate-for-the-native-core) starts the full proof
 from this specification. Do not describe the kernel as verified.
