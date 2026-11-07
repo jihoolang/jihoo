@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 368 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 405 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -525,10 +525,11 @@ simple type. `validate_erasure` derives closed simple typing from the exact
 snapshot-bound typing certificate.
 
 `accessibility_transfer` transfers accessibility of the erased term to the raw
-head relation. Its accessibility premise is explicit. This work does **not**
+head relation. Its accessibility premise is explicit. The erasure/simulation batch alone does **not**
 prove accessibility/normalization of all simply typed terms, existence of a
 normal form for every raw typing derivation, or unconditional false-evidence
-exclusion. Those remain the next mathematical obligations. The regression proofs
+exclusion. The closed-normalization layer below discharges these head-normalization and
+literal-consistency obligations. The erasure regression proofs
 exclude self-application and the standard closed Omega term through simple
 typing, cover higher-order arguments and capture avoidance, and show that an
 unformed expanded result still has Arity.
@@ -540,3 +541,71 @@ not asserted for arbitrary contextual beta or `Core.normal`. There is no claim
 about actual ghost-mode normalization, symbolic sum/subtraction canonicalization,
 compiler erasure, generated code, exporter fidelity or full checker soundness.
 No production checker, certificate format or admissible typing rule is changed.
+
+
+## Closed head normalization and literal consistency
+
+`SimpleHeadNormalization.lean` now discharges the simply typed accessibility
+obligation using a logical relation indexed by simple types. Base reducibility
+means a finite head reduction to a head-normal term. Arrow reducibility requires
+a finite reduction to a lambda whose instantiated body is reducible for every
+reducible argument. The fundamental lemma is proved by the unchanged simple
+typing derivation under reducible simultaneous substitutions. Its lambda case
+uses capture-avoiding substitution composition and weakening/instantiation;
+higher-order arguments use the arrow relation rather than a natural-number
+valuation. Substitution algebra is transferred through the proved erasure of a
+syntactic Raw representation; this introduces no semantic assumption.
+
+The fundamental lemma gives head normalization for every **closed** simply typed
+term. The simple head relation is independently proved deterministic. A finite
+path to a normal term then supplies accessibility of that relation, ruling out
+infinite paths rather than merely selecting a terminating path. These proofs do
+not postulate normalization, use `sorry`, or import a normalization oracle.
+
+`CoreBridgeClosedNormalization.lean` combines this result with the earlier
+closed typing erasure and one-for-one head simulation:
+
+- `HasType.closed_head_accessible`: every closed `Raw.Beta.HasType` derivation
+  has an accessible root-beta/function-spine reduction relation.
+- `HasType.closed_head_normalizes`: there exists a finite `Beta.Steps` path to
+  a term satisfying the existing `Beta.headNormal` predicate.
+- `HasType.closed_literal_eq` and `closed_literal_lt`: closed evidence at exact
+  literal Eq/Lt endpoints implies the literal equality/comparison, with **no**
+  separately assumed normal-form or reduction witness.
+- `no_closed_false_equality` and `no_closed_false_bound`: arbitrary closed
+  terms cannot inhabit false literal propositions in this declarative calculus.
+
+The last two conclusions use existing beta preservation, closed canonical forms
+and Church–Rosser literal injectivity. They apply to the unchanged higher-order
+Raw typing rules, including internal conversions; they are no longer limited to
+the earlier natural-index-only calculus. They do not interpret arbitrary symbolic
+indices as mathematical values or establish general semantic realization.
+
+`TypingClosedConsistency.lean` transfers these conclusions through the existing
+snapshot-bound typing certificate theorem. Accepted exact snapshot/certificate
+bytes imply existence of a typed head-normal Raw result; an independently matched
+literal type implies its truth even when the input evidence is not head normal.
+The theorem does not manufacture an output graph, alter the typing checker,
+relax any wire/step/resource check, or change the existing finite-witness tools.
+A regression accepts a beta-reducible typing certificate, rejects its old
+head-normal observation and empty normalization trace, and applies the new
+literal theorem without a normalization-certificate premise.
+
+### Exact normalization boundary
+
+This is **head beta normalization of closed terms in the selected declarative
+calculus**. Reduction stops at lambdas and non-application constructors. A lambda
+can be head normal while containing a contextual beta redex, and `3 + 4` is head
+normal without evaluating the sum; explicit regression proofs record both facts.
+There is no theorem here of full contextual/strong beta normalization, arbitrary
+open-context normalization, arithmetic or array evaluation, compiler termination,
+actual ghost `Core.normal` refinement, runtime behavior or full checker soundness.
+
+The proof supplies no uniform step/time/space bound and no total bounded producer.
+The 64-step finite certificate limit and all graph, expansion, substitution and
+input-byte caps remain unchanged. The regression family of arbitrarily many
+nested identity applications is covered by the mathematical theorem, including
+65 applications; it does not promise acceptance by the bounded producer. Graph
+export/import and IO correspondence remain independent trust boundaries. Actual
+`Core.normal` still canonicalizes symbolic arithmetic and subtraction beyond the
+modeled head-beta relation and requires separate correspondence work.

@@ -59,3 +59,8 @@ import Jihoo.CoreBridgeSimpleErasure
 import Jihoo.CoreBridgeSimpleSimulation
 import Jihoo.TypingSimpleErasure
 import Jihoo.SimpleErasureExamples
+
+import Jihoo.SimpleHeadNormalization
+import Jihoo.CoreBridgeClosedNormalization
+import Jihoo.TypingClosedConsistency
+import Jihoo.ClosedNormalizationExamples

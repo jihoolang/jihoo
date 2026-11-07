@@ -373,3 +373,23 @@ consistency, source/exporter fidelity, actual `Core.normal` equivalence, runtime
 behavior or full compiler soundness. The existing untrusted typing-certificate
 producer can also reject valid core terms when it cannot find the required
 conversion intermediates; no completeness theorem is introduced here.
+
+
+## Closed consistency without a supplied normalization trace
+
+The proof-only `TypingClosedConsistency.lean` layer uses the new closed head
+normalization theorem for `Raw.Beta.HasType` to strengthen the consequence of the
+**existing** exact-snapshot typing validator. Accepted input has some finite
+head-normal Raw result, and an exact independently selected literal Eq/Lt type
+has true endpoints without requiring a separate reduction certificate or an
+initially head-normal evidence term. The checker still validates typing rather
+than directly deciding the requested arithmetic relation.
+
+This introduces no new executable observer, wire format or acceptance rule.
+Existing head/type normalization tools still validate each actual retained
+snapshot, reject incomplete traces, and enforce their unchanged resource caps.
+The existence theorem does not produce a graph or imply that a bounded producer
+succeeds. It concerns closed declarative head beta only, not full contextual
+normalization, symbolic arithmetic, `Core.normal`, runtime execution, exporter
+fidelity or full compiler soundness. See the closed-head-normalization section
+of [lean-proofs.md](lean-proofs.md) for the precise theorem chain and limits.
