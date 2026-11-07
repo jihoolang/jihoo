@@ -64,20 +64,21 @@ example (Γ : Context) :
 -- The extrinsic relation rejects false result annotations and wrong lengths.
 example (Γ : Context) : ¬ HasType Γ (.refl (.lit 0)) (.eq (.lit 0) (.lit 1)) := by
   intro h
-  cases h
+  have bad := (h.refl_inversion rfl).view_sound (fun _ => 0)
+  simp [Ty.view, Expr.eval] at bad
 
 example (Γ : Context) : ¬ HasType Γ (.elements [3, 7]) (.array (.lit 3)) := by
   intro h
-  cases h
+  have bad := (h.elements_inversion rfl).view_sound (fun _ => 0)
+  simp [Ty.view, Expr.eval] at bad
 
 example (Γ : Context) :
     HasType Γ (.app (.lam (.zeroLe (.var 0))) (.lit 5))
       (.lt (.lit 0) (.add (.lit 5) (.lit 1))) := .app (.lam (.zeroLe _ _))
 
--- This calculus has no type-conversion rule, even for zero plus one.
+-- Arithmetic conversion now accepts equal lengths inside a typing derivation.
 example (Γ : Context) :
-    ¬ HasType Γ (.elements [3]) (.array (.add (.lit 0) (.lit 1))) := by
-  intro h
-  cases h
+    HasType Γ (.elements [3]) (.array (.add (.lit 0) (.lit 1))) :=
+  .convert (.elements _ _) (.array (.symm (.addLiterals 0 1)))
 
 end Jihoo.Indexed

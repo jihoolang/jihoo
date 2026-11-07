@@ -93,6 +93,91 @@ theorem Ty.instantiate_subst (A : Ty) (a : Expr) (σ : Substitution) :
       (A.subst (lift σ)).subst (single (a.subst σ)) := by
   simp only [Ty.subst_comp, lift_single]
 
+/-- Structural type conversion induced by the selected arithmetic equational
+relation. It is not the resource-bounded implementation's conversion algorithm. -/
+inductive Ty.Conv : Ty → Ty → Prop where
+  | u64 : Conv .u64 .u64
+  | i64 : Conv .i64 .i64
+  | array : Arithmetic.Conv a b → Conv (.array a) (.array b)
+  | lt : Arithmetic.Conv a a' → Arithmetic.Conv b b' → Conv (.lt a b) (.lt a' b')
+  | eq : Arithmetic.Conv a a' → Arithmetic.Conv b b' → Conv (.eq a b) (.eq a' b')
+  | pi : Conv A B → Conv (.pi A) (.pi B)
+
+section Conversion
+variable {A B C : Ty}
+
+theorem Ty.Conv.refl (A : Ty) : A.Conv A := by
+  induction A with
+  | u64 => exact .u64
+  | i64 => exact .i64
+  | array => exact .array (.refl _)
+  | lt => exact .lt (.refl _) (.refl _)
+  | eq => exact .eq (.refl _) (.refl _)
+  | pi _ ih => exact .pi ih
+
+theorem Ty.Conv.symm (h : A.Conv B) : B.Conv A := by
+  induction h with
+  | u64 => exact .u64
+  | i64 => exact .i64
+  | array h => exact .array (.symm h)
+  | lt h₁ h₂ => exact .lt (.symm h₁) (.symm h₂)
+  | eq h₁ h₂ => exact .eq (.symm h₁) (.symm h₂)
+  | pi _ ih => exact .pi ih
+
+theorem Ty.Conv.trans (h : A.Conv B) (k : B.Conv C) : A.Conv C := by
+  induction h generalizing C with
+  | u64 => cases k; exact .u64
+  | i64 => cases k; exact .i64
+  | array h => cases k with | array k => exact .array (.trans h k)
+  | lt h₁ h₂ => cases k with | lt k₁ k₂ => exact .lt (.trans h₁ k₁) (.trans h₂ k₂)
+  | eq h₁ h₂ => cases k with | eq k₁ k₂ => exact .eq (.trans h₁ k₁) (.trans h₂ k₂)
+  | pi _ ih => cases k with | pi k => exact .pi (ih k)
+
+theorem Ty.Conv.subst (h : A.Conv B) (σ : Substitution) :
+    (A.subst σ).Conv (B.subst σ) := by
+  induction h generalizing σ with
+  | u64 => exact .u64
+  | i64 => exact .i64
+  | array h => exact .array (h.subst σ)
+  | lt h₁ h₂ => exact .lt (h₁.subst σ) (h₂.subst σ)
+  | eq h₁ h₂ => exact .eq (h₁.subst σ) (h₂.subst σ)
+  | pi _ ih => exact .pi (ih (lift σ))
+
+theorem Ty.Conv.pi_injective (h : Ty.Conv (.pi A) (.pi B)) : A.Conv B := by
+  cases h with | pi h => exact h
+
+/-- Valuation of type structure. A Pi is observed at every possible natural
+argument. This is not an operational semantics of its inhabitants. -/
+inductive TypeView where
+  | u64
+  | i64
+  | array : Nat → TypeView
+  | lt : Nat → Nat → TypeView
+  | eq : Nat → Nat → TypeView
+  | pi : (Nat → TypeView) → TypeView
+
+def Ty.view (ρ : Arithmetic.Env) : Ty → TypeView
+  | .u64 => .u64
+  | .i64 => .i64
+  | .array a => .array (a.eval ρ)
+  | .lt a b => .lt (a.eval ρ) (b.eval ρ)
+  | .eq a b => .eq (a.eval ρ) (b.eval ρ)
+  | .pi B => .pi (fun a => B.view (fun n => match n with | 0 => a | k + 1 => ρ k))
+
+theorem Ty.Conv.view_sound (h : A.Conv B) (ρ : Arithmetic.Env) : A.view ρ = B.view ρ := by
+  induction h generalizing ρ with
+  | u64 => rfl
+  | i64 => rfl
+  | array h => simp only [Ty.view, h.sound ρ]
+  | lt h₁ h₂ => simp only [Ty.view, h₁.sound ρ, h₂.sound ρ]
+  | eq h₁ h₂ => simp only [Ty.view, h₁.sound ρ, h₂.sound ρ]
+  | pi _ ih =>
+      apply congrArg TypeView.pi
+      funext a
+      exact ih _
+
+end Conversion
+
 /-- Value variables are separate from the bound natural-index variables.
 A context can mention the free indices, so binding an index weakens its types. -/
 abbrev Context := Nat → Ty
@@ -234,6 +319,7 @@ inductive HasType : Context → Term → Ty → Prop where
   | app : HasType Γ f (.pi B) → HasType Γ (.app f a) (B.subst (single a))
   | letValue : HasType Γ v A → HasType (Γ.extend A) body B →
       HasType Γ (.letValue v body) B
+  | convert : HasType Γ t A → A.Conv B → HasType Γ t B
 
 /-- Capture-avoiding substitution preserves dependent typing, including beneath
 Pi/lambda binders. No semantic typing hypothesis is used. -/
@@ -257,6 +343,7 @@ theorem HasType.substitution (h : HasType Γ t A) (σ : Substitution) :
   | letValue _ _ ihv ihb =>
       apply HasType.letValue (ihv σ)
       simpa only [Context.extend_subst] using ihb σ
+  | convert _ hc ih => exact .convert (ih σ) (hc.subst σ)
 
 /-- Renaming value variables preserves typing in correspondingly related contexts. -/
 theorem HasType.valueRenaming (h : HasType Γ t A) (ρ : Nat → Nat)
@@ -281,6 +368,7 @@ theorem HasType.valueRenaming (h : HasType Γ t A) (ρ : Nat → Nat)
       apply ihb (liftRenaming ρ)
       intro x
       cases x <;> simp [Context.extend, liftRenaming, hρ]
+  | convert _ hc ih => exact .convert (ih ρ hρ) hc
 
 /-- A real value-substitution lemma. Under an index lambda the inserted values
 are index-weakened; under a value let they are value-weakened. -/
@@ -309,6 +397,31 @@ theorem HasType.valueSubstitution (h : HasType Γ t A)
       cases x with
       | zero => exact .param _ 0
       | succ x => exact (hσ x).valueRenaming Nat.succ (fun _ => rfl)
+  | convert _ hc ih => exact .convert (ih σ hσ) hc
+
+/-- Changing context entries to convertible types preserves the typing result.
+Conversions may appear inside a derivation, not merely at its outermost node. -/
+theorem HasType.contextConversion (h : HasType Γ t A)
+    (hΓ : ∀ x, Ty.Conv (Γ x) (Δ x)) : HasType Δ t A := by
+  induction h generalizing Δ with
+  | param Γ x => exact .convert (.param Δ x) (hΓ x).symm
+  | natural => exact .natural _ _
+  | integer => exact .integer _ _
+  | elements => exact .elements _ _
+  | decide _ _ _ h => exact .decide _ _ _ h
+  | refl => exact .refl _ _
+  | zeroLe => exact .zeroLe _ _
+  | index _ _ iha ihp => exact .index (iha hΓ) (ihp hΓ)
+  | lam _ ih => exact .lam (ih (fun x => (hΓ x).subst shift))
+  | app _ ih => exact .app (ih hΓ)
+  | letValue _ _ ihv ihb =>
+      apply HasType.letValue (ihv hΓ)
+      apply ihb
+      intro x
+      cases x with
+      | zero => exact .refl _
+      | succ x => exact hΓ x
+  | convert _ hc ih => exact .convert (ih hΓ) hc
 
 /-- Pure index-beta and value-let reduction with compatible closure. In particular this relation is
 on untyped terms: typing preservation is proved separately below. -/
@@ -343,40 +456,67 @@ theorem Step.substitution (h : Step t u) (σ : Substitution) :
   | letArg _ ih => exact .letArg (ih σ)
   | letBody _ ih => exact .letBody (ih σ)
 
+/-- Inversion must account for any number of conversions around a lambda. -/
+theorem HasType.lam_inversion (h : HasType Γ t A) (ht : t = .lam body) :
+    ∃ B, HasType (Γ.subst shift) body B ∧ Ty.Conv (.pi B) A := by
+  induction h with
+  | lam hb => cases ht; exact ⟨_, hb, .refl _⟩
+  | convert _ hc ih =>
+      obtain ⟨B, hb, he⟩ := ih ht
+      exact ⟨B, hb, he.trans hc⟩
+  | _ => cases ht
+
+theorem HasType.refl_inversion (h : HasType Γ t A) (ht : t = .refl a) :
+    Ty.Conv (.eq a a) A := by
+  induction h with
+  | refl => cases ht; exact .refl _
+  | convert _ hc ih => exact (ih ht).trans hc
+  | _ => cases ht
+
+theorem HasType.elements_inversion (h : HasType Γ t A) (ht : t = .elements xs) :
+    Ty.Conv (.array (.lit xs.length)) A := by
+  induction h with
+  | elements => cases ht; exact .refl _
+  | convert _ hc ih => exact (ih ht).trans hc
+  | _ => cases ht
+
+/-- Conversion-aware preservation. Lambda inversion exposes a convertible
+result type; substitution and conversion transport it to the application's type. -/
 theorem preservation (h : HasType Γ t A) (step : Step t u) : HasType Γ u A := by
-  induction step generalizing Γ A with
-  | beta body a =>
-      cases h with
-      | app hf =>
-          cases hf with
-          | lam hb =>
-              simpa only [Context.shift_single] using hb.substitution (single a)
-  | lam _ ih =>
-      cases h with
-      | lam hb => exact .lam (ih hb)
-  | app _ ih =>
-      cases h with
-      | app hf => exact .app (ih hf)
-  | indexArray _ ih =>
-      cases h with
-      | index ha hp => exact .index (ih ha) hp
-  | indexProof _ ih =>
-      cases h with
-      | index ha hp => exact .index ha (ih hp)
-  | letBeta v body =>
-      cases h with
-      | letValue hv hb =>
+  induction h generalizing u with
+  | param => cases step
+  | natural => cases step
+  | integer => cases step
+  | elements => cases step
+  | decide => cases step
+  | refl => cases step
+  | zeroLe => cases step
+  | index ha hp iha ihp =>
+      cases step with
+      | indexArray hs => exact .index (iha hs) hp
+      | indexProof hs => exact .index ha (ihp hs)
+  | lam hb ih =>
+      cases step with
+      | lam hs => exact .lam (ih hs)
+  | @app Γ f B a hf ih =>
+      cases step with
+      | app hs => exact .app (ih hs)
+      | beta body a =>
+          obtain ⟨B, hb, hc⟩ := hf.lam_inversion rfl
+          have typed := hb.substitution (single a)
+          rw [Context.shift_single] at typed
+          exact .convert typed (hc.pi_injective.subst (single a))
+  | @letValue Γ v A body B hv hb ihv ihb =>
+      cases step with
+      | letArg hs => exact .letValue (ihv hs) hb
+      | letBody hs => exact .letValue hv (ihb hs)
+      | letBeta v body =>
           apply hb.valueSubstitution (singleValue v)
           intro x
           cases x with
           | zero => exact hv
           | succ x => exact .param _ x
-  | letArg _ ih =>
-      cases h with
-      | letValue hv hb => exact .letValue (ih hv) hb
-  | letBody _ ih =>
-      cases h with
-      | letValue hv hb => exact .letValue hv (ih hb)
+  | convert _ hc ih => exact .convert (ih step) hc
 
 inductive Steps : Term → Term → Prop where
   | refl (t) : Steps t t

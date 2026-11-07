@@ -171,6 +171,12 @@ theorem ScopedTyping.indexSubstitution (h : ScopedTyping n Γ t A)
   · rw [complete_subst]
     exact h.2.2.2.substitution σ
 
+/-- The finite judgment requires the converted result type to be in scope.
+Raw arithmetic equations alone can introduce otherwise unused free variables. -/
+theorem ScopedTyping.convert (h : ScopedTyping n Γ t A) (hc : A.Conv B)
+    (hB : B.Scoped n) : ScopedTyping n Γ t B :=
+  ⟨h.1, h.2.1, hB, .convert h.2.2.2 hc⟩
+
 theorem scoped_preservation (h : ScopedTyping n Γ t A) (hs : Step t u) :
     ScopedTyping n Γ u A :=
   ⟨h.1, scoped_step h.2.1 hs, h.2.2.1, preservation h.2.2.2 hs⟩

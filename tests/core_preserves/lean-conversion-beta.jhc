@@ -1,0 +1,16 @@
+; Representative implementation regressions, not a translation of Lean typing.
+(def converted_function
+ (pi n U64 (Eq n n))
+ (lam n U64 (refl (uadd n 0))))
+(def converted_application
+ (Eq (uadd 7 0) (uadd 7 0))
+ (app converted_function 7))
+
+; An array's converted length is used inside an application and index evidence.
+(def converted_array
+ (Array (uadd 0 1))
+ (array (int 3)))
+(def converted_lookup
+ I64
+ (app (lam xs (Array (uadd 0 1))
+   (index xs 0 (decide-lt 0 1))) converted_array))
