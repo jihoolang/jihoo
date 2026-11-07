@@ -1,0 +1,46 @@
+// Borrowing list observations and imported structural length proofs.
+#![dependent_core]
+import dependent.list
+
+fn joined_with(xs: ref list.List, ys: list.List) -> i64 {
+    let before = list.sum(ys)
+    let zs = list.append(xs, ys)
+    let left = list.sum(xs)
+    left + before + list.sum(zs)
+}
+
+export fn joined(n: u64, m: u64, x: i64) -> i64 {
+    let xs = list.repeat(n, x)
+    joined_with(xs, list.repeat(m, 1))
+}
+
+fn slot(
+    xs: ref list.List,
+    ys: ref list.List,
+    p: erased(Lt(list.length(xs) + list.length(ys), 9))
+) -> i64 {
+    let e = list.append_length(xs, ys)
+    let reversed = transport(
+        fn(k) { Eq(k, list.into_length(list.append(xs, ys))) },
+        e,
+        refl(list.into_length(list.append(xs, ys)))
+    )
+    index([10, 20, 30, 40, 50, 60, 70, 80, 90], list.into_length(list.append(xs, ys)),
+        transport(fn(k) { Lt(k, 9) }, reversed, p))
+}
+
+fn bounded(xs: ref list.List, ys: ref list.List) -> i64 {
+    if_lt(list.length(xs) + list.length(ys), 9, fn(p) { slot(xs, ys, p) }, -1)
+}
+
+fn with_right(xs: ref list.List, m: u64) -> i64 {
+    let ys = list.repeat(m, 1)
+    bounded(xs, ys)
+}
+
+export fn lookup(n: u64, m: u64) -> i64 {
+    let xs = list.repeat(n, 2)
+    with_right(xs, m)
+}
+
+fn main() -> i64 { lookup(2, 3) }

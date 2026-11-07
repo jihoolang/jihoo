@@ -118,6 +118,9 @@ Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
 Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations.
+[The list proof library](docs/language/list-proofs.md) adds borrowed observations,
+owned copies and reusable structural clone/append length theorems, with an
+imported theorem proving an executable array bound.
 Dependent modules now keep separate namespaces and enforce public item and field
 boundaries, including qualified patterns and structural elimination.
 An initial [Lean 4 proof](docs/internals/lean-proofs.md) establishes consistency

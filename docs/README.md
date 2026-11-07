@@ -30,6 +30,7 @@ same on GitHub.
 - [Dependent types](language/dependent-types.md)
 - [Functions in dependent code](language/dependent-functions.md)
 - [Natural-index proof library](language/natural-proofs.md)
+- [List proof library](language/list-proofs.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)

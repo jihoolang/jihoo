@@ -1,0 +1,66 @@
+// Owned lists of i64 with borrowing observations and structural length proofs.
+#![dependent_core]
+
+pub enum List {
+    Nil
+    Cons(i64, List)
+}
+
+pub fn repeat(n: u64, x: i64) -> List {
+    fold(n, List.Nil, fn(i, p, acc) { List.Cons(x, acc) })
+}
+
+pub fn length(xs: ref List) -> u64 {
+    induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs)
+}
+
+// Consumes a freshly produced list while measuring it, freeing every node.
+pub fn into_length(xs: List) -> u64 {
+    induct(fn(t) { u64 }, 0, fn(x, rest, ih) { ih + 1 }, xs)
+}
+
+pub fn sum(xs: ref List) -> i64 {
+    induct(fn(t) { i64 }, 0, fn(x, rest, ih) { x + ih }, xs)
+}
+
+pub fn clone(xs: ref List) -> List {
+    induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(x, ih) }, xs)
+}
+
+// Both inputs remain borrowed; the result owns newly allocated nodes.
+pub fn append(xs: ref List, ys: ref List) -> List {
+    induct(fn(t) { List }, clone(ys), fn(x, rest, ih) { List.Cons(x, ih) }, xs)
+}
+
+pub fn clone_length(xs: ref List) -> Eq(into_length(clone(xs)), length(xs)) {
+    induct(fn(t) { Eq(into_length(clone(t)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(into_length(clone(rest)) + 1, k + 1) }, ih,
+            refl(into_length(clone(rest)) + 1))
+    }, xs)
+}
+
+pub fn append_length(
+    xs: ref List,
+    ys: ref List
+) -> Eq(into_length(append(xs, ys)), length(xs) + length(ys)) {
+    induct(
+        fn(t) { Eq(into_length(append(t, ys)), length(t) + length(ys)) },
+        clone_length(ys),
+        fn(x, rest, ih) {
+            transport(fn(k) { Eq(into_length(append(rest, ys)) + 1, k + 1) }, ih,
+                refl(into_length(append(rest, ys)) + 1))
+        },
+        xs
+    )
+}
+
+pub fn size(xs: ref List) -> refine(fn(k) { Eq(k, length(xs)) }) {
+    pack(length(xs), refl(length(xs)))
+}
+
+pub fn head_or(xs: ref List, missing: i64) -> i64 {
+    match xs {
+        Nil => missing
+        Cons(x, rest) => x
+    }
+}
