@@ -1,0 +1,21 @@
+// A runtime loop builds an owned list whose exact length remains in its type.
+// Imported structural map proofs preserve that index. A caller checks i < n
+// once, then reads the mapped list without measuring its length or checking
+// the bound again. main returns 18.
+#![dependent_core]
+import dependent.sized_list
+
+fn increment(x: i64) -> i64 { x + 1 }
+
+export fn at(n: u64, i: u64, x: i64) -> i64 {
+    let xs = sized_list.repeat(n, x)
+    let ys = sized_list.map(n, xs, increment)
+    if_lt(i, n, fn(p) { sized_list.nth(n, ys, i, p) }, -1)
+}
+
+export fn measured(n: u64, x: i64) -> u64 {
+    let xs = sized_list.repeat(n, x)
+    witness(sized_list.size(n, xs))
+}
+
+fn main() -> i64 { at(3, 2, 17) }

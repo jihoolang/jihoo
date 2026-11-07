@@ -32,6 +32,7 @@ same on GitHub.
 - [Parameterized dependent records](language/dependent-records.md)
 - [Natural-index proof library](language/natural-proofs.md)
 - [List proof library](language/list-proofs.md)
+- [Lists with exact lengths](language/sized-lists.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)
