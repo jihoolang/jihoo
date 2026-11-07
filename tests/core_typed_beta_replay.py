@@ -11,8 +11,9 @@ from pathlib import Path
 import shlex
 import tempfile
 
-from core_typing_producer import Snapshot, produce, encode_numbers
-from core_typing_certificates import ROOT, command, success, snapshot_bytes
+from core_typing_producer import Snapshot, Unsupported, produce, encode_numbers
+from core_certificate_process import ROOT, command, success
+from core_typing_certificates import snapshot_bytes
 
 FIXTURES = {
     'head': ('(def value U64 (app (lam x U64 x) 7))', []),
@@ -156,7 +157,7 @@ def test(compiler, checker, output):
     invoked, published = replay.invoked, replay.published
     try:
         replay.checked(b, other[2], [], consumer=got.append)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid input reached replay')
@@ -167,7 +168,7 @@ def test(compiler, checker, output):
         before, changed_output, typing, artifact, path)
     try:
         replay.checked(b, t, [], consumer=got.append)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid output published')

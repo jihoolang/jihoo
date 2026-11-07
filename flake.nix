@@ -238,6 +238,7 @@
             cd source
             export JIHOO_PATH=$PWD/lib
             (cd proofs && lake build --wfail)
+            python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typing_certificates.py --compiler ${jihoo}/bin/jihoo

@@ -15,7 +15,8 @@ import subprocess
 import tempfile
 
 from core_typing_producer import Snapshot, Unsupported, CHILD_START, encode_numbers, produce, require
-from core_typing_certificates import ROOT, command, success, snapshot_bytes
+from core_certificate_process import ROOT, command, success
+from core_typing_certificates import snapshot_bytes
 from core_typed_beta_replay import replay_bytes
 
 STEP_LIMIT, NODE_LIMIT, WORK_LIMIT = 64, 32768, 2000000
@@ -224,7 +225,7 @@ def test(compiler, checker, output):
     invoked = normalizer.invoked
     try:
         normalizer.generate(b, other[2])
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid input consumed')
@@ -236,7 +237,7 @@ def test(compiler, checker, output):
     normalizer.consume = corrupt
     try:
         normalizer.generate(b, t)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('corrupt intermediate reused')
