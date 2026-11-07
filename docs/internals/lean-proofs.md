@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 405 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 424 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -609,3 +609,73 @@ nested identity applications is covered by the mathematical theorem, including
 export/import and IO correspondence remain independent trust boundaries. Actual
 `Core.normal` still canonicalizes symbolic arithmetic and subtraction beyond the
 modeled head-beta relation and requires separate correspondence work.
+
+
+## Checked actual ghost Core.normal output
+
+`CoreBridgeComputation.lean` introduces a **separate** reduction relation with
+contextual beta and non-overflowing literal UAdd contraction. The historical
+beta-only `Beta.Step` and existing certificates keep their meanings. The new
+relation has conversion, type-formation preservation and fixed-original-type
+term preservation proofs for all its contexts, including dependent arguments,
+binder annotations and evidence positions. Addition's root rule requires
+`m + n < wordBound`; it is not wrapping arithmetic or symbolic sum equivalence.
+The proofs use the unchanged beta-aware typing/conversion judgments.
+
+`CheckedCoreNormalization.lean` is a bounded, proof-producing partial normalizer
+for a conservative subset of that relation. It scans left-to-right and innermost,
+performs at most one contraction per scan, and counts total contractions across
+the entire term. Supported constructors are variables, numeric literals, U64,
+I64, Array types, Eq, Lt, Pi, Lam, App, Refl, Decide and UAdd. Every encountered
+UAdd must reach two literals whose sum fits U64; no residual UAdd is a supported
+normal form. Subtraction, ZeroLe, indexing and array values are rejected. In
+particular a lambda body containing `x + 1` is rejected even when an outer
+application would later close x; this intentionally conservative search is not
+complete for terms with literal results.
+
+The test adapter now invokes **actual `Core.normal(root, depth)` with runtime
+mode explicitly false**. It reconstructs and re-exports a once-retained complete
+input graph before invoking Core, then exports the actual resulting graph and
+root. The existing beta/path and type-index modes continue using substitute;
+the new schema-6 record identifies the distinct ghost normalization operation.
+This difference is tested by a literal sum which Core.normal folds but the
+substitute-only head replay cannot contract.
+
+The checker independently computes a proof of directed beta/add reduction from
+the certified input to a supported normal form and compares it with the decoded
+actual output. It binds the complete independently supplied input/output
+snapshots, both roots, initial typing certificate, requested Core depth and
+proof-search fuel, and all four canonical byte artifacts. The output retains
+the original type-root ID and exact decoded original type. The whole input graph
+must remain an unchanged prefix, including unreachable nodes. Output typing at
+that original type is derived by preservation; no output typing certificate or
+mere convertibility test replaces the directed reduction proof.
+
+### Actual-normalization resource and trust boundary
+
+Input typing and bounded model normalization must succeed **before** invoking
+Core. The proof search permits at most 64 total contractions, 8192 expanded term
+nodes per scan, and depth 128. Every selected substitution is checked against the
+8192-node product bound and depth bound before expansion, and every next result
+is checked again before another scan. Shared graph references count repeatedly
+when expanded. The fixed scan cap and per-scan/product caps bound this search;
+no exact time-complexity or Lean-runtime cost theorem is claimed. Existing graph
+limits (4096 nodes and 200000 expanded nodes per graph root), typing-proof limits,
+64-bit canonical tokens and the 8 MiB total CLI input envelope also apply.
+
+The independently requested Core depth must lie in 1..128. Core has its own
+checking-step and node limits, and can fail even after model admission: a depth-1
+sum is an explicit test. Such failures, unsupported inputs, fuel exhaustion and
+invalid output yield no published bundle or downstream callback. Input files
+are read once, and the immutable retained bytes are used for both invocation
+and validation. The standalone producer emits only a complete validated bundle.
+
+The pure theorem is about decoded retained artifacts and the separate declared
+beta/add relation. Actual execution, importer/exporter, compiler, IO and provenance
+are still tested boundaries, not formally verified source-to-model correspondence.
+This is per-run result validation, **not** general `Core.normal` refinement,
+completeness, bounded success for every typed term, runtime-mode correctness or
+full compiler soundness. Actual Core can reorder symbolic sums and cancel
+subtractions; tests obtain such actual outputs and show this checker rejecting
+them outside its profile. No arithmetic rule was added to the beta-only head
+normalization or consistency theorems.

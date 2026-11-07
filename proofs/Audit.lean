@@ -425,3 +425,24 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.ClosedNormalizationExamples.head_normal_still_reduces
 #print axioms Jihoo.CoreBridge.Raw.Beta.ClosedNormalizationExamples.arithmetic_is_not_evaluated
 #print axioms Jihoo.GraphCertificates.Typing.ClosedConsistency.Examples.nonnormal_certificate_truth
+
+-- Contextual beta/add preservation and checked actual-Core normalization.
+#print axioms Jihoo.CoreBridge.Raw.Computation.Step.conversion
+#print axioms Jihoo.CoreBridge.Raw.Computation.formation_proposition_step
+#print axioms Jihoo.CoreBridge.Raw.Computation.formation_preservation
+#print axioms Jihoo.CoreBridge.Raw.Computation.preservation
+#print axioms Jihoo.CoreBridge.Raw.Computation.preservation_steps
+#print axioms Jihoo.CoreBridge.Raw.Computation.formation_preservation_steps
+#print axioms Jihoo.CoreBridge.Raw.Computation.Steps.map
+#print axioms Jihoo.GraphCertificates.CoreNormal.run_sound
+#print axioms Jihoo.GraphCertificates.CoreNormal.run_typed
+#print axioms Jihoo.GraphCertificates.CoreNormal.admit_typing
+#print axioms Jihoo.GraphCertificates.CoreNormal.validate_sound
+#print axioms Jihoo.GraphCertificates.CoreNormal.Wire.parse_encode
+#print axioms Jihoo.GraphCertificates.CoreNormal.Wire.decode_encode
+#print axioms Jihoo.GraphCertificates.CoreNormal.Wire.encode_injective
+#print axioms Jihoo.GraphCertificates.CoreNormal.Wire.decode_exact
+#print axioms Jihoo.GraphCertificates.CoreNormal.Wire.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.CoreNormal.Examples.literal_add_step
+#print axioms Jihoo.GraphCertificates.CoreNormal.Examples.evidence_original_type
+#print axioms Jihoo.GraphCertificates.CoreNormal.Examples.overflowing_add_rejected

@@ -310,8 +310,53 @@ fn replay(path: [u32], type_mode: bool) -> Result(String, String) {
     Ok(out)
 }
 
+// Actual ghost-mode Core.normal, not a sequence of substitute calls. The
+// caller must pass the Lean input gate before invoking this untrusted adapter.
+fn normal_replay(depth: u32, fuel: u32) -> Result(String, String) {
+    let text = stdin_once()?
+    var r = Reader { text: text.as_str(), pos: 0 }
+    if r.number()? != 3 { return Err("expected snapshot schema".to_string()) }
+    let root = r.bounded(0xffffffff)? as u32
+    let ty = r.bounded(0xffffffff)? as u32
+    var c = r.read_graph()?
+    if r.pos != text.len() || root as i64 >= c.nodes.len() || ty as i64 >= c.nodes.len() {
+        return Err("invalid snapshot roots or trailing data".to_string())
+    }
+    var before = String.new()
+    fields(&before, [3, root as u64, ty as u64])
+    write_graph(&before, c)?
+    if before != text { return Err("reconstructed snapshot mismatch".to_string()) }
+    c.runtime = false
+    let output = match c.normal(root, depth) {
+        Ok(id) => id
+        Err(e) => return Err(e.msg.clone())
+    }
+    var after = String.new()
+    fields(&after, [3, output as u64, ty as u64])
+    write_graph(&after, c)?
+    var out = String.new()
+    out.push_str(after.as_str())
+    out.push('\n')
+    fields(&out, [6, depth as u64, fuel as u64])
+    out.push_str(before.as_str())
+    out.push_str(after.as_str())
+    Ok(out)
+}
+
 fn main() -> i32 {
     let args = env.args()
+    if args.len() > 1 && args[1] == "--normal" {
+        if args.len() != 4 { eprintln("expected --normal DEPTH FUEL"); return 2 }
+        let Some(depth) = args[2].parse_int() else { eprintln("invalid depth"); return 2 }
+        let Some(fuel) = args[3].parse_int() else { eprintln("invalid fuel"); return 2 }
+        if depth < 1 || depth > 128 || fuel < 0 || fuel > 64 {
+            eprintln("normalization parameter bounds"); return 2
+        }
+        match normal_replay(depth as u32, fuel as u32) {
+            Ok(bytes) => { print(bytes); return 0 }
+            Err(message) => { eprintln(message); return 1 }
+        }
+    }
     let type_mode = args.len() > 1 && args[1] == "--type"
     let start = if type_mode { 2 } else { 1 }
     if args.len() > start + 128 { eprintln("path exceeds 128"); return 2 }
