@@ -123,3 +123,48 @@ reductions, runtime ownership/erasure, lowering, or machine-code safety. Existin
 [transformation certificates](graph-certificates.md) still have their stated
 structural and conditional typing boundaries. A closed typing certificate is not
 an automatic proof of every open body/replacement premise in that interface.
+
+## Typed contextual beta replay
+
+`TypedBeta.validate_sound` connects a checked closed input to **one** requested
+beta contraction. A path is a list of zero-based constructor-child indices;
+`[]` selects the root. Flags are not children. Pi/lambda children are annotation
+then body; application children are function then argument; array elements use
+their element index. Index and subtraction include their evidence child. Every
+context constructor of `Raw.Beta.Step` is covered. An absent redex, invalid path,
+reflexive conversion, or multiple contractions is rejected. The checker never
+uses conversion alone as evidence of a requested step.
+
+The version-4 replay record contains complete before/after version-3 snapshots
+and the path. Validation also receives independently retained before/after
+snapshots, the original version-2 typing artifact, and the independently requested
+path. Literal equality binds both complete graphs, all roots, and that path.
+The output's type root ID must equal the input's, and its decoded type must be
+exactly the original decoded type. A convertible replacement type is insufficient.
+The output term is checked against capture-avoiding contraction at the requested
+path. Its typing is then **derived** from `Raw.Beta.HasType.preservation`; no
+output typing derivation or open-context substitution premise is supplied.
+`TypedBeta.Wire.validateBytes_sound` lifts this guarantee to canonical bytes.
+
+The interface accepts a single step, not a chain. The shared bounded scanner caps
+the entire four-artifact input at 8 MiB, each graph at 4096 nodes, numeric tokens
+at 64 bits, and paths at 128 entries. Graph measurement counts every repeated
+edge before unfolding. A fixed number of decoded term/type endpoints is used;
+the existing aggregate typing-premise budget remains in force. At the redex,
+`substitutionSafe` checks size and depth before substitution. These are defensive
+limits, not an operating-system complexity theorem.
+
+`tests/core_typed_beta_replay.jh` reconstructs the retained input graph without
+renumbering, verifies its exact re-export, calls actual `Core.substitute` at the
+selected location, rebuilds the enclosing path, and exports every resulting node.
+The test orchestrator validates input typing before invoking this driver and
+validates replay before calling a downstream consumer. Retained bytes, rather
+than reread paths, are passed at both handoffs. The Python producer, importer,
+exporter, compilation and IO association are still outside the theorem. This is
+not a theorem about `Core.normal`, its reduction strategy, lowering, runtime
+ownership, erasure, or machine code. The beta-aware model's closed semantic
+consistency and all-program checker refinement remain open.
+
+The grouped `lean-proofs` and `graph-certificates` Nix checks now include this
+interface, executable constructor coverage, actual-Core positive examples,
+canonical/association mutations, resource rejections and both handoff gates.

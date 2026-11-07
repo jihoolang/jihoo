@@ -38,3 +38,8 @@ import Jihoo.CoreBridgeBetaExamples
 import Jihoo.TypingCertificates
 import Jihoo.TypingCertificateCodec
 import Jihoo.TypingCertificateExamples
+
+import Jihoo.TypedBetaReplay
+import Jihoo.TypedBetaReplayCodec
+import Jihoo.TypingInput
+import Jihoo.TypedBetaReplayExamples
