@@ -29,6 +29,7 @@ same on GitHub.
 - [Contracts](language/contracts.md)
 - [Dependent types](language/dependent-types.md)
 - [Natural-index proof library](language/natural-proofs.md)
+- [List proof library](language/list-proofs.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)
