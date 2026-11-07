@@ -7,3 +7,7 @@ import Jihoo.Scoped
 import Jihoo.ScopedExamples
 import Jihoo.Semantics
 import Jihoo.ConversionExamples
+import Jihoo.CoreBridge
+import Jihoo.CoreBridgeChecks
+import Jihoo.CoreBridgeLayout
+import Jihoo.CoreBridgeExamples

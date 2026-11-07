@@ -291,18 +291,29 @@ nix build .#checks.x86_64-linux.lean-proofs -L
 nix flake check -L
 ```
 
-The existing two-target CI runs `nix flake check`, including this derivation. The
+The proof check also regenerates the core bridge fixture and compares it with its
+checked-in canonical copy. The existing two-target CI runs `nix flake check`,
+including this derivation and the actual compiler's core suite. The
 Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of forty-three selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of sixty-one selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
 trusts Lean's kernel and standard logical foundation, as well as the toolchain
 used to run it. The theorem audit is an explicit list, not a ban on every unused future declaration: add new public guarantees
 to both that list and its expected count.
+
+## Representation bridge
+
+A [separate checked representation bridge](core-bridge.md) translates bounded,
+annotated inputs into selected actual core constructor shapes, unifies the binder
+namespaces, and proves scope/renaming and numeric certificate properties. It has
+explicit erasure back to the modeled syntax and generates textual fixtures checked
+by the actual compiler. It does not prove typing translation or executable-checker
+correspondence; the obligations below remain.
 
 ## Remaining obligations
 
