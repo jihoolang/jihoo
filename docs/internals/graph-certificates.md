@@ -223,7 +223,7 @@ nor `CheckArtifact` currently validates typing-derivation certificates or infers
 those premises. The intentionally untyped transformation fixtures therefore
 remain valid structural tests, without acquiring a typing or safety guarantee.
 Head-beta retyping also does not imply unrestricted contextual beta preservation;
-the [target-model limitation](lean-proofs.md#why-unrestricted-contextual-preservation-is-not-claimed)
+the [target-model limitation](lean-proofs.md#why-the-historical-conversion-cannot-preserve-contextual-beta)
 explains why the unchanged conversion relation cannot support that claim.
 
 The bridge theorems are `validate_shift_typed` and `validate_substitute_typed`.
@@ -231,3 +231,15 @@ Their premises name the certificate's exact operation and decoded input/replacem
 roots. The result includes the decoded output at the certificate's actual output
 root and its derived target typing. A shift also requires the matching context
 renaming relation; substitution instantiates both the term and its result type.
+
+
+`Jihoo.GraphCertificates.Beta.validate_shift_typed` and
+`Jihoo.GraphCertificates.Beta.validate_substitute_typed` provide the same conditional
+connection for the separate beta-aware target judgment. That judgment supports
+contextual beta preservation, including dependent arguments and annotations, as
+proved in [the beta-aware target development](lean-proofs.md#beta-aware-target-conversion-and-contextual-preservation).
+An accepted substitution example derives output typing at a genuinely
+beta-dependent result type. These theorems still require the exact decoded input
+and replacement typing derivations; the executable certificate validator has not
+become a type checker. No exporter, importer or runtime trust assumption is removed
+by extending the model's conversion relation.

@@ -712,7 +712,11 @@ mechanize its soundness, starting from that specification:
    execution path. Target renaming, typed substitution and head-beta retyping
    connect accepted structural transforms to conditional output typing, without
    changing conversion rules. Fixed-type contextual beta preservation does not
-   hold for that deliberately restricted conversion relation.
+   hold for that deliberately restricted conversion relation. A separate beta-aware
+   target extends conversion and proves contextual beta preservation, including
+   dependent arguments and annotations, via confluence and context transport.
+   This does not prove the executable checker implements that relation, or cover
+   all core reductions, runtime effects, erasure or lowering.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

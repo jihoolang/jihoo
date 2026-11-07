@@ -134,6 +134,8 @@ exporter and execution-association trust boundary. Canonical byte codecs and
 replay checks bind successive transforms to the same graph artifact and root.
 Target renaming, typed substitution and head-beta retyping preserve the restricted
 judgment; typed artifact outputs still require explicit input-typing premises.
+A separate beta-aware target proves fixed-type contextual beta preservation,
+including annotation changes, using proved conversion and context transport.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).
