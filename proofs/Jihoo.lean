@@ -11,3 +11,6 @@ import Jihoo.CoreBridge
 import Jihoo.CoreBridgeChecks
 import Jihoo.CoreBridgeLayout
 import Jihoo.CoreBridgeExamples
+
+import Jihoo.CoreBridgeTyping
+import Jihoo.CoreBridgeTypingExamples
