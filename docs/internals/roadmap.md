@@ -855,6 +855,16 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+The first step is stabilizing dependent types and their source ergonomics;
+mechanized soundness in Lean 4 follows that stabilization, before claiming the
+kernel is verified. Completed preparation includes preservation of dependent
+motives during pure normalization, proof-irrelevant sum ordering, and contextual
+source elaboration: scalar literals take their type from either arithmetic
+operand, contextual lambdas accept checked annotations, and extended data
+motives reject duplicate binders. The annotation regressions check invalid
+proofs before conversion, exact erasure, both targets and native execution.
+These improvements do not themselves constitute a soundness proof.
+
 Proof libraries target the [native dependent core](dependent-core.md).
 Users prove properties of integers, sequences and their own data by
 induction (`sum(xs[0..i])` and the like), import those lemmas and use them

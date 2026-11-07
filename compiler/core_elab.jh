@@ -1487,9 +1487,9 @@ impl Elaborator {
         let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
             return Err(error(e.span, "a data motive requires fn(x) { proposition }"))
         }
-        if ps.len() == 0 || ret.is_some() || ps[0].ty.is_some() || reserved(ps[0].name.as_str()) ||
+        if ps.len() == 0 || ret.is_some() || reserved(ps[0].name.as_str()) ||
             (ps.len() != 1 && !arguments) {
-            return Err(error(e.span, "a data motive has one untyped binder"))
+            return Err(error(e.span, "a data motive requires a binder and no return annotation"))
         }
         if body.stmts.len() != 0 { return Err(error(body.span, "a data motive is one proposition")) }
         let Some(tail) = body.tail else { return Err(error(
@@ -1502,6 +1502,7 @@ impl Elaborator {
         var indices = Vec(u32).new()
         for q in params { indices.push(q) }
         let family = self.c.add(core.Term.Ind(f, indices), e.span)?
+        self.parameter_annotation(ps[0], family, false)?
         self.push(ps[0].name.as_str(), family, false)
         var binders = Vec((bool, u32)).new()
         var failure: Option(diag.Diag) = None
@@ -1515,6 +1516,13 @@ impl Elaborator {
                 failure = Some(error(parameter.span, "a reserved name binds nothing"))
                 break
             }
+            for k in 0..j {
+                if ps[k].name == parameter.name {
+                    failure = Some(error(parameter.span, "duplicate motive parameter"))
+                    break
+                }
+            }
+            if failure.is_some() { break }
             match self.domain(t) {
                 Ok((erased, domain)) => {
                     self.push(parameter.name.as_str(), domain, erased)
@@ -1561,8 +1569,30 @@ impl Elaborator {
         self.c.add(core.Term.Ind(f, xs), sp)
     }
 
-    // Whether `+` is u64 addition: from the expected type, or else from
-    // the type of its left operand.
+    // Literal-only arithmetic has no signedness until context supplies it.
+    // Look through both operands so `1 + n` and `(1 + 2) + n` infer the
+    // same type as `n + 1`. This chooses a type, never converts an operand;
+    // the kernel still rejects mixed signed/unsigned expressions.
+    fn numeric_hint(inout self, e: ast.Expr, depth: u32) -> Result(Option(bool), diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        match e.kind {
+            Int(_) => Ok(None)
+            Unary(ast.UnOp.Neg, _) => Ok(Some(false))
+            Binary(_, a, b) => {
+                let left = self.numeric_hint(a.deref(), depth - 1)?
+                if left.is_some() { return Ok(left) }
+                self.numeric_hint(b.deref(), depth - 1)
+            }
+            _ => {
+                let value = self.expr(e, None, depth - 1)?
+                let ty = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+                let ty = self.c.normal(ty, core.DEPTH)?
+                Ok(Some(self.c.term(ty) == core.Term.U64))
+            }
+        }
+    }
+
+    // The expected scalar type wins; otherwise use a nonliteral operand.
     fn is_u64(inout self, e: ast.Expr, expected: Option(u32)) -> Result(bool, diag.Diag) {
         match expected {
             Some(t) => {
@@ -1571,11 +1601,7 @@ impl Elaborator {
             }
             None => {}
         }
-        let ast.ExprKind.Binary(_, a, _) = e.kind else { return Ok(false) }
-        let left = self.expr(a.deref(), None, core.DEPTH)?
-        let ty = self.c.infer(left, self.ctx.as_slice(), true, core.DEPTH)?
-        let ty = self.c.normal(ty, core.DEPTH)?
-        Ok(self.c.term(ty) == core.Term.U64)
+        Ok(match self.numeric_hint(e, core.DEPTH)? { Some(unsigned) => unsigned, None => false })
     }
 
     fn u64(inout self, sp: diag.Span) -> Result(u32, diag.Diag) {
@@ -1719,6 +1745,28 @@ impl Elaborator {
         Ok((false, self.ty(t, core.DEPTH)?))
     }
 
+    // Context decides relevance. An optional annotation checks the domain;
+    // spelling erased(T) additionally asserts that the binder is erased.
+    fn parameter_annotation(
+        inout self,
+        p: ast.LambdaParam,
+        domain: u32,
+        erased: bool
+    ) -> Result((), diag.Diag) {
+        let Some(t) = p.ty else { return Ok(()) }
+        let (annotated_erased, annotation) = self.domain(t)?
+        // Check before conversion: reduction may erase invalid evidence in
+        // an annotation, and annotations do not survive into the final term.
+        let _ = self.c.infer(annotation, self.ctx.as_slice(), true, core.DEPTH)?
+        if (annotated_erased && !erased) || !self.c.equal(annotation, domain, core.DEPTH)? {
+            return Err(error(
+                t.span,
+                "lambda parameter annotation does not match its expected type"
+            ))
+        }
+        Ok(())
+    }
+
     fn block(
         inout self,
         b: ast.Block,
@@ -1743,8 +1791,8 @@ impl Elaborator {
             return Err(error(e.span, "wrong proof family arity"))
         }
         for i, p in ps {
-            if p.ty.is_some() || reserved(p.name.as_str()) {
-                return Err(error(p.span, "proof family requires untyped U64 binders"))
+            if reserved(p.name.as_str()) {
+                return Err(error(p.span, "a reserved name binds nothing"))
             }
             for j in 0..i {
                 if ps[j].name == p.name { return Err(error(p.span, "duplicate family parameter")) }
@@ -1759,7 +1807,10 @@ impl Elaborator {
             "proof family requires a proposition"
         )) }
         let u = self.u64(e.span)?
-        for p in ps { self.push(p.name.as_str(), u, false) }
+        for p in ps {
+            self.parameter_annotation(p, u, false)?
+            self.push(p.name.as_str(), u, false)
+        }
         var proposition = self.type_expr(tail.deref(), depth - 1)?
         for _ in 0..ps.len() {
             self.pop()
@@ -1793,15 +1844,15 @@ impl Elaborator {
         let ast.ExprKind.Lambda(ps, ret, body) = e.kind else {
             return self.expr(e, Some(expected), depth - 1)
         }
-        if ps.len() != arity || ret.is_some() { return Err(error(
+        if ps.len() != arity { return Err(error(
             e.span,
             "wrong number of lambda parameters"
         )) }
         var domains = Vec((bool, u32)).new()
         var result = expected
         for i, p in ps {
-            if p.ty.is_some() || reserved(p.name.as_str()) {
-                return Err(error(p.span, "contextual lambda parameters are untyped"))
+            if reserved(p.name.as_str()) {
+                return Err(error(p.span, "a reserved name binds nothing"))
             }
             for j in 0..i {
                 if ps[j].name == p.name { return Err(error(p.span, "duplicate lambda parameter")) }
@@ -1810,12 +1861,26 @@ impl Elaborator {
             let core.Term.Pi(erased, domain, rest) = self.c.term(normal) else {
                 return Err(error(p.span, "too many lambda parameters"))
             }
+            self.parameter_annotation(p, domain, erased)?
             self.push(p.name.as_str(), domain, erased)
             // An owned value given to this code is its own to change.
             let at = self.ctx.len() - 1
             if self.owner(at).is_some() { self.mutable[at] = true }
             domains.push((erased, domain))
             result = rest
+        }
+        match ret {
+            Some(t) => {
+                let annotation = self.ty(t, depth - 1)?
+                let _ = self.c.infer(annotation, self.ctx.as_slice(), true, core.DEPTH)?
+                if !self.c.equal(annotation, result, core.DEPTH)? {
+                    return Err(error(
+                        t.span,
+                        "lambda result annotation does not match its expected type"
+                    ))
+                }
+            }
+            None => {}
         }
         var value = self.block(body, Some(result), depth - 1)?
         // A binder the body does not use is freed.
@@ -2131,12 +2196,12 @@ impl Elaborator {
                     let ast.ExprKind.Lambda(ps, ret, yes) = args[2].kind else {
                         return Err(error(args[2].span, "conditional requires fn(p) { value }"))
                     }
-                    if ps.len() != 1 || ps[0].ty.is_some() || ret.is_some() || reserved(
+                    if ps.len() != 1 || ret.is_some() || reserved(
                         ps[0].name.as_str()
                     ) {
                         return Err(error(
                             args[2].span,
-                            "conditional requires one untyped proof binder"
+                            "conditional requires one proof binder and no return annotation"
                         ))
                     }
                     let proposition = if n == "if_eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
@@ -2148,6 +2213,7 @@ impl Elaborator {
                         Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                         None => None
                     }
+                    self.parameter_annotation(ps[0], p, true)?
                     self.push(ps[0].name.as_str(), p, true)
                     let yes = self.block(yes, inner_expected, depth - 1)?
                     self.pop()
