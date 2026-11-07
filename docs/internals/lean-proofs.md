@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 176 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 232 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -345,7 +345,7 @@ regressions. They are not replaced by these proofs, and they do not discharge th
 missing correspondence. The [roadmap](roadmap.md#the-050-release-gate-for-the-native-core)
 continues to distinguish these obligations and their trusted implementation boundary.
 
-## Target substitution and head beta
+## Historical target substitution and head beta
 
 The unified target judgment can be studied without changing its rules or claiming
 that the executable core checker implements them. Renaming and typed substitution
@@ -358,7 +358,7 @@ typed argument can be replaced by capture-avoiding substitution into its body.
 Its result type is instantiated by the same substitution. This is separate from
 an unrestricted contextual-reduction theorem.
 
-### Why unrestricted contextual preservation is not claimed
+### Why the historical conversion cannot preserve contextual beta
 
 The target's deliberately small `Raw.Conv` has numeral addition and selected type
 congruence, but no beta or application conversion. In the empty context, write:
@@ -369,7 +369,7 @@ f = lambda x : U64. refl x
 ```
 
 The term `f a` has target type `Eq(a, a)`. Reducing its argument gives `f 0`, with
-result type `Eq(0, 0)`. The current target conversion cannot identify those two
+result type `Eq(0, 0)`. The historical target conversion cannot identify those two
 types. Thus full fixed-type contextual beta preservation is false for these
 unchanged rules. This is a limitation of the selected declarative target, not a
 counterexample to the implementation's richer normalization-based conversion.
@@ -398,3 +398,62 @@ certificates. `dependent_after_not_original_type` kernel-checks the closed
 contextual limitation above as failure of the original typing judgment, not only
 failure to find a conversion proof. The existing judgment and conversion
 definitions are unchanged.
+
+
+## Beta-aware target conversion and contextual preservation
+
+The separate `Raw.Beta` namespace extends the target model, without changing the
+historical `Raw` judgments or the compiler. Its conversion relation includes
+capture-avoiding beta equivalence and congruence for every selected constructor,
+including both parts of Pi and lambda binders and array elements. It retains only
+non-overflowing closed numeral addition as an arithmetic computation rule. It does
+not equate open machine arithmetic with unrestricted mathematical arithmetic.
+
+This extension requires more than adding a beta rule to the old proof. A lambda's
+type may now be converted through other raw expressions, so the historical Pi
+rigidity lemma no longer applies. The new conversion development uses parallel
+reduction and complete developments to prove the diamond property, confluence,
+and a common-reduct characterization. Pi injectivity follows from that argument;
+it is not a supplied axiom or a premise of preservation.
+
+The beta-aware typing rules otherwise follow the restricted target judgment.
+Renaming, typed substitution, and conversion of current-scope context entries are
+proved again for the extended rules. Legacy derivations embed into the new model.
+Formation and typing preservation are proved together. In particular, changing a
+lambda annotation transports its body derivation to the converted context and
+preserves the erasedness classification of the **formed annotation**. Arbitrary
+raw conversion is not assumed to preserve that classification.
+
+`Raw.Beta.HasType.preservation` keeps the exact original result type through one
+contextual beta step; `preservation_steps` covers finite sequences. Steps may occur
+in dependent application arguments, binder annotations and bodies, indexed types,
+evidence, and array elements. The former dependent-argument counterexample is now
+typed at its original equality type. Negative examples keep distinct type heads
+and binder erasedness separate. This is a theorem for beta reduction and its
+compatible closure, not for all arithmetic, array indexing, or compiler reduction
+rules. It proves neither termination nor progress, and does not establish global
+consistency for arbitrary contexts.
+
+The graph-certificate typing variants use the new judgment, while retaining the
+same explicit input/replacement typing and context-transport premises. Certificate
+acceptance still checks structural transforms rather than these typing premises.
+The exporter, importer, execution association and checker-refinement boundaries
+are unchanged.
+
+### Comparison with the executable core
+
+In `compiler/core.jh`, pure `Core.normal` contracts an application of a lambda by
+`Core.substitute`, and normalizes Pi/lambda annotations and bodies, arrays, bounds
+and equality indices. `Core.equal` normalizes both terms before `identical` compares
+them. The model's beta and constructor congruence rules follow this pure behavior;
+`tests/core_preserves/lean-target-beta-conversion.jhc` exercises dependent argument
+conversion, erased binder annotations, open substitution and array lengths in the
+actual checker and preservation regression.
+
+These finite tests are not a proof that every Lean conversion is accepted by the
+executable checker. The implementation has finite depth/work limits, mutable
+bounded graphs, a broader constructor set, additional computations and proof
+irrelevance. Conversely, the Lean relation is not a decision procedure for the
+implementation. The runtime mode also retains certain effectful arguments and
+tracks traps with `Strict`; the pure beta theorem does not model that evaluator,
+erasure, lowering, or generated machine code. Full compiler soundness remains open.

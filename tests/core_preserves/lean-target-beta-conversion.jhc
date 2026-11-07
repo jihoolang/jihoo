@@ -1,0 +1,31 @@
+; Pure-conversion correspondence regressions for the beta-aware Lean target.
+; Finite checker/preservation tests, not executable-checker refinement proofs.
+; Keep the declared dependent result type unchanged while reducing an argument.
+(def dependent_argument_before
+ (Eq (app (lam y U64 y) 0) (app (lam y U64 y) 0))
+ (app (lam x U64 (refl x)) (app (lam y U64 y) 0)))
+(def dependent_argument_after
+ (Eq (app (lam y U64 y) 0) (app (lam y U64 y) 0))
+ (app (lam x U64 (refl x)) 0))
+
+; Conversion beneath Pi and a lambda annotation; the erased binder is evidence.
+(def annotation_before
+ (pi0 p (Eq (app (lam y U64 y) 0) 0) (Eq 0 0))
+ (lam0 p (Eq (app (lam y U64 y) 0) 0) p))
+(def annotation_after
+ (pi0 p (Eq (app (lam y U64 y) 0) 0) (Eq 0 0))
+ (lam0 p (Eq 0 0) p))
+
+; Open substitution beneath a further binder must not capture the outer index.
+(def open_body_before
+ (pi n U64 (pi k U64 (Eq n n)))
+ (lam n U64 (lam k U64 (app (lam x U64 (refl x)) n))))
+(def open_body_after
+ (pi n U64 (pi k U64 (Eq n n)))
+ (lam n U64 (lam k U64 (refl n))))
+
+; The array's dependent length is compared by pure beta conversion.
+(def array_before
+ (Array (app (lam n U64 n) 1))
+ (app (lam n U64 (array (int 7))) 0))
+(def array_after (Array (app (lam n U64 n) 1)) (array (int 7)))

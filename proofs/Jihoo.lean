@@ -28,3 +28,9 @@ import Jihoo.CoreBridgeSubstitutionAlgebra
 import Jihoo.CoreBridgeMetatheory
 import Jihoo.GraphCertificateTyping
 import Jihoo.CoreBridgeMetatheoryExamples
+
+import Jihoo.CoreBridgeBetaConversion
+import Jihoo.CoreBridgeBetaTyping
+import Jihoo.CoreBridgeBetaPreservation
+import Jihoo.GraphCertificateBetaTyping
+import Jihoo.CoreBridgeBetaExamples
