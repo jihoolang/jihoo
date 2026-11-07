@@ -216,3 +216,75 @@ not full semantic realization of arbitrary higher-order terms or an unconditiona
 consistency theorem for `Raw.Beta`. Universal weak-head normalization, a full
 relational semantics, operational adequacy, exporter fidelity, checker refinement,
 and runtime/compiler soundness remain unproved.
+
+## Finite head-normalization witnesses
+
+The version-5 normalization witness is a finite list of version-4 beta replay
+records. The input snapshot, final output snapshot and original input typing
+artifact are supplied independently. Every record's entire `before` snapshot
+must equal the preceding retained state, including unreachable nodes and both
+root IDs. The last record's `after` snapshot must equal the independently retained
+output. An empty witness requires literal input/output snapshot equality.
+
+Each step recomputes a deterministic function-spine path: contract the current
+application if its function is a lambda; otherwise search only its function
+child. Arguments, lambda bodies and annotations are not searched. The validator
+checks the exact capture-avoiding contraction at that path, rather than accepting
+convertibility or a different valid beta step. The original type root ID and its
+exact decoded type are preserved at every step. `Trace.reduction` derives a
+finite `Raw.Beta.Steps` witness, and `validate_original_type` derives output typing
+at the original decoded input type. No output typing certificate is needed.
+
+A complete witness must end at `Raw.Beta.headNormal`. Prefix validation is a
+separate interface that proves typed continuity but makes no normality claim.
+The untrusted producer validates each prefix before passing its retained output
+to the next actual `Core.substitute` invocation. It validates the final witness
+before publication. Literal mode additionally applies the previous observer;
+`HeadNormalization.Wire.validateLiteralBytes_truth` derives the requested equality
+or strict inequality from successful normalization and original typing. The
+checker never directly tests the requested arithmetic relation.
+
+### Bounds and failures
+
+The verifier caps a chain at 64 steps, each path at 128 entries, the complete
+four-artifact input at 8 MiB and numeric tokens at 64 bits. Each graph retains the
+4096-node, 200000-expanded-occurrence and depth-128 limits. Aggregate serialized
+snapshot occurrences are capped at 32768 nodes. An additional 2000000-unit budget
+charges four times the expanded term and type root sizes for **each snapshot
+occurrence**, including duplicate graphs and repeated roots. Measurement happens
+before unfolding. The original typing derivation has its own premise-work
+budget. Selected substitutions have the existing size-product/depth guards.
+
+The producer accepts fuel from 0 through 64 and measures the selected graph
+substitution before invoking Core. It emits no partial result on fuel exhaustion,
+budget exhaustion, malformed input, failed subprocesses, mismatched prefixes or
+failed final validation. Inputs are read once with bounds; only retained bytes
+cross handoffs. Prefix revalidation has potentially quadratic orchestration cost
+within the fixed step cap. These are conservative defensive bounds, not an OS
+resource theorem or evidence that rejected programs are ill typed.
+
+The verifier is `lake env lean --run CheckNormalization.lean` with
+`input-snapshot LF output-snapshot LF input-typing LF chain` on stdin. Optional
+`eq LEFT RIGHT` or `lt LEFT RIGHT` requests literal truth; `--prefix` checks only
+a typed prefix. The reusable test producer is:
+
+```sh
+python3 tests/core_head_normalization.py \
+  --generate input.snapshot input.typing --driver ./core-typed-beta-replay \
+  --fuel 64 --claim eq 7 7 > checked-normalization.bundle
+```
+
+The driver is built from `tests/core_typed_beta_replay.jh` against the current
+compiler. Omitting `--generate` runs its integration tests. The grouped Nix checks
+exercise actual zero-, one- and multi-step witnesses, higher-order inputs,
+non-head valid beta steps, skipped/reordered/duplicated records, exact graph/root
+substitutions, aggregate repeated-reference budgets, fuel failures, intermediate
+handoff rejection and read-once final publication.
+
+**Remaining boundary:** success certifies one finite supplied trace and its
+head-normal endpoint. Fuel-bounded search is not universal normalization or a
+proof that every accepted core program has a witness. Constructor indices and
+lambda bodies may remain unreduced, and a nonliteral type is not normalized by
+this interface. Importer/exporter and IO fidelity, `Core.normal` strategy,
+higher-order denotational realization, unconditional consistency, runtime
+erasure/ownership and lowering remain outside the theorem.
