@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 232 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 255 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -333,8 +333,11 @@ the retained validated artifact; its importer and invocation remain trusted.
 
 ## Remaining obligations
 
-There is no map from accepted core programs to either `Derives` or `HasType` with
-a proved correctness theorem. Full soundness requires the remaining term syntax, universes, ghost/code
+A [data-only typing-certificate checker](typing-certificates.md) now derives
+closed beta-aware target typing and formation from accepted graph artifacts. Its
+canonical snapshot-bound interface checks the exact exported graph and roots.
+There is still no map from all accepted core programs to either `Derives` or
+`HasType` with a proved executable-checker refinement theorem. Full soundness requires the remaining term syntax, universes, ghost/code
 positions, dependent functions, families and elimination, followed by preservation
 and full consistency. Quantity rules need an execution model of ownership and
 scoped borrows. Erasure and runtime normalization must be related to the pure model,

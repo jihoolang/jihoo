@@ -34,3 +34,7 @@ import Jihoo.CoreBridgeBetaTyping
 import Jihoo.CoreBridgeBetaPreservation
 import Jihoo.GraphCertificateBetaTyping
 import Jihoo.CoreBridgeBetaExamples
+
+import Jihoo.TypingCertificates
+import Jihoo.TypingCertificateCodec
+import Jihoo.TypingCertificateExamples

@@ -53,7 +53,10 @@ private def scanNode (bytes : ByteArray) (start : Nat) : Option Nat := do
   match tag with
   | 0 | 1 | 5 | 13 | 14 => scanFields bytes cursor 1
   | 2 | 6 | 7 | 10 | 15 | 16 => scanFields bytes cursor 2
-  | 3 | 4 => return cursor
+  | 3 | 4 | 18 => return cursor
+  | 19 =>
+      let (level, cursor) ← scanNat bytes cursor
+      if level < universeBound then return cursor else none
   | 8 | 9 | 12 | 17 => scanFields bytes cursor 3
   | 11 =>
       let (count, cursor) ← scanNat bytes cursor
@@ -77,7 +80,7 @@ private def preflight (bytes : ByteArray) : IO Unit := do
     let cursor ← scanGraph bytes cursor
     if cursor = bytes.size then some () else none
   unless result.isSome do
-    throw (IO.userError "invalid canonical shape, token over 64 bits, or graph/child count over 4096")
+    throw (IO.userError "invalid canonical shape, token over 64 bits, universe over 32, or graph/child count over 4096")
 
 private def canonical (bytes : ByteArray) : IO Certificate := do
   preflight bytes

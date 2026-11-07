@@ -53,7 +53,7 @@ def inspect(payload):
         index += 1
         nodes = []
         sizes = {0: 1, 1: 1, 2: 2, 3: 0, 4: 0, 5: 1, 6: 2, 7: 2,
-                 8: 3, 9: 3, 10: 2, 12: 3, 13: 1, 14: 1, 15: 2, 16: 2, 17: 3}
+                 8: 3, 9: 3, 10: 2, 12: 3, 13: 1, 14: 1, 15: 2, 16: 2, 17: 3, 18: 0, 19: 1}
         for _ in range(count):
             tag = tokens[index]
             index += 1
@@ -111,7 +111,7 @@ def test(compiler, checker, output):
                          f"tests/{source}.jh", "-o", str(binary)]))
     replay = Replay(checker, driver)
     seeds, documents = {}, {}
-    for fixture in ("mixed", "all", "var", "above", "closed"):
+    for fixture in ("mixed", "all", "var", "above", "closed", "inert-sorts"):
         raw = require(command([str(snapshot), "shift", fixture, "0"]))
         document = json.loads(raw)
         documents[fixture] = document
@@ -120,6 +120,9 @@ def test(compiler, checker, output):
         path.write_bytes(seeds[fixture])
         # A single filesystem read supplies every consumer of this artifact.
         retained = path.read_bytes()
+        if fixture == "inert-sorts":
+            assert all(node in inspect(retained)["before"] for node in
+                       ((18,), (19, 0), (19, 31), (19, 32)))
         for step, (operation, amount, replacement) in enumerate((
             ("shift", 2, 0), ("substitute", 0, 14), ("shift", 0, 0), ("shift", 1, 0),
         )):
@@ -241,14 +244,35 @@ def test(compiler, checker, output):
         ("schema", single([3], schema=2)), ("operation-tag", single([3], operation=2)),
         ("input-root", single([3], input=1)), ("output-root", single([3], output=1)),
         ("replacement-root", single([3], operation=1, payload=1)),
-        ("unsupported-constructor", single([18])), ("forward-child", single([5, 1])),
+        ("unsupported-constructor", single([20])), ("forward-child", single([5, 1])),
         ("self-child", single([5, 0])), ("var-range", single([0, 2**32])),
         ("natural-range", single([1, 2**64])), ("integer-range", single([2, 0, 2**63])),
         ("negative-zero", single([2, 1, 0])), ("integer-sign", single([2, 2, 1])),
         ("binder-flag", single([8, 2, 0, 0])), ("elements-limit", single([11, 4097])),
         ("nodes-limit", canonical_tokens([1, 0, 0, 0, 0, 4097])),
+        ("universe-limit", single([19, 33])),
+        ("universe-u32-overflow", single([19, 2**32])),
     ):
         rejects_bytes(name, payload)
+    for name, payload in (
+        ("selected-prop", single([18])),
+        ("selected-universe", single([19, 32])),
+        ("reachable-prop", canonical_tokens([1, 1, 1, 0, 0, 2, 18, 5, 0, 2, 18, 5, 0])),
+        ("reachable-universe", canonical_tokens([1, 1, 1, 0, 0, 2, 19, 0, 5, 0,
+                                                2, 19, 0, 5, 0])),
+        ("sort-replacement", canonical_tokens([1, 0, 0, 1, 1, 2, 3, 18, 2, 3, 18])),
+    ):
+        checked = replay.lean(payload)
+        assert checked.returncode == 1 and b"rejected" in checked.stderr, (name, checked)
+        # Parsing/re-exporting an exact sort is allowed. This cannot turn it into
+        # an accepted Raw root: the runner checks Lean before any replay handoff.
+        if name != "sort-replacement":
+            assert replay.lean(require(replay.consume(payload, "shift", 0, 0))).returncode == 1
+        rejected += 1
+    # A bad unreachable sort level must be rejected by both graph checking and
+    # the importer, even though the selected u64 node is otherwise supported.
+    rejects_bytes("unreachable-universe-limit",
+                  canonical_tokens([1, 0, 0, 0, 0, 2, 3, 19, 33, 2, 3, 19, 33]))
     for requested in (("shift", -1, 0), ("shift", 1001, 0), ("shift", 0, 1),
                       ("substitute", 1, 0), ("substitute", 0, 9999), ("rewrite", 0, 0)):
         result = replay.consume(good, *requested)

@@ -238,3 +238,28 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.Examples.accepted_substitution_beta_type
 #print axioms Jihoo.CoreBridge.Raw.Beta.Examples.integer_types_separate
 #print axioms Jihoo.CoreBridge.Raw.Beta.Examples.pi_erasedness_separate
+
+-- Full-graph inert sort transport and independently checked typing artifacts.
+#print axioms Jihoo.GraphCertificates.Node.assemble_prop
+#print axioms Jihoo.GraphCertificates.Node.assemble_universe
+#print axioms Jihoo.GraphCertificates.unfoldGraph_prop_none
+#print axioms Jihoo.GraphCertificates.unfoldGraph_universe_none
+#print axioms Jihoo.GraphCertificates.Typing.validate_sound
+#print axioms Jihoo.GraphCertificates.Typing.validate_exact_roots
+#print axioms Jihoo.GraphCertificates.Typing.Wire.parseStep_encode
+#print axioms Jihoo.GraphCertificates.Typing.Wire.parse_encode
+#print axioms Jihoo.GraphCertificates.Typing.Wire.decode_encode
+#print axioms Jihoo.GraphCertificates.Typing.Wire.encode_injective
+#print axioms Jihoo.GraphCertificates.Typing.Wire.decode_exact
+#print axioms Jihoo.GraphCertificates.Typing.Wire.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.Typing.Wire.parseSnapshot_encode
+#print axioms Jihoo.GraphCertificates.Typing.Wire.decodeSnapshot_encode
+#print axioms Jihoo.GraphCertificates.Typing.Wire.encodeSnapshot_injective
+#print axioms Jihoo.GraphCertificates.Typing.Wire.decodeSnapshot_exact
+#print axioms Jihoo.GraphCertificates.Typing.Wire.validateAgainst_sound
+#print axioms Jihoo.GraphCertificates.Typing.Wire.validateAgainstBytes_sound
+#print axioms Jihoo.GraphCertificates.Typing.literal_accepted
+#print axioms Jihoo.GraphCertificates.Typing.literal_sound
+#print axioms Jihoo.GraphCertificates.Typing.wrong_root_rejected
+#print axioms Jihoo.GraphCertificates.Typing.literal_roundtrip
+#print axioms Jihoo.GraphCertificates.Typing.snapshot_literal_accepted

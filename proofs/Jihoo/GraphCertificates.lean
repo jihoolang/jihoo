@@ -8,7 +8,8 @@ namespace Jihoo.GraphCertificates
 open CoreBridge
 
 /-- Selected constructor payloads, with mathematical numbers before validation.
-Unsupported compiler constructors have no encoding in this datatype. -/
+Administrative sorts are transported exactly but have no Raw interpretation.
+Other unsupported compiler constructors have no encoding in this datatype. -/
 inductive Node where
   | var (index : Nat)
   | natural (value : Nat)
@@ -27,6 +28,8 @@ inductive Node where
   | decide (left right : Nat)
   | uadd (left right : Nat)
   | usub (left right proof : Nat)
+  | prop
+  | universe (level : Nat)
   deriving DecidableEq, Repr
 
 abbrev Graph := Array Node
@@ -36,8 +39,12 @@ def treeLimit : Nat := 200000
 def depthLimit : Nat := 128
 def idBound : Nat := 2^32
 
+/-- Source levels are below 32; inference of level 31 appends level 32.
+Transporting that final administrative sort does not authorize typing it. -/
+def universeBound : Nat := 33
+
 def Node.children : Node → List Nat
-  | .var _ | .natural _ | .integer _ | .u64 | .i64 => []
+  | .var _ | .natural _ | .integer _ | .u64 | .i64 | .prop | .universe _ => []
   | .array a | .refl a | .zeroLe a => [a]
   | .lt a b | .eq a b | .app a b | .decide a b | .uadd a b => [a, b]
   | .pi _ a b | .lam _ a b => [a, b]
@@ -48,6 +55,7 @@ def Node.payloadBounded : Node → Prop
   | .var k => k < idBound
   | .natural n => n < wordBound
   | .integer n => -signedBound ≤ n ∧ n < signedBound
+  | .universe level => level < universeBound
   | _ => True
 
 instance (n : Node) : Decidable n.payloadBounded := by
@@ -88,7 +96,14 @@ def Node.assemble : Node → List Raw → Option Raw
   | .decide _ _, [a, b] => some (.decide a b)
   | .uadd _ _, [a, b] => some (.uadd a b)
   | .usub _ _ _, [a, b, c] => some (.usub a b c)
+  | .prop, _ | .universe _, _ => none
   | _, _ => none
+
+/-- Inert sorts cannot be smuggled into the interpreted fragment at any arity. -/
+theorem Node.assemble_prop (ts : List Raw) : Node.prop.assemble ts = none := rfl
+
+theorem Node.assemble_universe (level : Nat) (ts : List Raw) :
+    (Node.universe level).assemble ts = none := rfl
 
 inductive Related (R : α → β → Prop) : List α → List β → Prop where
   | nil : Related R [] []
@@ -157,6 +172,17 @@ theorem unfoldGraph_sound {fuel id : Nat} {g : Graph} {t : Raw}
                 simp [unfoldGraph, hn, hv, ht] at h
                 exact .node hn hv (BoundedChildren.ofRelated (traverse_sound ht (fun _ _ hx => ih hx))) h
           · simp [unfoldGraph, hn, hv] at h
+
+/-- Exact transport does not give a selected administrative sort a Raw meaning. -/
+theorem unfoldGraph_prop_none {fuel id : Nat} {g : Graph}
+    (lookup : g[id]? = some .prop) : unfoldGraph fuel g id = none := by
+  cases fuel <;> simp [unfoldGraph, lookup, Node.valid, Node.payloadBounded,
+    Node.children, traverse, Node.assemble]
+
+theorem unfoldGraph_universe_none {fuel id level : Nat} {g : Graph}
+    (lookup : g[id]? = some (.universe level)) : unfoldGraph fuel g id = none := by
+  cases fuel <;> simp [unfoldGraph, lookup, Node.valid, Node.payloadBounded,
+    Node.children, traverse, Node.assemble]
 
 /-- Per-node DAG measurements are computed using only earlier entries, before
 unfolding. They bound repeated references by counting each occurrence. -/

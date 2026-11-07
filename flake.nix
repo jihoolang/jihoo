@@ -223,6 +223,7 @@
                 ./proofs/Jihoo.lean
                 ./proofs/CheckGraph.lean
                 ./proofs/CheckArtifact.lean
+                ./proofs/CheckTyping.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -234,6 +235,7 @@
             (cd proofs && lake build --wfail)
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_typing_certificates.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 
