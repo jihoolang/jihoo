@@ -49,6 +49,12 @@ class CheckedNormalizer:
 
 
 FIXTURES = {
+    'discarded-overflow': '(def value U64 (app (lam x U64 7) (uadd 18446744073709551615 1)))',
+    'closed-symbolic-body': '(def value U64 (app (lam x U64 (uadd x 1)) 6))',
+    'curried-symbolic': '(def value U64 (app (app (lam x U64 (lam y U64 (uadd x y))) 3) 4))',
+    'higher-order-symbolic': '(def value U64 (app (lam f (pi x U64 U64) (app f 6)) (lam x U64 (uadd x 1))))',
+    'dependent-symbolic': '(def value (Eq 7 7) (app (lam x U64 (refl (uadd x 1))) 6))',
+    'symbolic-beta-argument': '(def value U64 (app (lam x U64 (uadd x 1)) (app (lam y U64 y) 6)))',
     'literal': '(def value U64 7)',
     'add': '(def value U64 (uadd 3 4))',
     'nested-add': '(def value U64 (uadd (uadd 1 2) (uadd 3 4)))',
@@ -62,8 +68,8 @@ FIXTURES = {
     'bound': '(def value (Lt 1 2) (decide-lt 1 2))',
 }
 REJECTED = {
+    'residual-symbolic-body': '(def value (pi y U64 U64) (app (lam x U64 (lam y U64 (uadd x y))) 3))',
     'symbolic-add': '(def value (pi x U64 U64) (lam x U64 (uadd x 1)))',
-    'closed-symbolic-body': '(def value U64 (app (lam x U64 (uadd x 1)) 6))',
     'symbolic-reorder': '(def value (pi x U64 U64) (lam x U64 (uadd 1 x)))',
     'overflow': '(def value U64 (uadd 18446744073709551615 1))',
     'subtraction': '(def value U64 (usub 3 1 (decide-lt 1 4)))',
@@ -140,7 +146,7 @@ def test(compiler, checker, output):
             raise AssertionError(f'{name} admitted')
         assert normalizer.invoked == invoked and normalizer.published == published
         rejected_inputs += 1
-        if name in ('symbolic-reorder', 'subtraction', 'closed-symbolic-body'):
+        if name in ('symbolic-reorder', 'subtraction', 'residual-symbolic-body'):
             actual, record = success(command([driver, '--normal', '128', '64'], before)).split(b'\n')
             reject(f'unsupported-actual-result-{name}', before, actual, typing, record)
     # Shared references are charged by expanded size, before invoking Core.

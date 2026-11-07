@@ -24,7 +24,8 @@ def normal : Raw → Bool
   | _ => false
 
 /-- None rejects unsupported computation; some none denotes a completed scan.
-Search is left-to-right, innermost, with at most one contraction per scan.
+A syntactic beta redex contracts before descending into its lambda or argument.
+Other contexts are scanned left-to-right, with at most one contraction per scan.
 Every beta expansion is guarded before substitution; no unused branch expands. -/
 def next : (t : Raw) → Option (Option {u : Raw // Reduction t u})
   | .var _ | .natural _ | .integer _ | .u64 | .i64 => some none
@@ -71,20 +72,18 @@ def next : (t : Raw) → Option (Option {u : Raw // Reduction t u})
           match ← next b with
           | some u => pure (some ⟨.decide a u.val, .decideRight u.property⟩)
           | none => pure none
+  | .app (.lam e A body) b =>
+      if Typing.rawSize body * (Typing.rawSize b + 1) ≤ termLimit ∧
+          Typing.rawDepth body + Typing.rawDepth b ≤ depthLimit then
+        some (some ⟨body.subst (single b), Computation.Step.beta e A body b⟩)
+      else none
   | .app a b => do
       match ← next a with
       | some u => pure (some ⟨.app u.val b, .appFunction u.property⟩)
       | none =>
           match ← next b with
           | some u => pure (some ⟨.app a u.val, .appArgument u.property⟩)
-          | none => 
-              match he : a with
-              | .lam e A body =>
-                  if Typing.rawSize body * (Typing.rawSize b + 1) ≤ termLimit ∧
-                      Typing.rawDepth body + Typing.rawDepth b ≤ depthLimit then
-                    pure (some ⟨body.subst (single b), by simpa only [he] using (Computation.Step.beta e A body b)⟩)
-                  else none
-              | _ => pure none
+          | none => pure none
   | .uadd a b => do
       match ← next a with
       | some u => pure (some ⟨.uadd u.val b, .uaddLeft u.property⟩)
