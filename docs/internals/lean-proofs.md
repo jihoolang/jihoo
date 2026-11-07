@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of sixty-one selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of eighty-three selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -312,8 +312,12 @@ A [separate checked representation bridge](core-bridge.md) translates bounded,
 annotated inputs into selected actual core constructor shapes, unifies the binder
 namespaces, and proves scope/renaming and numeric certificate properties. It has
 explicit erasure back to the modeled syntax and generates textual fixtures checked
-by the actual compiler. It does not prove typing translation or executable-checker
-correspondence; the obligations below remain.
+by the actual compiler. A restricted annotation-checking source judgment now
+translates to an independently defined unified-target typing judgment, including
+dependent application and mixed value/index binders. Closed corollaries remove
+context-correspondence premises and connect source typing to the earlier calculus.
+The target is ghost-mode and universe-free. Executable-checker correspondence,
+target preservation and runtime correctness remain separate obligations.
 
 ## Remaining obligations
 

@@ -5,8 +5,8 @@ bounded, annotated subset into trees with selected constructor shapes from
 `compiler/core.jh`. It addresses a concrete gap between the two-sorted
 [proved calculus](lean-proofs.md) and the core's single de Bruijn namespace.
 It is **not** a proof that the executable checker implements the calculus, or
-that every encoded term is accepted. The target has no formal typing judgment
-in this bridge.
+that every encoded term is accepted. A separate restricted declarative typing
+translation is described below; it is not the executable graph checker.
 
 ## The selected subset
 
@@ -18,9 +18,9 @@ applications, and value lets with explicit type annotations.
 
 The annotated input has an explicit erasure to `Indexed.Term`/`Indexed.Ty` and
 `Arithmetic.Expr`. Erasure preserves scope. The mixed-binder example is also
-checked in the earlier finite typing judgment. There is no general proof that
-source typing entails target typing; a let annotation can be wrong, for example,
-while every representation-side property still holds.
+checked in the earlier finite typing judgment. The representation guarantees alone do not establish typing: a let annotation
+can be wrong while every representation-side property still holds. The restricted
+typed translation below checks that annotation explicitly.
 
 `Index.ofExpr` is a checked partial conversion from the earlier arithmetic syntax.
 Successful conversion erases back to **exactly** the input expression. It rejects
@@ -46,8 +46,9 @@ index variable cannot alias a value-variable slot. Scope preservation connects
 these layouts to the encoded target tree.
 
 Encoding also commutes with unified capture-avoiding renaming, including beneath
-both binder sorts and within annotations. Weakening is an instance. This is **not**
-yet a theorem about arbitrary substitution, beta simulation or typing translation.
+both binder sorts and within annotations. Weakening is an instance. This representation theorem alone does not establish arbitrary term substitution
+or beta simulation. The typed extension below separately proves the type-substitution
+correspondence needed by its application rule.
 General encoding functions permit arbitrary maps; the non-aliasing guarantees
 apply when using a valid mixed layout.
 
@@ -111,8 +112,71 @@ formation, inductive families and eliminators, ownership, memory effects and
 most core evidence terms.
 
 Well-scoped, bounded syntax with guarded subtraction can still be ill typed.
-The needed next bridge theorem must connect a precisely restricted source typing
-derivation to a target declarative typing judgment, followed by the separately
-stated trusted or proved relationship to the executable checker. The existing
+The restricted typing theorem below connects a source typing derivation to a
+target declarative judgment. A relationship between that judgment and the
+executable checker remains a separate, unproved obligation. The existing
 fragment preservation and consistency results do not automatically become
 guarantees about all accepted core programs merely because a serializer exists.
+
+## Restricted declarative typing
+
+`CoreBridgeTyping.lean` adds a separate target typing judgment over `Raw` trees.
+Its rules do not mention the source encoder. Variables use a single namespace;
+context entries are expressed in the current scope, and extending a context
+weakens both existing entries and the new annotation. This differs in storage
+convention from the executable checker, which stores declaration-time types and
+weakens them on lookup. Equivalence of those implementations is not assumed to
+be an executable-checker theorem.
+
+The target has ordinary dependent lambda/application rules with capture-avoiding
+substitution into the result type. Type formation checks the indices occurring
+in arrays, inequalities and equalities. A small target conversion relation folds
+non-overflowing numeral addition and transports that equation through selected
+type constructors. In particular, subtraction requires evidence of
+`Lt(b, UAdd(a, 1))`; the generated numeral-endpoint certificate is connected by
+conversion rather than a special rule recognizing the source encoder.
+
+This target is a universe-free **ghost-mode** specification. Proposition domains
+select erased binders, but variable lookup does not enforce runtime erasure
+restrictions. It does not model ownership, lowering or execution. Its conversion
+rules are a specified subset, not the compiler's resource-bounded `equal` routine.
+A proof of translation into this judgment therefore cannot by itself establish
+acceptance by the executable checker or runtime safety.
+
+The finite source judgment `SourceTyping` inspects the annotated bridge syntax.
+In particular, its let rule requires the value to have the stated annotation and
+types the body in the extended value context. It has no general conversion rule
+and no rule for `zeroLe`. It supports bounded numeric literals, arrays and indexed
+reads, closed comparisons, reflexivity, certified closed subtraction, natural-index
+lambdas/applications and value lets. Array lengths must also fit the literal range.
+
+`SourceTyping.translate` proves that every such derivation translates to a target
+typing derivation. Its context correspondence supplies only variable-lookup facts;
+it does not assume target typing of the translated term. Both binder extensions
+preserve that correspondence by proved context lemmas. Dependent application uses
+`Ty.encode_instantiate`, a theorem connecting source index substitution to unified
+target substitution. Value-let elimination uses `Ty.encode_drop_value`, since
+source types cannot depend on value variables.
+
+The target deliberately selects fewer binder modes than the implementation: its
+erasure flag is exactly the domain's proposition classification, excluding legal
+erased U64 binders. Arbitrary target contexts can contain malformed types; no
+regularity theorem for arbitrary contexts or general target preservation/consistency
+theorem is claimed here. The earlier calculus's soundness results apply to its own
+judgment, not automatically to every inhabitant of this target judgment.
+
+`SourceTyping.translate_closed` removes the open context-correspondence hypotheses
+for closed input. The source erasure theorems `SourceTyping.erases` and
+`SourceTyping.erase_closed` also connect this annotation-checking judgment to the
+earlier calculus. Open context matching alone permits same-typed variable aliasing,
+and unused source context entries need not be scoped. The translation theorem is
+valid with these weaker assumptions, but an injective, globally well-formed open
+embedding requires the separate layout/scoping invariants. Closed corollaries avoid
+these open-context issues.
+
+`CoreBridgeTypingExamples.lean` proves source and target typing for every emitted
+fixture declaration, including dependent applications whose result changes under
+index substitution. It also proves that an I64-valued let falsely annotated U64 is
+rejected at every claimed result type, even though its annotation-erased image is
+typable in the earlier calculus. The closed type-formation corollary
+`SourceTyping.closed_type_formed` checks the translated result type separately.
