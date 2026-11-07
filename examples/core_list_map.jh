@@ -1,0 +1,35 @@
+// Reusable map and proof-bounded list access. Mapping preserves element order,
+// although its callbacks run tail-to-head. The imported structural map_length
+// theorem turns the original list's bound into a bound on a computed mapped
+// length; proving it does not run the callback. main returns 40.
+#![dependent_core]
+import dependent.list
+
+fn increment(x: i64) -> i64 { x + 1 }
+
+fn slot(xs: ref list.List, p: erased(Lt(list.length(xs), 5))) -> i64 {
+    let e = list.map_length(xs, increment)
+    let reversed = transport(fn(k) { Eq(k, list.into_length(list.map(xs, increment))) }, e,
+        refl(list.into_length(list.map(xs, increment))))
+    index([10, 20, 30, 40, 50], list.into_length(list.map(xs, increment)),
+        transport(fn(k) { Lt(k, 5) }, reversed, p))
+}
+
+export fn lookup(n: u64, x: i64) -> i64 {
+    let xs = list.repeat(n, x)
+    let size = list.size(xs)
+    if_lt(witness(size), 5, fn(p) {
+        slot(xs, transport(fn(k) { Lt(k, 5) }, proof(size), p))
+    }, -1)
+}
+
+export fn at(n: u64, i: u64, x: i64) -> i64 {
+    let xs = list.repeat(n, x)
+    let ys = list.map(xs, increment)
+    let size = list.size(ys)
+    if_lt(i, witness(size), fn(p) {
+        list.nth(ys, i, transport(fn(k) { Lt(i, k) }, proof(size), p))
+    }, -1)
+}
+
+fn main() -> i64 { lookup(3, 7) }

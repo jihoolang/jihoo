@@ -64,3 +64,34 @@ pub fn head_or(xs: ref List, missing: i64) -> i64 {
         Cons(x, rest) => x
     }
 }
+
+// Read with evidence rather than a fallback or a runtime bounds check.
+pub fn head(xs: ref List, p: erased(Lt(0, length(xs)))) -> i64 {
+    match xs {
+        Nil => absurd(p)
+        Cons(x, rest) => x
+    }
+}
+
+pub fn nth(xs: ref List, i: u64, p: erased(Lt(i, length(xs)))) -> i64 {
+    induct(fn(t, i: u64, p: erased(Lt(i, length(t)))) { i64 }, fn(i, p) { absurd(p) },
+        fn(x, rest, ih, i, p) {
+            if_lt(0, i, fn(q) {
+                let e = lt_add(0, i, 1, q)
+                ih(sub(i, 1, e), lt_cancel(sub(i, 1, e), length(rest), 1, p))
+            }, x)
+        }, xs)(i, p)
+}
+
+// Preserve element order. Structural recursion computes the tail first,
+// so callbacks run from the last element to the first, once per element.
+pub fn map(xs: ref List, f: fn(i64) -> i64) -> List {
+    induct(fn(t) { List }, List.Nil, fn(x, rest, ih) { List.Cons(f(x), ih) }, xs)
+}
+
+pub fn map_length(xs: ref List, f: fn(i64) -> i64) -> Eq(into_length(map(xs, f)), length(xs)) {
+    induct(fn(t) { Eq(into_length(map(t, f)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(into_length(map(rest, f)) + 1, k + 1) }, ih,
+            refl(into_length(map(rest, f)) + 1))
+    }, xs)
+}
