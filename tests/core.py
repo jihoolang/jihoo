@@ -638,6 +638,8 @@ def main():
         validate_modules(compiler, root, temporary, environment, run)
         from core_context import validate_context
         validate_context(compiler, root, temporary, environment, run)
+        from core_constructors import validate_constructors
+        validate_constructors(compiler, root, temporary, environment, run)
         from core_equality import validate_equality
         validate_equality(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_chain import validate_chain
