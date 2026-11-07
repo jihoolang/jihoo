@@ -1,7 +1,7 @@
 import Jihoo.Arithmetic
 
 /-! An extrinsically typed, index-dependent function calculus. Only natural
-indices are bound by lambdas; value variables are free parameters. This is not
+indices are bound by lambdas; values are bound by nondependent lets. This is not
 the full core calculus. See the proof boundary document for the correspondence. -/
 namespace Jihoo.Indexed
 
@@ -93,12 +93,21 @@ theorem Ty.instantiate_subst (A : Ty) (a : Expr) (σ : Substitution) :
       (A.subst (lift σ)).subst (single (a.subst σ)) := by
   simp only [Ty.subst_comp, lift_single]
 
-/-- Free value parameters are separate from the bound natural-index variables.
+/-- Value variables are separate from the bound natural-index variables.
 A context can mention the free indices, so binding an index weakens its types. -/
 abbrev Context := Nat → Ty
 
+def Context.extend (Γ : Context) (A : Ty) : Context
+  | 0 => A
+  | n + 1 => Γ n
+
 def Context.subst (Γ : Context) (σ : Substitution) : Context :=
   fun x => (Γ x).subst σ
+
+@[simp] theorem Context.extend_subst (Γ : Context) (A : Ty) (σ : Substitution) :
+    (Γ.extend A).subst σ = (Γ.subst σ).extend (A.subst σ) := by
+  funext x
+  cases x <;> rfl
 
 theorem Context.shift_lift (Γ : Context) (σ : Substitution) :
     (Γ.subst shift).subst (lift σ) = (Γ.subst σ).subst shift := by
@@ -121,6 +130,7 @@ inductive Term where
   | index : Term → Expr → Term → Term
   | lam : Term → Term
   | app : Term → Expr → Term
+  | letValue : Term → Term → Term
   deriving DecidableEq, Repr
 
 def Term.subst (σ : Substitution) : Term → Term
@@ -134,6 +144,7 @@ def Term.subst (σ : Substitution) : Term → Term
   | .index a i p => .index (a.subst σ) (i.subst σ) (p.subst σ)
   | .lam body => .lam (body.subst (lift σ))
   | .app f a => .app (f.subst σ) (a.subst σ)
+  | .letValue v body => .letValue (v.subst σ) (body.subst σ)
 
 @[simp] theorem Term.subst_id (t : Term) : t.subst Expr.var = t := by
   induction t <;> simp_all [Term.subst]
@@ -147,6 +158,65 @@ theorem Term.instantiate_subst (t : Term) (a : Expr) (σ : Substitution) :
     (t.subst (single a)).subst σ =
       (t.subst (lift σ)).subst (single (a.subst σ)) := by
   simp only [Term.subst_comp, lift_single]
+
+def liftRenaming (ρ : Nat → Nat) : Nat → Nat
+  | 0 => 0
+  | n + 1 => ρ n + 1
+
+def Term.renameValues (ρ : Nat → Nat) : Term → Term
+  | .param x => .param (ρ x)
+  | .natural n => .natural n
+  | .integer n => .integer n
+  | .elements ns => .elements ns
+  | .decide m n => .decide m n
+  | .refl a => .refl a
+  | .zeroLe a => .zeroLe a
+  | .index a i p => .index (a.renameValues ρ) i (p.renameValues ρ)
+  | .lam body => .lam (body.renameValues ρ)
+  | .app f a => .app (f.renameValues ρ) a
+  | .letValue v body => .letValue (v.renameValues ρ) (body.renameValues (liftRenaming ρ))
+
+def liftValues (σ : Nat → Term) : Nat → Term
+  | 0 => .param 0
+  | n + 1 => (σ n).renameValues Nat.succ
+
+def singleValue (v : Term) : Nat → Term
+  | 0 => v
+  | n + 1 => .param n
+
+def Term.valueSubst (σ : Nat → Term) : Term → Term
+  | .param x => σ x
+  | .natural n => .natural n
+  | .integer n => .integer n
+  | .elements ns => .elements ns
+  | .decide m n => .decide m n
+  | .refl a => .refl a
+  | .zeroLe a => .zeroLe a
+  | .index a i p => .index (a.valueSubst σ) i (p.valueSubst σ)
+  | .lam body => .lam (body.valueSubst (fun x => (σ x).subst shift))
+  | .app f a => .app (f.valueSubst σ) a
+  | .letValue v body => .letValue (v.valueSubst σ) (body.valueSubst (liftValues σ))
+
+theorem Term.renameValues_indexSubst (t : Term) (ρ : Nat → Nat) (σ : Substitution) :
+    (t.renameValues ρ).subst σ = (t.subst σ).renameValues ρ := by
+  induction t generalizing ρ σ <;> simp_all [Term.renameValues, Term.subst]
+
+theorem Term.shift_lift (t : Term) (σ : Substitution) :
+    (t.subst shift).subst (lift σ) = (t.subst σ).subst shift := by
+  simp only [Term.subst_comp]
+  rfl
+
+theorem liftValues_indexSubst (υ : Nat → Term) (σ : Substitution) :
+    (fun x => (liftValues υ x).subst σ) = liftValues (fun x => (υ x).subst σ) := by
+  funext x
+  cases x with
+  | zero => rfl
+  | succ x => exact (υ x).renameValues_indexSubst Nat.succ σ
+
+theorem Term.valueSubst_indexSubst (t : Term) (υ : Nat → Term) (σ : Substitution) :
+    (t.valueSubst υ).subst σ = (t.subst σ).valueSubst (fun x => (υ x).subst σ) := by
+  induction t generalizing υ σ <;>
+    simp_all [Term.valueSubst, Term.subst, Term.shift_lift, liftValues_indexSubst]
 
 /-- Extrinsic typing: raw syntax and reduction do not carry typing evidence.
 Pi binds a natural index in the result type; lambda binds it in the body. -/
@@ -162,6 +232,8 @@ inductive HasType : Context → Term → Ty → Prop where
       HasType Γ (.index a i p) .i64
   | lam : HasType (Γ.subst shift) body B → HasType Γ (.lam body) (.pi B)
   | app : HasType Γ f (.pi B) → HasType Γ (.app f a) (B.subst (single a))
+  | letValue : HasType Γ v A → HasType (Γ.extend A) body B →
+      HasType Γ (.letValue v body) B
 
 /-- Capture-avoiding substitution preserves dependent typing, including beneath
 Pi/lambda binders. No semantic typing hypothesis is used. -/
@@ -182,8 +254,63 @@ theorem HasType.substitution (h : HasType Γ t A) (σ : Substitution) :
   | app h ih =>
       simp only [Term.subst, Ty.instantiate_subst]
       exact .app (ih σ)
+  | letValue _ _ ihv ihb =>
+      apply HasType.letValue (ihv σ)
+      simpa only [Context.extend_subst] using ihb σ
 
-/-- Pure beta reduction and compatible closure. In particular this relation is
+/-- Renaming value variables preserves typing in correspondingly related contexts. -/
+theorem HasType.valueRenaming (h : HasType Γ t A) (ρ : Nat → Nat)
+    (hρ : ∀ x, Δ (ρ x) = Γ x) : HasType Δ (t.renameValues ρ) A := by
+  induction h generalizing Δ ρ with
+  | param Γ x => simpa only [hρ, Term.renameValues] using HasType.param Δ (ρ x)
+  | natural => exact .natural _ _
+  | integer => exact .integer _ _
+  | elements => exact .elements _ _
+  | decide _ _ _ h => exact .decide _ _ _ h
+  | refl => exact .refl _ _
+  | zeroLe => exact .zeroLe _ _
+  | index _ _ iha ihp => exact .index (iha ρ hρ) (ihp ρ hρ)
+  | lam _ ih =>
+      apply HasType.lam
+      apply ih ρ
+      intro x
+      simp only [Context.subst, hρ]
+  | app _ ih => exact .app (ih ρ hρ)
+  | letValue _ _ ihv ihb =>
+      apply HasType.letValue (ihv ρ hρ)
+      apply ihb (liftRenaming ρ)
+      intro x
+      cases x <;> simp [Context.extend, liftRenaming, hρ]
+
+/-- A real value-substitution lemma. Under an index lambda the inserted values
+are index-weakened; under a value let they are value-weakened. -/
+theorem HasType.valueSubstitution (h : HasType Γ t A)
+    (σ : Nat → Term) (hσ : ∀ x, HasType Δ (σ x) (Γ x)) :
+    HasType Δ (t.valueSubst σ) A := by
+  induction h generalizing Δ σ with
+  | param Γ x => exact hσ x
+  | natural => exact .natural _ _
+  | integer => exact .integer _ _
+  | elements => exact .elements _ _
+  | decide _ _ _ h => exact .decide _ _ _ h
+  | refl => exact .refl _ _
+  | zeroLe => exact .zeroLe _ _
+  | index _ _ iha ihp => exact .index (iha σ hσ) (ihp σ hσ)
+  | lam _ ih =>
+      apply HasType.lam
+      apply ih (fun x => (σ x).subst shift)
+      intro x
+      exact (hσ x).substitution shift
+  | app _ ih => exact .app (ih σ hσ)
+  | letValue _ _ ihv ihb =>
+      apply HasType.letValue (ihv σ hσ)
+      apply ihb (liftValues σ)
+      intro x
+      cases x with
+      | zero => exact .param _ 0
+      | succ x => exact (hσ x).valueRenaming Nat.succ (fun _ => rfl)
+
+/-- Pure index-beta and value-let reduction with compatible closure. In particular this relation is
 on untyped terms: typing preservation is proved separately below. -/
 inductive Step : Term → Term → Prop where
   | beta (body a) : Step (.app (.lam body) a) (body.subst (single a))
@@ -191,6 +318,9 @@ inductive Step : Term → Term → Prop where
   | app : Step f g → Step (.app f a) (.app g a)
   | indexArray : Step a b → Step (.index a i p) (.index b i p)
   | indexProof : Step p q → Step (.index a i p) (.index a i q)
+  | letBeta (v body) : Step (.letValue v body) (body.valueSubst (singleValue v))
+  | letArg : Step v w → Step (.letValue v body) (.letValue w body)
+  | letBody : Step a b → Step (.letValue v a) (.letValue v b)
 
 /-- Substitution also preserves the untyped reduction relation. -/
 theorem Step.substitution (h : Step t u) (σ : Substitution) :
@@ -203,6 +333,15 @@ theorem Step.substitution (h : Step t u) (σ : Substitution) :
   | app _ ih => exact .app (ih σ)
   | indexArray _ ih => exact .indexArray (ih σ)
   | indexProof _ ih => exact .indexProof (ih σ)
+  | letBeta v body =>
+      simp only [Term.subst, Term.valueSubst_indexSubst]
+      have same : (fun x => (singleValue v x).subst σ) = singleValue (v.subst σ) := by
+        funext x
+        cases x <;> rfl
+      rw [same]
+      exact .letBeta _ _
+  | letArg _ ih => exact .letArg (ih σ)
+  | letBody _ ih => exact .letBody (ih σ)
 
 theorem preservation (h : HasType Γ t A) (step : Step t u) : HasType Γ u A := by
   induction step generalizing Γ A with
@@ -224,6 +363,20 @@ theorem preservation (h : HasType Γ t A) (step : Step t u) : HasType Γ u A := 
   | indexProof _ ih =>
       cases h with
       | index ha hp => exact .index ha (ih hp)
+  | letBeta v body =>
+      cases h with
+      | letValue hv hb =>
+          apply hb.valueSubstitution (singleValue v)
+          intro x
+          cases x with
+          | zero => exact hv
+          | succ x => exact .param _ x
+  | letArg _ ih =>
+      cases h with
+      | letValue hv hb => exact .letValue (ih hv) hb
+  | letBody _ ih =>
+      cases h with
+      | letValue hv hb => exact .letValue hv (ih hb)
 
 inductive Steps : Term → Term → Prop where
   | refl (t) : Steps t t

@@ -689,8 +689,12 @@ mechanize its soundness, starting from that specification:
    semantic soundness and substitution stability of a selected conversion
    relation. A second extrinsically typed index-dependent calculus proves
    capture-avoiding index substitution and beta preservation, including nested
-   binders and dependent result instantiation. CI checks the proofs and their
-   axioms. This is not full-core consistency or preservation, quantity soundness
+   binders and dependent result instantiation. Value lets now have a separate
+   capture-avoiding substitution theorem, and an independent finite-scoping
+   judgment excludes dangling indices and value variables while preserving
+   typing through reduction. These value lets are nondependent; general value
+   domains and conversion-aware typing remain open. CI checks the proofs and
+   their axioms. This is not full-core consistency or preservation, quantity soundness
    or a refinement proof for `core.jh`; those remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against

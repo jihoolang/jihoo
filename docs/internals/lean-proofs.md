@@ -1,8 +1,9 @@
 # Lean proof boundary
 
-The mechanized work toward 0.6 currently has two parts: an arithmetic evidence
+The mechanized work toward 0.6 currently has three parts: an arithmetic evidence
 fragment in `proofs/Jihoo/Arithmetic.lean`, and an index-dependent function calculus
-in `proofs/Jihoo/Indexed.lean`. These are separate declarative specifications
+in `proofs/Jihoo/Indexed.lean` with index lambdas and value lets, and finite scoping
+in `proofs/Jihoo/Scoped.lean`. These are separate declarative specifications
 inspired by the [core specification](core-spec.md), not translations of
 `compiler/core.jh`. They do **not** prove the full dependent kernel, its normalization
 algorithm, ownership, lowering or whole executables sound.
@@ -68,8 +69,7 @@ sound arithmetic foundation on which that correspondence can later be establishe
 ## Index-dependent beta preservation
 
 `Indexed.lean` proves capture-avoiding index substitution and beta subject reduction
-for an **extrinsically typed**, natural-index-dependent function calculus with free
-value parameters. Types include scalar types, arrays indexed by length, `Lt`, `Eq`,
+for an **extrinsically typed**, natural-index-dependent calculus with index lambdas and value lets. Types include scalar types, arrays indexed by length, `Lt`, `Eq`,
 and `pi B`: a function whose implicit domain is a natural index and whose result
 is B. For example, `lam (refl (var 0))` has result type `Eq(i, i)` depending on its
 argument i. Applying it to seven substitutes seven into that result type.
@@ -108,19 +108,17 @@ Lean terms and core graphs.
 ### Indexed correspondence and differences
 
 - Pi and lambda bind **only natural indices**. Their domain is implicit; there is
-  no arbitrary dependent domain, bound value parameter, type abstraction or
-  dependent telescope. Applications accept an arithmetic expression rather than
+  no arbitrary dependent function domain, value lambda, type abstraction or
+  dependent telescope. The nondependent value lets are described below. Applications accept an arithmetic expression rather than
   an arbitrary term of type `u64`.
 - Index variables use de Bruijn numbers: zero is the latest index binder; lifting
   a substitution shifts its inserted expressions beneath a binder. The value
-  parameter namespace is separate and its identifiers are never substituted.
-- The calculus is open: `Context` is a total function from parameter identifiers
-  to types, not a finite context with an empty constructor. There is no finite
-  index-depth or scope judgment; all free index numbers are ambient variables.
-  The substitution theorem is about index substitution, not arbitrary core term
-  substitution or a closedness theorem. Arbitrary proposition assumptions may
-  appear in the parameter context, and preservation does not establish their
-  truth or consistency.
+  variable namespace is separate; value lets and their substitution operate in
+  that namespace, while index substitution does not change its identifiers.
+- The raw typing judgment uses a total `Context` function from value identifiers
+  to types. The stronger `ScopedTyping` judgment below uses a finite list and
+  explicitly bounds both kinds of variables. Preservation still does not
+  establish the truth of proposition assumptions in those contexts.
 - The arithmetic syntax is reused from the first fragment, including totalized
   subtraction. `natural`, `integer`, and `elements` use unbounded mathematical
   numbers. The names `u64` and `i64` identify intended core counterparts; they
@@ -129,7 +127,8 @@ Lean terms and core graphs.
   arithmetic evaluation step, or proof of the core's normalization algorithm.
   In particular `Array(0 + 1)` and `Array(1)` remain different types.
 - Reduction is beta plus closure beneath lambda, in the function of application,
-  and in the array/evidence positions of indexing. Array reads do not reduce,
+  and in the array/evidence positions of indexing, plus value-let substitution
+  and closure in a let's value and body. Array reads do not reduce,
   just as they remain neutral in the core's pure normalization model. There is
   no runtime lookup semantics, progress theorem or executable bounds-safety proof.
 - Universe/Prop formation, ghost/code modes, erased binder distinctions,
@@ -140,6 +139,71 @@ Lean terms and core graphs.
 This is genuine dependent-result substitution and preservation for the stated
 calculus, but **not** preservation for the full core or every reduction it performs.
 A restriction/translation theorem relating the two remains necessary.
+
+## Finite scope and value lets
+
+A value let adds a separate de Bruijn value binder. `Term.valueSubst` shifts the
+inserted term's **indices** when it crosses an index lambda, and its **value
+variables** when it crosses another value let. `HasType.valueRenaming` and
+`HasType.valueSubstitution` prove preservation for these operations, and
+`Term.valueSubst_indexSubst` proves that value and index substitution commute with
+the appropriate transformed substitutions. The earlier `HasType.substitution`
+and `Step.substitution` names continue to mean **index** substitution.
+
+The untyped `Step.letBeta` substitutes any raw value into a raw body. Its subject
+reduction case invokes the value-substitution theorem; typing is not built into
+that reduction rule. The existing single- and multi-step preservation theorems
+therefore now cover both index beta and value-let reduction.
+
+`Scoped.lean` independently defines scope for arithmetic expressions, types and
+terms. A term at scope `(n, m)` has n available index variables and m available
+value variables. An index lambda increments n; a value let's body increments m.
+There are no semantic or typing premises in these structural scope definitions.
+
+The new audited scope guarantees establish:
+
+- Index substitution preserves expression, type and term scope when each inserted
+  expression is within the target scope.
+- Value substitution preserves scope when each inserted term is within the target
+  index and value scopes.
+- `scoped_step`: raw reduction preserves both finite scopes.
+- `ScopedTyping.indexSubstitution`: index substitution preserves finite-context
+  typing, substituting the context's types as well as the term and result type.
+- `scoped_preservation` and `scoped_preservation_many`: one or many reduction steps
+  preserve the finite typing judgment.
+- `no_closed_parameter`: a free value parameter cannot be typed in the empty
+  finite value context.
+
+`ScopedTyping n Γ t A` requires all types in the finite list Γ and the result A to
+be index-scoped at n, the term t to be scoped at `(n, Γ.length)`, and the existing
+extrinsic typing derivation. Internally Γ is completed to a total context with a
+scalar default, but the independent scope condition forbids a term from accessing
+those default entries. Examples demonstrate that raw `HasType` can type such an
+entry while `ScopedTyping` rejects it. A closed scoped judgment uses n = 0 and an
+empty value context; scope/typing preservation is not a progress or consistency
+theorem.
+
+The additional examples cover a closed let beta step, a value with free indices
+moved beneath an index lambda, a free value variable moved beneath a nested value
+let, both binder sorts interleaved, and rejection of dangling indices, value
+variables and context-type indices.
+
+### Value and scope boundaries
+
+These are **nondependent value lets**: types mention index variables, not value
+variables, so the result type does not need substitution of the bound value. This
+is not general dependent value substitution. The auxiliary `letValue` form is
+intended to correspond to suitable core lambda/application redexes; it is not a
+constructor of `core.Term`, and no translation or simulation is proved. The core's
+unified binder namespace also still needs an explicit correspondence with this
+model's two namespaces.
+
+The reduction is pure substitution. It may duplicate or discard a let argument,
+and it reduces underneath a let. It does not model call-by-value evaluation,
+single evaluation, overflow traps, effects, ownership or quantities. Finite scope
+also does not establish numeric ranges, subtraction evidence, universe formation
+or proposition truth. Conversion-aware typing and general value-dependent domains
+remain future increments; neither is silently supplied by the scope judgment.
 
 ## Reproducing the checks
 
@@ -165,7 +229,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of sixteen selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of twenty-eight selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and some use `Quot.sound`; no theorem requires
 `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
