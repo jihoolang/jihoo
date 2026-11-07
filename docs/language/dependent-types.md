@@ -89,6 +89,34 @@ type, usually a `let` or function result annotation. Inference does not search
 other arms or speculate by elaborating an expression twice.
 
 
+## Local dependent functions
+
+A lambda without an expected type needs an annotation on every parameter and on
+its result, and at least one parameter. Annotations may depend on earlier
+parameters. Proof parameters must explicitly say `erased` in this form:
+
+```jihoo
+#![dependent_core]
+
+fn main() -> i64 {
+    let at = fn(n: erased(u64), xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 {
+        index(xs, i, p)
+    }
+    at(2, [10, 20], 1, decide_lt(1, 2))
+}
+```
+
+This returns `20`. A fully annotated lambda can also be called directly, as in
+`(fn(x: u64) -> u64 { x + 1 })(3)`, or partially applied. Scalar captures are
+supported; capturing an owned buffer remains an error. Owned parameters are
+settled by the same rules as named functions. Annotations and bodies are checked
+even when the local function is unused.
+
+Creating or passing a function does not execute its body. Calls retain the body's
+traps and memory effects. These forms use the existing function normalization and
+runtime representation; they do not introduce heap closures, an unrestricted
+function ABI, zero-argument thunks, or inference of missing annotations.
+
 ## Constructors with explicit indices
 
 A parameterized enum constructor normally gets its parameters from the expected

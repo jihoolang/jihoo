@@ -23,8 +23,8 @@ def validate_guide(compiler, root, temporary, environment, run):
     """Every program on the language page compiles and returns what the page says."""
     text = (root / "docs/language/dependent-types.md").read_text()
     programs = re.findall(r"```jihoo\n(.*?)```", text, re.S)
-    assert len(programs) == 5, len(programs)
-    for i, (program, status) in enumerate(zip(programs, (19, 0, 30, 0, 42))):
+    assert len(programs) == 6, len(programs)
+    for i, (program, status) in enumerate(zip(programs, (19, 0, 20, 30, 0, 42))):
         path = temporary / f"guide-{i}.jh"
         path.write_text(program)
         result = run([compiler, "run", str(path)], success=status == 0, env=environment)

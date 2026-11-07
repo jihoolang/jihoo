@@ -2033,6 +2033,52 @@ impl Elaborator {
         result
     }
 
+    // Without context, a fully annotated lambda supplies its own Pi telescope.
+    // Keep annotation validation before normalization, then reuse proof_case's
+    // body checking, erasure and ownership settlement.
+    fn lambda_type(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
+        if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
+        let ast.ExprKind.Lambda(ps, ret, _) = e.kind else {
+            return Err(error(e.span, "expected a lambda"))
+        }
+        if ps.len() == 0 { return Err(error(
+            e.span,
+            "a lambda without context needs at least one parameter"
+        )) }
+        let Some(ret) = ret else { return Err(error(
+            e.span,
+            "a lambda without context needs a result annotation"
+        )) }
+        var domains = Vec((bool, u32)).new()
+        for i, p in ps {
+            if reserved(p.name.as_str()) {
+                return Err(error(p.span, "a reserved name binds nothing"))
+            }
+            for j in 0..i {
+                if ps[j].name == p.name { return Err(error(p.span, "duplicate lambda parameter")) }
+            }
+            let Some(t) = p.ty else { return Err(error(
+                p.span,
+                "a lambda without context needs parameter annotations"
+            )) }
+            let (erased, domain) = self.domain(t)?
+            let _ = self.c.infer(domain, self.ctx.as_slice(), true, core.DEPTH)?
+            domains.push((erased, domain))
+            self.push(p.name.as_str(), domain, erased)
+        }
+        var result = self.ty(ret, depth - 1)?
+        let _ = self.c.infer(result, self.ctx.as_slice(), true, core.DEPTH)?
+        var i = domains.len()
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = domains[i]
+            self.pop()
+            result = self.c.add(core.Term.Pi(erased, domain, result), e.span)?
+        }
+        let _ = self.c.infer(result, self.ctx.as_slice(), true, core.DEPTH)?
+        Ok(result)
+    }
+
     fn proof_case(
         inout self,
         e: ast.Expr,
@@ -2244,11 +2290,16 @@ impl Elaborator {
             Block(b) => self.block(b, expected, depth - 1)
             // A function where its type is known, such as a recursion's result.
             Lambda(ps, _, _) => {
-                let Some(t) = expected else { return Err(error(
-                    sp,
-                    "unsupported expression in dependent_core"
-                )) }
-                self.proof_case(e, t, ps.len(), depth - 1)
+                let t = match expected {
+                    Some(t) => t
+                    None => self.lambda_type(e, depth - 1)?
+                }
+                let value = self.proof_case(e, t, ps.len(), depth - 1)?
+                if expected.is_none() {
+                    let ghost = self.ghost > 0 || self.proposition(t)
+                    self.c.require(value, t, self.ctx.as_slice(), ghost, core.DEPTH)?
+                }
+                Ok(value)
             }
             Field(_, _) => {
                 let Some((f, k)) = self.find_variant(e) else { return Err(error(
@@ -2365,8 +2416,8 @@ impl Elaborator {
                     return self.apply(function, args.as_slice(), sp, depth)
                 }
                 let ast.ExprKind.Name(n) = f.kind else {
-                    // A recursion whose result is a function, given its arguments.
-                    let is_call = match f.kind { Call(_, _) => true, _ => false }
+                    // A function-valued call or fully annotated lambda, applied directly.
+                    let is_call = match f.kind { Call(_, _) | Lambda(_, _, _) => true, _ => false }
                     if !is_call { return Err(error(f.span, "calls require a named function")) }
                     let function = self.expr(f.deref(), None, depth - 1)?
                     return self.apply(function, args.as_slice(), sp, depth)

@@ -359,6 +359,26 @@ flat data before MIR lowering. Pure conversion does not: a dependent motive may 
 different types, while `IfLt` and `IfEq` require one common type. Consequently a symbolic elimination
 and its manually distributed form need not be definitionally equal. Concrete scrutinees still compute.
 
+At an application, an argument normalized to `Lam` is already a function value:
+its body is not evaluated when passed. It can be substituted even when the body
+contains arithmetic, reads or memory effects. Likewise `Strict(Lam(...), b)`
+normalizes to `b`. For a runtime lambda application, a `Strict(prefix, value)`
+argument becomes `Strict(prefix, App(lambda, value))` before substitution, so its
+prefix is evaluated once before the body. Discarding a nested strict result
+reassociates `Strict(Strict(prefix, value), b)` to
+`Strict(prefix, Strict(value, b))`. This allows arithmetic captured by a partial
+application without a runtime closure, while retaining capture-time overflow
+traps even when the function is unused. Applying the function still normalizes
+its body under the ordinary runtime rules. A retained redex representing an
+effectful capture is floated out of a runtime lambda's argument position, with
+the consumer shifted under its binder. Discarding such a redex similarly moves
+the discard under that binder. The effectful argument is never substituted or
+duplicated; only its bound value is reused. This handles called and unused partial
+applications such as `f(free(alloc(n, 7), 5))` without runtime closure allocation. This exception is local to application and
+`Strict`: the predicates below still inspect lambda bodies when analyzing invoked
+loop and induction cases. Runtime normalization is not covered by a general
+formal preservation or compiler refinement theorem.
+
 Three syntactic predicates decide this, each conservative at the depth limit, and otherwise the
 disjunction over a term's children:
 
