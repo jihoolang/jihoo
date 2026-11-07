@@ -22,10 +22,10 @@ import tempfile
 
 from core_typing_producer import (
     Snapshot, Unsupported, encode_certificate, encode_numbers, graph_tokens,
-    inspect_certificate, produce,
+    inspect_certificate, produce, require,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+from core_certificate_process import ROOT, command, success
 FIXTURES = {
     'lambda': '(def value (pi x U64 U64) (lam x U64 x))',
     'application': '(def value U64 (app (lam x U64 x) 7))',
@@ -59,18 +59,6 @@ OUTSIDE = {
 }
 
 
-def command(argv, payload=None, *, cwd=ROOT):
-    return subprocess.run(list(map(str, argv)), input=payload, capture_output=True,
-                          cwd=cwd, timeout=180)
-
-
-def success(result):
-    assert result.returncode == 0, (result.args, result.returncode,
-                                    result.stdout.decode(errors='replace'),
-                                    result.stderr.decode(errors='replace'))
-    return result.stdout
-
-
 def snapshot_bytes(snapshot, *, graph=None, term=None, ty=None):
     return encode_numbers([3, snapshot.term if term is None else term,
                            snapshot.type if ty is None else ty,
@@ -80,8 +68,8 @@ def snapshot_bytes(snapshot, *, graph=None, term=None, ty=None):
 def association(snapshot, certificate):
     """Tested IO guard, not a theorem: compare exact graph bytes and root IDs."""
     s, c = Snapshot.read(snapshot), inspect_certificate(certificate)
-    assert (s.term, s.type) == (c['termRoot'], c['typeRoot']), 'selected roots changed'
-    assert s.graph_bytes == encode_numbers(graph_tokens(c['graph'])), 'complete graph changed'
+    require((s.term, s.type) == (c['termRoot'], c['typeRoot']), 'selected roots changed')
+    require(s.graph_bytes == encode_numbers(graph_tokens(c['graph'])), 'complete graph changed')
 
 
 def changed(c, **fields):
@@ -159,7 +147,7 @@ def test(compiler, checker, output):
         assert bound.returncode == 1 and b'rejected' in bound.stderr, (name, bound)
         try:
             association(snapshot, certificate)
-        except AssertionError:
+        except Unsupported:
             counts['association_rejected'] += 1
         else:
             raise AssertionError(f'accepted switched artifact: {name}')

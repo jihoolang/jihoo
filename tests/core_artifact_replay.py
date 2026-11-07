@@ -19,18 +19,8 @@ import shlex
 import subprocess
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def command(argv, payload=None, *, cwd=ROOT):
-    return subprocess.run(argv, input=payload, capture_output=True, cwd=cwd, timeout=180)
-
-
-def require(result):
-    assert result.returncode == 0, (result.args, result.returncode,
-                                    result.stdout.decode(errors="replace"),
-                                    result.stderr.decode(errors="replace"))
-    return result.stdout
+from core_certificate_process import ROOT, command, success as require
+from core_typing_producer import Unsupported
 
 
 def canonical_tokens(values):
@@ -93,8 +83,6 @@ class Replay:
         invoke = self.consume if consumer is None else consumer
         result = require(invoke(retained, operation, amount, replacement))
         expected = (0, amount) if operation == "shift" else (1, replacement)
-        observed = inspect(result)
-        assert (observed["operation"], observed["payload"]) == expected, "operation mismatch"
         # The theorem-backed checker compares complete graphs and roots, not
         # merely hashes or equality of their decoded expressions.
         require(self.lean(retained + b"\n" + result, "--chain", operation, str(expected[1])))
@@ -164,7 +152,7 @@ def test(compiler, checker, output):
         try:
             replay.checked(prior, operation, amount, replacement,
                            consumer=lambda *_: produced)
-        except AssertionError:
+        except Unsupported:
             rejected += 1
         else:
             raise AssertionError(f"accepted invalid handoff: {name}")
@@ -295,7 +283,7 @@ def test(compiler, checker, output):
     assert rejected_prior.returncode == 1 and b"rejected" in rejected_prior.stderr
     try:
         replay.checked(invalid, "shift", 0, consumer=forbidden)
-    except AssertionError:
+    except Unsupported:
         assert not called
         rejected += 1
     else:

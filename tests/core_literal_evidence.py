@@ -13,7 +13,8 @@ import shlex
 import tempfile
 
 from core_typing_producer import Snapshot, produce, encode_certificate
-from core_typing_certificates import ROOT, command, success, snapshot_bytes
+from core_certificate_process import ROOT, command, success
+from core_typing_certificates import snapshot_bytes
 
 FIXTURES = {
     'literal-equality': ('(def value (Eq 7 7) (refl 7))', ['eq', '7', '7']),

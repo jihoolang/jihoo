@@ -12,15 +12,8 @@ import subprocess
 import sys
 import tempfile
 from core_typing_producer import Snapshot, Unsupported, produce, require, encode_numbers
-from core_typing_certificates import ROOT, command, snapshot_bytes
-
-
-def success(result):
-    """Enforce subprocess failure even when Python assertions are disabled."""
-    if result.returncode != 0:
-        raise Unsupported(f'command failed ({result.returncode}): {result.args}: '
-                          f'{result.stderr.decode(errors="replace")}')
-    return result.stdout
+from core_certificate_process import ROOT, command, success
+from core_typing_certificates import snapshot_bytes
 
 
 def record_bytes(before, after, depth=128, fuel=64):

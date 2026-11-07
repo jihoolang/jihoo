@@ -426,3 +426,33 @@ bodies contain symbolic arithmetic before beta contraction. Core's broader
 symbolic normalization is not modeled. This is checked per-run output within the
 profile, not a formal proof of the Core implementation or its general termination.
 See [lean-proofs.md](lean-proofs.md) for the exact semantic and resource boundaries.
+
+
+## Producer process failures and Python optimization
+
+The canonical artifact replay, typed beta replay, head/type normalization and
+actual Core.normal producers share `tests/core_certificate_process.py` for
+subprocess execution and successful-exit enforcement. A nonzero exit (including
+termination by a signal) raises `Unsupported`; this is an ordinary runtime
+check, not a Python assertion. Executable-launch errors and timeouts propagate
+before downstream use. The head/type/Core.normal command-line producers report
+failure without publishing a partial bundle. The exact host-side typing
+association checks also remain active when Python assertions are disabled.
+
+`tests/core_producer_gates.py` tests normal Python, `-O`, and
+`PYTHONOPTIMIZE=1/2`. Controlled subprocess results isolate every input, driver,
+intermediate-prefix and final-output boundary, including timeouts, launch
+errors, positive controls, consumer calls and CLI stdout. It tests that a failed
+prefix is never passed to another Core invocation. These subprocess doubles
+verify orchestration only; they do not establish that any artifact is valid.
+The existing real-Core/Lean suites independently exercise semantic acceptance,
+rejection, exact artifact association and actual process failures. Both layers
+run in `graph-certificates`. Ordinary test-only assertions elsewhere are not
+producer acceptance rules, and this does not claim that the entire test suite
+is meaningful when run with assertions disabled.
+
+Canonical artifact replay now delegates operation and whole-graph continuity
+checks directly to `CheckArtifact --chain` before returning the result. Its
+independent Python `inspect` routine is used only for test observations, not as
+an additional parser on the production handoff path. No Lean acceptance rule,
+normalization profile, graph codec, resource limit or compiler behavior changes.

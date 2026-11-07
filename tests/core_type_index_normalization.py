@@ -16,7 +16,8 @@ import tempfile
 
 from core_head_normalization import Normalizer, STEP_LIMIT, chain_bytes, head_request
 from core_typing_producer import Snapshot, Unsupported, produce, require
-from core_typing_certificates import ROOT, command, success, snapshot_bytes
+from core_certificate_process import ROOT, command, success
+from core_typing_certificates import snapshot_bytes
 from core_typed_beta_replay import replay_bytes
 
 
@@ -160,7 +161,7 @@ def test(compiler, checker, output):
     invoked = normalizer.invoked
     try:
         normalizer.generate(b, other[3], claim=q)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid input used')
@@ -172,7 +173,7 @@ def test(compiler, checker, output):
     normalizer.consume = corrupt
     try:
         normalizer.generate(b, t, claim=q)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid intermediate used')
@@ -181,7 +182,7 @@ def test(compiler, checker, output):
     final_seen = []
     try:
         normalizer.generate(b, t, claim=['eq', '7', '8'], consumer=final_seen.append)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid final claim published')
