@@ -1203,16 +1203,50 @@ impl Elaborator {
         None
     }
 
-    // `E.V` for a data type E.
+    // `E.V` or `E(indices).V` for a data type E.
     fn find_variant(self, e: ast.Expr) -> Option((u32, u32)) {
         let ast.ExprKind.Field(base, variant) = e.kind else { return None }
-        let Some(name) = self.path_name(base.deref()) else { return None }
+        let family = match base.kind {
+            Call(f, _) => f.deref()
+            _ => base.deref()
+        }
+        let Some(name) = self.path_name(family) else { return None }
         let Some(f) = self.find_family(name.as_str()) else { return None }
         if !self.c.families[f as i64].data { return None }
         for k, c in self.c.families[f as i64].constructors {
             if c.name == variant { return Some((f, k as u32)) }
         }
         None
+    }
+
+    // Explicit family indices supply context for a constructor's fields,
+    // including when the surrounding expression has no expected type.
+    fn variant(
+        inout self,
+        e: ast.Expr,
+        f: u32,
+        k: u32,
+        args: [ast.Expr],
+        expected: Option(u32),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let ast.ExprKind.Field(base, _) = e.kind else {
+            return Err(error(sp, "malformed data constructor"))
+        }
+        match base.kind {
+            Call(_, _) => {
+                self.exposed(f, sp)?
+                let annotation = self.type_expr(base.deref(), depth - 1)?
+                // Check before normalization: conversion may discard invalid
+                // evidence in an index, but a written annotation must be valid.
+                let _ = self.c.infer(annotation, self.ctx.as_slice(), true, core.DEPTH)?
+                let value = self.construct(f, k, args, Some(annotation), sp, depth)?
+                self.c.require(value, annotation, self.ctx.as_slice(), true, core.DEPTH)?
+                Ok(value)
+            }
+            _ => self.construct(f, k, args, expected, sp, depth)
+        }
     }
 
     // A constructor, fully applied; each field is elaborated against the
@@ -2221,7 +2255,7 @@ impl Elaborator {
                     sp,
                     "unsupported expression in dependent_core"
                 )) }
-                self.construct(f, k, [], expected, sp, depth)
+                self.variant(e, f, k, [], expected, sp, depth)
             }
             // `S { field: value, ... }`, every field once.
             StructLit(path, inits) => {
@@ -2297,7 +2331,8 @@ impl Elaborator {
                     )) } }
                 }
                 match self.find_variant(f.deref()) {
-                    Some((family, k)) => return self.construct(
+                    Some((family, k)) => return self.variant(
+                        f.deref(),
                         family,
                         k,
                         args.as_slice(),

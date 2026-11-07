@@ -677,6 +677,25 @@ fields, and `Slot.Full(s)` takes its parameter from the expected type:
 a function's result, a parameter or an arm. A parameter is a field of
 the value, erased, so it is never evaluated.
 
+When no surrounding type is available, write the parameters on the constructor:
+
+```jihoo
+let empty = Slot(n).Empty
+let full = Slot(4).Full(pack(2, decide_lt(2, 4)))
+match Slot(3).Empty { Empty => 7; Full(j) => witness(j) }
+```
+
+`Slot(n).Variant(fields...)` supplies the same field context as a local
+`Slot(n)` annotation; nested constructors and `pack` can use that context.
+Imported families use `module.Slot(n).Variant`, including import aliases.
+Every parameter must be supplied in declaration order. An explicit qualifier
+must agree with any surrounding expected type, up to existing core conversion.
+The compiler checks the written qualifier before normalization, including proof
+terms in its indices, so an invalid proof cannot disappear during conversion.
+The parameters remain erased and are not evaluated at runtime. Existing private
+family/field restrictions and ownership checks apply unchanged; this is source
+elaboration into the existing `Con` term, not a new kernel rule.
+
 In `.jhc`, `(data E N P (c TYPE) ...)` declares a data type with `N`
 indices, the first `P` of them parameters; constructors take the
 parameters explicitly, `(Full n s)`. The other indices are true indices,

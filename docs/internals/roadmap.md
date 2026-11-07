@@ -891,6 +891,14 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+Explicit dependent constructor qualifiers, `Slot(n).Empty` and
+`Slot(n).Full(value)`, now supply field context without requiring a local type
+annotation. They preserve erased parameters, module identity/private boundaries
+and ownership, with checks before annotation normalization. The regression suite
+compares their MIR to contextual construction and checks both targets, native
+execution and invalid proofs. This changes source ergonomics, not the core rules
+or the scope of the mechanized soundness results.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.

@@ -89,6 +89,39 @@ type, usually a `let` or function result annotation. Inference does not search
 other arms or speculate by elaborating an expression twice.
 
 
+## Constructors with explicit indices
+
+A parameterized enum constructor normally gets its parameters from the expected
+type, as in `let s: Slot(3) = Slot.Empty`. Write `Slot(3).Empty` or
+`Slot(3).Full(value)` when the surrounding expression has no type annotation:
+
+```jihoo
+#![dependent_core]
+
+enum Slot(n: u64) {
+    Empty
+    Full(refine(fn(j) { Lt(j, n) }))
+}
+
+fn main() -> i64 {
+    let slot = Slot(3).Full(pack(2, decide_lt(2, 3)))
+    match slot {
+        Empty => -1
+        Full(j) => index([10, 20, 30], witness(j), proof(j))
+    }
+}
+```
+
+This returns 30. The qualifier supplies the field types, including the expected
+refinement for `pack`. It may use earlier variables or computed indices, and an
+imported type is written `module.Slot(n).Variant`. Supply all parameters in their
+declaration order. The resulting value must still match any surrounding type;
+`Slot(3).Empty` cannot produce a `Slot(4)`.
+
+Indices and their evidence are checked before normalization and remain erased
+at runtime. Module privacy and ownership rules are unchanged. Contextual
+`Slot.Variant(...)` syntax remains available when its type is already known.
+
 ## Owned memory
 
 `buffer(n)` is `n` i64 values on the heap, and data declared with `enum` or `struct` that
