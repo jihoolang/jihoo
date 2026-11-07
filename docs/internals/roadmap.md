@@ -891,6 +891,14 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+`dependent.sized_list` packages an owned list with a private erased length
+proof in `Sized(n)`. Its runtime repeat loop maintains `Sized(iteration)`;
+imported structural map evidence preserves the index for subsequent bounded
+reads. Exact MIR agrees with an unindexed wrapper reference, while native
+allocation tests state the real wrapper overhead. This supplies a typed loop
+postcondition and imported induction in one executable library consumer, not
+ordinary `ensures` syntax or full mechanized soundness.
+
 `dependent.list` supplies owned i64 lists, borrowing observations, clone/append
 operations, proof-bounded head/nth access and higher-order map with structural
 length theorems. Imported append/map lemmas prove executable array bounds.
