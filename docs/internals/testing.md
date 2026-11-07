@@ -93,6 +93,9 @@ the runner. Its suites:
   `tests/core_buffer.py` adds owned buffers: native calls are linked
   with counting `malloc`/`free` wrappers, and each must free what it
   allocates; leaks, double frees, uses after free and captures are rejected.
+  `tests/core_list_map.py` checks reusable higher-order maps and proof-bounded
+  list access, with callback order, erased proofs, counted allocations, signed
+  traps and malformed imported induction cases.
   `tests/core_list.py` adds recursive data on the heap: `match`,
   structural recursion, trees and parameterized lists, proofs by
   induction, and counted nodes.

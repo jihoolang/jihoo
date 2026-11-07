@@ -892,9 +892,11 @@ sizes are listed in the design.
 ### 7. Proofs as a library (0.6)
 
 `dependent.list` supplies owned i64 lists, borrowing observations, clone/append
-operations and structural length theorems. An imported append lemma proves an
-executable array bound. Both-target object tests, native O0/O2 models and counted
-allocations cover the runtime operations; unused malformed imported induction
+operations, proof-bounded head/nth access and higher-order map with structural
+length theorems. Imported append/map lemmas prove executable array bounds.
+Map preserves element order while invoking callbacks tail-to-head; callback
+allocation traces, ghost erasure and overflow/underflow are regression-tested.
+Both-target object tests, native O0/O2 models and counted allocations cover the runtime operations; unused malformed imported induction
 cases are rejected. This fills an initial list-theory library slice, not the full
 0.6 completion criterion or a mechanized compiler soundness proof.
 

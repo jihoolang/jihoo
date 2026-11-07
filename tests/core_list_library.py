@@ -151,7 +151,7 @@ def validate_list_library(compiler, root, temporary, environment, run):
     command('check', importer, *flags, env=env)
     command('emit-obj', importer, *flags, '-o', str(temporary / 'list-import-control.o'), env=env)
     for old, new in (
-        ('}, refl(0), fn(x, rest, ih)', '}, refl(1), fn(x, rest, ih)'),
+        ('Eq(into_length(clone(t)), length(t)) }, refl(0),', 'Eq(into_length(clone(t)), length(t)) }, refl(1),'),
         ('refl(into_length(clone(rest)) + 1)', 'ih'),
         ('        clone_length(ys),', '        refl(0),'),
         ('refl(into_length(append(rest, ys)) + 1)', 'ih'),
