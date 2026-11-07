@@ -51,3 +51,6 @@ import Jihoo.BetaEvidenceExamples
 import Jihoo.HeadNormalization
 import Jihoo.HeadNormalizationCodec
 import Jihoo.HeadNormalizationExamples
+
+import Jihoo.TypeIndexNormalizationCodec
+import Jihoo.TypeIndexNormalizationExamples

@@ -331,3 +331,20 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.arguments_not_searched
 #print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.bodies_not_searched
 #print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.false_bound_rejected
+
+-- Composed term and type-index normalization.
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Transition.preserve
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Trace.preserve
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Trace.termRoot
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Trace.evidence
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Trace.reduction
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.validatePrefix_sound
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.validate_sound
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.validate_lineage
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.validate_truth
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.false_claim_rejected
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Wire.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Wire.validateBytes_truth
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Examples.left_first
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Examples.right_next
+#print axioms Jihoo.GraphCertificates.TypeIndexNormalization.Examples.no_arithmetic
