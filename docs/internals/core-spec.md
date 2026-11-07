@@ -8,11 +8,13 @@ meant to be right, and a difference is a bug in one of them or in the code. The
 elaborator (`core_elab.jh`) and the textual parser (`core_parse.jh`) are not
 described: they are untrusted, since the kernel checks their output.
 
-**Status.** Nothing here is mechanically proved. The properties in
-[What is intended](#what-is-intended) rest on the independent evaluator, the
-rejection suites and reviews. A proof in Lean 4 of these rules comes after 0.5.0
-([roadmap](roadmap.md#the-050-release-gate-for-the-native-core)), starting from this
-page. Do not describe the kernel as verified.
+**Status.** The full properties in [What is intended](#what-is-intended) are
+not mechanically proved. A [first Lean 4 formalization](lean-proofs.md) proves
+consistency and semantic conversion soundness for a separate arithmetic evidence
+fragment, not this whole calculus or the implementation. The remaining properties
+rest on the independent evaluator, rejection suites and reviews. The
+[roadmap](roadmap.md#the-050-release-gate-for-the-native-core) starts the full proof
+from this specification. Do not describe the kernel as verified.
 
 `tests/core_spec.py` fails if a term of `Term` has no entry in
 [The terms](#the-terms), so the page cannot silently fall behind by a whole term;
