@@ -153,6 +153,9 @@ Indices and their evidence are checked before normalization and remain erased
 at runtime. Module privacy and ownership rules are unchanged. Contextual
 `Slot.Variant(...)` syntax remains available when its type is already known.
 
+[Parameterized dependent records](dependent-records.md) attach erased `u64` indices
+to named fields, including fields that depend on earlier fields.
+
 ## Owned memory
 
 `buffer(n)` is `n` i64 values on the heap, and data declared with `enum` or `struct` that

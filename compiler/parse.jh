@@ -444,8 +444,12 @@ impl Parser {
         if !self.at(Tok.LParen) {
             return Ok(Vec(Param).new())
         }
-        let (var ps, _) = self.param_list()?
+        let (var ps, variadic) = self.param_list()?
+        if variadic { return Err(self.error("generic parameters cannot be variadic")) }
         for i in 0..ps.len() {
+            if ps[i].mode != Mode.Let && ps[i].mode != Mode.Comptime {
+                return Err(Diag.new(ps[i].span, "generic parameters cannot use inout or sink"))
+            }
             ps[i].mode = Mode.Comptime
         }
         Ok(ps)
