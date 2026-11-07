@@ -359,6 +359,16 @@ flat data before MIR lowering. Pure conversion does not: a dependent motive may 
 different types, while `IfLt` and `IfEq` require one common type. Consequently a symbolic elimination
 and its manually distributed form need not be definitionally equal. Concrete scrutinees still compute.
 
+At an application, an argument normalized to `Lam` is already a function value:
+its body is not evaluated when passed. It can be substituted even when the body
+contains arithmetic, reads or memory effects. Likewise `Strict(Lam(...), b)`
+normalizes to `b`. Effects preceding creation of the function remain in a `Strict`
+argument and stay bound once; applying the function still normalizes its body
+under the ordinary runtime rules. This exception is local to application and
+`Strict`: the predicates below still inspect lambda bodies when analyzing invoked
+loop and induction cases. Runtime normalization is not covered by a general
+formal preservation or compiler refinement theorem.
+
 Three syntactic predicates decide this, each conservative at the depth limit, and otherwise the
 disjunction over a term's children:
 

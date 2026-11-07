@@ -891,6 +891,17 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+Fully annotated local dependent functions now synthesize their Pi telescope and
+can be called directly or partially applied. Their domains, result and body are
+checked, including discarded evidence and unused functions. Runtime normalization
+distinguishes passing a lambda value from invoking its body, preserving effects
+before value creation and on invocation. Tests compare local and named function
+MIR, exercise both object targets and native ownership/traps, and require intended
+rejection diagnostics with an exported positive control. Missing annotations,
+zero-argument lambdas, owned captures and unrestricted runtime closures remain
+outside this increment; no general elaborator or runtime soundness theorem follows.
+
+
 Explicit dependent constructor qualifiers, `Slot(n).Empty` and
 `Slot(n).Full(value)`, now supply field context without requiring a local type
 annotation. They preserve erased parameters, module identity/private boundaries

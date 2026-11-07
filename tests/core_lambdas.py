@@ -1,0 +1,165 @@
+"""Fully annotated dependent lambdas without expected types, checked against named functions."""
+import ctypes
+import json
+import os
+import platform
+import shlex
+import struct
+from core_buffer import COUNTER
+
+PREFIX = '''#![dependent_core]
+enum Slot(n: u64) { Empty; Full(refine(fn(j) { Lt(j, n) })) }
+'''
+PROGRAM = PREFIX + '''
+export fn unused_trap() -> i64 { let f = fn(x: u64) -> u64 { 18446744073709551615 + x }; 5 }
+export fn unused_allocate() -> i64 { let f = fn(n: u64) -> buffer(n) { alloc(n, 7) }; 5 }
+export fn allocate_twice() -> i64 { let f = fn(n: u64) -> buffer(n) { alloc(n, 7) }; let a = f(1); let b = f(1); free(a, free(b, 7)) }
+export fn identity(n: u64) -> u64 { let id = fn(x: u64) -> u64 { x }; id(n) }
+export fn immediate(n: u64) -> u64 { (fn(x: u64) -> u64 { x + 1 })(n) }
+export fn captured(n: u64) -> u64 { let add = fn(x: u64) -> u64 { n + x }; add(3) + add(4) }
+export fn curried(n: u64) -> u64 {
+    let add = fn(x: u64, y: u64) -> u64 { x + y }
+    let plus = add(n)
+    plus(4)
+}
+export fn direct_curried(n: u64) -> u64 { (fn(x: u64, y: u64) -> u64 { x + y })(n)(4) }
+export fn dependent(x: i64) -> i64 {
+    let at = fn(n: erased(u64), xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 { index(xs, i, p) }
+    at(2, [x, 8], 0, decide_lt(0, 2))
+}
+export fn evidence() -> i64 {
+    let bound = fn(k: u64) -> Lt(0, k + 1) { zero_le(k) }
+    index([7], 0, bound(0))
+}
+export fn family(n: u64) -> u64 {
+    let make = fn(k: u64) -> Slot(k) { Slot.Empty }
+    let s = make(n)
+    match s { Empty => 7; Full(j) => witness(j) }
+}
+export fn owned(n: u64, x: i64) -> i64 {
+    let make = fn(value: i64) -> buffer(n) { alloc(n, value) }
+    let release = fn(k: erased(u64), b: buffer(k), result: i64) -> i64 { free(b, result) }
+    release(n, make(x), x)
+}
+export fn unused_owner() -> i64 { let ignore = fn(b: buffer(1)) -> i64 { 9 }; ignore(alloc(1, 7)) }
+export fn shadow(n: u64) -> u64 { let f = fn(n: u64, p: erased(Eq(n, n))) -> u64 { n }; f(n, refl(n)) }
+'''
+REFERENCE = PREFIX + '''
+export fn unused_trap() -> i64 { 5 }
+export fn unused_allocate() -> i64 { 5 }
+export fn allocate_twice() -> i64 { let a = alloc(1, 7); let b = alloc(1, 7); free(a, free(b, 7)) }
+fn id(x: u64) -> u64 { x }
+fn increment(x: u64) -> u64 { x + 1 }
+fn add(x: u64, y: u64) -> u64 { x + y }
+fn at(n: erased(u64), xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 { index(xs, i, p) }
+fn bound(k: u64) -> Lt(0, k + 1) { zero_le(k) }
+fn make_slot(k: u64) -> Slot(k) { Slot.Empty }
+fn make_buffer(n: u64, value: i64) -> buffer(n) { alloc(n, value) }
+fn release(k: erased(u64), b: buffer(k), result: i64) -> i64 { free(b, result) }
+fn ignore(b: buffer(1)) -> i64 { 9 }
+fn keep(n: u64, p: erased(Eq(n, n))) -> u64 { n }
+export fn identity(n: u64) -> u64 { id(n) }
+export fn immediate(n: u64) -> u64 { increment(n) }
+export fn captured(n: u64) -> u64 { add(n, 3) + add(n, 4) }
+export fn curried(n: u64) -> u64 { add(n, 4) }
+export fn direct_curried(n: u64) -> u64 { add(n, 4) }
+export fn dependent(x: i64) -> i64 { at(2, [x, 8], 0, decide_lt(0, 2)) }
+export fn evidence() -> i64 { index([7], 0, bound(0)) }
+export fn family(n: u64) -> u64 { let s = make_slot(n); match s { Empty => 7; Full(j) => witness(j) } }
+export fn owned(n: u64, x: i64) -> i64 { release(n, make_buffer(n, x), x) }
+export fn unused_owner() -> i64 { ignore(alloc(1, 7)) }
+export fn shadow(n: u64) -> u64 { keep(n, refl(n)) }
+'''
+INVALID = {
+    'missing-parameter': ('fn bad() -> u64 { let f = fn(x) -> u64 { x }; 0 }', 'a lambda without context needs parameter annotations'),
+    'missing-result': ('fn bad() -> u64 { let f = fn(x: u64) { x }; 0 }', 'a lambda without context needs a result annotation'),
+    'zero-parameters': ('fn bad() -> u64 { let f = fn() -> u64 { 0 }; 0 }', 'a lambda without context needs at least one parameter'),
+    'duplicate-parameter': ('fn bad() -> u64 { let f = fn(x: u64, x: u64) -> u64 { x }; 0 }', 'duplicate lambda parameter'),
+    'reserved-parameter': ('fn bad() -> u64 { let f = fn(index: u64) -> u64 { index }; 0 }', 'a reserved name binds nothing'),
+    'body-type': ('fn bad() -> u64 { let f = fn(x: i64) -> u64 { x }; 0 }', 'type mismatch'),
+    'false-result': ('fn bad() -> u64 { let f = fn(n: u64) -> Eq(n, n + 1) { refl(n) }; 0 }', 'type mismatch'),
+    'invalid-parameter-proof': ('fn bad() -> u64 { let f = fn(b: buffer(sub(2, 1, decide_lt(0, 1)))) -> i64 { free(b, 0) }; 0 }', 'type mismatch'),
+    'invalid-result-proof': ('fn bad() -> u64 { let f = fn(x: i64) -> buffer(sub(2, 1, decide_lt(0, 1))) { alloc(1, x) }; 0 }', 'type mismatch'),
+    'forward-domain': ('fn bad() -> u64 { let f = fn(xs: [i64; n], n: u64) -> i64 { 0 }; 0 }', 'unknown name (or recursive/forward definition): n'),
+    'unbound-result': ('fn bad() -> u64 { let f = fn(x: i64) -> buffer(missing) { alloc(1, x) }; 0 }', 'unknown name (or recursive/forward definition): missing'),
+    'relevant-proof': ('fn bad() -> u64 { let f = fn(p: Eq(0, 0)) -> u64 { 0 }; 0 }', 'proof binders must be erased'),
+    'erased-i64': ('fn bad() -> u64 { let f = fn(x: erased(i64)) -> i64 { 0 }; 0 }', 'erased binders must be propositions, u64 or data'),
+    'erased-runtime': ('fn bad() -> u64 { let f = fn(x: erased(u64)) -> u64 { x }; 0 }', 'erased value used at runtime'),
+    'duplicate-owner': ('fn bad() -> u64 { let f = fn(b: buffer(1)) -> i64 { free(b, free(b, 0)) }; 0 }', 'an owned value is used more than once'),
+    'captured-owner': ('fn bad(b: buffer(1)) -> i64 { let f = fn(x: i64) -> i64 { free(b, x) }; f(1) + f(2) }', 'a function cannot capture an owned value'),
+    'direct-missing-result': ('fn bad() -> u64 { (fn(x: u64) { x })(0) }', 'a lambda without context needs a result annotation'),
+}
+ANCHOR = '\nexport fn harness_anchor() -> i64 { 0 }\n'
+
+
+def validate_lambdas(compiler, root, temporary, environment, run):
+    def command(action, path, *args, success=True, env=environment):
+        return run([compiler, action, str(path), *args], success=success, env=env)
+    source, reference = temporary / 'lambdas.jh', temporary / 'lambdas-reference.jh'
+    source.write_text(PROGRAM); reference.write_text(REFERENCE)
+    command('check', source, '--lib', env={**environment, 'JIHOO_LLVM': '/unavailable', 'JIHOO_CC': '/unavailable'})
+    mir = command('emit-mir', source, '--lib').stdout
+    expected = command('emit-mir', reference, '--lib').stdout
+    assert mir == expected, 'local and named dependent functions differ in MIR'
+    formatted = temporary / 'lambdas-formatted.jh'; formatted.write_text(command('fmt', source).stdout)
+    assert command('fmt', formatted).stdout == formatted.read_text()
+    assert command('emit-mir', formatted, '--lib').stdout == mir
+    counter = temporary / 'lambdas-counter.c'; counter.write_text(COUNTER)
+    host = 'aarch64' if platform.machine() in ('aarch64', 'arm64') else 'x86_64'
+    for target, machine in (('x86_64', 62), ('aarch64', 183)):
+        for level in ('-O0', '-O2'):
+            obj = temporary / f'lambdas-{target}{level}.o'
+            command('emit-obj', source, '--lib', '--target', target, level, '-o', str(obj))
+            assert struct.unpack_from('<H', obj.read_bytes(), 18)[0] == machine
+            if target != host:
+                continue
+            library = temporary / f'lambdas{level}.so'
+            run([*shlex.split(os.environ.get('JIHOO_CC', 'clang')), '-shared', '-fPIC', str(obj), str(counter),
+                 '-Wl,--wrap=malloc', '-Wl,--wrap=free', '-o', str(library)])
+            native = ctypes.CDLL(str(library))
+            for name in ('identity', 'immediate', 'captured', 'curried', 'direct_curried', 'family', 'shadow'):
+                fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_uint64
+            native.dependent.argtypes, native.dependent.restype = [ctypes.c_int64], ctypes.c_int64
+            native.owned.argtypes, native.owned.restype = [ctypes.c_uint64, ctypes.c_int64], ctypes.c_int64
+            for n in (0, 1, 3, 16, 1 << 62):
+                assert native.identity(n) == n and native.shadow(n) == n
+                assert native.immediate(n) == n + 1 and native.captured(n) == 2*n + 7
+                assert native.curried(n) == n + 4 and native.direct_curried(n) == n + 4
+                assert native.family(n) == 7
+            for x in (-19, 0, 100):
+                assert native.dependent(x) == x
+                for n in (0, 1, 8):
+                    assert native.owned(n, x) == x
+            assert native.evidence() == 7 and native.unused_owner() == 9
+            count = ctypes.c_long.in_dll(native, 'allocations').value
+            assert native.unused_trap() == 5 and native.unused_allocate() == 5
+            assert ctypes.c_long.in_dll(native, 'allocations').value == count
+            assert native.allocate_twice() == 7
+            # LLVM can eliminate these unused buffers at -O2. Before optimization,
+            # each call must allocate once; both levels must balance frees.
+            if level == '-O0':
+                assert ctypes.c_long.in_dll(native, 'allocations').value == count + 2
+            assert ctypes.c_long.in_dll(native, 'allocations').value == ctypes.c_long.in_dll(native, 'frees').value
+    # Calling a latent body must retain traps even if its result is unused.
+    trap = temporary / 'lambda-called-trap.jh'
+    trap.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: u64) -> u64 { 18446744073709551615 + x }; let unused = f(1); 0 }')
+    for level in ('-O0', '-O2'):
+        assert command('run', trap, level, success=False).returncode == 132
+    flags = ('--lib', '--no-verify', '--release', '--error-format=json')
+    no_elab = {**environment, 'JIHOO_NO_ELAB': '1'}
+    control = temporary / 'lambdas-negative-control.jh'
+    control.write_text(PREFIX + 'fn valid() -> u64 { let f = fn(x: u64) -> u64 { x }; f(0) }' + ANCHOR)
+    command('check', control, *flags, env=no_elab)
+    control_obj = temporary / 'lambdas-negative-control.o'
+    command('emit-obj', control, *flags, '-o', str(control_obj), env=no_elab)
+    assert control_obj.read_bytes().startswith(b'\x7fELF')
+    for name, (body, diagnostic) in INVALID.items():
+        bad = temporary / f'lambdas-{name}.jh'; bad.write_text(PREFIX + body + ANCHOR)
+        obj = temporary / f'lambdas-{name}.o'
+        for action, options in (('check', ()), ('emit-obj', ('-o', str(obj)))):
+            result = command(action, bad, *flags, *options, success=False, env=no_elab)
+            errors = [d for d in json.loads(result.stderr)['diagnostics'] if d['severity'] == 'error']
+            assert result.returncode == 1 and len(errors) == 1, (name, action, result.stderr)
+            assert errors[0]['kind'] == 'source' and errors[0]['message'] == 'core: '+diagnostic, (name, action, result.stderr)
+        assert not obj.exists(), name
+    print(f'annotated dependent lambdas: named-function MIR, formatter, both targets, native/ownership, positive harness and {len(INVALID)} intended rejections passed')

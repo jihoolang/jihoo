@@ -524,10 +524,13 @@ impl Core {
             App(f, a) => {
                 let f = self.normal(f, depth - 1)?
                 let a = self.normal(a, depth - 1)?
+                // A lambda is already a value. Its body runs when called,
+                // not when the function value is passed as an argument.
+                let function_value = match self.term(a) { Lam(_, _, _) => true, _ => false }
                 match self.term(f) {
                     // An argument that allocates, frees or touches memory is
                     // not substituted: the redex binds it, evaluated once.
-                    Lam(false, domain, body) if self.runtime && (
+                    Lam(false, domain, body) if self.runtime && !function_value && (
                         self.effectful(a, depth - 1) || self.reads(a, depth - 1)
                     ) => {
                         let body = self.normal(body, depth - 1)?
@@ -541,7 +544,7 @@ impl Core {
                         // in one branch; its traps still happen first.
                         // Only code that runs needs the traps; conversion
                         // ignores Strict.
-                        if self.runtime && !erased && self.may_trap(a, depth - 1) {
+                        if self.runtime && !erased && !function_value && self.may_trap(a, depth - 1) {
                             return self.add(Term.Strict(a, result), sp)
                         }
                         return Ok(result)
@@ -750,6 +753,10 @@ impl Core {
             Strict(a, b) => {
                 let a = self.normal(a, depth - 1)?
                 let b = self.normal(b, depth - 1)?
+                // Earlier conservative analysis can leave Strict around a
+                // function-valued call. After it becomes a lambda, evaluating
+                // that value has no effect; effects before it remain in a.
+                if match self.term(a) { Lam(_, _, _) => true, _ => false } { return Ok(b) }
                 if !self.may_trap(a, depth - 1) { return Ok(b) }
                 Term.Strict(a, b)
             }
@@ -4550,6 +4557,50 @@ fn effectful_arguments_are_bound_once() {
     let App(g, a) = c.term(normal) else { panic("the redex is kept") }
     let Lam(false, _, _) = c.term(g) else { panic("binding the allocation") }
     let Alloc(_, _) = c.term(a) else { panic("evaluated once") }
+}
+
+#[test]
+fn lambda_arguments_do_not_evaluate_their_bodies() {
+    let sp = diag.Span.nowhere()
+    for allocation in [false, true] {
+        var c = Core.new()
+        let u = c.add(Term.U64, sp).unwrap()
+        let i = c.add(Term.I64, sp).unwrap()
+        let one = c.add(Term.Natural(1), sp).unwrap()
+        let zero = c.add(Term.Integer(0), sp).unwrap()
+        let max_u64 = c.add(Term.Natural(0xffffffffffffffff), sp).unwrap()
+        let body = if allocation { c.add(Term.Alloc(one, zero), sp).unwrap() }
+        else { c.add(Term.UAdd(max_u64, one), sp).unwrap() }
+        let value = c.add(Term.Lam(false, u, body), sp).unwrap()
+        let ty = c.infer(value, [], false, DEPTH).unwrap()
+        let ignore = c.add(Term.Lam(false, ty, zero), sp).unwrap()
+        let passed = c.add(Term.App(ignore, value), sp).unwrap()
+        let strict = c.add(Term.Strict(value, zero), sp).unwrap()
+        c.require(passed, i, [], false, DEPTH).unwrap()
+        c.require(strict, i, [], false, DEPTH).unwrap()
+        c.runtime = true
+        for term in [passed, strict] {
+            let result = c.normal(term, DEPTH).unwrap()
+            assert(c.term(result) == Term.Integer(0), "creating a function does not run its body")
+            c.require(result, i, [], false, DEPTH).unwrap()
+        }
+        let called = c.add(Term.App(value, one), sp).unwrap()
+        let result = c.normal(called, DEPTH).unwrap()
+        if allocation {
+            let Alloc(_, _) = c.term(result) else { panic("calling the function keeps allocation") }
+        } else {
+            let UAdd(_, _) = c.term(result) else { panic("calling the function keeps its overflow") }
+        }
+        // An effect evaluated before a function result is not latent.
+        let made = c.add(Term.Alloc(one, zero), sp).unwrap()
+        let effect = c.add(Term.Free(made, zero), sp).unwrap()
+        let before = c.add(Term.Strict(effect, value), sp).unwrap()
+        let passed = c.add(Term.App(ignore, before), sp).unwrap()
+        c.require(passed, i, [], false, DEPTH).unwrap()
+        let result = c.normal(passed, DEPTH).unwrap()
+        let App(_, argument) = c.term(result) else { panic("preceding effects stay bound") }
+        let Strict(_, _) = c.term(argument) else { panic("preceding allocation is retained") }
+    }
 }
 
 #[test]

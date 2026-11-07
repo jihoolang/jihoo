@@ -1850,3 +1850,16 @@ The next stages of the replacement are:
 5. Retire legacy verification paths as their source programs and enabled
    guarantees move to the core. Reproducing the legacy certificate format
    or preserving its implementation is not a migration requirement.
+
+### Fully annotated local lambdas
+
+Without an expected type, a nonempty lambda parameter list and result annotation
+supply a Pi telescope. The elaborator validates domains in order and the result
+in that context before normalization, checks binder relevance, reuses contextual
+body elaboration and ownership settlement, and requires the resulting lambda at
+that telescope. Direct lambda application uses the existing application checker.
+There is no implicit argument search or inference of omitted annotations. This is
+an implementation extension with regression coverage, not a correspondence proof
+between the entire source elaborator and the Lean typing relation. See the
+language guide for executable examples and core-spec for the function-value
+exception in runtime normalization.
