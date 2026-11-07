@@ -623,15 +623,24 @@ binder annotations and evidence positions. Addition's root rule requires
 The proofs use the unchanged beta-aware typing/conversion judgments.
 
 `CheckedCoreNormalization.lean` is a bounded, proof-producing partial normalizer
-for a conservative subset of that relation. It scans left-to-right and innermost,
-performs at most one contraction per scan, and counts total contractions across
-the entire term. Supported constructors are variables, numeric literals, U64,
-I64, Array types, Eq, Lt, Pi, Lam, App, Refl, Decide and UAdd. Every encountered
-UAdd must reach two literals whose sum fits U64; no residual UAdd is a supported
-normal form. Subtraction, ZeroLe, indexing and array values are rejected. In
-particular a lambda body containing `x + 1` is rejected even when an outer
-application would later close x; this intentionally conservative search is not
-complete for terms with literal results.
+for a conservative subset of that relation. A syntactic application of a lambda
+contracts beta before descending into its body or argument; other contexts are
+scanned left-to-right. It performs at most one contraction per scan and counts
+total contractions across the entire term. Supported normal-form constructors
+are variables, numeric literals, U64, I64, Array types, Eq, Lt, Pi, Lam, App, Refl
+and Decide. An encountered UAdd must reach two literals whose sum fits U64;
+no residual UAdd is a supported normal form. Encountered subtraction, ZeroLe,
+indexing and array values are rejected.
+
+Beta-first search admits closed calls such as `(app (lam x U64 (uadd x 1)) 6)`,
+curried addition, higher-order arithmetic functions and dependent evidence.
+A surviving lambda with symbolic arithmetic remains unsupported. Beta can erase
+unused arguments, including an overflowing sum; no overflowing addition rule is
+introduced. This is a directed proof-search strategy, not a reproduction of
+Core's evaluation order. Actual Core output must still match the complete
+computed result, and Core resource failure still prevents publication. Search
+remains partial and bounded, without a completeness or universal termination
+claim. The same size/depth/product guards run before each selected substitution.
 
 The test adapter now invokes **actual `Core.normal(root, depth)` with runtime
 mode explicitly false**. It reconstructs and re-exports a once-retained complete

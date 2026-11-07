@@ -420,10 +420,12 @@ The proof-producing normalizer has total-step, expanded-size, depth and selected
 substitution-product limits. Failure or incomplete/unsupported normalization
 never falls back to mere conversion or assumes output typing.
 
-This conservative profile rejects symbolic UAdd, overflow, subtraction, ZeroLe,
-indexing and array values. Some closed inputs are rejected because their lambda
-bodies contain symbolic arithmetic before beta contraction. Core's broader
-symbolic normalization is not modeled. This is checked per-run output within the
+This conservative profile rejects residual symbolic UAdd and encountered
+overflow, subtraction, ZeroLe, indexing and array values. Beta-first proof
+search can close a symbolic lambda body before evaluating addition, and can
+remove unused arguments. It does not add symbolic arithmetic rules or promise
+to follow Core's evaluation order. Core's broader symbolic normalization is not
+modeled. This is checked per-run output within the
 profile, not a formal proof of the Core implementation or its general termination.
 See [lean-proofs.md](lean-proofs.md) for the exact semantic and resource boundaries.
 

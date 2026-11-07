@@ -40,6 +40,29 @@ theorem overflowing_add_rejected (h : ¬ m + n < wordBound) :
   if (next beta).isSome then throw (IO.userError "substitution product guard ignored")
   let small := Raw.app (.lam false .u64 (.var 0)) (.natural 7)
   unless (next small).isSome do throw (IO.userError "small beta control rejected")
+  let increment := Raw.lam false .u64 (.uadd (.var 0) (.natural 1))
+  let closed := Raw.app increment (.natural 6)
+  let some closedResult := run 2 closed | throw (IO.userError "closed symbolic lambda rejected")
+  unless closedResult.val == .natural 7 do throw (IO.userError "closed increment result")
+  if (run 1 closed).isSome then throw (IO.userError "beta/add total fuel ignored")
+  -- This is a beta step, not an overflowing addition step: unused input is erased.
+  let discard := Raw.app (.lam false .u64 (.natural 7))
+    (.uadd (.natural (wordBound - 1)) (.natural 1))
+  let some discarded := run 1 discard | throw (IO.userError "discarded argument rejected")
+  unless discarded.val == .natural 7 do throw (IO.userError "discarded argument result")
+  -- A surviving symbolic body still cannot be certified normal.
+  if (run 64 increment).isSome then throw (IO.userError "symbolic lambda admitted")
+  let curried := Raw.app
+    (.app (.lam false .u64 (.lam false .u64 (.uadd (.var 1) (.var 0)))) (.natural 3))
+    (.natural 4)
+  let some curriedResult := run 3 curried | throw (IO.userError "curried addition rejected")
+  unless curriedResult.val == .natural 7 do throw (IO.userError "capture during curried substitution")
+  if (run 2 curried).isSome then throw (IO.userError "curried beta/add fuel ignored")
+  -- Root beta must preserve the product guard even if the unexpanded body is
+  -- unsupported: changing traversal order must not bypass expansion accounting.
+  let hugeBody := Raw.uadd large large
+  if (next (.app (.lam false .u64 hugeBody) large)).isSome then
+    throw (IO.userError "beta-first symbolic substitution product guard ignored")
   let graph : Graph := #[.u64, .natural 0] ++
     ((List.range 14).map (fun n => Node.uadd (n+1) (n+1))).toArray
   unless graphValid graph do throw (IO.userError "shared graph fixture invalid")
