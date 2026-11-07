@@ -12,7 +12,15 @@ import subprocess
 import sys
 import tempfile
 from core_typing_producer import Snapshot, Unsupported, produce, require, encode_numbers
-from core_typing_certificates import ROOT, command, success, snapshot_bytes
+from core_typing_certificates import ROOT, command, snapshot_bytes
+
+
+def success(result):
+    """Enforce subprocess failure even when Python assertions are disabled."""
+    if result.returncode != 0:
+        raise Unsupported(f'command failed ({result.returncode}): {result.args}: '
+                          f'{result.stderr.decode(errors="replace")}')
+    return result.stdout
 
 
 def record_bytes(before, after, depth=128, fuel=64):
@@ -71,6 +79,7 @@ REJECTED = {
 
 
 def test(compiler, checker, output):
+    success(command([sys.executable, ROOT / "tests/core_checked_normalization_optimized.py"]))
     exporter, driver = output / 'snapshot', output / 'normal'
     for source, binary in [('core_typing_snapshots.jh', exporter), ('core_typed_beta_replay.jh', driver)]:
         success(command([*compiler, 'build', '-O2', '-I', 'compiler', f'tests/{source}', '-o', binary]))
@@ -132,7 +141,7 @@ def test(compiler, checker, output):
         assert result.returncode == 1 and b'rejected' in result.stderr, name
         try:
             normalizer.generate(before, typing)
-        except AssertionError:
+        except Unsupported:
             pass
         else:
             raise AssertionError(f'{name} admitted')
@@ -156,7 +165,7 @@ def test(compiler, checker, output):
     seen = []; published = normalizer.published
     try:
         normalizer.generate(b, t, depth=1, consumer=seen.append)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('Core resource failure published')
@@ -164,7 +173,7 @@ def test(compiler, checker, output):
     invoked = normalizer.invoked
     try:
         normalizer.generate(b, other[2])
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid typing invoked Core')
@@ -176,7 +185,7 @@ def test(compiler, checker, output):
     normalizer.consume = corrupt
     try:
         normalizer.generate(b, t, consumer=seen.append)
-    except AssertionError:
+    except Unsupported:
         pass
     else:
         raise AssertionError('invalid output published')
