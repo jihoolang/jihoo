@@ -1814,6 +1814,7 @@ impl Elaborator {
     fn proposition_expr(inout self, e: ast.Expr, depth: u32) -> Result(u32, diag.Diag) {
         if depth == 0 { return Err(error(e.span, "elaboration nesting limit reached")) }
         match e.kind {
+            Type(t) => self.ty(t, depth - 1)
             Name(n) if n == "u64" => self.u64(e.span)
             Name(n) if n == "i64" => self.c.add(core.Term.I64, e.span)
             Call(f, args) => {
@@ -1914,6 +1915,38 @@ impl Elaborator {
                 }
                 Err(error(t.span, "unsupported type in dependent_core"))
             }
+            // Function types list unnamed domains, all in the outer source
+            // context. Shift them under the preceding Pi binders without
+            // introducing names that could capture an outer index.
+            Fn(params, result) => {
+                if params.len() == 0 { return Err(error(
+                    t.span, "a dependent function type needs at least one parameter"
+                )) }
+                let Some(result) = result else { return Err(error(
+                    t.span, "a dependent function type needs an explicit result"
+                )) }
+                var domains = Vec((bool, u32)).new()
+                for p in params {
+                    if p.mode != ast.Mode.Let { return Err(error(
+                        p.ty.span, "function type parameters use plain types or erased(T)"
+                    )) }
+                    let (erased, domain) = self.domain_at(p.ty, depth - 1)?
+                    let _ = self.c.infer(domain, self.ctx.as_slice(), true, core.DEPTH)?
+                    domains.push((erased, domain))
+                }
+                var ty = self.ty(result.deref(), depth - 1)?
+                let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
+                ty = self.c.shift(ty, params.len(), 0, core.DEPTH)?
+                var i = domains.len()
+                while i > 0 {
+                    i -= 1
+                    let (erased, domain) = domains[i]
+                    let domain = self.c.shift(domain, i, 0, core.DEPTH)?
+                    ty = self.c.add(core.Term.Pi(erased, domain, ty), t.span)?
+                }
+                let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
+                Ok(ty)
+            }
             // `ref T`: a borrow of a buffer or heap data.
             Ref(inner, false) => {
                 let inner = self.ty(inner.deref(), depth - 1)?
@@ -1934,15 +1967,19 @@ impl Elaborator {
     }
 
     fn domain(inout self, t: ast.Ty) -> Result((bool, u32), diag.Diag) {
+        self.domain_at(t, core.DEPTH)
+    }
+
+    fn domain_at(inout self, t: ast.Ty, depth: u32) -> Result((bool, u32), diag.Diag) {
         if let_erased(t) {
             let ast.TyKind.Path(_, Some(args)) = t.kind else { return Err(error(
                 t.span,
                 "expected erased(P)"
             )) }
             if args.len() != 1 { return Err(error(t.span, "expected erased(P)")) }
-            return Ok((true, self.type_expr(args[0], core.DEPTH)?))
+            return Ok((true, self.type_expr(args[0], depth)?))
         }
-        Ok((false, self.ty(t, core.DEPTH)?))
+        Ok((false, self.ty(t, depth)?))
     }
 
     // Context decides relevance. An optional annotation checks the domain;
