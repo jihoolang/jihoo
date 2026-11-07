@@ -78,6 +78,29 @@ INVALID = {
 }
 
 
+ANCHOR = '\nexport fn harness_anchor() -> i64 { 0 }\n'
+EXPECTED_DIAGNOSTICS = {
+    'missing-index': 'wrong number of family indices',
+    'extra-index': 'wrong number of family indices',
+    'wrong-index-type': 'type mismatch',
+    'false-field': 'decide-lt needs a true closed inequality',
+    'wrong-field-index': 'type mismatch',
+    'context-mismatch': 'type mismatch',
+    'discarded-context-mismatch': 'type mismatch',
+    'missing-field': 'a constructor requires all of its fields',
+    'extra-field': 'too many constructor arguments',
+    'unknown-variant': 'unsupported expression in dependent_core',
+    'unknown-family': 'unsupported expression in dependent_core',
+    'partial-indices': 'wrong number of family indices',
+    'dependent-buffer-length': 'type mismatch',
+    'owner-length': 'type mismatch',
+    'erased-runtime-field': 'erased value used at runtime',
+    'invalid-index-proof': 'type mismatch',
+    'invalid-index-proof-with-context': 'type mismatch',
+    'duplicate-owner': 'an owned value is used more than once',
+}
+
+
 def validate_constructors(compiler, root, temporary, environment, run):
     def command(action, path, *args, success=True, env=environment):
         return run([compiler, action, str(path), *args], success=success, env=env)
@@ -117,12 +140,27 @@ def validate_constructors(compiler, root, temporary, environment, run):
             for x in (-19, 0, 100):
                 assert native.pair(x) == x + 3
             assert ctypes.c_long.in_dll(native, 'allocations').value == ctypes.c_long.in_dll(native, 'frees').value
+    # The same harness must compile a valid, unused local function. Otherwise
+    # a missing runtime export could masquerade as the intended rejection.
+    flags = ('--lib', '--no-verify', '--release', '--error-format=json')
+    no_elab = {**environment, 'JIHOO_NO_ELAB': '1'}
+    control = temporary / 'constructors-negative-control.jh'
+    control.write_text(PREFIX + 'fn valid() -> u64 { let s = Slot(1).Empty; 0 }' + ANCHOR)
+    command('check', control, *flags, env=no_elab)
+    control_obj = temporary / 'constructors-negative-control.o'
+    command('emit-obj', control, *flags, '-o', str(control_obj), env=no_elab)
+    assert control_obj.read_bytes().startswith(b'\x7fELF'), 'positive rejection-harness control did not emit an object'
+    assert INVALID.keys() == EXPECTED_DIAGNOSTICS.keys()
     for name, body in INVALID.items():
-        bad = temporary / f'constructors-{name}.jh'; bad.write_text(PREFIX + body)
-        result = command('check', bad, '--lib', '--no-verify', '--release', '--error-format=json', success=False)
-        assert result.returncode == 1 and json.loads(result.stderr) and 'core:' in result.stderr, (name, result.stderr)
+        bad = temporary / f'constructors-{name}.jh'; bad.write_text(PREFIX + body + ANCHOR)
         obj = temporary / f'constructors-{name}.o'
-        command('emit-obj', bad, '--lib', '-o', str(obj), success=False, env={**environment, 'JIHOO_NO_ELAB': '1'})
+        for action, options in (('check', ()), ('emit-obj', ('-o', str(obj)))):
+            result = command(action, bad, *flags, *options, success=False, env=no_elab)
+            document = json.loads(result.stderr)
+            errors = [d for d in document['diagnostics'] if d['severity'] == 'error']
+            assert result.returncode == 1 and len(errors) == 1, (name, action, result.stderr)
+            assert errors[0]['kind'] == 'source', (name, action, result.stderr)
+            assert errors[0]['message'] == 'core: ' + EXPECTED_DIAGNOSTICS[name], (name, action, result.stderr)
         assert not obj.exists(), name
     directory = temporary / 'constructor-modules'; directory.mkdir()
     module = """#![dependent_core]
