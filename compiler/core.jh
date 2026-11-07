@@ -527,6 +527,19 @@ impl Core {
                 // A lambda is already a value. Its body runs when called,
                 // not when the function value is passed as an argument.
                 let function_value = match self.term(a) { Lam(_, _, _) => true, _ => false }
+                // A strict argument evaluates its prefix before this lambda
+                // runs. Keep that prefix once, outside substitution, so a
+                // function-valued result need not acquire a runtime closure.
+                if self.runtime && match self.term(f) { Lam(false, _, _) => true, _ => false } {
+                    match self.term(a) {
+                        Strict(first, value) => {
+                            let applied = self.add(Term.App(f, value), sp)?
+                            let ordered = self.add(Term.Strict(first, applied), sp)?
+                            return self.normal(ordered, depth - 1)
+                        }
+                        _ => {}
+                    }
+                }
                 match self.term(f) {
                     // An argument that allocates, frees or touches memory is
                     // not substituted: the redex binds it, evaluated once.
@@ -753,6 +766,19 @@ impl Core {
             Strict(a, b) => {
                 let a = self.normal(a, depth - 1)?
                 let b = self.normal(b, depth - 1)?
+                // Discarding a strict result keeps its prefix, then evaluates
+                // and discards its value. In particular, a trailing lambda's
+                // body is latent while capture-time traps still happen.
+                if self.runtime {
+                    match self.term(a) {
+                        Strict(first, value) => {
+                            let rest = self.add(Term.Strict(value, b), sp)?
+                            let ordered = self.add(Term.Strict(first, rest), sp)?
+                            return self.normal(ordered, depth - 1)
+                        }
+                        _ => {}
+                    }
+                }
                 // Earlier conservative analysis can leave Strict around a
                 // function-valued call. After it becomes a lambda, evaluating
                 // that value has no effect; effects before it remain in a.
@@ -4598,8 +4624,16 @@ fn lambda_arguments_do_not_evaluate_their_bodies() {
         let passed = c.add(Term.App(ignore, before), sp).unwrap()
         c.require(passed, i, [], false, DEPTH).unwrap()
         let result = c.normal(passed, DEPTH).unwrap()
-        let App(_, argument) = c.term(result) else { panic("preceding effects stay bound") }
-        let Strict(_, _) = c.term(argument) else { panic("preceding allocation is retained") }
+        let Strict(first, rest) = c.term(result) else { panic("preceding effects stay ordered") }
+        let Free(_, _) = c.term(first) else { panic("preceding allocation and free are retained") }
+        assert(c.term(rest) == Term.Integer(0), "unused function body stays latent")
+        c.require(result, i, [], false, DEPTH).unwrap()
+        let discarded = c.add(Term.Strict(before, zero), sp).unwrap()
+        let result = c.normal(discarded, DEPTH).unwrap()
+        let Strict(first, rest) = c.term(result) else { panic("discarding keeps preceding effects") }
+        let Free(_, _) = c.term(first) else { panic("discarding keeps allocation and free") }
+        assert(c.term(rest) == Term.Integer(0), "discarding does not evaluate the body")
+        c.require(result, i, [], false, DEPTH).unwrap()
     }
 }
 

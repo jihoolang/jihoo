@@ -11,6 +11,9 @@ PREFIX = '''#![dependent_core]
 enum Slot(n: u64) { Empty; Full(refine(fn(j) { Lt(j, n) })) }
 '''
 PROGRAM = PREFIX + '''
+export fn captured_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); g(2) }
+export fn unused_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); 0 }
+export fn repeated_partial(n: u64) -> u64 { let f = fn(x: u64, y: u64) -> u64 { x + y }; let g = f(n + 1); g(2) + g(3) }
 export fn unused_trap() -> i64 { let f = fn(x: u64) -> u64 { 18446744073709551615 + x }; 5 }
 export fn unused_allocate() -> i64 { let f = fn(n: u64) -> buffer(n) { alloc(n, 7) }; 5 }
 export fn allocate_twice() -> i64 { let f = fn(n: u64) -> buffer(n) { alloc(n, 7) }; let a = f(1); let b = f(1); free(a, free(b, 7)) }
@@ -45,6 +48,9 @@ export fn unused_owner() -> i64 { let ignore = fn(b: buffer(1)) -> i64 { 9 }; ig
 export fn shadow(n: u64) -> u64 { let f = fn(n: u64, p: erased(Eq(n, n))) -> u64 { n }; f(n, refl(n)) }
 '''
 REFERENCE = PREFIX + '''
+export fn captured_partial(n: u64) -> u64 { let x = n + 1; x + 2 }
+export fn unused_partial(n: u64) -> u64 { let x = n + 1; 0 }
+export fn repeated_partial(n: u64) -> u64 { let x = n + 1; (x + 2) + (x + 3) }
 export fn unused_trap() -> i64 { 5 }
 export fn unused_allocate() -> i64 { 5 }
 export fn allocate_twice() -> i64 { let a = alloc(1, 7); let b = alloc(1, 7); free(a, free(b, 7)) }
@@ -117,7 +123,7 @@ def validate_lambdas(compiler, root, temporary, environment, run):
             run([*shlex.split(os.environ.get('JIHOO_CC', 'clang')), '-shared', '-fPIC', str(obj), str(counter),
                  '-Wl,--wrap=malloc', '-Wl,--wrap=free', '-o', str(library)])
             native = ctypes.CDLL(str(library))
-            for name in ('identity', 'immediate', 'captured', 'curried', 'direct_curried', 'family', 'shadow'):
+            for name in ('identity', 'immediate', 'captured', 'curried', 'direct_curried', 'family', 'shadow', 'captured_partial', 'unused_partial', 'repeated_partial'):
                 fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_uint64
             native.dependent.argtypes, native.dependent.restype = [ctypes.c_int64], ctypes.c_int64
             native.owned.argtypes, native.owned.restype = [ctypes.c_uint64, ctypes.c_int64], ctypes.c_int64
@@ -126,6 +132,9 @@ def validate_lambdas(compiler, root, temporary, environment, run):
                 assert native.immediate(n) == n + 1 and native.captured(n) == 2*n + 7
                 assert native.curried(n) == n + 4 and native.direct_curried(n) == n + 4
                 assert native.family(n) == 7
+                assert native.captured_partial(n) == n + 3 and native.unused_partial(n) == 0
+                assert native.repeated_partial(n) == 2*n + 7
+            assert native.unused_partial((1 << 64) - 2) == 0
             for x in (-19, 0, 100):
                 assert native.dependent(x) == x
                 for n in (0, 1, 8):
@@ -145,6 +154,14 @@ def validate_lambdas(compiler, root, temporary, environment, run):
     trap.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: u64) -> u64 { 18446744073709551615 + x }; let unused = f(1); 0 }')
     for level in ('-O0', '-O2'):
         assert command('run', trap, level, success=False).returncode == 132
+    # A partial application's argument evaluates at capture time, even if
+    # the resulting function is discarded or its body would ignore that value.
+    for name, result in (('called', 'g(2)'), ('unused', '0')):
+        capture = temporary / f'lambda-capture-trap-{name}.jh'
+        capture.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: u64, y: i64) -> i64 { y }; '
+                           'let g = f(18446744073709551615 + 1); ' + result + ' }')
+        for level in ('-O0', '-O2'):
+            assert command('run', capture, level, success=False).returncode == 132
     flags = ('--lib', '--no-verify', '--release', '--error-format=json')
     no_elab = {**environment, 'JIHOO_NO_ELAB': '1'}
     control = temporary / 'lambdas-negative-control.jh'
