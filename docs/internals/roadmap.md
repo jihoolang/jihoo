@@ -704,6 +704,9 @@ mechanize its soundness, starting from that specification:
    judgment translates to independent ghost-mode target typing, with proved
    codomain substitution correspondence. It is not an executable-checker proof. This is not full-core consistency or preservation, quantity soundness
    or a refinement proof for `core.jh`; those remain open.
+   [Graph artifact certificates](graph-certificates.md) now check exported
+   shift/substitution snapshots against the formal operations. They certify
+   artifacts with a trusted exporter/run association, not all checker executions.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

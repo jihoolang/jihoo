@@ -1,0 +1,166 @@
+// Test-only snapshots of the actual compiler/core.jh graph operations.
+// Build with `jihoo build -I compiler tests/core_transform_snapshots.jh`.
+// The serializer and its association with the invoked compiled source are
+// trusted. A validated artifact is not a proof that the exporter is honest,
+// that the compiler was built correctly, or that Core.infer is sound.
+import std.env
+import core
+import diag
+import json
+
+fn node(tag: str, fields: [json.Json]) -> json.Json {
+    var xs = Vec(json.Json).new()
+    xs.push(json.text(tag))
+    for value in fields { xs.push(value.clone()) }
+    json.Json.Arr(xs)
+}
+
+fn id(n: u32) -> json.Json { json.int(n as i64) }
+
+fn encode(term: core.Term) -> Result(json.Json, String) {
+    let out = match term {
+        Var(k) => node("var", [id(k)])
+        Natural(n) => node("natural", [json.Json.Num(n.to_string())])
+        Integer(n) => node("integer", [json.int(n)])
+        U64 => node("u64", [])
+        I64 => node("i64", [])
+        Array(n) => node("array", [id(n)])
+        Lt(a, b) => node("lt", [id(a), id(b)])
+        Eq(a, b) => node("eq", [id(a), id(b)])
+        Pi(e, a, b) => node("pi", [json.Json.Bool(e), id(a), id(b)])
+        Lam(e, a, b) => node("lam", [json.Json.Bool(e), id(a), id(b)])
+        App(f, a) => node("app", [id(f), id(a)])
+        Elements(xs) => {
+            var values = Vec(json.Json).new()
+            for x in xs { values.push(id(x)) }
+            node("elements", [json.Json.Arr(values)])
+        }
+        Index(a, i, p) => node("index", [id(a), id(i), id(p)])
+        Refl(a) => node("refl", [id(a)])
+        ZeroLe(a) => node("zeroLe", [id(a)])
+        Decide(a, b) => node("decide", [id(a), id(b)])
+        UAdd(a, b) => node("uadd", [id(a), id(b)])
+        USub(a, b, p) => node("usub", [id(a), id(b), id(p)])
+        _ => return Err("unsupported constructor in graph snapshot".to_string())
+    }
+    Ok(out)
+}
+
+fn snapshot(c: core.Core) -> Result(json.Json, String) {
+    var nodes = Vec(json.Json).new()
+    for n in c.nodes { nodes.push(encode(n.term)?) }
+    Ok(json.Json.Arr(nodes))
+}
+
+fn add(inout c: core.Core, sink term: core.Term) -> u32 {
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(n) => n
+        Err(e) => panic(e.msg)
+    }
+}
+
+fn ids(xs: [u32]) -> Vec(u32) {
+    var out = Vec(u32).new()
+    for x in xs { out.push(x) }
+    out
+}
+
+// Deliberately structural, not claimed to be well-typed. Reusing the same node
+// at different binder depths catches a traversal that mistakes DAG sharing for
+// context-independent shifting. Both annotations and bodies contain variables.
+fn fixture(inout c: core.Core, name: str) -> Result((u32, u32), String) {
+    let u = add(&c, core.Term.U64)
+    let i = add(&c, core.Term.I64)
+    let v0 = add(&c, core.Term.Var(0))
+    let v1 = add(&c, core.Term.Var(1))
+    let v2 = add(&c, core.Term.Var(2))
+    let v3 = add(&c, core.Term.Var(3))
+    let v4 = add(&c, core.Term.Var(4))
+    let v5 = add(&c, core.Term.Var(5))
+    let zero = add(&c, core.Term.Natural(0))
+    let maximum = add(&c, core.Term.Natural(0xffffffffffffffff))
+    let minimum = add(&c, core.Term.Integer(-9223372036854775807 - 1))
+    let signed_maximum = add(&c, core.Term.Integer(9223372036854775807))
+    // This replacement has a free Var(0), as well as a bound Var(0). Inserting
+    // it below mixed binders must shift only its free occurrence.
+    let sum = add(&c, core.Term.UAdd(v0, v1))
+    let replacement_lam = add(&c, core.Term.Lam(false, u, sum))
+    let replacement = add(&c, core.Term.App(replacement_lam, v0))
+    if name == "var" { return Ok((v0, replacement)) }
+    if name == "above" { return Ok((v3, replacement)) }
+    if name == "overflow" { return Ok((add(&c, core.Term.Var(0xffffffff)), replacement)) }
+    if name == "closed" { return Ok((maximum, replacement)) }
+    if name == "unsupported" { return Ok((add(&c, core.Term.Prop), replacement)) }
+    if name == "invalid" { return Ok((add(&c, core.Term.Array(0xffffffff)), replacement)) }
+    let array = add(&c, core.Term.Array(v0))
+    let lt = add(&c, core.Term.Lt(v0, v1))
+    let eq = add(&c, core.Term.Eq(v1, v2))
+    let refl = add(&c, core.Term.Refl(v0))
+    let zero_le = add(&c, core.Term.ZeroLe(v1))
+    let decide = add(&c, core.Term.Decide(v0, maximum))
+    let subtract = add(&c, core.Term.USub(v1, v0, decide))
+    let elements = add(&c, core.Term.Elements(ids([minimum, signed_maximum])))
+    let index = add(&c, core.Term.Index(elements, v0, decide))
+    let app = add(&c, core.Term.App(v3, v0))
+    let all = add(&c, core.Term.Elements(ids([
+        u, i, v0, v1, v2, v3, v4, v5, zero, maximum, minimum, signed_maximum,
+        array, lt, eq, refl, zero_le, decide, sum, subtract, elements, index, app
+    ])))
+    if name == "all" { return Ok((all, replacement)) }
+    if name == "mixed" {
+        let inner = add(&c, core.Term.Lam(false, array, all))
+        let proof = add(&c, core.Term.Lam(true, lt, inner))
+        let pi = add(&c, core.Term.Pi(false, array, proof))
+        return Ok((add(&c, core.Term.Pi(true, eq, pi)), replacement))
+    }
+    Err("unknown fixture".to_string())
+}
+
+fn certificate(operation: str, name: str, amount: i64) -> Result(json.Json, String) {
+    if operation != "shift" && operation != "substitute" {
+        return Err("expected shift or substitute".to_string())
+    }
+    // Reject unsupported shift parameters instead of wrapping them into the
+    // certificate's Nat/u32 fragment. The overflow fixture is intentionally
+    // outside ordinary well-scoped program inputs.
+    if amount < 0 || amount > 1000 || (operation == "substitute" && amount != 0) {
+        return Err("unsupported amount".to_string())
+    }
+    var c = core.Core.new()
+    let (input, replacement) = fixture(&c, name)?
+    let before = snapshot(c)?
+    // No mutation between taking the before snapshot and this invocation.
+    let transformed = if operation == "shift" { c.shift(input, amount, 0, core.DEPTH) }
+    else { c.substitute(input, replacement, core.DEPTH) }
+    let output = match transformed {
+        Ok(n) => n
+        Err(e) => return Err(e.msg.clone())
+    }
+    let after = snapshot(c)?
+    Ok(json.obj().with("schema", json.int(1))
+        .with("operation", json.text(operation))
+        .with("amount", json.int(amount))
+        .with("cutoff", json.int(0))
+        .with("depth", id(core.DEPTH))
+        .with("input", id(input))
+        .with("output", id(output))
+        .with("replacement", id(if operation == "shift" { 0 } else { replacement }))
+        .with("before", before)
+        .with("after", after))
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() != 4 {
+        eprintln("usage: core-transform-snapshots shift|substitute FIXTURE AMOUNT")
+        return 2
+    }
+    let Some(amount) = args[3].parse_int() else {
+        eprintln("expected integer amount")
+        return 2
+    }
+    match certificate(args[1], args[2], amount) {
+        Ok(value) => { println(value.to_text()); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}

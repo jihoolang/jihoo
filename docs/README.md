@@ -57,6 +57,7 @@ same on GitHub.
 - [Design: native dependent core](internals/dependent-core.md)
 - [Core specification](internals/core-spec.md)
 - [Lean proof boundary](internals/lean-proofs.md)
+- [Graph artifact certificates](internals/graph-certificates.md)
 - [Core representation bridge](internals/core-bridge.md)
 - [Self-hosting](internals/self-hosting.md)
 - [Testing](internals/testing.md)

@@ -128,6 +128,9 @@ A [representation bridge](docs/internals/core-bridge.md) connects a bounded subs
 to core syntax with proved binder and certificate properties and generated tests.
 Restricted annotated source typing translates to a separate ghost-mode target
 judgment; executable-checker refinement remains unproved.
+[Graph artifact certificates](docs/internals/graph-certificates.md) independently
+check exported snapshots of actual binder transformations, with an explicit
+exporter and execution-association trust boundary.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).
