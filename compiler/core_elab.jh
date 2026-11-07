@@ -1273,7 +1273,9 @@ impl Elaborator {
         sp: diag.Span,
         depth: u32
     ) -> Result(u32, diag.Diag) {
-        let Some(t) = expected else { return Err(error(sp, "match needs an expected type")) }
+        // With no context, the first constructor arm determines a constant
+        // result type. It must not mention that arm's local fields.
+        var t = match expected { Some(t) => t, None => self.u64(sp)? }
         let x = self.expr(scrutinee, None, depth - 1)?
         let ty = self.c.infer(x, self.ctx.as_slice(), true, core.DEPTH)?
         var ty = self.c.normal(ty, core.DEPTH)?
@@ -1296,16 +1298,23 @@ impl Elaborator {
             sp,
             "a private type cannot be inspected here"
         )) }
-        let (p, ps) = self.constant_motive(f, xs.as_slice(), t, sp)?
+        let (initial_p, ps) = self.constant_motive(f, xs.as_slice(), t, sp)?
+        var p = initial_p
         let count = self.c.families[f as i64].constructors.len()
         if arms.len != count { return Err(error(sp, "match requires one arm per variant")) }
-        let ghost = self.proposition(t)
+        if count == 0 && expected.is_none() { return Err(error(
+            sp,
+            "an empty match needs an expected type"
+        )) }
+        var ghost = self.proposition(t)
         // A match on a borrowed variable refines what mentions it: the
         // expected type, and evidence in scope, which each arm sees anew under
         // its own name.
         var general = Vec(i64).new()
         var scrutinee_var: Option(u32) = None
-        if borrowed || (self.c.is_boxed(f) && !ghost && params_only(self.c.families[f as i64])) {
+        if expected.is_some() && (
+            borrowed || (self.c.is_boxed(f) && !ghost && params_only(self.c.families[f as i64]))
+        ) {
             match self.c.term(x) {
                 Var(v) => {
                     scrutinee_var = Some(v)
@@ -1329,9 +1338,9 @@ impl Elaborator {
         // A proof by cases reads the value the borrow reads: evidence never
         // runs, so nothing is lent or freed. Otherwise the view's motive is
         // over the borrow.
-        let proof_by_cases = borrowed && ghost
+        var proof_by_cases = borrowed && ghost
         let family = self.c.add(core.Term.Ind(f, xs.clone()), sp)?
-        let motive = match scrutinee_var {
+        var motive = match scrutinee_var {
             Some(v) if dependent && borrowed => {
                 let domain = if proof_by_cases { family } else {
                     self.c.add(core.Term.Ref(family), sp)?
@@ -1350,7 +1359,7 @@ impl Elaborator {
         // A match on an owned variable of heap data takes it apart: the
         // expected type then reads the node, so an arm can prove what the
         // function promises about the value it started with.
-        let owned_motive = match scrutinee_var {
+        var owned_motive = match scrutinee_var {
             Some(v) if !borrowed && dependent => self.general_motive(
                 family,
                 v,
@@ -1489,7 +1498,35 @@ impl Elaborator {
                 }
                 _ => {}
             }
-            var value = self.scope_expr(arm.body, Some(result), depth - 1)?
+            let infer_result = expected.is_none() && k == 0
+            var value = self.scope_expr(
+                arm.body,
+                if infer_result { None } else { Some(result) },
+                depth - 1
+            )?
+            if infer_result {
+                let inferred = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+                // Normalization may remove a local index that is irrelevant
+                // to the result, but cannot turn invalid evidence into a type.
+                let inferred = self.c.normal(inferred, core.DEPTH)?
+                t = match self.c.shift(inferred, -domains.len(), 0, core.DEPTH) {
+                    Ok(t) => t
+                    Err(_) => return Err(error(
+                        arm.span,
+                        "a field-dependent match result needs an expected type"
+                    ))
+                }
+                let (new_p, _) = self.constant_motive(f, xs.as_slice(), t, sp)?
+                p = new_p
+                ghost = self.proposition(inferred)
+                if borrowed && ghost { return Err(error(
+                    arm.span,
+                    "a proof by borrowed cases needs an expected type"
+                )) }
+                proof_by_cases = borrowed && ghost
+                motive = if proof_by_cases { p } else { t }
+                owned_motive = p
+            }
             // A field the arm does not use is freed.
             if !ghost { value = self.settle(value, domains.len())? }
             arities.push(domains.len())
@@ -2336,12 +2373,12 @@ impl Elaborator {
                     let ast.ExprKind.Lambda(ps, ret, yes) = args[2].kind else {
                         return Err(error(args[2].span, "conditional requires fn(p) { value }"))
                     }
-                    if ps.len() != 1 || ret.is_some() || reserved(
+                    if ps.len() != 1 || reserved(
                         ps[0].name.as_str()
                     ) {
                         return Err(error(
                             args[2].span,
-                            "conditional requires one proof binder and no return annotation"
+                            "conditional requires one proof binder"
                         ))
                     }
                     let proposition = if n == "if_eq" { core.Term.Eq(a, b) } else { core.Term.Lt(
@@ -2349,22 +2386,61 @@ impl Elaborator {
                         b
                     ) }
                     let p = self.c.add(proposition, sp)?
-                    let inner_expected = match expected {
+                    var inner_expected = match expected {
                         Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                         None => None
                     }
                     self.parameter_annotation(ps[0], p, true)?
                     self.push(ps[0].name.as_str(), p, true)
+                    match ret {
+                        Some(annotation) => {
+                            let t = self.ty(annotation, depth - 1)?
+                            let _ = self.c.infer(t, self.ctx.as_slice(), true, core.DEPTH)?
+                            match inner_expected {
+                                Some(expected) => if !self.c.equal(t, expected, core.DEPTH)? {
+                                    return Err(error(
+                                        annotation.span,
+                                        "lambda result annotation does not match its expected type"
+                                    ))
+                                }
+                                None => inner_expected = Some(t)
+                            }
+                        }
+                        None => {}
+                    }
                     let yes = self.block(yes, inner_expected, depth - 1)?
+                    let result = match expected {
+                        Some(t) => t
+                        None => {
+                            let t = self.c.infer(yes, self.ctx.as_slice(), true, core.DEPTH)?
+                            match inner_expected {
+                                Some(annotation) => if !self.c.equal(t, annotation, core.DEPTH)? {
+                                    return Err(error(
+                                        sp,
+                                        "conditional body does not match its result annotation"
+                                    ))
+                                }
+                                None => {}
+                            }
+                            let t = self.c.normal(t, core.DEPTH)?
+                            match self.c.shift(t, -1, 0, core.DEPTH) {
+                                Ok(t) => t
+                                Err(_) => return Err(error(
+                                    sp,
+                                    "a proof-dependent conditional result needs an expected type"
+                                ))
+                            }
+                        }
+                    }
                     self.pop()
-                    let no = self.scope_expr(args[3], expected, depth - 1)?
+                    let no = self.scope_expr(args[3], Some(result), depth - 1)?
                     // One branch runs: what one uses, the other frees.
                     var binders = Vec(Vec((bool, u32))).new()
                     var evidence = Vec((bool, u32)).new()
                     evidence.push((true, p))
                     binders.push(evidence)
                     binders.push(Vec((bool, u32)).new())
-                    let ghost = match expected { Some(t) => self.proposition(t), None => false }
+                    let ghost = self.proposition(result)
                     let (yes, no) = if ghost { (yes, no) } else {
                         let both = self.balance(binders.as_slice(), [yes, no])?
                         (both[0], both[1])

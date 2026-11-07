@@ -116,6 +116,8 @@ branches, so the core preservation regressions have no expected failures.
 Sum conversion also respects proof irrelevance when ordering nested terms.
 Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
+Conditional branches and constant-result matches infer local result types;
+conditional proof lambdas accept validated result annotations.
 Dependent modules now keep separate namespaces and enforce public item and field
 boundaries, including qualified patterns and structural elimination.
 These are stabilization steps, not a completed or formally verified 0.6 release
