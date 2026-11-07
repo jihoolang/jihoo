@@ -11,6 +11,12 @@ pub fn eq_trans(a: u64, b: u64, c: u64, p: erased(Eq(a, b)), q: erased(Eq(b, c))
     transport(fn(k) { Eq(a, k) }, q, p)
 }
 
+// Congruence for any supplied natural-index function. This constructs
+// equality evidence; it does not evaluate the function at runtime.
+pub fn eq_congr(f: fn(u64) -> u64, a: u64, b: u64, p: erased(Eq(a, b))) -> Eq(f(a), f(b)) {
+    transport(fn(k) { Eq(f(a), f(k)) }, p, refl(f(a)))
+}
+
 pub fn eq_add(a: u64, b: u64, k: u64, p: erased(Eq(a, b))) -> Eq(a + k, b + k) {
     transport(fn(m) { Eq(a + k, m + k) }, p, refl(a + k))
 }

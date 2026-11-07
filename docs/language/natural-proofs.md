@@ -14,6 +14,7 @@ Arguments named as evidence below are explicitly erased in the API.
 | --- | --- | --- |
 | `eq_sym(a, b, p)` | `Eq(a, b)` | `Eq(b, a)` |
 | `eq_trans(a, b, c, p, q)` | `Eq(a, b)`, `Eq(b, c)` | `Eq(a, c)` |
+| `eq_congr(f, a, b, p)` | `f: fn(u64) -> u64`, `Eq(a, b)` | `Eq(f(a), f(b))` |
 | `eq_add(a, b, k, p)` | `Eq(a, b)` | `Eq(a + k, b + k)` |
 | `rewrite_upper(i, n, m, e, p)` | `Eq(n, m)`, `Lt(i, n)` | `Lt(i, m)` |
 | `rewrite_lower(i, j, n, e, p)` | `Eq(i, j)`, `Lt(i, n)` | `Lt(j, n)` |
