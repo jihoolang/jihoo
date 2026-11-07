@@ -1,0 +1,17 @@
+// exit: 17
+#![dependent_core]
+
+struct Sized(n: u64) { data: buffer(n) }
+
+fn make(n: u64, value: i64) -> Sized(n) {
+    Sized { data: alloc(n, value) }
+}
+
+fn first(n: erased(u64), s: ref Sized(n), p: erased(Lt(0, n))) -> i64 {
+    match s { Sized { data } => index(data, 0, p) }
+}
+
+fn main() -> i64 {
+    let s = make(3, 17)
+    first(3, s, decide_lt(0, 3))
+}

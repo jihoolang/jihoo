@@ -29,6 +29,7 @@ same on GitHub.
 - [Contracts](language/contracts.md)
 - [Dependent types](language/dependent-types.md)
 - [Functions in dependent code](language/dependent-functions.md)
+- [Parameterized dependent records](language/dependent-records.md)
 - [Natural-index proof library](language/natural-proofs.md)
 - [List proof library](language/list-proofs.md)
 - [Reflection and derive](language/reflection.md)

@@ -3020,26 +3020,43 @@ impl Elaborator {
         self.c.extend()
     }
 
-    // `struct S { a: u64, b: buffer(a), p: erased(Lt(0, a)) }`: heap data with
-    // one constructor, whose fields may name the fields before them.
+    // Structs have one constructor. Erased u64 parameters are bound first;
+    // each field may name them and the fields before it. Constructor indices
+    // point past every field to the original parameters, in declaration order.
     fn structure(inout self, item: ast.Item, s: ast.StructDecl) -> Result((), diag.Diag) {
-        if item.attrs.len() != 0 || s.params.len() != 0 || s.invariants.len() != 0 {
+        if item.attrs.len() != 0 || s.invariants.len() != 0 {
             return Err(error(item.span, "a dependent_core struct has fields only"))
         }
         if reserved(s.name.as_str()) || self.taken(s.name.as_str()) {
             return Err(error(item.span, "duplicate or reserved data type name"))
         }
+        for i, p in s.params {
+            let valid = match p.ty {
+                Some(ty) => match ty.kind { Path(path, None) => path.len() == 1 && path[0] == "u64", _ => false }
+                None => false
+            }
+            let mode = p.mode == ast.Mode.Let || p.mode == ast.Mode.Comptime
+            if !mode || p.bounds.len() != 0 || !valid || reserved(p.name.as_str()) {
+                return Err(error(p.span, "data types are parameterized by u64 values"))
+            }
+            for j in 0..i {
+                if s.params[j].name == p.name { return Err(error(p.span, "duplicate parameter")) }
+            }
+        }
+        let params = s.params.len()
         let f = self.c.families.len() as u32
         self.families.push((self.module, item.public))
         self.c.families.push(core.Family {
             name: s.name.clone(),
             data: true,
-            params: 0,
-            arity: 0,
+            params: params as u32,
+            arity: params as u32,
             constructors: Vec(core.Constructor).new(),
             globals: self.c.definitions.len() as u32,
             span: item.span
         })
+        let u = self.u64(item.span)?
+        for p in s.params { self.push(p.name.as_str(), u, true) }
         var names = Vec(String).new()
         var domains = Vec((bool, u32)).new()
         var failure: Option(diag.Diag) = None
@@ -3050,6 +3067,7 @@ impl Elaborator {
             }
             let mut_name = field.name.clone()
             var duplicate = false
+            for p in s.params { if p.name == mut_name { duplicate = true } }
             for n in names { if n == mut_name { duplicate = true } }
             if duplicate {
                 failure = Some(error(field.span, "duplicate field"))
@@ -3067,9 +3085,13 @@ impl Elaborator {
                 }
             }
         }
-        var ty_result: Result(u32, diag.Diag) = self.c.add(
-            core.Term.Ind(f, Vec(u32).new()),
+        var indices = Vec(u32).new()
+        for j in 0..params { indices.push(self.c.add(
+            core.Term.Var((domains.len() + params - 1 - j) as u32),
             item.span
+        )?) }
+        var ty_result: Result(u32, diag.Diag) = self.c.add(
+            core.Term.Ind(f, indices), item.span
         )
         var j = domains.len()
         while j > 0 {
@@ -3078,6 +3100,13 @@ impl Elaborator {
             self.pop()
             ty_result = match ty_result {
                 Ok(ty) => self.c.add(core.Term.Pi(erased, domain, ty), item.span)
+                Err(d) => Err(d)
+            }
+        }
+        for _ in 0..params {
+            self.pop()
+            ty_result = match ty_result {
+                Ok(ty) => self.c.add(core.Term.Pi(true, u, ty), item.span)
                 Err(d) => Err(d)
             }
         }
