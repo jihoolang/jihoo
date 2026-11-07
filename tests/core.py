@@ -642,6 +642,8 @@ def main():
         validate_constructors(compiler, root, temporary, environment, run)
         from core_lambdas import validate_lambdas
         validate_lambdas(compiler, root, temporary, environment, run)
+        from core_functions import validate_functions
+        validate_functions(compiler, root, temporary, environment, run)
         from core_equality import validate_equality
         validate_equality(compiler, root, temporary, environment, run, definitions, evaluate)
         from core_chain import validate_chain

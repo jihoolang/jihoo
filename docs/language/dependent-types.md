@@ -91,6 +91,9 @@ other arms or speculate by elaborating an expression twice.
 
 ## Local dependent functions
 
+[Explicit function types](dependent-functions.md) let local values, parameters
+and results use `fn(A, ...) -> R`, including reusable higher-order helpers.
+
 A lambda without an expected type needs an annotation on every parameter and on
 its result, and at least one parameter. Annotations may depend on earlier
 parameters. Proof parameters must explicitly say `erased` in this form:

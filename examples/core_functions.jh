@@ -1,0 +1,23 @@
+// Explicit function types specialize through the existing dependent core.
+// No closure object or function pointer is passed to the exported runtime ABI.
+#![dependent_core]
+import dependent.nat
+
+fn twice(f: fn(u64) -> u64, x: u64) -> u64 { f(f(x)) }
+
+fn shifted(n: u64) -> fn(u64) -> u64 { fn(x) { x + n } }
+
+fn checked(n: u64, p: erased(Eq(n + 1, n + 1))) -> u64 { n }
+
+export fn incremented(n: u64) -> u64 { twice(shifted(1), n) }
+
+export fn unchanged(n: u64) -> u64 {
+    // Even at maximal u64, the function application here is ghost arithmetic.
+    checked(n, nat.eq_congr(fn(k) { k + 1 }, n, n, refl(n)))
+}
+
+fn main() -> i64 {
+    let f: fn(i64) -> i64 = fn(x) { x + 10 }
+    f(7)
+}
+// exit: 17
