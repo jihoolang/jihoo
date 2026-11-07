@@ -137,3 +137,74 @@ and changed input prefix. Separate executable assertions exercise the substituti
 size-product/depth-sum guards with individually valid input graphs. The integration
 suite accepts 15 actual exported transformations and rejects 59 malformed, tampered
 or wrapping results, plus six unsupported or failed exporter invocations.
+
+## Canonical artifact replay
+
+The replay path narrows the association gap for successive transformations. Its
+input is the complete previous validated certificate, not an independently
+reconstructed JSON description or a hidden original compiler graph. The next input
+graph is exactly that certificate's `after` graph, and its root is exactly `output`.
+There is no separate root override.
+
+The canonical format retains every constructor, payload, child index and operation
+field. Natural numbers use little-endian ASCII binary digits terminated by a
+semicolon; zero is the terminator alone. Thus large numeric literals need a number
+of digits proportional to their bit width, not a unary expansion. Signed integers
+and Boolean fields have fixed interpretations in the codec.
+
+The runner reads the prior artifact once and retains its bytes. Lean validates
+those bytes, and the test-only Jihoo driver receives the same retained bytes on
+stdin. The driver constructs a fresh `Core` graph in index order and re-exports its
+actual nodes to check canonical identity before invoking the requested operation.
+The emitted next certificate is checked against the prior artifact for exact
+before/after graph and root continuity, not just mathematical equality of selected
+subtrees or matching hashes.
+
+This is still not a theorem about executing Jihoo or about the honesty of the
+importer/exporter. The smaller integration boundary includes the stdin/IO path,
+the reconstruction/round-trip guard, and invocation of the operation on that same
+reconstruction. The canonical codec theorem establishes artifact identity, while
+the transformation theorem establishes the stated relation on decoded artifacts.
+Neither alone proves that the implementation followed the integration protocol.
+The ordinary lowering pipeline does not consume this certified replay chain.
+
+### Codec and chain guarantees
+
+`Canonical.decodeCertificate_encode` proves byte-level roundtrip for every
+certificate. `Canonical.encodeCertificate_injective` proves that the canonical
+encoding cannot identify two different certificates. `Canonical.decodeCertificate_exact`
+proves that every accepted complete decoding re-encodes to exactly the supplied
+bytes, rejecting trailing bytes and nonminimal numeral encodings. These results
+concern actual `ByteArray` values, not only an abstract token stream.
+
+`validateChain_sound` proves exact graph/root continuity and composition of the
+selected transformations across a checked list. `validateRequested_sound` also
+checks an operation supplied independently of the artifact's self-description.
+`Canonical.validateReplay_sound` ties these properties to the exact previous and
+next artifact bytes. An individually valid but unrelated certificate therefore
+cannot satisfy the replay handoff merely because its selected term has the same
+meaning.
+
+The generic codec is total over the mathematical datatype. Before running its
+recursive parser, the runtime CLI separately checks file/token limits and bounds
+graph and child-vector counts. This defensive preflight limits work on malicious
+inputs; it is not a theorem about OS resource consumption. Canonical-byte decoding
+is proved, while the initial JSON-to-certificate adapter and external IO/execution
+remain outside that proof.
+
+### Replay checks
+
+The same `graph-certificates` Nix check also builds the replay driver and runs
+`tests/core_artifact_replay.py`. It exercises real chained transformations, a file
+replacement after the single input read, and individually valid but unrelated
+certificates. It checks selected-root/full-graph continuity and rejects requested
+operation mismatches even when the different operations produce the same graph.
+Nine tiny kernel examples cover accepted replay, multiple-step composition and
+representative byte/metadata/root/graph rejections.
+
+To run this part alone with the built compiler and pinned Lean toolchain:
+
+```sh
+(cd proofs && lake build --wfail)
+python3 tests/core_artifact_replay.py --compiler out/jihoo
+```

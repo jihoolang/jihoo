@@ -1,0 +1,261 @@
+// Test-only trusted importer/invoker for GraphCertificateCodec's canonical bytes.
+// A runner validates retained bytes before passing this exact stream on stdin.
+// Parsing builds fresh Core nodes in index order, never synthetic fixtures. The
+// byte equality guard re-exports those actual nodes before the next operation.
+// This boundary is tested, not proved, and does not claim inference/lowering safety.
+import std.env
+import std.os
+import core
+import diag
+
+fn token(inout out: String, value: u64) {
+    var n = value
+    while n > 0 {
+        out.push(if n % 2 == 0 { '0' } else { '1' })
+        n /= 2
+    }
+    out.push(';')
+}
+
+fn fields(inout out: String, values: [u64]) {
+    for value in values { token(&out, value) }
+}
+
+fn write_node(inout out: String, term: core.Term) -> Result((), String) {
+    match term {
+        Var(k) => fields(&out, [0, k as u64])
+        Natural(n) => fields(&out, [1, n])
+        Integer(n) => fields(&out, [2, if n < 0 { 1 } else { 0 },
+            if n < 0 { (0 -% n) as u64 } else { n as u64 }])
+        U64 => token(&out, 3)
+        I64 => token(&out, 4)
+        Array(a) => fields(&out, [5, a as u64])
+        Lt(a, b) => fields(&out, [6, a as u64, b as u64])
+        Eq(a, b) => fields(&out, [7, a as u64, b as u64])
+        Pi(e, a, b) => fields(&out, [8, if e { 1 } else { 0 }, a as u64, b as u64])
+        Lam(e, a, b) => fields(&out, [9, if e { 1 } else { 0 }, a as u64, b as u64])
+        App(a, b) => fields(&out, [10, a as u64, b as u64])
+        Elements(xs) => {
+            fields(&out, [11, xs.len() as u64])
+            for x in xs { token(&out, x as u64) }
+        }
+        Index(a, b, p) => fields(&out, [12, a as u64, b as u64, p as u64])
+        Refl(a) => fields(&out, [13, a as u64])
+        ZeroLe(a) => fields(&out, [14, a as u64])
+        Decide(a, b) => fields(&out, [15, a as u64, b as u64])
+        UAdd(a, b) => fields(&out, [16, a as u64, b as u64])
+        USub(a, b, p) => fields(&out, [17, a as u64, b as u64, p as u64])
+        _ => return Err("unsupported canonical constructor".to_string())
+    }
+    Ok(())
+}
+
+fn write_graph(inout out: String, graph: core.Core) -> Result((), String) {
+    token(&out, graph.nodes.len() as u64)
+    for n in graph.nodes { write_node(&out, n.term)? }
+    Ok(())
+}
+
+struct Reader {
+    text: str
+    pos: i64
+}
+
+impl Reader {
+    fn number(inout self) -> Result(u64, String) {
+        var value: u64 = 0
+        var count: u64 = 0
+        var last = ';'
+        while self.pos < self.text.len {
+            let b = self.text[self.pos]
+            self.pos += 1
+            if b == ';' {
+                if count > 0 && last != '1' {
+                    return Err("noncanonical natural".to_string())
+                }
+                return Ok(value)
+            }
+            if (b != '0' && b != '1') || count >= 64 {
+                return Err("invalid or excessive canonical natural".to_string())
+            }
+            if b == '1' { value |= (1 as u64) << count }
+            count += 1
+            last = b
+        }
+        Err("truncated canonical natural".to_string())
+    }
+
+    fn bounded(inout self, maximum: u64) -> Result(u64, String) {
+        let n = self.number()?
+        if n > maximum { return Err("canonical number out of range".to_string()) }
+        Ok(n)
+    }
+
+    fn child(inout self, index: u32) -> Result(u32, String) {
+        let n = self.bounded(0xffffffff)?
+        if n >= index as u64 { return Err("canonical child must point backwards".to_string()) }
+        Ok(n as u32)
+    }
+
+    fn read_node(inout self, index: u32) -> Result(core.Term, String) {
+        let tag = self.number()?
+        let term = match tag {
+            0 => core.Term.Var(self.bounded(0xffffffff)? as u32)
+            1 => core.Term.Natural(self.number()?)
+            2 => {
+                let sign = self.bounded(1)?
+                let magnitude = self.bounded(
+                    if sign == 0 { 0x7fffffffffffffff } else { 0x8000000000000000 }
+                )?
+                if sign == 1 && magnitude == 0 { return Err("negative zero".to_string()) }
+                core.Term.Integer(
+                    if sign == 0 { magnitude as i64 } else { (0 as i64) -% magnitude as i64 }
+                )
+            }
+            3 => core.Term.U64
+            4 => core.Term.I64
+            5 => core.Term.Array(self.child(index)?)
+            6 => core.Term.Lt(self.child(index)?, self.child(index)?)
+            7 => core.Term.Eq(self.child(index)?, self.child(index)?)
+            8 => core.Term.Pi(self.bounded(1)? == 1, self.child(index)?, self.child(index)?)
+            9 => core.Term.Lam(self.bounded(1)? == 1, self.child(index)?, self.child(index)?)
+            10 => core.Term.App(self.child(index)?, self.child(index)?)
+            11 => {
+                let count = self.bounded(4096)?
+                var children = Vec(u32).new()
+                for _ in 0..count as i64 { children.push(self.child(index)?) }
+                core.Term.Elements(children)
+            }
+            12 => core.Term.Index(self.child(index)?, self.child(index)?, self.child(index)?)
+            13 => core.Term.Refl(self.child(index)?)
+            14 => core.Term.ZeroLe(self.child(index)?)
+            15 => core.Term.Decide(self.child(index)?, self.child(index)?)
+            16 => core.Term.UAdd(self.child(index)?, self.child(index)?)
+            17 => core.Term.USub(self.child(index)?, self.child(index)?, self.child(index)?)
+            _ => return Err("unsupported canonical constructor".to_string())
+        }
+        Ok(term)
+    }
+
+    fn read_graph(inout self) -> Result(core.Core, String) {
+        let count = self.bounded(4096)?
+        var c = core.Core.new()
+        for index in 0..count as i64 {
+            let term = self.read_node(index as u32)?
+            match c.add(term, diag.Span.nowhere()) {
+                Ok(actual) => {
+                    if actual != index as u32 { return Err(
+                        "reconstruction changed node indices".to_string()
+                    ) }
+                }
+                Err(e) => return Err(e.msg.clone())
+            }
+        }
+        Ok(c)
+    }
+}
+
+struct Artifact {
+    input: u32
+    output: u32
+    operation: u64
+    payload: u64
+    before: core.Core
+    after: core.Core
+}
+
+fn encode_artifact(a: Artifact) -> Result(String, String) {
+    var out = String.new()
+    fields(&out, [1, a.input as u64, a.output as u64, a.operation, a.payload])
+    write_graph(&out, a.before)?
+    write_graph(&out, a.after)?
+    Ok(out)
+}
+
+fn read_artifact(text: str) -> Result(Artifact, String) {
+    var r = Reader { text, pos: 0 }
+    if r.number()? != 1 { return Err("unsupported canonical schema".to_string()) }
+    let input = r.bounded(0xffffffff)? as u32
+    let output = r.bounded(0xffffffff)? as u32
+    let operation = r.bounded(1)?
+    let payload = r.bounded(if operation == 0 { 0x7fffffffffffffff } else { 0xffffffff })?
+    let before = r.read_graph()?
+    let after = r.read_graph()?
+    if r.pos != text.len { return Err("trailing canonical bytes".to_string()) }
+    if input as i64 >= before.nodes.len() || output as i64 >= after.nodes.len() ||
+        (operation == 1 && payload >= before.nodes.len() as u64) {
+        return Err("canonical root or replacement out of range".to_string())
+    }
+    let artifact = Artifact { input, output, operation, payload, before, after }
+    // Re-export actual reconstructed Core nodes and the actual selected root,
+    // not an untouched parsed representation or a hash of the input stream.
+    if encode_artifact(artifact)? != text { return Err("reconstruction byte mismatch".to_string()) }
+    Ok(artifact)
+}
+
+fn stdin_once() -> Result(String, String) {
+    var source = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 8 * 1024 * 1024
+    loop {
+        let n = match source.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read canonical artifact".to_string())
+        }
+        if bytes.len() > limit { return Err("canonical artifact exceeds 8 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn replay(operation: str, amount_text: str, replacement_text: str) -> Result(String, String) {
+    let Some(amount) = amount_text.parse_int() else { return Err("invalid amount".to_string()) }
+    let Some(replacement) = replacement_text.parse_int() else { return Err(
+        "invalid replacement".to_string()
+    ) }
+    if amount.to_string() != amount_text || replacement.to_string() != replacement_text ||
+        amount < 0 || amount > 1000 || replacement < 0 || replacement > 0xffffffff ||
+        (operation != "shift" && operation != "substitute") ||
+        (operation == "shift" && replacement != 0) || (operation == "substitute" && amount != 0) {
+        return Err("unsupported replay operation metadata".to_string())
+    }
+    // This is the only read. The root is selected solely from this artifact.
+    let text = stdin_once()?
+    var a = read_artifact(text.as_str())?
+    if operation == "substitute" && replacement >= a.after.nodes.len() {
+        return Err("replacement outside consumed graph".to_string())
+    }
+    let input = a.output as u32
+    var before = String.new()
+    write_graph(&before, a.after)?
+    // There is no original fixture object or alternate graph to fall back to.
+    let result = if operation == "shift" { a.after.shift(input, amount, 0, core.DEPTH) }
+    else { a.after.substitute(input, replacement as u32, core.DEPTH) }
+    let output = match result {
+        Ok(n) => n
+        Err(e) => return Err(e.msg.clone())
+    }
+    var out = String.new()
+    fields(&out, [1, input as u64, output as u64, if operation == "shift" { 0 } else { 1 },
+        if operation == "shift" { amount as u64 } else { replacement as u64 }])
+    out.push_str(before.as_str())
+    write_graph(&out, a.after)?
+    Ok(out)
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() != 4 {
+        eprintln(
+            "usage: core-artifact-replay shift|substitute AMOUNT REPLACEMENT < validated-artifact"
+        )
+        return 2
+    }
+    match replay(args[1], args[2], args[3]) {
+        Ok(bytes) => { print(bytes); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}
