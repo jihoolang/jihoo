@@ -1,0 +1,107 @@
+// Natural-index proofs checked by the dependent core, not compiler intrinsics.
+// Lt(a, b + 1) expresses a <= b. Arithmetic inside evidence is ghost;
+// evaluating the same arithmetic as a u64 value still checks overflow.
+#![dependent_core]
+
+pub fn eq_sym(a: u64, b: u64, p: erased(Eq(a, b))) -> Eq(b, a) {
+    transport(fn(k) { Eq(k, a) }, p, refl(a))
+}
+
+pub fn eq_trans(a: u64, b: u64, c: u64, p: erased(Eq(a, b)), q: erased(Eq(b, c))) -> Eq(a, c) {
+    transport(fn(k) { Eq(a, k) }, q, p)
+}
+
+pub fn eq_add(a: u64, b: u64, k: u64, p: erased(Eq(a, b))) -> Eq(a + k, b + k) {
+    transport(fn(m) { Eq(a + k, m + k) }, p, refl(a + k))
+}
+
+pub fn rewrite_upper(i: u64, n: u64, m: u64, e: erased(Eq(n, m)), p: erased(Lt(i, n))) -> Lt(i, m) {
+    transport(fn(k) { Lt(i, k) }, e, p)
+}
+
+pub fn rewrite_lower(i: u64, j: u64, n: u64, e: erased(Eq(i, j)), p: erased(Lt(i, n))) -> Lt(j, n) {
+    transport(fn(k) { Lt(k, n) }, e, p)
+}
+
+pub fn le_refl(a: u64) -> Lt(a, a + 1) { lt_add(0, 1, a, decide_lt(0, 1)) }
+
+pub fn weaken(a: u64, b: u64, p: erased(Lt(a, b))) -> Lt(a, b + 1) {
+    lt_le(a, b, b + 1, p, lt_add(0, 2, b, decide_lt(0, 2)))
+}
+
+pub fn lt_trans(a: u64, b: u64, c: u64, p: erased(Lt(a, b)), q: erased(Lt(b, c))) -> Lt(a, c) {
+    lt_le(a, b, c, p, weaken(b, c, q))
+}
+
+pub fn le_trans(
+    a: u64,
+    b: u64,
+    c: u64,
+    p: erased(Lt(a, b + 1)),
+    q: erased(Lt(b, c + 1))
+) -> Lt(a, c + 1) {
+    lt_le(a, b + 1, c + 1, p, lt_add(b, c + 1, 1, q))
+}
+
+pub fn le_lt(a: u64, b: u64, c: u64, p: erased(Lt(a, b + 1)), q: erased(Lt(b, c))) -> Lt(a, c) {
+    lt_le(a, b + 1, c, p, lt_add(b, c, 1, q))
+}
+
+// Contradictory strict order gives the core's empty bound, for absurd(...).
+pub fn lt_irrefl(a: u64, p: erased(Lt(a, a))) -> Lt(0, 0) { lt_cancel(0, 0, a, p) }
+
+pub fn add_le(a: u64, k: u64) -> Lt(a, a + k + 1) { lt_add(0, k + 1, a, zero_le(k)) }
+
+pub fn sub_cancel(n: u64, k: u64, p: erased(Lt(k, n + 1))) -> Eq(sub(n, k, p) + k, n) {
+    refl(n)
+}
+
+pub fn sub_le(n: u64, k: u64, p: erased(Lt(k, n + 1))) -> Lt(sub(n, k, p), n + 1) {
+    lt_add(0, k + 1, sub(n, k, p), zero_le(k))
+}
+
+pub fn mirror_lt(i: u64, n: u64, p: erased(Lt(i, n))) -> Lt(sub(n, i + 1, lt_add(i, n, 1, p)), n) {
+    lt_add(0, i + 1, sub(n, i + 1, lt_add(i, n, 1, p)), zero_le(i))
+}
+
+// A finite nondecreasing trace. Concatenation has two recursive premises;
+// steps_bound must establish its conclusion from both induction hypotheses.
+pub trait Steps(a: u64, b: u64) {
+    fn stationary(a: u64) -> Steps(a, a)
+    fn successor(a: u64, b: u64, p: erased(Steps(a, b))) -> Steps(a, b + 1)
+    fn concatenate(
+        a: u64,
+        b: u64,
+        c: u64,
+        p: erased(Steps(a, b)),
+        q: erased(Steps(b, c))
+    ) -> Steps(a, c)
+}
+
+pub fn steps_bound(a: u64, b: u64, p: erased(Steps(a, b))) -> Lt(a, b + 1) {
+    induct(fn(x, y) { Lt(x, y + 1) },
+        fn(x) { le_refl(x) },
+        fn(x, y, p, ih) { weaken(x, y + 1, ih) },
+        fn(x, y, z, p, q, ihp, ihq) { le_trans(x, y, z, ihp, ihq) },
+        p)
+}
+
+// Translate every point of a trace by the same natural offset.
+pub fn steps_add(a: u64, b: u64, k: u64, p: erased(Steps(a, b))) -> Steps(a + k, b + k) {
+    induct(fn(x, y) { Steps(x + k, y + k) },
+        fn(x) { stationary(x + k) },
+        fn(x, y, p, ih) { successor(x + k, y + k, ih) },
+        fn(x, y, z, p, q, ihp, ihq) { concatenate(x + k, y + k, z + k, ihp, ihq) },
+        p)
+}
+
+// A proof-producing loop: its invariant is Steps(a, a + k).
+// It is erased, not executed at runtime, including when n is symbolic.
+pub fn advance(a: u64, n: u64) -> Steps(a, a + n) {
+    fold(n, fn(k) { Steps(a, a + k) }, stationary(a),
+        fn(i, p, acc) { successor(a, a + i, acc) })
+}
+
+pub fn steps_lt(a: u64, b: u64, n: u64, p: erased(Steps(a, b)), q: erased(Lt(b, n))) -> Lt(a, n) {
+    le_lt(a, b, n, steps_bound(a, b, p), q)
+}

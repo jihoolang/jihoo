@@ -28,6 +28,7 @@ same on GitHub.
 - [Compile-time evaluation](language/comptime.md)
 - [Contracts](language/contracts.md)
 - [Dependent types](language/dependent-types.md)
+- [Natural-index proof library](language/natural-proofs.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)

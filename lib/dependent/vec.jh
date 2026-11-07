@@ -7,6 +7,7 @@
 // Elements are i64: the core has no type parameters yet. The room field keeps
 // the length within the capacity, which is what lets `get` read the buffer.
 #![dependent_core]
+import dependent.nat
 
 pub struct Vec {
     pub len: u64
@@ -62,7 +63,7 @@ pub fn size(v: ref Vec) -> refine(fn(k) { Eq(k, len(v)) }) {
 }
 
 pub fn eq_sym(a: u64, b: u64, p: erased(Eq(a, b))) -> Eq(b, a) {
-    transport(fn(m) { Eq(m, a) }, p, refl(a))
+    nat.eq_sym(a, b, p)
 }
 
 // The first `n` elements of `from` in a new buffer of `to` elements.
@@ -85,7 +86,7 @@ fn grown_room(len: u64, cap: u64, room: erased(Lt(len, cap + 1))) -> Lt(len, cap
 }
 
 fn weaken(a: u64, b: u64, p: erased(Lt(a, b))) -> Lt(a, b + 1) {
-    lt_le(a, b, b + 1, p, lt_add(0, 2, b, decide_lt(0, 2)))
+    nat.weaken(a, b, p)
 }
 
 pub fn push(inout v: Vec, x: i64) -> Eq(len(v), len(old(v)) + 1) {

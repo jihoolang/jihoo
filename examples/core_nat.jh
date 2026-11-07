@@ -1,0 +1,23 @@
+// Imported structural induction establishes a runtime loop invariant's bound.
+// Steps(c, k) says the count c can advance to the iteration count k.
+// All trace constructors and induction proofs are erased. main returns 30.
+#![dependent_core]
+import dependent.nat
+
+fn counted(n: u64, limit: u64) -> refine(fn(c) { nat.Steps(c, n) }) {
+    fold(n, fn(k) { refine(fn(c) { nat.Steps(c, k) }) }, pack(0, nat.stationary(0)),
+        fn(i, p, acc) {
+            if_lt(i, limit, fn(q) {
+                pack(witness(acc) + 1, nat.steps_add(witness(acc), i, 1, proof(acc)))
+            }, pack(witness(acc), nat.successor(witness(acc), i, proof(acc))))
+    })
+}
+
+export fn count(n: u64, limit: u64) -> u64 { witness(counted(n, limit)) }
+
+export fn slot(limit: u64) -> i64 {
+    let c = counted(4, limit)
+    index([10, 20, 30, 40, 50], witness(c), nat.steps_bound(witness(c), 4, proof(c)))
+}
+
+fn main() -> i64 { slot(2) }
