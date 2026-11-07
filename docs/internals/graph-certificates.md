@@ -208,3 +208,26 @@ To run this part alone with the built compiler and pinned Lean toolchain:
 (cd proofs && lake build --wfail)
 python3 tests/core_artifact_replay.py --compiler out/jihoo
 ```
+
+## Conditional typing of transformed artifacts
+
+A structural certificate alone does not establish typing. A typed-substitution
+bridge can additionally use a derivation for the exact decoded input body in a
+context extended by its argument type, and a derivation for the exact decoded
+replacement in the original context. It then derives typing of the certified
+output at the correspondingly substituted result type. Output typing is the
+conclusion, not another assumed certificate field.
+
+Those input/replacement derivations are separate premises. Neither `CheckGraph`
+nor `CheckArtifact` currently validates typing-derivation certificates or infers
+those premises. The intentionally untyped transformation fixtures therefore
+remain valid structural tests, without acquiring a typing or safety guarantee.
+Head-beta retyping also does not imply unrestricted contextual beta preservation;
+the [target-model limitation](lean-proofs.md#why-unrestricted-contextual-preservation-is-not-claimed)
+explains why the unchanged conversion relation cannot support that claim.
+
+The bridge theorems are `validate_shift_typed` and `validate_substitute_typed`.
+Their premises name the certificate's exact operation and decoded input/replacement
+roots. The result includes the decoded output at the certificate's actual output
+root and its derived target typing. A shift also requires the matching context
+renaming relation; substitution instantiates both the term and its result type.

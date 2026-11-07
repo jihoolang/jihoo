@@ -709,7 +709,10 @@ mechanize its soundness, starting from that specification:
    artifacts with a trusted exporter/run association, not all checker executions.
    Canonical byte roundtrip/injectivity and checked replay chains narrow artifact
    identity to exact bytes, graphs and roots, without proving the importer or
-   execution path.
+   execution path. Target renaming, typed substitution and head-beta retyping
+   connect accepted structural transforms to conditional output typing, without
+   changing conversion rules. Fixed-type contextual beta preservation does not
+   hold for that deliberately restricted conversion relation.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
