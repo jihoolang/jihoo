@@ -1,12 +1,13 @@
 # Lean proof boundary
 
-The first mechanized step toward 0.6 is an arithmetic evidence fragment in
-`proofs/Jihoo/Arithmetic.lean`. It is a separate declarative specification inspired
-by the [core specification](core-spec.md), not a translation of `compiler/core.jh`.
-It does **not** prove the dependent kernel, its normalization algorithm, ownership,
-lowering or whole executables sound.
+The mechanized work toward 0.6 currently has two parts: an arithmetic evidence
+fragment in `proofs/Jihoo/Arithmetic.lean`, and an index-dependent function calculus
+in `proofs/Jihoo/Indexed.lean`. These are separate declarative specifications
+inspired by the [core specification](core-spec.md), not translations of
+`compiler/core.jh`. They do **not** prove the full dependent kernel, its normalization
+algorithm, ownership, lowering or whole executables sound.
 
-## What is proved
+## Arithmetic evidence
 
 Expressions contain free variables, natural literals, addition and subtraction.
 A valuation assigns a natural number to every free variable. Propositions are
@@ -32,7 +33,7 @@ The example module checks nested conversion, open assumptions, equality transpor
 and the maximum u64 boundary, and proves that unrestricted subtraction cancellation
 and a closed equality between zero and one are impossible in this fragment.
 
-## Correspondence and differences
+### Arithmetic correspondence and differences
 
 `Expr.var`, `lit`, `add` and `sub` abstract `Var`, `Natural`, `UAdd` and `USub`.
 Unlike the core's graph, these are trees. Their free variables have natural indices;
@@ -64,6 +65,82 @@ Consequently this model does not prove proof-irrelevant ordering in `compare`, o
 that removing an evidence child preserves the typing of a core term. It proves a
 sound arithmetic foundation on which that correspondence can later be established.
 
+## Index-dependent beta preservation
+
+`Indexed.lean` proves capture-avoiding index substitution and beta subject reduction
+for an **extrinsically typed**, natural-index-dependent function calculus with free
+value parameters. Types include scalar types, arrays indexed by length, `Lt`, `Eq`,
+and `pi B`: a function whose implicit domain is a natural index and whose result
+is B. For example, `lam (refl (var 0))` has result type `Eq(i, i)` depending on its
+argument i. Applying it to seven substitutes seven into that result type.
+
+Raw terms, the typing judgment `HasType`, and the reduction relation `Step` are
+independent definitions. `Step` does not require or carry typing evidence. The
+preservation theorem is therefore not enforced by the definition of reduction:
+its beta case uses the proved substitution theorem and restores the weakened
+context of free value parameters.
+
+The eight additional audited guarantees are:
+
+- `Ty.subst_comp` and `Term.subst_comp`: capture-avoiding simultaneous substitution
+  composes, including beneath index binders.
+- `Ty.instantiate_subst` and `Term.instantiate_subst`: substituting free indices
+  commutes with instantiating an index binder, with the required lifting.
+- `HasType.substitution`: substituting indices in the context, term and type
+  preserves typing.
+- `Step.substitution`: substituting indices preserves the untyped reduction
+  relation.
+- `preservation`: a beta step, or its compatible closure, preserves a term's type.
+- `preservation_many`: a finite sequence of these steps preserves the type.
+
+`IndexedExamples.lean` checks a dependent equality result, a dependent bound result,
+nested lambdas with a free index argument that must not be captured, weakening of
+an array-typed free value parameter, and beta reduction within an array expression.
+Negative examples reject a false equality annotation, a wrong array length, and an
+arithmetically equal but structurally different length: the last deliberately
+exhibits the lack of a conversion rule.
+
+`tests/core_preserves/lean-indexed-beta.jhc` exercises matching beta patterns in the
+real kernel, including closing the free array parameter with ordinary value
+binders. It is an implementation regression, not a proved translation between
+Lean terms and core graphs.
+
+### Indexed correspondence and differences
+
+- Pi and lambda bind **only natural indices**. Their domain is implicit; there is
+  no arbitrary dependent domain, bound value parameter, type abstraction or
+  dependent telescope. Applications accept an arithmetic expression rather than
+  an arbitrary term of type `u64`.
+- Index variables use de Bruijn numbers: zero is the latest index binder; lifting
+  a substitution shifts its inserted expressions beneath a binder. The value
+  parameter namespace is separate and its identifiers are never substituted.
+- The calculus is open: `Context` is a total function from parameter identifiers
+  to types, not a finite context with an empty constructor. There is no finite
+  index-depth or scope judgment; all free index numbers are ambient variables.
+  The substitution theorem is about index substitution, not arbitrary core term
+  substitution or a closedness theorem. Arbitrary proposition assumptions may
+  appear in the parameter context, and preservation does not establish their
+  truth or consistency.
+- The arithmetic syntax is reused from the first fragment, including totalized
+  subtraction. `natural`, `integer`, and `elements` use unbounded mathematical
+  numbers. The names `u64` and `i64` identify intended core counterparts; they
+  do not enforce machine representability, subtraction evidence or trap behavior.
+- Type equality here is structural. There is no definitional conversion rule,
+  arithmetic evaluation step, or proof of the core's normalization algorithm.
+  In particular `Array(0 + 1)` and `Array(1)` remain different types.
+- Reduction is beta plus closure beneath lambda, in the function of application,
+  and in the array/evidence positions of indexing. Array reads do not reduce,
+  just as they remain neutral in the core's pure normalization model. There is
+  no runtime lookup semantics, progress theorem or executable bounds-safety proof.
+- Universe/Prop formation, ghost/code modes, erased binder distinctions,
+  quantities, general evidence elimination, inductive families, heaps, effects
+  and erasure are absent. The arithmetic `Derives.sound` theorem is not
+  automatically a soundness theorem for `Indexed.HasType`.
+
+This is genuine dependent-result substitution and preservation for the stated
+calculus, but **not** preservation for the full core or every reduction it performs.
+A restriction/translation theorem relating the two remains necessary.
+
 ## Reproducing the checks
 
 The project pins Lean 4.34.1 in `proofs/lean-toolchain` and uses only its bundled
@@ -88,18 +165,18 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of all eight exported theorems in `Audit.lean`. Only Lean's
+axiom dependencies of sixteen selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and some use `Quot.sound`; no theorem requires
 `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
 trusts Lean's kernel and standard logical foundation, as well as the toolchain
-used to run it. The theorem audit is an explicit list: add new public guarantees
+used to run it. The theorem audit is an explicit list, not a ban on every unused future declaration: add new public guarantees
 to both that list and its expected count.
 
 ## Remaining obligations
 
-There is no map from accepted core programs to `Derives` with a proved correctness
-theorem. Full soundness requires the remaining term syntax, universes, ghost/code
+There is no map from accepted core programs to either `Derives` or `HasType` with
+a proved correctness theorem. Full soundness requires the remaining term syntax, universes, ghost/code
 positions, dependent functions, families and elimination, followed by preservation
 and full consistency. Quantity rules need an execution model of ownership and
 scoped borrows. Erasure and runtime normalization must be related to the pure model,

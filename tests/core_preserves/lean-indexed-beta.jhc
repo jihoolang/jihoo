@@ -1,0 +1,25 @@
+; Implementation regressions corresponding to Lean's index-beta examples.
+; These are finite tests, not a checked translation or refinement proof.
+(def self_equality
+ (pi n U64 (Eq n n))
+ (lam n U64 (refl n)))
+(def at_seven (Eq 7 7) (app self_equality 7))
+(def positive
+ (pi n U64 (Lt 0 (uadd n 1)))
+ (lam n U64 (zero-le n)))
+(def positive_five (Lt 0 (uadd 5 1)) (app positive 5))
+
+; Keep the outer index free while substituting beneath the inner lambda.
+(def outer_equality
+ (pi outer U64 (pi inner U64 (Eq outer outer)))
+ (lam outer U64 (lam inner U64 (refl outer))))
+(def no_capture
+ (pi free U64 (Eq free free))
+ (lam free U64 (app outer_equality free 9)))
+
+; Value binders here close the Lean example's free parameter context.
+; Its array length must not become the newly bound index.
+(def unchanged_array
+ (pi n U64 (pi xs (Array n) (pi k U64 (Array n))))
+ (lam n U64 (lam xs (Array n) (lam k U64
+  (app (lam ignored U64 xs) k)))))
