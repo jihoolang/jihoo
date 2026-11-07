@@ -43,3 +43,8 @@ import Jihoo.TypedBetaReplay
 import Jihoo.TypedBetaReplayCodec
 import Jihoo.TypingInput
 import Jihoo.TypedBetaReplayExamples
+import Jihoo.CoreBridgeBetaShapes
+
+import Jihoo.CoreBridgeBetaEvidence
+import Jihoo.TypingEvidence
+import Jihoo.BetaEvidenceExamples
