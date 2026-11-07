@@ -166,7 +166,7 @@ coerces mixed scalar types nor changes overflow checks.
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
 `fold`, `lt_add`, `lt_cancel`, `lt_le`, `sub`, `zero_le`, `refine`, `pack`, `witness`, `proof`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
 `__jihoo_dependent_main` are reserved in marked modules. Functions,
-propositions and constructors share one namespace. A branch
+propositions, constructors and import aliases share a namespace within each module. A branch
 binder may shadow another local; de Bruijn indices preserve its scope.
 
 Exports accept U64/I64 values and return U64/I64 values or
@@ -1735,10 +1735,10 @@ in the core, `import dependent.vec`:
 
 ```jihoo
 pub struct Vec {
-    len: u64
-    cap: u64
-    data: buffer(cap)
-    room: erased(Lt(len, cap + 1))
+    pub len: u64
+    pub cap: u64
+    pub data: buffer(cap)
+    pub room: erased(Lt(len, cap + 1))
 }
 
 pub fn get(v: ref Vec, i: u64, p: erased(Lt(i, len(v)))) -> i64
@@ -1770,8 +1770,16 @@ This needed four things, each usable on its own:
   and run twice. Lowering calls the case with its evidence erased. A field taken
   from an owned value may be changed with `&` in its arm.
 - A marked module may import marked modules. Each is elaborated after those it
-  imports, `alias.name` reaches their functions, types and variants, and only the
-  root has an entry point. They share one namespace and `pub` is not yet enforced.
+  imports, and only the root has an entry point. Declarations retain their module
+  identity: `alias.name` reaches only that direct import's public functions,
+  types and proposition constructors; `alias.Enum.Variant` selects its variants.
+  Modules may reuse names without conflating their types or proofs. Public
+  proposition constructors and enum variants follow their family's visibility.
+  Struct fields are private unless `pub`; construction and induction require all
+  fields to be accessible, while a named match may leave private fields with `..`.
+  Qualified patterns check family identity, and discarded binders cannot be read
+  through `_`. See [module boundaries](../language/dependent-types.md#module-boundaries)
+  for entry points, foreign symbols and the direct-import restriction.
 - A node waiting to be freed goes down both branches of an `if_lt`, so a push with
   room allocates nothing.
 

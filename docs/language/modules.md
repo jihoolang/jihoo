@@ -32,3 +32,11 @@ or `aarch64` and the profile `native`, `freestanding` or `uefi`
 ([Profiles](profiles.md)). This is how `std.sys` talks to libc in one
 profile, to the kernel in another and to firmware in the third, with one
 interface.
+
+## Dependent modules
+
+A `#![dependent_core]` module imports only other marked modules. Its direct import
+aliases and `pub` item/field visibility follow the same boundaries, but it has no
+prelude, and definitions are checked in declaration order rather than hoisted.
+See [dependent module boundaries](dependent-types.md#module-boundaries) for public
+proof constructors, opaque return values, structural elimination and foreign symbols.

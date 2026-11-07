@@ -863,6 +863,10 @@ source elaboration: scalar literals take their type from either arithmetic
 operand, contextual lambdas accept checked annotations, and extended data
 motives reject duplicate binders. The annotation regressions check invalid
 proofs before conversion, exact erasure, both targets and native execution.
+Module stabilization now records declaration provenance, separates imported
+namespaces, enforces public items and struct fields, and checks qualified pattern
+identity. Regression modules reuse helper/type/constructor names, preserve opaque
+APIs, and reject visibility bypasses through induction or discarded binders.
 These improvements do not themselves constitute a soundness proof.
 
 Proof libraries target the [native dependent core](dependent-core.md).
