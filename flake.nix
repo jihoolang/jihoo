@@ -193,6 +193,7 @@
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/Audit.lean
+                ./proofs/EmitCore.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -200,6 +201,8 @@
               ];
             }} proofs
             chmod -R u+w proofs
+            mkdir -p tests/core_preserves
+            cp ${./tests/core_preserves/lean-core-translation.jhc} tests/core_preserves/lean-core-translation.jhc
             bash proofs/check.sh
             touch $out
           '';

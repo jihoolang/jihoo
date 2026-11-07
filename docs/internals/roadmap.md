@@ -697,7 +697,11 @@ mechanize its soundness, starting from that specification:
    bound or equality evidence for this calculus. The value lets remain
    nondependent, general value domains remain open, and this interpretation
    establishes inhabitance rather than operational adequacy. CI checks the
-   proofs and their axioms. This is not full-core consistency or preservation, quantity soundness
+   proofs and their axioms. A [representation bridge](core-bridge.md) now maps
+   a bounded annotated subset to unified core constructor trees, with scope,
+   renaming, literal-bound and closed-subtraction certificate proofs plus
+   Lean-generated implementation fixtures. It is not a typing translation or
+   executable-checker proof. This is not full-core consistency or preservation, quantity soundness
    or a refinement proof for `core.jh`; those remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
