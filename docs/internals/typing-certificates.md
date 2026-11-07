@@ -89,7 +89,10 @@ The CLI bounds input bytes, numeric token lengths, graph and proof-step counts,
 context lengths and premise-vector lengths before invoking the recursive codec.
 The pure checker also checks counts and graph validity, and budgets the aggregate
 expanded size of every referenced root before unfolding terms. Repeated references
-count repeatedly. Potentially expanding beta/application substitutions have
+count repeatedly. Each premise occurrence also charges the expanded subject,
+target and complete context of the referenced claim, including repeated premise
+IDs. This prevents a wide rule from repeatedly comparing a large context while
+paying for it only once. Potentially expanding beta/application substitutions have
 additional structural size/depth guards before substitution.
 
 These are conservative defensive limits, not a theorem bounding operating-system

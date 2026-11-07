@@ -290,7 +290,8 @@ def checkStep (g : Graph) (prior : Array Checked) (s : Step) : Option Checked :=
 
 /-- Aggregate expanded-node budget, counting repeated references separately.
 This check runs before any root is unfolded. It also covers unused derivations
-and repeated telescope entries, not just the two selected output roots. -/
+and repeated telescope entries, not just the two selected output roots.
+Every premise occurrence additionally pays for comparing its entire claim. -/
 def expansionBudget : Nat := 2000000
 
 private def addRootWork (ms : Array Measure) (used root : Nat) : Option Nat := do
@@ -298,14 +299,21 @@ private def addRootWork (ms : Array Measure) (used root : Nat) : Option Nat := d
   let total := used + m.size
   if total ≤ expansionBudget then some total else none
 
+private def addStepWork (ms : Array Measure) (used : Nat) (s : Step) : Option Nat := do
+  let used ← addRootWork ms used s.subject
+  let used ← addRootWork ms used s.target
+  s.context.foldlM (addRootWork ms) used
+
 def workSafe (c : Certificate) : Bool := (do
   let ms ← measureGraph c.graph
   let used ← addRootWork ms 0 c.termRoot
   let used ← addRootWork ms used c.typeRoot
+  let steps := c.steps.toArray
   c.steps.foldlM (fun (used : Nat) (s : Step) => do
-    let used ← addRootWork ms used s.subject
-    let used ← addRootWork ms used s.target
-    s.context.foldlM (addRootWork ms) used) used).isSome
+    let used ← addStepWork ms used s
+    s.premises.foldlM (fun used premise => do
+      let previous ← steps[premise]?
+      addStepWork ms used previous) used) used).isSome
 
 /-- This closed result mentions independently decoded roots and the original
 judgments. It contains no source/checker typing hypothesis. -/

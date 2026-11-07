@@ -269,6 +269,30 @@ def test(compiler, checker, output):
                    for _ in range(100)]
     rejected('aggregate-expansion-budget', encode_certificate(c))
 
+    # Reusing one premise repeats equality of its entire context. These unused
+    # open steps are valid model claims; the selected conclusion remains closed.
+    # Merely budgeting each step's decoded roots misses this repeated work.
+    def repeated_premise_work(width, doublings):
+        graph = [(4,), (2, 0, 0), (1, width), (5, 2),
+                 (11, *([1] * width)), (1, 0)]
+        root = 5
+        for _ in range(doublings):
+            graph.append((16, root, root))
+            root = len(graph) - 1
+        context = [root] * 7
+        return dict(graph=graph, termRoot=1, typeRoot=0, typingStep=1, formationStep=0,
+                    steps=[
+                        dict(rule=1, context=[], subject=0, target=0, premises=[]),
+                        dict(rule=12, context=[], subject=1, target=0, premises=[]),
+                        dict(rule=12, context=context, subject=1, target=0, premises=[]),
+                        dict(rule=15, context=context, subject=4, target=3,
+                             premises=[2] * width),
+                    ])
+
+    success(lean(encode_certificate(repeated_premise_work(1, 15))))
+    rejected('repeated-premise-work-budget',
+             encode_certificate(repeated_premise_work(256, 16)))
+
     good = encode_certificate(certificates['application-infer'])
     for name, payload in (
         ('empty', b''), ('truncated', good[:-1]), ('trailing', good + b';'),
