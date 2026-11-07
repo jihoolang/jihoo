@@ -393,3 +393,36 @@ succeeds. It concerns closed declarative head beta only, not full contextual
 normalization, symbolic arithmetic, `Core.normal`, runtime execution, exporter
 fidelity or full compiler soundness. See the closed-head-normalization section
 of [lean-proofs.md](lean-proofs.md) for the precise theorem chain and limits.
+
+
+## Actual ghost Core.normal result validation
+
+`CheckCoreNormal.lean DEPTH FUEL` checks four LF-separated canonical artifacts:
+input snapshot, output snapshot, original input typing certificate, and a
+schema-6 operation record. The record encodes `6; depth; fuel; before; after`
+using the existing canonical number/snapshot encoding. Version 6 fixes ghost
+Core.normal as the operation; it is not a beta-path or type-root replay record.
+`--input DEPTH FUEL` consumes just input snapshot LF typing and admits only an
+input for which bounded, independently proved beta/add normalization succeeds.
+The producer always uses this gate before invoking the actual Core method.
+
+```sh
+python3 tests/core_checked_normalization.py \
+  --generate retained.snapshot retained.typing \
+  --driver /path/to/core-typed-beta-replay --depth 128 --fuel 64
+```
+
+The driver receives `--normal DEPTH FUEL`, explicitly sets ghost mode and invokes
+`Core.normal` once. The final checker binds the exact retained output and request
+record, verifies the unchanged whole input graph prefix, and derives output
+typing at the original type from a directed contextual beta/literal-add proof.
+The proof-producing normalizer has total-step, expanded-size, depth and selected
+substitution-product limits. Failure or incomplete/unsupported normalization
+never falls back to mere conversion or assumes output typing.
+
+This conservative profile rejects symbolic UAdd, overflow, subtraction, ZeroLe,
+indexing and array values. Some closed inputs are rejected because their lambda
+bodies contain symbolic arithmetic before beta contraction. Core's broader
+symbolic normalization is not modeled. This is checked per-run output within the
+profile, not a formal proof of the Core implementation or its general termination.
+See [lean-proofs.md](lean-proofs.md) for the exact semantic and resource boundaries.

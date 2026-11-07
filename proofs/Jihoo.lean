@@ -64,3 +64,8 @@ import Jihoo.SimpleHeadNormalization
 import Jihoo.CoreBridgeClosedNormalization
 import Jihoo.TypingClosedConsistency
 import Jihoo.ClosedNormalizationExamples
+
+import Jihoo.CoreBridgeComputation
+import Jihoo.CheckedCoreNormalization
+import Jihoo.CheckedCoreNormalizationCodec
+import Jihoo.CheckedCoreNormalizationExamples
