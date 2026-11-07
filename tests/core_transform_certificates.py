@@ -110,7 +110,7 @@ def rejected_snapshots(shift, substitute):
     # Make all node mutations in both snapshots where needed so prefix checking
     # cannot hide an incomplete graph decoder. Unreachable nodes also matter.
     for name, node in (
-        ("unknown-constructor", ["prop"]),
+        ("unknown-constructor", ["global", 0]),
         ("forward-reference", ["array", 1]),
         ("self-reference", ["array", 0]),
         ("out-of-range-reference", ["array", 2**32 - 1]),
@@ -123,6 +123,11 @@ def rejected_snapshots(shift, substitute):
         ("extra-node-operand", ["u64", 0]),
         ("missing-node-operand", ["var"]),
         ("wrong-node-type", {"tag": "u64"}),
+        ("universe-limit", ["universe", 33]),
+        ("universe-u32-overflow", ["universe", 2**32]),
+        ("universe-negative", ["universe", -1]),
+        ("universe-missing-level", ["universe"]),
+        ("prop-extra-operand", ["prop", 0]),
     ):
         bad = copy.deepcopy(shift)
         bad["before"][0] = node
@@ -134,8 +139,20 @@ def rejected_snapshots(shift, substitute):
     bad["after"][position][1] = 0
     yield "binder-flag-not-bool", bad
     bad = copy.deepcopy(shift)
-    bad["after"].append(["prop"])
+    bad["after"].append(["global", 0])
     yield "unreachable-unsupported-node", bad
+    for tag, node in (("prop", ["prop"]), ("universe", ["universe", 32])):
+        bad = copy.deepcopy(shift)
+        bad["after"].append(node)
+        bad["output"] = len(bad["after"]) - 1
+        yield f"selected-{tag}", bad
+        bad = copy.deepcopy(shift)
+        bad["after"].extend([node, ["array", len(bad["after"])]])
+        bad["output"] = len(bad["after"]) - 1
+        yield f"reachable-{tag}", bad
+    bad = copy.deepcopy(shift)
+    bad["after"].append(["universe", 33])
+    yield "unreachable-universe-limit", bad
     bad = copy.deepcopy(shift)
     bad["after"].append(["array", len(bad["after"])])
     yield "unreachable-self-reference", bad
@@ -162,7 +179,7 @@ def test(compiler, checker, output):
              "tests/core_transform_snapshots.jh", "-o", str(driver)]
     run(build)
     accepted = {}
-    for fixture in ("mixed", "all", "var", "above", "closed"):
+    for fixture in ("mixed", "all", "var", "above", "closed", "inert-sorts"):
         for operation, amount in (("shift", 0), ("shift", 2), ("substitute", 0)):
             name = f"{fixture}-{operation}-{amount}"
             result = run([str(driver), operation, fixture, str(amount)])
@@ -183,7 +200,18 @@ def test(compiler, checker, output):
     assert any(node == ["var", 5] for node in mixed["before"])
     assert len(mixed["after"]) > len(mixed["before"])
 
+    sorts = accepted["inert-sorts-shift-2"]
+    assert all(node in sorts["before"] for node in
+               (["prop"], ["universe", 0], ["universe", 31], ["universe", 32]))
+    assert sorts["before"][sorts["input"]] == ["var", 0]
+
     failures = 0
+    for fixture in ("selected-prop", "selected-universe", "reachable-sort"):
+        result = run([str(driver), "shift", fixture, "0"])
+        path = output / f"reject-{fixture}.json"
+        path.write_text(result.stdout)
+        validate(checker, path, success=False)
+        failures += 1
     for name, document in rejected_snapshots(accepted["mixed-shift-2"], mixed):
         path = output / f"reject-{name}.json"
         path.write_text(json.dumps(document, separators=(",", ":")) + "\n")
@@ -231,6 +259,7 @@ def test(compiler, checker, output):
         ("shift", "unsupported", "1", "unsupported constructor"),
         ("substitute", "unsupported", "0", "unsupported constructor"),
         ("shift", "invalid", "1", "invalid term reference"),
+        ("shift", "universe-overflow", "0", "universe level exceeds transport bound"),
         ("shift", "mixed", "-1", "unsupported amount"),
         ("shift", "mixed", "4294967296", "unsupported amount"),
         ("substitute", "mixed", "1", "unsupported amount"),

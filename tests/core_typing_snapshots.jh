@@ -1,0 +1,115 @@
+// Test-only invocation/export boundary. Reads one textual-core declaration,
+// runs this checkout's actual Core.check and ghost Core.infer/Core.require,
+// then exports every post-call node in its original order and the actual roots.
+// No nodes are filtered, remapped or synthesized by the exporter. This tested
+// IO/source/build association is not a theorem about all Core.infer executions.
+import std.env
+import std.os
+import core
+import core_parse
+
+fn token(inout out: String, value: u64) {
+    var n = value
+    while n > 0 {
+        out.push(if n % 2 == 0 { '0' } else { '1' })
+        n /= 2
+    }
+    out.push(';')
+}
+
+fn fields(inout out: String, values: [u64]) {
+    for value in values { token(&out, value) }
+}
+
+fn write_node(inout out: String, term: core.Term) -> Result((), String) {
+    match term {
+        Var(k) => fields(&out, [0, k as u64])
+        Natural(n) => fields(&out, [1, n])
+        Integer(n) => fields(&out, [2, if n < 0 { 1 } else { 0 },
+            if n < 0 { (0 -% n) as u64 } else { n as u64 }])
+        U64 => token(&out, 3)
+        I64 => token(&out, 4)
+        Array(a) => fields(&out, [5, a as u64])
+        Lt(a, b) => fields(&out, [6, a as u64, b as u64])
+        Eq(a, b) => fields(&out, [7, a as u64, b as u64])
+        Pi(e, a, b) => fields(&out, [8, if e { 1 } else { 0 }, a as u64, b as u64])
+        Lam(e, a, b) => fields(&out, [9, if e { 1 } else { 0 }, a as u64, b as u64])
+        App(a, b) => fields(&out, [10, a as u64, b as u64])
+        Elements(xs) => {
+            fields(&out, [11, xs.len() as u64])
+            for x in xs { token(&out, x as u64) }
+        }
+        Index(a, b, p) => fields(&out, [12, a as u64, b as u64, p as u64])
+        Refl(a) => fields(&out, [13, a as u64])
+        ZeroLe(a) => fields(&out, [14, a as u64])
+        Decide(a, b) => fields(&out, [15, a as u64, b as u64])
+        UAdd(a, b) => fields(&out, [16, a as u64, b as u64])
+        USub(a, b, p) => fields(&out, [17, a as u64, b as u64, p as u64])
+        Prop => token(&out, 18)
+        Universe(level) => fields(&out, [19, level as u64])
+        _ => return Err("unsupported constructor in full typing snapshot".to_string())
+    }
+    Ok(())
+}
+
+fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn snapshot(mode: str) -> Result(String, String) {
+    if mode != "infer" && mode != "require" { return Err("expected infer or require".to_string()) }
+    let source = stdin_once()?
+    var c = match core_parse.parse(source.as_str(), 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 || c.families.len() != 0 {
+        return Err("expected exactly one core definition and no families".to_string())
+    }
+    let value = c.definitions[0].value
+    let declared = c.definitions[0].ty
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    let inferred = match c.infer(value, [], true, core.DEPTH) {
+        Ok(t) => t
+        Err(e) => return Err(e.msg.clone())
+    }
+    let selected = if mode == "require" {
+        match c.require(value, declared, [], true, core.DEPTH) {
+            Ok(_) => {}
+            Err(e) => return Err(e.msg.clone())
+        }
+        declared
+    } else { inferred }
+    // Freeze the full arena immediately after the actual operation. Snapshot
+    // schema 3 is distinct from the theorem checker's certificate schema 2.
+    var out = String.new()
+    fields(&out, [3, value as u64, selected as u64, c.nodes.len() as u64])
+    for n in c.nodes { write_node(&out, n.term)? }
+    Ok(out)
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() != 2 {
+        eprintln("usage: core-typing-snapshots infer|require < one-definition.core")
+        return 2
+    }
+    match snapshot(args[1]) {
+        Ok(bytes) => { print(bytes); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}

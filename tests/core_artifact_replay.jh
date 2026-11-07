@@ -45,6 +45,11 @@ fn write_node(inout out: String, term: core.Term) -> Result((), String) {
         Decide(a, b) => fields(&out, [15, a as u64, b as u64])
         UAdd(a, b) => fields(&out, [16, a as u64, b as u64])
         USub(a, b, p) => fields(&out, [17, a as u64, b as u64, p as u64])
+        Prop => token(&out, 18)
+        Universe(level) => {
+            if level > 32 { return Err("universe level exceeds transport bound".to_string()) }
+            fields(&out, [19, level as u64])
+        }
         _ => return Err("unsupported canonical constructor".to_string())
     }
     Ok(())
@@ -132,6 +137,8 @@ impl Reader {
             15 => core.Term.Decide(self.child(index)?, self.child(index)?)
             16 => core.Term.UAdd(self.child(index)?, self.child(index)?)
             17 => core.Term.USub(self.child(index)?, self.child(index)?, self.child(index)?)
+            18 => core.Term.Prop
+            19 => core.Term.Universe(self.bounded(32)? as u32)
             _ => return Err("unsupported canonical constructor".to_string())
         }
         Ok(term)

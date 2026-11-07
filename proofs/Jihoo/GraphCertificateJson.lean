@@ -82,6 +82,11 @@ private def node (j : Json) : Except String Node := do
   | [.str "decide", a, b] => return .decide (← nat a) (← nat b)
   | [.str "uadd", a, b] => return .uadd (← nat a) (← nat b)
   | [.str "usub", a, b, p] => return .usub (← nat a) (← nat b) (← nat p)
+  | [.str "prop"] => return .prop
+  | [.str "universe", level] =>
+      let level ← nat level
+      require (level < universeBound) "universe level exceeds transport bound"
+      return .universe level
   | _ => throw "unsupported constructor, payload, or arity"
 
 private def graph (j : Json) : Except String Graph := do

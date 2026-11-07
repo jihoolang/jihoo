@@ -136,6 +136,8 @@ Target renaming, typed substitution and head-beta retyping preserve the restrict
 judgment; typed artifact outputs still require explicit input-typing premises.
 A separate beta-aware target proves fixed-type contextual beta preservation,
 including annotation changes, using proved conversion and context transport.
+[Checked typing artifacts](docs/internals/typing-certificates.md) independently
+validate closed typing and formation derivations bound to complete exported graphs.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).

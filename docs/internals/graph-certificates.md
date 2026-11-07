@@ -243,3 +243,13 @@ beta-dependent result type. These theorems still require the exact decoded input
 and replacement typing derivations; the executable certificate validator has not
 become a type checker. No exporter, importer or runtime trust assumption is removed
 by extending the model's conversion relation.
+
+
+## Independently checked closed typing
+
+[Checked typing artifacts](typing-certificates.md) now validate explicit closed
+typing and type-formation derivations against a complete exported graph. This
+separate version-2 format does not turn the version-1 transformation validator
+into a typing checker, nor automatically discharge arbitrary open-context
+substitution premises. Inert Prop/Universe transport preserves administrative
+nodes created by actual inference without adding sort typing to Raw.

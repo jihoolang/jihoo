@@ -41,6 +41,11 @@ fn encode(term: core.Term) -> Result(json.Json, String) {
         Decide(a, b) => node("decide", [id(a), id(b)])
         UAdd(a, b) => node("uadd", [id(a), id(b)])
         USub(a, b, p) => node("usub", [id(a), id(b), id(p)])
+        Prop => node("prop", [])
+        Universe(level) => {
+            if level > 32 { return Err("universe level exceeds transport bound".to_string()) }
+            node("universe", [id(level)])
+        }
         _ => return Err("unsupported constructor in graph snapshot".to_string())
     }
     Ok(out)
@@ -90,7 +95,31 @@ fn fixture(inout c: core.Core, name: str) -> Result((u32, u32), String) {
     if name == "above" { return Ok((v3, replacement)) }
     if name == "overflow" { return Ok((add(&c, core.Term.Var(0xffffffff)), replacement)) }
     if name == "closed" { return Ok((maximum, replacement)) }
-    if name == "unsupported" { return Ok((add(&c, core.Term.Prop), replacement)) }
+    if name == "unsupported" { return Ok((add(&c, core.Term.Global(0)), replacement)) }
+    if name == "inert-sorts" {
+        // Inference really appends these sorts. Preserve every node and ID.
+        let universe = c.infer(u, [], true, core.DEPTH).unwrap()
+        let proposition = add(&c, core.Term.Eq(zero, zero))
+        let prop = c.infer(proposition, [], true, core.DEPTH).unwrap()
+        let high = add(&c, core.Term.Universe(31))
+        let highest = c.infer(high, [], true, core.DEPTH).unwrap()
+        assert(c.term(universe) == core.Term.Universe(0), "inference appends Universe(0)")
+        assert(c.term(prop) == core.Term.Prop, "inference appends Prop")
+        assert(c.term(highest) == core.Term.Universe(32), "inference can append Universe(32)")
+        return Ok((v0, replacement))
+    }
+    if name == "selected-prop" { return Ok((add(&c, core.Term.Prop), replacement)) }
+    if name == "selected-universe" {
+        return Ok((add(&c, core.Term.Universe(0)), replacement))
+    }
+    if name == "reachable-sort" {
+        let sort = add(&c, core.Term.Prop)
+        return Ok((add(&c, core.Term.Array(sort)), replacement))
+    }
+    if name == "universe-overflow" {
+        add(&c, core.Term.Universe(33))
+        return Ok((v0, replacement))
+    }
     if name == "invalid" { return Ok((add(&c, core.Term.Array(0xffffffff)), replacement)) }
     let array = add(&c, core.Term.Array(v0))
     let lt = add(&c, core.Term.Lt(v0, v1))

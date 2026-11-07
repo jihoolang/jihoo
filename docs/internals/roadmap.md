@@ -717,6 +717,10 @@ mechanize its soundness, starting from that specification:
    dependent arguments and annotations, via confluence and context transport.
    This does not prove the executable checker implements that relation, or cover
    all core reductions, runtime effects, erasure or lowering.
+   [Checked typing artifacts](typing-certificates.md) independently validate
+   closed typing/formation derivations for exact exported graph roots, with
+   explicit conversion evidence. The producer is untrusted for artifact typing;
+   exporter/source association and all-program checker refinement remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

@@ -106,6 +106,8 @@ theorem parseInt_encode (n : Int) (rest : Bytes) :
     parseInt (encodeInt n ++ rest) = some (n, rest) := by
   cases n <;> simp [parseInt, encodeInt, List.append_assoc, parseNat_encode]
 
+/-- Tags 0–17 retain their original bytes. Tags 18–19 extend the version-1
+constructor alphabet with inert sorts; older decoders reject those tags. -/
 def encodeNode : Node → Bytes
   | .var k => encodeNat 0 ++ encodeNat k
   | .natural n => encodeNat 1 ++ encodeNat n
@@ -125,6 +127,8 @@ def encodeNode : Node → Bytes
   | .decide a b => encodeNat 15 ++ encodeNat a ++ encodeNat b
   | .uadd a b => encodeNat 16 ++ encodeNat a ++ encodeNat b
   | .usub a b c => encodeNat 17 ++ encodeNat a ++ encodeNat b ++ encodeNat c
+  | .prop => encodeNat 18
+  | .universe level => encodeNat 19 ++ encodeNat level
 
 def parseNode : Parser Node := fun bs => do
   let (tag, bs) ← parseNat bs
@@ -151,6 +155,8 @@ def parseNode : Parser Node := fun bs => do
   | 16 => let (a, bs) ← parseNat bs; let (b, bs) ← parseNat bs; pure (.uadd a b, bs)
   | 17 => let (a, bs) ← parseNat bs; let (b, bs) ← parseNat bs
           let (c, bs) ← parseNat bs; pure (.usub a b c, bs)
+  | 18 => pure (.prop, bs)
+  | 19 => let (level, bs) ← parseNat bs; pure (.universe level, bs)
   | _ => none
 
 theorem parseNode_encode (n : Node) (rest : Bytes) :
