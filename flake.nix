@@ -209,7 +209,9 @@
 
           # Build the exporter against this exact compiler/core.jh, execute
           # real transforms, and feed their snapshots to the Lean validator.
-          # This is an integration check, not a proof of exporter fidelity.
+          # Replay imports the exact retained canonical artifact and validates
+          # whole-graph/root continuity before any subsequent consumer runs.
+          # This is an integration check, not a proof of importer/exporter fidelity.
           graph-certificates = pkgs.runCommand "jihoo-graph-certificates" {
             nativeBuildInputs = [ jihoo pkgs.lean4 pkgs.python3 ];
           } ''
@@ -220,6 +222,7 @@
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/CheckGraph.lean
+                ./proofs/CheckArtifact.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -230,6 +233,7 @@
             export JIHOO_PATH=$PWD/lib
             (cd proofs && lake build --wfail)
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 

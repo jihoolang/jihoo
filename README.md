@@ -130,7 +130,8 @@ Restricted annotated source typing translates to a separate ghost-mode target
 judgment; executable-checker refinement remains unproved.
 [Graph artifact certificates](docs/internals/graph-certificates.md) independently
 check exported snapshots of actual binder transformations, with an explicit
-exporter and execution-association trust boundary.
+exporter and execution-association trust boundary. Canonical byte codecs and
+replay checks bind successive transforms to the same graph artifact and root.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).

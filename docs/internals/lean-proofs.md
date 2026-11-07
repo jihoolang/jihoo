@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of ninety-nine selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 126 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -326,7 +326,10 @@ of actual core shifts and substitutions against the unified formal operations.
 It checks the entire original graph remains a prefix of the final graph. This
 certifies specific exported artifacts, not every compiler execution or typing of
 those artifacts. Exporter fidelity and association with the invoked implementation
-remain trusted.
+remain trusted. A canonical byte codec now proves roundtrip and injectivity,
+and replay certificates bind exact graph/root continuity and an independently
+requested operation. The real replay driver reconstructs its graph solely from
+the retained validated artifact; its importer and invocation remain trusted.
 
 ## Remaining obligations
 
