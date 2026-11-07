@@ -1861,6 +1861,57 @@ impl Elaborator {
         }
     }
 
+    // Named and anonymous domains both introduce core binders. Only named
+    // ones are visible in source; anonymous binders cannot capture outer names.
+    fn function_type(
+        inout self,
+        params: Vec(ast.FnTyParam),
+        result: Option(Box(ast.Ty)),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if params.len() == 0 { return Err(error(
+            sp, "a dependent function type needs at least one parameter"
+        )) }
+        let Some(result) = result else { return Err(error(
+            sp, "a dependent function type needs an explicit result"
+        )) }
+        var domains = Vec((bool, u32)).new()
+        for i, p in params {
+            if p.mode != ast.Mode.Let { return Err(error(
+                p.ty.span, "function type parameters use plain types or erased(T)"
+            )) }
+            let name = match p.name { Some(n) => n.clone(), None => "_".to_string() }
+            if reserved(name.as_str()) { return Err(error(
+                p.ty.span,
+                "reserved dependent_core name"
+            )) }
+            if name != "_" {
+                for j in 0..i {
+                    if params[j].name == p.name { return Err(error(
+                        p.ty.span,
+                        "duplicate function type parameter"
+                    )) }
+                }
+            }
+            let (erased, domain) = self.domain_at(p.ty, depth - 1)?
+            let _ = self.c.infer(domain, self.ctx.as_slice(), true, core.DEPTH)?
+            domains.push((erased, domain))
+            self.push(name.as_str(), domain, erased)
+        }
+        var ty = self.ty(result.deref(), depth - 1)?
+        let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
+        var i = domains.len()
+        while i > 0 {
+            i -= 1
+            let (erased, domain) = domains[i]
+            self.pop()
+            ty = self.c.add(core.Term.Pi(erased, domain, ty), sp)?
+        }
+        let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
+        Ok(ty)
+    }
+
     fn ty(inout self, t: ast.Ty, depth: u32) -> Result(u32, diag.Diag) {
         self.ghost += 1
         let result = self.type_of(t, depth)
@@ -1915,37 +1966,12 @@ impl Elaborator {
                 }
                 Err(error(t.span, "unsupported type in dependent_core"))
             }
-            // Function types list unnamed domains, all in the outer source
-            // context. Shift them under the preceding Pi binders without
-            // introducing names that could capture an outer index.
+            // Restore the source context even when a later domain is invalid.
             Fn(params, result) => {
-                if params.len() == 0 { return Err(error(
-                    t.span, "a dependent function type needs at least one parameter"
-                )) }
-                let Some(result) = result else { return Err(error(
-                    t.span, "a dependent function type needs an explicit result"
-                )) }
-                var domains = Vec((bool, u32)).new()
-                for p in params {
-                    if p.mode != ast.Mode.Let { return Err(error(
-                        p.ty.span, "function type parameters use plain types or erased(T)"
-                    )) }
-                    let (erased, domain) = self.domain_at(p.ty, depth - 1)?
-                    let _ = self.c.infer(domain, self.ctx.as_slice(), true, core.DEPTH)?
-                    domains.push((erased, domain))
-                }
-                var ty = self.ty(result.deref(), depth - 1)?
-                let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
-                ty = self.c.shift(ty, params.len(), 0, core.DEPTH)?
-                var i = domains.len()
-                while i > 0 {
-                    i -= 1
-                    let (erased, domain) = domains[i]
-                    let domain = self.c.shift(domain, i, 0, core.DEPTH)?
-                    ty = self.c.add(core.Term.Pi(erased, domain, ty), t.span)?
-                }
-                let _ = self.c.infer(ty, self.ctx.as_slice(), true, core.DEPTH)?
-                Ok(ty)
+                let before = self.ctx.len()
+                let value = self.function_type(params, result, t.span, depth)
+                while self.ctx.len() > before { self.pop() }
+                value
             }
             // `ref T`: a borrow of a buffer or heap data.
             Ref(inner, false) => {

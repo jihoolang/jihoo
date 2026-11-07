@@ -179,6 +179,8 @@ pub enum TyKind {
 }
 
 pub struct FnTyParam {
+    // Optional source binder, scoped over later domains and the result.
+    pub name: Option(String)
     pub mode: Mode
     pub ty: Ty
 }
@@ -459,7 +461,7 @@ impl Clone for TyKind {
 
 impl Clone for FnTyParam {
     fn clone(self) -> FnTyParam {
-        FnTyParam { mode: self.mode, ty: self.ty.clone() }
+        FnTyParam { name: self.name.clone(), mode: self.mode, ty: self.ty.clone() }
     }
 }
 

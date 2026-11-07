@@ -322,6 +322,7 @@ impl Dump {
             self.s("(")
             self.mode(p.mode)
             self.s(" ")
+            match p.name { Some(n) => { self.s(n.as_str()); self.s(": ") }, None => {} }
             self.ty(p.ty)
             self.s(")")
         }
