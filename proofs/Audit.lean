@@ -305,3 +305,29 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.Typing.Evidence.Examples.false_bound_rejected
 #print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.nonnormal_index_evidence
 #print axioms Jihoo.CoreBridge.Raw.Beta.EvidenceExamples.nonnormal_index_truth
+
+-- Bounded finite head normalization and literal-truth witnesses.
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Transition.preserve
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Trace.preserve
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Trace.typeRoot
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Trace.original_type
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Trace.reduction
+#print axioms Jihoo.GraphCertificates.HeadNormalization.validatePrefix_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.validate_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.validate_original_type
+#print axioms Jihoo.GraphCertificates.HeadNormalization.validateLiteral_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.validateLiteral_truth
+#print axioms Jihoo.GraphCertificates.HeadNormalization.false_literal_rejected
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.parse_encode
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.decode_encode
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.encode_injective
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.decode_exact
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.validatePrefixBytes_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.validateLiteralBytes_sound
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Wire.validateLiteralBytes_truth
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.root_path
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.function_path
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.arguments_not_searched
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.bodies_not_searched
+#print axioms Jihoo.GraphCertificates.HeadNormalization.Examples.false_bound_rejected

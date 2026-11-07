@@ -48,3 +48,6 @@ import Jihoo.CoreBridgeBetaShapes
 import Jihoo.CoreBridgeBetaEvidence
 import Jihoo.TypingEvidence
 import Jihoo.BetaEvidenceExamples
+import Jihoo.HeadNormalization
+import Jihoo.HeadNormalizationCodec
+import Jihoo.HeadNormalizationExamples
