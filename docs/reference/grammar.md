@@ -118,13 +118,24 @@ type     = path [ "(" expr { sep expr } ")" ]      Vec(i64), std.map.Map(K, V)
          | ( "ref" | "inout" ) type                 a borrow, as a type argument
          | "type"                                   the type of types
 path     = name { "." name }
-fn_ty    = "(" [ [ "inout" | "sink" ] type { "," [ "inout" | "sink" ] type } ] ")"
-           [ "->" type ]
+fn_ty    = "(" [ fn_ty_param { "," fn_ty_param } ] ")" [ "->" type ]
+fn_ty_param = [ "inout" | "sink" ] [ name ":" ] type
 fnptr_ty = "(" [ [ "inout" | "sink" ] type { "," [ "inout" | "sink" ] type }
                  [ "," "..." ] | "..." ] ")" [ "->" type ]
 ```
 
 `...` in a function pointer requires a C-compatible value signature.
+
+Named function-type parameters are supported only by `fn` types in
+`#![dependent_core]` modules. For example, `fn(n: u64, buffer(n)) -> i64`
+names the first argument so the second argument's type can refer to it.
+The name is in scope in later domains and the result, not in its own domain;
+unnamed domains remain supported. The dependent subset requires at least one
+parameter and an explicit result, uses `erased(T)` for erased domains, and
+rejects `inout` and `sink` in function types. Named domains do not extend
+`fnptr`, `dyn fn`, `impl fn`, or ordinary code. See
+[functions in dependent code](../language/dependent-functions.md) and the
+[indexed callback example](../../examples/core_named_functions.jh).
 
 Type arguments are expressions, so a number can be one (`[T; N]`,
 `Matrix(f64, 3)`). The `(` of type arguments, and the `->` of a function
