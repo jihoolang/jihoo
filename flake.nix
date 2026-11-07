@@ -227,6 +227,7 @@
                 ./proofs/CheckBetaReplay.lean
                 ./proofs/CheckEvidence.lean
                 ./proofs/CheckNormalization.lean
+                ./proofs/CheckTypeNormalization.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -242,6 +243,7 @@
             python3 tests/core_typed_beta_replay.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_literal_evidence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_head_normalization.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_type_index_normalization.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 

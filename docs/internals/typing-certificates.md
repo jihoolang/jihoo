@@ -288,3 +288,88 @@ lambda bodies may remain unreduced, and a nonliteral type is not normalized by
 this interface. Importer/exporter and IO fidelity, `Core.normal` strategy,
 higher-order denotational realization, unconditional consistency, runtime
 erasure/ownership and lowering remain outside the theorem.
+
+
+## Finite type-index normalization after head normalization
+
+`TypeIndexNormalization.lean` closes an observation gap left by the literal-only
+endpoint. For example, a certified term at `Eq ((lambda x. x) 7) 7` cannot pass
+an observation requesting the exact type `Eq 7 7`, even if its evidence term is
+already head normal. A second finite, checked trace now reduces the original
+proposition's indices and transports that same evidence term to the resulting
+type. The requested arithmetic truth is still derived from typing and canonical
+forms, not supplied as a premise or tested directly by the observation checker.
+
+There are two distinct trace roles:
+
+1. The existing head trace reduces the term while preserving its original type
+   root and decoded type, and proves a head-normal middle snapshot.
+2. The type-index trace reduces the type while preserving the exact term root
+   ID and decoded evidence term. Each transition proves `Beta.Step A B`, derives
+   formation of B by `IsType.preservation`, and transports term typing using
+   the step's proved conversion. It does not request an output typing certificate.
+
+The deterministic type policy handles only `Eq` and `Lt`: reduce the left
+index's function spine first, then the right index's function spine. It does
+not normalize constructor children, lambda bodies, arithmetic, general Pi
+types or arbitrary convertible types. Consequently a true `Eq (3 + 4) 7`
+observation is intentionally rejected by this beta-only policy. There is no
+claim that every well-typed index reaches a literal.
+
+`validate_lineage` exposes both reductions explicitly: the original term
+reduces at its original decoded type, the original type reduces to the requested
+literal proposition, and the retained resulting evidence has both the original
+and final types. `validate_truth` derives the requested equality or bound;
+`false_claim_rejected` excludes false literal claims. The full graph and both
+roots are compared at the shared phase boundary and at every record boundary,
+including unreachable nodes. A term-root record cannot be substituted into the
+type-root phase, and a different output root is not interchangeable with an
+independently supplied output snapshot merely because it decodes equivalently.
+
+The CLI consumes six canonical artifacts separated by LF:
+
+```
+input snapshot LF middle snapshot LF output snapshot LF input typing LF head chain LF type chain
+```
+
+Both chains reuse schema-5 lists of schema-4 before/after/path records. Their
+fixed positions in this envelope determine the operation's root; the record
+syntax alone does not authorize either role. `TypeIndexNormalization.Wire`
+proves exact canonical byte identities for all six artifacts on acceptance.
+`CheckTypeNormalization.lean eq M N` or `lt M N` requires the final literal
+observation. `--prefix` checks a head-normal first phase and a possibly unfinished
+type trace; it is never sufficient for publishing a completed literal result.
+
+The 8 MiB total CLI input bound, 4096 nodes per graph, 128 path/depth bound,
+32768 aggregate serialized nodes and 2000000 charged expanded work remain.
+The 64-step cap and aggregate node/work caps apply to the **combined** head and
+type chains, counting repeated graph/root occurrences. Existing typing search
+has its separate bounds. Pure validation measures graph expansions before
+unfolding, and the producer guards each selected substitution before invoking
+Core. These are finite resource guards, not a proved time-complexity bound.
+
+The untrusted producer is executable as:
+
+```sh
+python3 tests/core_type_index_normalization.py \
+  --generate retained.snapshot retained.typing \
+  --driver /path/to/core-typed-beta-replay --claim eq 7 7 --fuel 64
+```
+
+The replay driver now takes explicit `--type` to call actual `Core.substitute`
+at the type root. Its existing term-root mode is unchanged. The producer reads
+each supplied artifact once, validates the original input before reduction,
+checks the combined prefix before the first and each subsequent type operation,
+and emits a bundle only after the complete requested observation passes.
+Invalid intermediate graphs and fuel/resource failure prevent further use or
+publication. Tests exercise real-Core equality and bound indices, both phases,
+higher-order arguments, retained-file replacement, role swaps, changed evidence,
+root/graph mutations, valid but out-of-policy steps, incomplete traces, shared
+limits and producer failure without partial stdout.
+
+This is a successful finite-trace theorem for the declarative fragment. It does
+not prove general higher-order realization, weak/strong normalization, all-term
+consistency, source/exporter fidelity, actual `Core.normal` equivalence, runtime
+behavior or full compiler soundness. The existing untrusted typing-certificate
+producer can also reject valid core terms when it cannot find the required
+conversion intermediates; no completeness theorem is introduced here.

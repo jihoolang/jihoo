@@ -279,7 +279,7 @@ fn contract(inout c: core.Core, root: u32, path: [u32], at: i64) -> Result(u32, 
     }
 }
 
-fn replay(path: [u32]) -> Result(String, String) {
+fn replay(path: [u32], type_mode: bool) -> Result(String, String) {
     let text = stdin_once()?
     var r = Reader { text: text.as_str(), pos: 0 }
     if r.number()? != 3 { return Err("expected snapshot schema".to_string()) }
@@ -293,9 +293,10 @@ fn replay(path: [u32]) -> Result(String, String) {
     fields(&before, [3, root as u64, ty as u64])
     write_graph(&before, c)?
     if before != text { return Err("reconstructed snapshot mismatch".to_string()) }
-    let output = contract(&c, root, path, 0)?
+    let output = contract(&c, if type_mode { ty } else { root }, path, 0)?
     var after = String.new()
-    fields(&after, [3, output as u64, ty as u64])
+    fields(&after, [3, if type_mode { root as u64 } else { output as u64 },
+        if type_mode { output as u64 } else { ty as u64 }])
     write_graph(&after, c)?
     // Return separately retained actual output plus the data-only replay record.
     var out = String.new()
@@ -311,14 +312,16 @@ fn replay(path: [u32]) -> Result(String, String) {
 
 fn main() -> i32 {
     let args = env.args()
-    if args.len() > 129 { eprintln("path exceeds 128"); return 2 }
+    let type_mode = args.len() > 1 && args[1] == "--type"
+    let start = if type_mode { 2 } else { 1 }
+    if args.len() > start + 128 { eprintln("path exceeds 128"); return 2 }
     var path = Vec(u32).new()
-    for i in 1..args.len() {
+    for i in start..args.len() {
         let Some(n) = args[i].parse_int() else { eprintln("invalid child index"); return 2 }
         if n < 0 || n >= 4096 { eprintln("child index out of bounds"); return 2 }
         path.push(n as u32)
     }
-    match replay(path.as_slice()) {
+    match replay(path.as_slice(), type_mode) {
         Ok(bytes) => { print(bytes); 0 }
         Err(message) => { eprintln(message); 1 }
     }
