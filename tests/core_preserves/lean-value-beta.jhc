@@ -1,0 +1,22 @@
+; Corresponding pure lambda/application patterns for Lean's auxiliary value lets.
+; Core uses a unified binder namespace; these tests are not a translation proof.
+(def scalar_let I64 (app (lam value I64 value) (int 7)))
+
+; A proof value carries an outer index through an inner index lambda.
+(def mixed_binders
+ (pi n U64 (pi ignored U64 (Eq n n)))
+ (lam n U64
+  (app (lam0 evidence (Eq n n) (lam ignored U64 evidence)) (refl n))))
+
+; The outer value must not be captured by the nested value binder.
+(def nested_values
+ (pi x I64 I64)
+ (lam x I64
+  (app (lam y I64 (app (lam z I64 y) (int 3))) x)))
+
+(def interleaved
+ (pi n U64 (pi ignored U64 (Eq n n)))
+ (lam n U64
+  (app (lam0 evidence (Eq n n)
+    (lam ignored U64 (app (lam unused I64 evidence) (int 3))))
+   (refl n))))

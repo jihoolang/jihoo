@@ -16,3 +16,15 @@ import Jihoo
 #print axioms Jihoo.Indexed.Step.substitution
 #print axioms Jihoo.Indexed.preservation
 #print axioms Jihoo.Indexed.preservation_many
+#print axioms Jihoo.Indexed.Term.valueSubst_indexSubst
+#print axioms Jihoo.Indexed.HasType.valueRenaming
+#print axioms Jihoo.Indexed.HasType.valueSubstitution
+#print axioms Jihoo.Arithmetic.Expr.scoped_subst
+#print axioms Jihoo.Indexed.Ty.scoped_subst
+#print axioms Jihoo.Indexed.Term.scoped_indexSubst
+#print axioms Jihoo.Indexed.Term.scoped_valueSubst
+#print axioms Jihoo.Indexed.scoped_step
+#print axioms Jihoo.Indexed.ScopedTyping.indexSubstitution
+#print axioms Jihoo.Indexed.scoped_preservation
+#print axioms Jihoo.Indexed.scoped_preservation_many
+#print axioms Jihoo.Indexed.no_closed_parameter
