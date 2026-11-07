@@ -1,0 +1,57 @@
+// An owned list whose exact length is an erased index. Runtime construction
+// and reads use the same checked core as the structural evidence.
+#![dependent_core]
+import dependent.list
+import dependent.nat
+
+pub struct Sized(n: u64) {
+    data: list.List
+    exact: erased(Eq(list.length(data), n))
+}
+
+pub fn empty() -> Sized(0) { Sized { data: list.List.Nil, exact: refl(0) } }
+
+pub fn cons(n: erased(u64), x: i64, xs: Sized(n)) -> Sized(n + 1) {
+    match xs {
+        Sized { data, exact } => Sized {
+            data: list.List.Cons(x, data),
+            exact: nat.eq_add(list.length(data), n, 1, exact)
+        }
+    }
+}
+
+// The accumulator's erased index advances with the loop counter.
+pub fn repeat(n: u64, x: i64) -> Sized(n) {
+    fold(n, fn(k) { Sized(k) }, empty(), fn(i, p, acc) { cons(i, x, acc) })
+}
+
+pub fn nth(n: erased(u64), xs: ref Sized(n), i: u64, p: erased(Lt(i, n))) -> i64 {
+    match xs {
+        Sized { data, exact } => list.nth(data, i,
+            nat.rewrite_upper(i, n, list.length(data), nat.eq_sym(list.length(data), n, exact), p))
+    }
+}
+
+pub fn head(n: erased(u64), xs: ref Sized(n), p: erased(Lt(0, n))) -> i64 {
+    nth(n, xs, 0, p)
+}
+
+pub fn size(n: erased(u64), xs: ref Sized(n)) -> refine(fn(k) { Eq(k, n) }) {
+    match xs { Sized { data, exact } => pack(list.length(data), exact) }
+}
+
+pub fn into_list(n: erased(u64), xs: Sized(n)) -> list.List {
+    match xs { Sized { data, .. } => data }
+}
+
+// The structural map theorem preserves the wrapper's erased length index.
+// Like list.map, callbacks execute tail-to-head and may allocate or trap.
+pub fn map(n: erased(u64), xs: ref Sized(n), f: fn(i64) -> i64) -> Sized(n) {
+    match xs {
+        Sized { data, exact } => Sized {
+            data: list.map(data, f),
+            exact: nat.eq_trans(list.length(list.map(data, f)), list.length(data), n,
+                list.map_borrowed_length(data, f), exact)
+        }
+    }
+}

@@ -93,6 +93,9 @@ the runner. Its suites:
   `tests/core_buffer.py` adds owned buffers: native calls are linked
   with counting `malloc`/`free` wrappers, and each must free what it
   allocates; leaks, double frees, uses after free and captures are rejected.
+  `tests/core_sized_list.py` checks indexed owned-list construction and mapping,
+  exact erasure against an unindexed reference, allocation costs, private fields
+  and malformed imported loop/induction proofs.
   `tests/core_list_map.py` checks reusable higher-order maps and proof-bounded
   list access, with callback order, erased proofs, counted allocations, signed
   traps and malformed imported induction cases.

@@ -70,11 +70,21 @@ Eq(into_length(append(xs, ys)), length(xs) + length(ys))
 Eq(into_length(map(xs, f)), length(xs))
 ```
 
+`map_borrowed_length(xs, f)` proves the corresponding borrowed observation:
+
+```jihoo
+Eq(length(map(xs, f)), length(xs))
+```
+
+This direct structural proof is used by [lists with exact lengths](sized-lists.md)
+to retain the mapped owner in an indexed record. The consuming form remains
+available with its original signature.
+
 When applying `map_length` to a locally owned list, use its evidence inside a
 helper taking `ref List`, as the map example does. A proof type that retains a
 borrow cannot be returned from the temporary lend into a surrounding `let`.
 
-All three lemmas use structural induction over a borrow. The append proof uses the
+These lemmas use structural induction over a borrow. The append proof uses the
 clone theorem in its empty-prefix case and transports the induction hypothesis
 in its nonempty case. The terms in these propositions are ghost computations:
 proving a length does not copy or consume the caller's list at runtime.

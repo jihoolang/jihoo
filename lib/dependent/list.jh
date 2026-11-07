@@ -95,3 +95,11 @@ pub fn map_length(xs: ref List, f: fn(i64) -> i64) -> Eq(into_length(map(xs, f))
             refl(into_length(map(rest, f)) + 1))
     }, xs)
 }
+
+// Borrowing form for a record that retains the newly mapped list.
+pub fn map_borrowed_length(xs: ref List, f: fn(i64) -> i64) -> Eq(length(map(xs, f)), length(xs)) {
+    induct(fn(t) { Eq(length(map(t, f)), length(t)) }, refl(0), fn(x, rest, ih) {
+        transport(fn(k) { Eq(length(map(rest, f)) + 1, k + 1) }, ih,
+            refl(length(map(rest, f)) + 1))
+    }, xs)
+}
