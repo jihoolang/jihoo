@@ -72,7 +72,7 @@ def validate_loop(compiler, root, temporary, environment, run, definitions, eval
         "runtime-proof": "fn bad() -> i64 { fold(3, 0, fn(i, p, acc) { p }) }",
         "index-result": "fn bad() -> i64 { fold(3, 0, fn(i, p, acc) { i }) }",
         "arity": "fn bad() -> i64 { fold(3, 0, fn(i, acc) { acc }) }",
-        "typed-binder": "fn bad() -> i64 { fold(3, 0, fn(i: u64, p, acc) { acc }) }",
+        "wrong-typed-binder": "fn bad() -> i64 { fold(3, 0, fn(i: i64, p, acc) { acc }) }",
         "u64-result": "fn bad(n: u64) -> u64 { fold(n, 0, fn(i, p, acc) { acc }) }",
         "signed-count": "fn bad(x: i64) -> i64 { fold(x, 0, fn(i, p, acc) { acc }) }",
         "proof-escape": "fn bad() -> i64 { fold(3, 0, fn(i, p, acc) { acc }) + index([1, 2, 3], 2, p) }",

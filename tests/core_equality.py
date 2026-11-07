@@ -69,7 +69,7 @@ fn get(n: u64, xs: [i64; n], i: u64, p: erased(Lt(i, n))) -> i64 { index(xs, i, 
         "signed-refl": "fn bad(i: i64) -> Eq(0, 0) { refl(i) }",
         "erased-refl": "fn bad(e: erased(Eq(0, 0))) -> Eq(0, 0) { refl(e) }",
         "family-runtime-proof": "fn bad(e: erased(Eq(0, 0))) -> Eq(0, 0) { transport(fn(k) { Eq(k, e) }, refl(0), refl(0)) }",
-        "bad-family-binder": "fn bad() -> Eq(0, 0) { transport(fn(k: u64) { Eq(k, 0) }, refl(0), refl(0)) }",
+        "bad-family-binder": "fn bad() -> Eq(0, 0) { transport(fn(k: i64) { Eq(k, 0) }, refl(0), refl(0)) }",
     }
     for name, body in source_invalid.items():
         path = temporary / f"equality-{name}.jh"

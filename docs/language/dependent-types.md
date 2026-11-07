@@ -54,6 +54,29 @@ Evidence is built from these rules, from `refl` and `transport` for equality on 
 from what `if_lt` and `if_eq` give, and from inductive propositions the program
 declares. Nothing is searched for: a proof is written out, and is an ordinary term.
 
+## Contextual types
+
+Integer literals use the expected scalar type. Without one, arithmetic takes its
+signedness from the first nonliteral operand, looking through nested arithmetic:
+`let next = 1 + n` and `let next = n + 1` both infer u64 when `n` is u64.
+Literal-only arithmetic still defaults to i64. This is inference, not a conversion:
+mixing an i64 value with a u64 value is an error, and overflow still traps.
+
+Contextual lambdas may spell out their parameter types. For example, a loop body
+can be `fn(i: u64, p: Lt(i, n), acc: i64) -> i64 { acc + 1 }`. Its types are checked
+against the loop's signature; `p` remains erased even though its annotation does
+not say `erased`. Writing `p: erased(Lt(i, n))` asserts that it is erased, while
+writing `i: erased(u64)` is an error because the loop index is a runtime parameter.
+Annotations may refer to earlier parameters, and parameters in one lambda must
+have distinct names. Inner lambdas may still shadow outer names.
+
+The same optional parameter annotations work in `if_lt`/`if_eq` branches, proof
+families such as `fn(k: u64) { Eq(k, k) }`, and data motives such as
+`fn(t: List) { i64 }`. Loop and induction cases also allow result annotations.
+Families, motives and conditional branches still omit result annotations. No
+proof search is implied, and all annotations are checked, including evidence
+inside an annotation that computation would otherwise discard.
+
 ## Owned memory
 
 `buffer(n)` is `n` i64 values on the heap, and data declared with `enum` or `struct` that

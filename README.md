@@ -114,6 +114,8 @@ Work toward 0.6 starts with dependent-type stabilization, before mechanized
 soundness. Pure normalization now retains dependent motives on symbolic
 branches, so the core preservation regressions have no expected failures.
 Sum conversion also respects proof irrelevance when ordering nested terms.
+Source elaboration infers unsigned literal arithmetic from either operand and
+accepts checked type annotations in contextual proof and induction lambdas.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).
 

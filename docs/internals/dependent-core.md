@@ -151,12 +151,17 @@ proofs or return `Lt(i, n)`, `Eq(a, b)` or declared evidence; the checker contro
 relevance. Every definition and both branches are checked, including
 unused helpers and discarded proof arguments.
 
-Functions must have explicit parameter and result types and one value
-expression per block. They may refer only to earlier definitions, and
+Functions have explicit parameter and result types (except the result-free
+inout functions described below). Blocks may have local statements and finish
+with a value expression. They may refer only to earlier definitions, and
 calls supply exactly the declared number of arguments. Expressions are
 names, checked integer literals (including negative I64 literals), arrays,
 blocks, calls and the operations above. Integer literals take the
 expected scalar type; array elements are I64 and indices/lengths are U64.
+Without an expected type, arithmetic looks through literal-only subexpressions
+for a nonliteral operand: `1 + n` and `(1 + 2) + n` infer U64 when `n` is U64,
+just as `n + 1` does. Literal-only arithmetic defaults to I64. This neither
+coerces mixed scalar types nor changes overflow checks.
 `erased` is allowed only as the outer parameter annotation. The forms
 `erased`, `Lt`, `Eq`, `if_lt`, `if_eq`, `refl`, `transport`, `induct`,
 `fold`, `lt_add`, `lt_cancel`, `lt_le`, `sub`, `zero_le`, `refine`, `pack`, `witness`, `proof`, `index`, `decide_lt`, `u64`, `i64` and the entry symbol
@@ -174,10 +179,11 @@ entry point. `check` validates this executable subset, including its ABI,
 without LLVM or a linker.
 
 Imports of ordinary modules, item attributes, contracts, foreign declarations, other profiles,
-local statements, implicit proof search, ordinary `if`/index syntax,
-u64 products, the `-` operator on u64 (use `sub`), division and comparison operators, general runtime
-closures/recursion, recursive data types and mutable memory are outside
-this slice and rejected. Marked modules cannot be imported by the
+implicit proof search, ordinary `if`/index syntax,
+u64 products, the `-` operator on u64 (use `sub`), division and comparison operators,
+general runtime closures/recursion and unrestricted mutable memory are outside
+this subset and rejected. Recursive data, structural recursion, local statements,
+buffers and inout mutation are supported as described below. Marked modules cannot be imported by the
 legacy frontend. This keeps the source scope explicit while extending
 only one execution path. `fmt`, AST dumps and source diagnostics use the
 ordinary parser; checking errors retain `.jh` byte ranges. Source parsing
@@ -214,7 +220,7 @@ values do not change because of a proof.
   substituting `refl(a)` into a true branch.
 
 Source families are written `fn(k) { Lt(i, k) }` or `fn(k) { Eq(k, a) }`:
-one untyped U64 binder and a proposition as their single expression.
+one U64 binder (optionally annotated `k: u64`) and a proposition as their single expression.
 They elaborate directly to core lambdas; they create no runtime closure.
 The textual equivalents are `(Eq a b)`, `(refl a)`,
 `(transport family e p)` and `(if-eq a b e yes no)`, with a family such as
@@ -370,6 +376,12 @@ fold(n, init, body) : I64
 It starts with `init` and replaces the accumulator by `body(i, p, acc)`
 for each `i` from 0 to `n - 1`. In `.jh` the body is a contextual lambda
 `fn(i, p, acc) { ... }` whose parameter types come from that signature.
+Optional annotations, such as `fn(i: u64, p: Lt(i, n), acc: i64) -> i64 { acc }`,
+are checked against it, without changing which parameters are erased. An explicit
+`erased(T)` annotation requires an erased binder. Parameters are checked in order,
+so a later annotation sees earlier binders; duplicate names within a lambda or
+extended data motive are rejected. The checker validates annotations before
+conversion so that normalization cannot discard malformed evidence in them.
 Because `p` proves `Lt(i, n)`, a body loads from an array of length `n`
 with `index(xs, i, p)` and no bounds check. A helper over arrays of any
 length is checked once, for symbolic `n`:
