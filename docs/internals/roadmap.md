@@ -692,9 +692,12 @@ mechanize its soundness, starting from that specification:
    binders and dependent result instantiation. Value lets now have a separate
    capture-avoiding substitution theorem, and an independent finite-scoping
    judgment excludes dangling indices and value variables while preserving
-   typing through reduction. These value lets are nondependent; general value
-   domains and conversion-aware typing remain open. CI checks the proofs and
-   their axioms. This is not full-core consistency or preservation, quantity soundness
+   typing through reduction. Conversion now participates throughout typing and
+   preservation; a classical logical interpretation proves no closed false
+   bound or equality evidence for this calculus. The value lets remain
+   nondependent, general value domains remain open, and this interpretation
+   establishes inhabitance rather than operational adequacy. CI checks the
+   proofs and their axioms. This is not full-core consistency or preservation, quantity soundness
    or a refinement proof for `core.jh`; those remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against

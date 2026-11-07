@@ -11,8 +11,9 @@ described: they are untrusted, since the kernel checks their output.
 **Status.** The full properties in [What is intended](#what-is-intended) are
 not mechanically proved. The [Lean 4 formalization](lean-proofs.md) proves
 arithmetic-fragment consistency and semantic conversion soundness, plus
-capture-avoiding index/value substitution and finite-scope beta preservation
-for a separate index-dependent calculus with value lets. These are not proofs of this whole calculus
+capture-avoiding index/value substitution, conversion-aware finite-scope beta
+preservation and logical consistency for a separate index-dependent calculus
+with value lets. These are not proofs of this whole calculus
 or the implementation. The remaining properties
 rest on the independent evaluator, rejection suites and reviews. The
 [roadmap](roadmap.md#the-050-release-gate-for-the-native-core) starts the full proof

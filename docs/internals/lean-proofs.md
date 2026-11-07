@@ -1,12 +1,12 @@
 # Lean proof boundary
 
-The mechanized work toward 0.6 currently has three parts: an arithmetic evidence
-fragment in `proofs/Jihoo/Arithmetic.lean`, and an index-dependent function calculus
-in `proofs/Jihoo/Indexed.lean` with index lambdas and value lets, and finite scoping
-in `proofs/Jihoo/Scoped.lean`. These are separate declarative specifications
-inspired by the [core specification](core-spec.md), not translations of
-`compiler/core.jh`. They do **not** prove the full dependent kernel, its normalization
-algorithm, ownership, lowering or whole executables sound.
+The mechanized work toward 0.6 includes arithmetic evidence, an index-dependent
+calculus with value lets and conversion, finite scoping, and a logical interpretation
+of that calculus. These are separate declarative specifications inspired by the
+[core specification](core-spec.md), not translations of `compiler/core.jh`.
+They establish preservation and consistency for the stated fragments, **not** the
+full dependent kernel, its normalization algorithm, ownership, lowering or whole
+executables.
 
 ## Arithmetic evidence
 
@@ -96,9 +96,9 @@ The eight additional audited guarantees are:
 `IndexedExamples.lean` checks a dependent equality result, a dependent bound result,
 nested lambdas with a free index argument that must not be captured, weakening of
 an array-typed free value parameter, and beta reduction within an array expression.
-Negative examples reject a false equality annotation, a wrong array length, and an
-arithmetically equal but structurally different length: the last deliberately
-exhibits the lack of a conversion rule.
+Negative examples reject a false equality annotation and a wrong array length.
+Arithmetic conversion now accepts a structurally different but provably equal
+length; that old rejection example has become a positive regression.
 
 `tests/core_preserves/lean-indexed-beta.jhc` exercises matching beta patterns in the
 real kernel, including closing the free array parameter with ordinary value
@@ -123,9 +123,9 @@ Lean terms and core graphs.
   subtraction. `natural`, `integer`, and `elements` use unbounded mathematical
   numbers. The names `u64` and `i64` identify intended core counterparts; they
   do not enforce machine representability, subtraction evidence or trap behavior.
-- Type equality here is structural. There is no definitional conversion rule,
-  arithmetic evaluation step, or proof of the core's normalization algorithm.
-  In particular `Array(0 + 1)` and `Array(1)` remain different types.
+- Conversion is the selected arithmetic equational theory lifted structurally
+  through types, including Pi bodies. It is not the core's resource-bounded
+  normalization algorithm, and there is still no arithmetic evaluation step.
 - Reduction is beta plus closure beneath lambda, in the function of application,
   and in the array/evidence positions of indexing, plus value-let substitution
   and closure in a let's value and body. Array reads do not reduce,
@@ -202,8 +202,75 @@ The reduction is pure substitution. It may duplicate or discard a let argument,
 and it reduces underneath a let. It does not model call-by-value evaluation,
 single evaluation, overflow traps, effects, ownership or quantities. Finite scope
 also does not establish numeric ranges, subtraction evidence, universe formation
-or proposition truth. Conversion-aware typing and general value-dependent domains
-remain future increments; neither is silently supplied by the scope judgment.
+or proposition truth. General value-dependent domains remain future work.
+Conversion-aware typing and logical inhabitation are established separately below,
+not silently supplied by the scope judgment.
+
+## Conversion-aware typing and logical consistency
+
+`Ty.Conv` lifts the arithmetic `Conv` relation through array lengths, `Lt` and `Eq`
+indices and natural-index Pi bodies. Scalars convert only to the same scalar
+constructor. Reflexivity, symmetry, transitivity, substitution stability and Pi
+injectivity are proved. `view_sound` shows that converted types have equal
+structure and evaluated natural indices under every valuation, including every
+argument of a Pi. This is semantic soundness of the chosen equations, not a claim
+that every equation succeeds in the actual compiler's normalizer.
+
+`HasType.convert` may occur **anywhere** in a typing derivation. The index/value
+substitution proofs now include conversion, and `contextConversion` permits
+replacing context entries with convertible types. The revised preservation proof
+uses conversion-aware lambda inversion: the lambda's original body type may only
+be convertible to the function type expected by the application. That conversion
+is transported through argument substitution before concluding the beta case.
+Finite-context preservation continues to follow from typing and scope preservation.
+
+`ScopedTyping.convert` explicitly requires its new result type to be scoped.
+Arithmetic conversion alone does not preserve scope: reversing
+`(0 + x) - x = 0` can introduce an otherwise unused free x. A regression demonstrates
+that the raw typing judgment can use this conversion while the finite judgment
+rejects its out-of-scope result. Finite scope constrains the context, term and
+final type; the enclosed raw typing derivation may still have intermediate types
+with additional free indices. Equivalence to a typing derivation whose every
+intermediate type is scoped has **not** been proved.
+
+### Logical interpretation
+
+`Semantics.lean` interprets the modeled scalar types as `Nat` and `Int`, an array
+of length n as `Fin n → Int`, propositions as lifted natural-number comparisons
+or equalities, and a Pi as a dependent function over mathematical naturals.
+Substitution commutes with this type interpretation, and type conversion gives
+equal interpreted types.
+
+`HasType.realize` proves that a typing derivation has an **inhabited result type**
+whenever its context entries have inhabited types. It recurses on the actual typing
+derivation, with no rule assuming semantic validity of an arbitrary conclusion.
+For a proposition result this supplies evidence that the proposition is true.
+It uses Lean's standard `Classical.choice` to assemble a Pi inhabitant from
+pointwise inhabited result types. This is a classical logical interpretation,
+not constructive extraction.
+
+The resulting theorems quantify over every term of this calculus:
+
+- `no_closed_false_bound`: no `ScopedTyping 0 [] t (Lt(0, 0))` exists.
+- `no_closed_false_equality`: no `ScopedTyping 0 [] t (Eq(0, 1))` exists.
+
+These consistency results include arbitrarily nested index lambdas, value lets
+and internal conversions. They are stronger than the first arithmetic-derivation
+result, but still concern this restricted calculus only.
+
+The interpretation supplies `Nonempty` types, not a fixed valuation of concrete
+parameter values. It does not associate a particular term with a particular
+semantic result, require repeated parameter uses to choose the same witness, or
+show that reduction preserves a result value. Consequently it proves neither
+operational adequacy, executable array bounds safety, normalization nor generated
+code correctness. General dependent domains, universes, proposition families and
+eliminators, the remaining core evidence rules, and a core translation remain
+outside these theorems.
+
+`ConversionExamples.lean` exercises conversion around both a lambda and a whole
+application, dependent Pi instantiation, converted let/array/index evidence,
+convertible context entries, finite-scope conversion, non-convertible false
+propositions/type constructors, and both universal consistency corollaries.
 
 ## Reproducing the checks
 
@@ -229,10 +296,10 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of twenty-eight selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of forty-three selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
-The current proofs use `propext` and some use `Quot.sound`; no theorem requires
-`Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
+The current proofs use `propext` and `Quot.sound`; the logical inhabitation
+and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
 trusts Lean's kernel and standard logical foundation, as well as the toolchain
 used to run it. The theorem audit is an explicit list, not a ban on every unused future declaration: add new public guarantees
 to both that list and its expected count.
