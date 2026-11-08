@@ -606,3 +606,27 @@ legacy exporter compatibility, graph-valid tampering with repaired positive
 controls, and the per-chain 32768 substitution budget. The maximum is 16 links
 and 8 MiB total input, with existing per-snapshot and substitution limits also
 applied. See the [proof boundary and resource accounting](lean-proofs.md#retained-application-spines).
+
+
+### Higher-order proof assumptions
+
+`CheckPropositionalEvidence.lean TERM_ROOT REQUESTED_ROOT INFERRED_ROOT` consumes
+the same two-snapshot `both` export as the principal checker. It adds erased
+proof arguments, exact hypothesis lookup, proof-function abstraction and
+application over closed propositions. Natural-quantified proof premises can be
+instantiated with closed scalar expressions. The consumer receives the original
+retained pair only after successful validation of both types and the whole graph.
+
+```sh
+python3 tests/core_propositional_evidence.py --compiler jihoo
+python3 -O tests/core_propositional_evidence.py --compiler jihoo
+```
+
+The inferred type must match structurally; the requested type may use proved
+coefficient conversion, also inside proof arrows. A true proposition or a
+convertible replacement does not suffice as an exact inferred-type observation.
+Tests include distinct hypothesis slots with repaired positive controls, false
+premises versus closed false claims, conservative profile exclusions, cumulative
+substitution limits and failure-publication gates. The existing byte/graph limits
+apply. Read the [context assumptions and exclusions](lean-proofs.md#closed-propositions-with-higher-order-proof-assumptions)
+before interpreting this as a compiler soundness result.

@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 527 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 539 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -976,3 +976,68 @@ is checked for semantic equivalence, not normality. The parser, exporter,
 compilation and execution/IO association are tested boundaries. General
 `Beta.HasType`, unrestricted conversion consistency, completeness of the actual
 checker and full compiler soundness are neither assumed nor established.
+
+
+## Closed propositions with higher-order proof assumptions
+
+`PropositionalEvidence.lean` adds a separate evidence judgment for functions of
+proofs. Its types are closed formulas from the linear-natural profile and
+arbitrarily nested proof arrows. Thus `(P -> Q) -> P -> Q` and composition of
+proof functions are expressible, including natural-quantified premises. Every
+arrow binder is erased. Contexts contain proof assumptions only; they are not
+mixed natural/proof telescopes. Closed principal evidence can be used under any
+proof context, and a quantified proof function can be applied to a closed
+linear-natural argument.
+
+`Derives.sound` requires semantic validity of every assumption in the context.
+Proof-variable lookup uses its exact de Bruijn position; implication introduction
+extends that context and elimination consumes evidence for the domain. Proved
+coefficient conversion extends recursively to proof arrows. Empty-context
+soundness follows without assumptions. The examples deliberately derive a false
+proposition from a false hypothesis, and prove `False -> False`, while separately
+proving that no closed derivation inhabits `Eq 0 1`. These distinctions prevent
+silently treating arbitrary open contexts as semantically valid.
+
+`Ty.subst_closed` proves that every admitted type is unchanged by **any** raw
+substitution. In particular, the codomain of a proof arrow cannot depend on the
+proof as a natural index. Applying a natural-quantified premise instead uses the
+existing proved capture-avoiding index substitution. `Ty.proposition` and `Ty.formed` also prove proposition classification and type
+formation in the existing Beta model, in any surrounding raw context. These do
+not imply term typing or semantic soundness of general Beta conversion. The
+model does not assume unrestricted Beta conversion or general `Beta.HasType` consistency.
+
+The executable inference function returns its derivation, remaining budget and
+a proof that the budget did not increase. It counts visits and charges natural
+substitution before expansion, with 128 recursive fuel, an initial budget of
+32768, the existing 8192 substitution-product / 128 depth guard, and an 8192
+size cap on newly formed arrow types. The artifact checker applies the existing
+whole-graph/tree limits before inference. These are conservative resource
+defenses, not a universal normalization or complexity theorem.
+
+`CheckedPropositionalEvidence.lean` checks the unchanged actual-Core `both`
+exporter's retained requested/inferred snapshots. Complete graphs and selected
+roots must agree; the actual inferred type must equal the modeled inferred type
+**structurally**. Only the requested type may differ by proved conversion.
+Canonical-byte soundness supplies a closed evidence derivation and truth of its
+requested proposition, which may itself be a higher-order implication. No output
+typing premise is supplied by the producer.
+
+Actual-Core regressions cover identity, weakening, modus ponens, higher-order
+composition and application, quantified hypotheses, false hypotheses, wide ghost
+sums and converted proof arguments. Graph-valid tests distinguish two different
+hypothesis slots and require a repaired output type to restore acceptance.
+Individual substitutions and a seven-call prefix pass where an eight-call chain
+exceeds its cumulative budget. Failed source checking, failed exporter exits with
+valid stdout, and failed validation cannot publish a result, including under
+Python optimization.
+
+This is an extension of the semantic evidence fragment, not general higher-order
+dependent type soundness. Mixed scalar/proof contexts, scalar lambdas whose body
+uses a surrounding proof hypothesis, erased natural-index binders, runtime
+function arguments, global definitions, induction and subtraction remain outside
+this profile. Core can normalize a Pi before application and return a structurally
+different inferred type; such a run is conservatively rejected here even when its
+result is convertible. The application-spine profile separately validates explicit
+normalization observations for its supported scalar calls. Export provenance,
+compilation, runtime/ownership behavior and full checker refinement remain
+unverified. The source compiler and its acceptance rules are unchanged.

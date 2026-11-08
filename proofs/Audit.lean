@@ -556,3 +556,16 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.ApplicationSpine.Chain.remaining_le
 #print axioms Jihoo.GraphCertificates.ApplicationSpine.validate_sound
 #print axioms Jihoo.GraphCertificates.ApplicationSpine.validateBytes_sound
+
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Ty.subst_closed
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Converts.sound
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Derives.sound
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Derives.closed_sound
+#print axioms Jihoo.GraphCertificates.PropositionalCheck.validate_sound
+#print axioms Jihoo.GraphCertificates.PropositionalCheck.validateBytes_sound
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Examples.false_assumption_is_usable
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Examples.false_identity_is_valid
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Examples.no_closed_false_evidence
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Examples.composition
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Ty.proposition
+#print axioms Jihoo.CoreBridge.PropositionalEvidence.Ty.formed
