@@ -789,8 +789,10 @@ than accepting any term merely because the requested proposition is true.
 `Formula.formed` separately establishes formation of the encoded proposition
 in the existing `Raw.Beta.IsType` judgment. This is **not** a theorem that the new
 `Derives` judgment implies `Raw.Beta.HasType` at the converted type: the latter's
-conversion relation has not been extended with symbolic arithmetic, and it has
-no `zeroLe` typing rule. The two evidence judgments remain explicitly distinct.
+conversion relation has not been extended with symbolic arithmetic. The later
+[closed primitive safety extension](#closed-local-array-and-subtraction-safety)
+adds a `zeroLe` typing rule to `Raw.Beta.HasType`, but does not identify these
+two evidence judgments or extend the typing-certificate rule language.
 
 `CheckedLinearEvidence.lean` applies this checker to a closed retained snapshot.
 `validateBytes_sound` identifies the entire canonical artifact and both exact
