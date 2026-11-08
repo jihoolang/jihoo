@@ -40,17 +40,18 @@ compiled implementation still trusts the Lean toolchain and runtime.
 
 ## Explicit conversion evidence
 
-The step language covers the target formation and typing rules, plus explicit
+The step language covers a subset of the target formation and typing rules, plus explicit
 conversion derivations: reflexivity, symmetry, transitivity, beta, bounded closed
 numeral addition and constructor congruence. A beta step recomputes
 capture-avoiding substitution and checks its exact result. Application likewise
 checks its substituted dependent result type. The checker does not attempt to
 decide unrestricted beta equivalence by searching for a normal form.
 
-This is the existing model, not a broader version of `Core.equal`. In particular,
+This certificate interface is not a broader version of `Core.equal`. In particular,
 the certificate producer must fail explicitly on unsupported features even when
 the actual compiler accepts them. Examples include erased U64 binders, `zeroLe`
-typing, `decide` with nonliteral endpoints, additional arithmetic identities,
+typing (although the declarative `Raw.Beta.HasType` judgment now includes it),
+`decide` with nonliteral endpoints, additional arithmetic identities,
 proof irrelevance, globals and inductive families. The model's erasure flag must
 equal its annotation's proposition classification. No universe typing rule was
 added.
@@ -194,8 +195,13 @@ including conversion anywhere in a derivation. Church–Rosser supplies separati
 of formed type heads, injectivity of equality/bound/array indices, and rigidity
 of distinct numerals. A closed head-normal function must be a lambda; therefore
 a closed typed head-normal application cannot be stuck. Closed equality evidence
-is reflexivity and closed strict-bound evidence is literal `decide`, up to
-conversion of their types. These facts imply the observed literal truth.
+is reflexivity. In the expanded declarative judgment, closed head-normal
+strict-bound evidence is either literal `decide` or `zeroLe x`, up to conversion
+of its type. For the latter, Church–Rosser-derived successor positivity proves
+that a literal endpoint convertible from `x + 1` is positive. These facts imply
+the observed literal truth. The typing-certificate rule language remains
+unchanged: it cannot construct a `zeroLe` typing step, so the broader declarative
+canonical theorem does not expand certificate admission.
 
 `Typing.Evidence.replay_realized` composes this result with typed beta replay:
 if the validated output passes the observer, its semantic conclusion follows
@@ -211,11 +217,13 @@ exercise actual-Core exports, higher-order index expressions, unnormalized
 indices, independently typed unsupported observations, wrong requests, exact
 snapshot substitutions, malformed bytes, and false claims.
 
-**Remaining obligation:** these are conditional canonical-evidence results,
-not full semantic realization of arbitrary higher-order terms or an unconditional
-consistency theorem for `Raw.Beta`. Universal weak-head normalization, a full
-relational semantics, operational adequacy, exporter fidelity, checker refinement,
-and runtime/compiler soundness remain unproved.
+**Boundary of this observer:** this endpoint requires head-normal evidence.
+The later [closed primitive safety development](lean-proofs.md#closed-local-array-and-subtraction-safety)
+uses proved closed head normalization and unconditional closed literal
+consistency for the expanded `Raw.Beta` judgment, including `ZeroLe`.
+This does not establish whole-specified-calculus consistency, a full relational
+semantics, operational adequacy, exporter fidelity, checker refinement or
+runtime/compiler soundness.
 
 ## Finite head-normalization witnesses
 

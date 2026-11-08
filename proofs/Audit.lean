@@ -569,3 +569,14 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.PropositionalEvidence.Examples.composition
 #print axioms Jihoo.CoreBridge.PropositionalEvidence.Ty.proposition
 #print axioms Jihoo.CoreBridge.PropositionalEvidence.Ty.formed
+
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.successor_positive
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.index_inversion
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.usub_inversion
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_array
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_index_safe
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_read_progress
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_usub_safe
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_usub_reconstructs
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.evaluated_index_safe
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.evaluated_usub_safe

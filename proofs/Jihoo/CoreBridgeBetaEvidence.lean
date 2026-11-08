@@ -19,9 +19,10 @@ def headNormal : Raw → Bool
 /-- Canonical shapes retain independently proved conversion of their indices. -/
 def HeadCanonical (t A : Raw) : Prop :=
   (∀ e D C, Conv A (.pi e D C) → ∃ e' D' body, t = .lam e' D' body) ∧
-  (∀ a b, Conv A (.lt a b) → ∃ m n,
-    t = .decide (.natural m) (.natural n) ∧ m < n ∧
-      Conv (.natural m) a ∧ Conv (.natural n) b) ∧
+  (∀ a b, Conv A (.lt a b) →
+    (∃ m n, t = .decide (.natural m) (.natural n) ∧ m < n ∧
+      Conv (.natural m) a ∧ Conv (.natural n) b) ∨
+    (∃ x, t = .zeroLe x ∧ Conv (.natural 0) a ∧ Conv (.uadd x (.natural 1)) b)) ∧
   (∀ a b, Conv A (.eq a b) → ∃ x, t = .refl x ∧ Conv x a ∧ Conv x b)
 
 private theorem HeadCanonical.convert (h : HeadCanonical t A) (hc : Conv A B) :
@@ -56,7 +57,14 @@ private theorem closed_canonical : ∀ Γ t A, HasType Γ t A →
     refine ⟨?_, ?_, ?_⟩
     · intro e D C hc; have := hc.rigid_head rfl rfl; contradiction
     · intro a b hc
-      exact ⟨_, _, rfl, hab, hc.lt_injective⟩
+      exact .inl ⟨_, _, rfl, hab, hc.lt_injective⟩
+    · intro a b hc; have := hc.rigid_head rfl rfl; contradiction
+  case zeroLe ha ih =>
+    intro _ _
+    refine ⟨?_, ?_, ?_⟩
+    · intro e D C hc; have := hc.rigid_head rfl rfl; contradiction
+    · intro a b hc
+      exact .inr ⟨_, rfl, hc.lt_injective⟩
     · intro a b hc; have := hc.rigid_head rfl rfl; contradiction
   case refl ha ih =>
     intro _ _
@@ -87,8 +95,11 @@ theorem HasType.head_canonical (h : HasType (fun _ => none) t A)
 
 theorem HasType.head_literal_lt (h : HasType (fun _ => none) t (.lt (.natural m) (.natural n)))
     (hn : headNormal t = true) : m < n := by
-  obtain ⟨a, b, _, hab, ha, hb⟩ := (h.head_canonical hn).2.1 _ _ (.refl _)
-  simpa only [ha.natural_injective, hb.natural_injective] using hab
+  rcases (h.head_canonical hn).2.1 _ _ (.refl _) with
+    ⟨a, b, _, hab, ha, hb⟩ | ⟨x, _, ha, hb⟩
+  · simpa only [ha.natural_injective, hb.natural_injective] using hab
+  · rw [← ha.natural_injective]
+    exact hb.successor_positive
 
 theorem HasType.head_literal_eq (h : HasType (fun _ => none) t (.eq (.natural m) (.natural n)))
     (hn : headNormal t = true) : m = n := by

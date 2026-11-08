@@ -113,6 +113,36 @@ theorem Conv.natural_injective (h : Conv (.natural m) (.natural n)) : m = n := b
   obtain ⟨w, hw, hw'⟩ := h.church_rosser
   exact Raw.natural.inj ((hw.natural_shape rfl).symm.trans (hw'.natural_shape rfl))
 
+/-- A successor-shaped sum can only remain successor-shaped or become a
+positive numeral under parallel beta/add reduction. No typing or normalization
+assumption is needed, including for higher-order raw operands. -/
+private def SuccessorShape (t : Raw) : Prop :=
+  (∃ a, t = .uadd a (.natural 1)) ∨ (∃ n, t = .natural (n + 1))
+
+private theorem successor_parallel (h : Par t u) (hs : SuccessorShape t) :
+    SuccessorShape u := by
+  rcases hs with ⟨a, rfl⟩ | ⟨n, rfl⟩
+  · cases h with
+    | uadd ha hb => cases hb; exact .inl ⟨_, rfl⟩
+    | add a _ => exact .inr ⟨a, rfl⟩
+  · cases h; exact .inr ⟨n, rfl⟩
+
+private theorem successor_star (h : Star t u) (hs : SuccessorShape t) : SuccessorShape u := by
+  induction h with
+  | refl => exact hs
+  | cons hp _ ih => exact ih (successor_parallel hp hs)
+
+/-- Conversion cannot turn a syntactic successor into zero. This is a proved
+Church–Rosser consequence, not an assumed natural interpretation of Conv. -/
+theorem Conv.successor_positive (h : Conv (.uadd a (.natural 1)) (.natural n)) : 0 < n := by
+  obtain ⟨w, hw, hn⟩ := h.church_rosser
+  have hs := successor_star hw (.inl ⟨a, rfl⟩)
+  have he := hn.natural_shape rfl
+  rw [he] at hs
+  rcases hs with ⟨a, ha⟩ | ⟨k, hk⟩
+  · cases ha
+  · cases hk; omega
+
 /-- Structural type information; scalar indices are erased, but higher-order
 Pi domains/codomains and their binder modes are retained. -/
 inductive Skeleton where

@@ -477,7 +477,7 @@ the runtime.
 
 The specification above, rather than historical feature snapshots in the design
 notes, is the intended starting point for a Lean formalization. There is not yet
-a machine-checked soundness proof. A useful order is typing and capture-avoiding
+a machine-checked soundness proof for the whole specified calculus. A useful order is typing and capture-avoiding
 substitution, conversion and pure preservation, quantities and borrow lifetimes,
 then runtime normalization and erasure adequacy. Each theorem must state which
 term forms and reduction rules it covers.
@@ -491,3 +491,12 @@ elaborator, the implementation of its checker, MIR to LLVM, LLVM or the runtime.
 Partial lowering and documented source inference restrictions are not additional
 core typing rules and should not silently narrow a theorem advertised for the
 whole core.
+
+
+The [Lean proof boundary](lean-proofs.md#closed-local-array-and-subtraction-safety)
+now includes closed local-array selection and unsigned subtraction safety in the
+higher-order `Raw.Beta` fragment, including `ZeroLe`. Bounds follow from typing
+and closed literal consistency, without assuming evidence normalization. Literal
+operands are required, or explicit finite beta/add evaluations to those operands.
+This does not discharge the whole-calculus, quantity/borrow or lowering obligations
+above; actual kernel and native behavior are checked by finite regression tests.
