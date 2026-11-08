@@ -1,0 +1,16 @@
+// An imported-style callback can work for every buffer length, without a
+// runtime closure or a new kernel rule.
+// exit: 17
+#![dependent_core]
+
+fn use(n: u64, x: i64, p: erased(Lt(0, n)),
+    f: fn(k: erased(u64), buffer(k), erased(Lt(0, k))) -> i64) -> i64 {
+    f(n, alloc(n, x), p)
+}
+
+fn first(n: erased(u64), b: buffer(n), p: erased(Lt(0, n))) -> i64 {
+    let result = index(b, 0, p)
+    free(b, result)
+}
+
+fn main() -> i64 { use(3, 17, decide_lt(0, 3), first) }

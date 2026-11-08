@@ -686,7 +686,12 @@ impl Parser {
                 break
             }
             let m = self.param_mode()
-            ps.push(FnTyParam { mode: m, ty: self.ty()? })
+            let name = if self.at(Tok.Ident) && self.peek(1) == Tok.Colon {
+                let n = self.ident()?
+                self.expect(Tok.Colon)?
+                Some(n)
+            } else { None }
+            ps.push(FnTyParam { name, mode: m, ty: self.ty()? })
             if !self.comma() {
                 break
             }
@@ -1242,7 +1247,8 @@ impl Parser {
         })
     }
 
-    // `fn(x, y: i64) -> T { ... }` is a closure; `fn(i64) -> T` is a type.
+    // A body distinguishes a lambda from a function type, which can also
+    // name parameters for the dependent-core elaborator.
     fn lambda_or_type(inout self) -> Result(Expr, Diag) {
         let start = self.expect(Tok.Fn)?
         self.list_open(Tok.LParen)?
@@ -1290,8 +1296,18 @@ impl Parser {
         var tys = Vec(FnTyParam).new()
         for e in entries.into_iter() {
             match e {
-                Typed(m, t) => tys.push(FnTyParam { mode: m, ty: t })
-                Named(p) => return Err(Diag.new(p.span, "a function type lists types, not names"))
+                Typed(m, t) => tys.push(FnTyParam { name: None, mode: m, ty: t })
+                Named(p) => {
+                    let Some(t) = p.ty else { return Err(Diag.new(
+                        p.span,
+                        "expected a parameter type"
+                    )) }
+                    tys.push(FnTyParam {
+                        name: Some(p.name.clone()),
+                        mode: Mode.Let,
+                        ty: t.clone()
+                    })
+                }
             }
         }
         let span = start.to(self.prev_span())

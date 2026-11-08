@@ -11,8 +11,8 @@ fn twice(f: fn(u64) -> u64, x: u64) -> u64 { f(f(x)) }
 fn shifted(n: u64) -> fn(u64) -> u64 { fn(x) { x + n } }
 export fn incremented(n: u64) -> u64 { twice(shifted(1), n) }
 fn main() -> i64 {
-    let f: fn(i64) -> i64 = fn(x) { x + 10 }
-    f(7)
+    let f: fn(n: u64, i64) -> buffer(n) = fn(k, x) { alloc(k, x) }
+    free(f(3, 17), 17)
 }
 ```
 
@@ -23,13 +23,25 @@ types support the existing partial application behavior.
 
 ## Outer indices and evidence
 
-The type syntax lists types, not parameter names. Every listed domain and the
-result may refer to names in the surrounding scope. For example, inside a
+Domains can be unnamed types or named binders such as `n: u64`. A binder is
+in scope in later domains and the result, so `fn(n: u64, buffer(n)) -> i64`
+accepts a buffer at the length passed to that callback. A binder is not in
+scope in its own domain, and does not escape the function type. Every domain
+and the result may also refer to names in the surrounding scope. For example, inside a
 function with `n: u64` and `i: u64`, a callback type can be
 `fn([i64; n], erased(Lt(i, n))) -> i64`. Here `n` and `i` refer to the outer
 parameters; the callback's unnamed arguments do not introduce source names.
-Dependent results referring to a callback's own named parameters still require
-the existing named-function or annotated-lambda form.
+Named results such as `fn(n: u64) -> buffer(n)` and nested types such as
+`fn(n: u64) -> fn(erased(Eq(n, n))) -> u64` are supported. Parameter names
+do not affect type equality: a lambda can call the same argument `k`. A named
+binder may shadow an outer name; duplicate names within one function type and
+reserved built-in names are rejected. `_` introduces an inaccessible binder.
+Unnamed domains keep their previous outer-scope meaning, even when mixed with
+named domains.
+
+These binders are supported only in marked dependent modules. Ordinary code
+rejects named function type parameters; the existing unnamed function syntax
+remains available there.
 
 Proof arguments inside a function type must explicitly use `erased(P)`. A
 proof-producing function can itself be erased, as in
@@ -58,8 +70,9 @@ An exported function cannot receive a function-valued argument from foreign
 callers. Supported calls specialize through the core's existing normalization
 and lowering; not every higher-order graph has a runtime representation.
 
-The elaborator checks each annotation before conversion and shifts outer
-references beneath the generated Pi binders. Existing nesting and graph limits
+The elaborator checks each annotation before conversion and introduces
+sequential Pi binders, preserving outer references and restoring source scope
+after each function type. Existing nesting and graph limits
 still apply. No kernel typing or normalization rule changes here. The tests
 cover source elaboration and runtime erasure; this is not a general proof of
 elaborator correspondence or compiler soundness.

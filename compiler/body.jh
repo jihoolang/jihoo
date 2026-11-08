@@ -7103,6 +7103,9 @@ impl sema.Sema {
             return Ok(false)
         }
         for i, p in ps {
+            if p.name.is_some() { return Err(err(
+                p.ty.span, "named function type parameters require dependent_core"
+            )) }
             var x = sig.params[i]
             var known = env.clone()
             for j, prm in params {

@@ -1219,6 +1219,9 @@ impl Sema {
         var params = Vec(u32).new()
         var c_abi = !closure
         for x in ps {
+            if x.name.is_some() { return Err(ty_err(
+                x.ty.span, "named function type parameters require dependent_core"
+            )) }
             let pt = self.resolve_ty(x.ty, env)?
             raw.push(pt)
             params.push(self.param_local_ty(x.mode, pt).0)
