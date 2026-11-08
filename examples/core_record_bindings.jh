@@ -1,14 +1,22 @@
-// A record let keeps the same dependent field and ownership rules as match.
+// Nested record patterns keep dependent field and ownership rules in lets and match arms.
 // exit: 17
 #![dependent_core]
 
 struct Sized(n: u64) { data: buffer(n) }
 struct Envelope(n: u64) { inner: Sized(n), scratch: buffer(n) }
+enum Delivery(n: u64) { Missing; Present(Envelope(n)) }
+
+fn read(delivery: Delivery(3)) -> i64 {
+    match delivery {
+        Delivery.Missing => 0
+        Delivery.Present(Envelope { inner: Sized { data: bytes }, scratch: _ }) => {
+            let result = index(bytes, 0, decide_lt(0, 3))
+            free(bytes, result)
+        }
+    }
+}
 
 fn main() -> i64 {
-    let Envelope { inner: Sized { data: bytes }, scratch: _ }: Envelope(3) = Envelope {
-        inner: Sized { data: alloc(3, 17) }, scratch: alloc(3, 0)
-    }
-    let result = index(bytes, 0, decide_lt(0, 3))
-    free(bytes, result)
+    let Sized { data: bytes }: Sized(3) = Sized { data: alloc(3, 17) }
+    read(Delivery(3).Present(Envelope { inner: Sized { data: bytes }, scratch: alloc(3, 0) }))
 }

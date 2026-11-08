@@ -18,6 +18,7 @@ import dependent.nat
 struct Packet(n: u64) { len: u64, data: buffer(len), same: erased(Eq(len, n)) }
 struct Pair { a: i64, b: i64 }
 struct Nest(n: u64) { packet: Packet(n), extra: buffer(n) }
+enum Optional(n: u64) { None; Some(Nest(n)) }
 fn packet(n: u64, x: i64) -> Packet(n) { Packet { len: n, data: alloc(n, x), same: refl(n) } }
 '''
 BODIES={
@@ -134,6 +135,53 @@ export fn nested_mutate(x: i64) -> i64 {
     nested_update(&p, x + 1)
     nested_peek(p)
 }''')
+BODIES['match_owned'] = ('''export fn match_owned(n: u64, x: i64) -> i64 {
+    let p: Optional(1) = if_lt(n, 1, fn(bound) { Optional.None }, Optional.Some(Nest { packet: packet(1, x), extra: alloc(1, x) }))
+    match p { Optional.None => 0, Optional.Some(Nest { packet: Packet { data, .. }, extra: _ }) => free(data, 7) }
+}''', '''export fn match_owned(n: u64, x: i64) -> i64 {
+    let p: Optional(1) = if_lt(n, 1, fn(bound) { Optional.None }, Optional.Some(Nest { packet: packet(1, x), extra: alloc(1, x) }))
+    match p { Optional.None => 0, Optional.Some(inner) => { match inner { Nest { packet: value, extra: _ } => {
+        match value { Packet { data, .. } => free(data, 7) }
+    } } } }
+}''')
+BODIES['match_borrowed'] = ('''fn optional_peek(p: ref Optional(1)) -> i64 {
+    match p { Optional.None => 0, Optional.Some(Nest { packet: Packet { data, len, same }, .. }) =>
+        index(data, 0, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1))) }
+}
+export fn match_borrowed(n: u64, x: i64) -> i64 {
+    let p: Optional(1) = if_lt(n, 1, fn(bound) { Optional.None }, Optional.Some(Nest { packet: packet(1, x), extra: alloc(1, x) }))
+    optional_peek(p) + optional_peek(p)
+}''', '''fn optional_peek(p: ref Optional(1)) -> i64 {
+    match p { Optional.None => 0, Optional.Some(inner) => { match inner { Nest { packet: value, .. } => {
+        match value { Packet { data, len, same } =>
+            index(data, 0, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1))) }
+    } } } }
+}
+export fn match_borrowed(n: u64, x: i64) -> i64 {
+    let p: Optional(1) = if_lt(n, 1, fn(bound) { Optional.None }, Optional.Some(Nest { packet: packet(1, x), extra: alloc(1, x) }))
+    optional_peek(p) + optional_peek(p)
+}''')
+BODIES['match_record'] = ('''export fn match_record(n: u64, x: i64) -> i64 {
+    let p: Nest(n) = Nest { packet: packet(n, x), extra: alloc(n, x) }
+    let result = match p { Nest { packet: Packet { data, .. }, extra } => free(data, free(extra, 19)) }
+    result
+}''', '''export fn match_record(n: u64, x: i64) -> i64 {
+    let p: Nest(n) = Nest { packet: packet(n, x), extra: alloc(n, x) }
+    let result = match p { Nest { packet: inner, extra } => { match inner { Packet { data, .. } => free(data, free(extra, 19)) } } }
+    result
+}''')
+BODIES['match_update'] = tuple(
+    body.replace('nested_update', 'match_update').replace('nested_mutate', 'match_mutate')
+    for body in BODIES['nested_update']
+)
+BODIES['match_update'] = (
+    BODIES['match_update'][0].replace(
+        'let Nest { packet: Packet { len, data, same }, extra } = p;',
+        'match p { Nest { packet: Packet { len, data, same }, extra } => {'
+    ).replace('p = Nest { packet: Packet { len, data, same }, extra }\n}',
+              'p = Nest { packet: Packet { len, data, same }, extra }\n} } }'),
+    BODIES['match_update'][1],
+)
 PROGRAM=PREFIX+'\n'.join(a for a,b in BODIES.values())
 REFERENCE=PREFIX+'\n'.join(b for a,b in BODIES.values())
 INVALID={
@@ -162,6 +210,16 @@ INVALID={
     'refutable': ('enum Maybe { None; Some(i64) } fn bad(x: Maybe) -> i64 { let Maybe.Some(y) = x; y }','a let binds a name'),
     'scalar': ('fn bad() -> i64 { let Pair { a, b } = 1; a }','match requires a value of a data type'),
 }
+INVALID.update({
+    'match-duplicate': ('fn bad(p: Nest(1)) -> i64 { match p { Nest { packet: Packet { data: x, .. }, extra: x } => 0 } }', 'duplicate struct binding name'),
+    'match-flat-duplicate': ('fn bad(p: Pair) -> i64 { match p { Pair { a: x, b: x } => x } }', 'duplicate struct binding name'),
+    'match-borrow': ('fn bad(p: ref Nest(1)) -> i64 { match p { Nest { packet: Packet { data, .. }, .. } => free(data, 0) } }', 'expected a buffer'),
+    'match-reuse': ('fn bad(p: Nest(1)) -> i64 { match p { Nest { packet: Packet { data, .. }, .. } => free(data, free(data, 0)) } }', 'an owned value is used more than once'),
+    'match-private': ('struct Wrapped { inner: binding_helper.Secret(1) } fn bad(p: Wrapped) -> i64 { match p { Wrapped { inner: binding_helper.Secret { data, .. } } => 0 } }', 'private struct field: data'),
+    'match-missing-variant': ('fn bad(p: Optional(1)) -> i64 { match p { Optional.Some(Nest { packet: Packet { data, .. }, .. }) => free(data, 0) } }', 'match requires one arm per variant'),
+    'match-refutable': ('fn bad(p: Optional(1)) -> i64 { match p { Optional.None => 0, Optional.Some(Optional.None) => 1 } }', 'variant fields bind names or _'),
+    'match-wrong-family': ('fn bad(p: Optional(1)) -> i64 { match p { Optional.None => 0, Optional.Some(Packet { data, .. }) => 0 } }', 'match has no arm for Nest'),
+})
 INVALID['nesting-limit']=('fn bad() -> i64 { '+('let Pair { .. } = Pair { a: 0, b: 0 }; '*140)+'0 }', 'elaboration nesting limit reached')
 ANCHOR='\nexport fn positive_anchor() -> i64 { 0 }\n'
 
@@ -197,9 +255,9 @@ def validate_bindings(compiler,root,temporary,environment,run):
                 library=temporary/f'bindings-{variant}{level}.so'
                 run([*shlex.split(os.environ.get('JIHOO_CC','clang')),'-shared','-fPIC',str(obj),str(counter),'-Wl,--wrap=malloc','-Wl,--wrap=free','-o',str(library)])
                 native=ctypes.CDLL(str(library))
-                for name in ('owned','partial','context','nested','discard'):
+                for name in ('owned','partial','context','nested','discard','match_owned','match_borrowed','match_record'):
                     f=getattr(native,name);f.argtypes,f.restype=[ctypes.c_uint64,ctypes.c_int64],ctypes.c_int64
-                for name in ('borrowed','shadow','nested_borrow','deep','nested_mutate'):
+                for name in ('borrowed','shadow','nested_borrow','deep','nested_mutate','match_mutate'):
                     f=getattr(native,name);f.argtypes,f.restype=[ctypes.c_int64],ctypes.c_int64
                 for n in (0,1,9):
                     for x in (-7,0,13):
@@ -210,7 +268,10 @@ def validate_bindings(compiler,root,temporary,environment,run):
                         assert native.nested(n,x)==11 and native.discard(n,x)==13
                         assert native.borrowed(x)==2*x+1 and native.shadow(x)==2*x+3
                         assert native.nested_borrow(x)==2*x and native.deep(x)==x+5
-                        assert native.nested_mutate(x)==x+1
+                        assert native.nested_mutate(x)==x+1 and native.match_mutate(x)==x+1
+                        assert native.match_owned(n,x)==(7 if n else 0)
+                        assert native.match_borrowed(n,x)==(2*x if n else 0)
+                        assert native.match_record(n,x)==19
                 assert ctypes.c_long.in_dll(native,'allocations').value==ctypes.c_long.in_dll(native,'frees').value
     trap=temporary/'binding-trap.jh';trap.write_text(PREFIX+'struct Wrapped { inner: Pair } fn main() -> i64 { let Wrapped { inner: Pair { .. } } = Wrapped { inner: Pair { a: 9223372036854775807 + 1, b: 0 } }; 0 }')
     for level in ('-O0','-O2'):assert command('run',trap,level,success=False).returncode==132
