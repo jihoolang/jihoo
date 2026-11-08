@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 462 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 484 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -771,3 +771,52 @@ dependent conversions, subtraction, higher-order application, effects and
 runtime overflow/traps remain outside this fragment. The existing beta-only
 consistency and normalization theorems are unchanged. No completeness or
 universal success claim is made for `Core.normal` or the coefficient checker.
+
+## First-order evidence with symbolic conversion
+
+`LinearEvidence.lean` defines an independent `Derives` judgment for `refl`,
+`zeroLe`, closed computed `decide`, and non-erased `U64` lambdas. Its propositions
+are equality or strict order of linear-natural expressions, optionally under
+nested natural quantifiers. `Converts` compares corresponding coefficient
+normal forms; its soundness theorem proves logical equivalence for every
+natural environment, including beneath quantifiers. `Derives.sound` then proves
+that every derived proposition holds. It does not assume semantic soundness of
+unrestricted raw beta conversion.
+
+The proof-producing `infer`, `parseFormula` and `check` functions reconstruct an
+exact proposition and derivation from Raw syntax. Evidence is checked, rather
+than accepting any term merely because the requested proposition is true.
+`Formula.formed` separately establishes formation of the encoded proposition
+in the existing `Raw.Beta.IsType` judgment. This is **not** a theorem that the new
+`Derives` judgment implies `Raw.Beta.HasType` at the converted type: the latter's
+conversion relation has not been extended with symbolic arithmetic, and it has
+no `zeroLe` typing rule. The two evidence judgments remain explicitly distinct.
+
+`CheckedLinearEvidence.lean` applies this checker to a closed retained snapshot.
+`validateBytes_sound` identifies the entire canonical artifact and both exact
+requested root IDs, reconstructs a closed formula and derivation, and establishes
+its truth in every natural environment. Its literal-equality and literal-order
+corollaries reject false closed claims. The semantic model permits mathematical
+natural sums above a word; each literal leaf still lies below the word bound.
+
+The CLI reads one artifact once, with the existing canonical token, 8 MiB,
+4096-node, depth-128 and graph-validity checks. Before expansion, it reuses the
+8192 selected-tree and 131072 total-expanded-graph guards, charging repeated
+references and unreachable nodes. Inference and conversion traverse only those
+bounded syntax trees; no beta search or general proof search is introduced.
+These defensive checks do not constitute a formal implementation cost theorem.
+
+The real-core suite builds the exporter against the current `compiler/core.jh`,
+runs actual `Core.check`, `Core.infer` and `Core.require`, and validates the
+once-retained result before publishing it. This is a per-artifact correspondence
+check on successful executions, not a proof of the implementation. Source
+parsing, export fidelity, compiler execution and IO association remain tested
+boundaries. A snapshot is the complete submitted claim, not an authenticated
+record tied to an independently supplied source or graph: another valid graph
+can also pass when its roots are requested. Invalid unreachable nodes and root
+mismatches are rejected; harmless valid unreachable nodes need not be rejected.
+
+Arbitrary applications, beta-equivalent proof terms, proof hypotheses,
+higher-order domains, subtraction and other arithmetic, runtime behavior and
+full checker soundness are outside this profile. Existing general Beta typing,
+normalization and consistency theorems are unchanged.

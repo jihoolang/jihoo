@@ -487,3 +487,26 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.LinearNaturals.Examples.wide_sum_not_zero
 #print axioms Jihoo.CoreBridge.LinearNaturals.Examples.application_rejected
 #print axioms Jihoo.GraphCertificates.LinearNormal.admit_sound
+
+#print axioms Jihoo.CoreBridge.LinearEvidence.context_succ
+#print axioms Jihoo.CoreBridge.LinearEvidence.Formula.formed
+#print axioms Jihoo.CoreBridge.LinearEvidence.Converts.sound
+#print axioms Jihoo.CoreBridge.LinearEvidence.closed_value
+#print axioms Jihoo.CoreBridge.LinearEvidence.Derives.sound
+#print axioms Jihoo.CoreBridge.LinearEvidence.check_sound
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.validate_sound
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.validateBytes_sound
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.literal_value
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.Formula.literal_equal_truth
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.Formula.literal_less_truth
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.false_equal_rejected
+#print axioms Jihoo.GraphCertificates.LinearEvidenceCheck.false_less_rejected
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.universal_positive
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.symbolic_commutativity_checked
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.symbolic_zero_le_checked
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.closed_computed_decision_checked
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.wide_zero_le_checked
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.distinct_binders_rejected
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.false_under_quantifier_rejected
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.true_claim_wrong_evidence_rejected
+#print axioms Jihoo.CoreBridge.LinearEvidence.Examples.arbitrary_beta_evidence_rejected

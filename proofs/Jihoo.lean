@@ -76,3 +76,7 @@ import Jihoo.OpenHeadNormalizationExamples
 import Jihoo.LinearNaturals
 import Jihoo.CheckedLinearNormalization
 import Jihoo.LinearNormalizationExamples
+
+import Jihoo.LinearEvidence
+import Jihoo.CheckedLinearEvidence
+import Jihoo.LinearEvidenceExamples
