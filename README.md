@@ -118,7 +118,8 @@ Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
 Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations.
-[Nested record lets](docs/language/dependent-records.md) unpack owned or borrowed
+[Nested record patterns](docs/language/dependent-records.md) in lets and match
+arms unpack owned or borrowed
 indexed fields while preserving evidence, private fields and single ownership.
 [Bulk vector extension](docs/language/vector-extension.md) retains a checked
 old-to-new length postcondition while reusing capacity or growing the buffer.

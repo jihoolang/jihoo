@@ -680,6 +680,32 @@ impl Elaborator {
         Ok(())
     }
 
+    // Replace an irrefutable nested record by a fresh field binder and
+    // unpack it inside the arm, after the complete outer telescope exists.
+    fn record_field(inout self, pattern: ast.Pat, inout nested: Vec(ast.Stmt)) -> ast.Pat {
+        match pattern.kind {
+            Struct(_, _, _) => {
+                let name = "<record:" + self.record_serial.to_string() + ">"
+                self.record_serial += 1
+                nested.push(ast.Stmt {
+                    kind: ast.StmtKind.Let(ast.LetStmt {
+                        kind: ast.LetKind.Let,
+                        pat: pattern.clone(),
+                        ty: None,
+                        value: ast.Expr {
+                            kind: ast.ExprKind.Name(name.clone()),
+                            span: pattern.span
+                        },
+                        els: None
+                    }),
+                    span: pattern.span
+                })
+                ast.Pat { kind: ast.PatKind.Name(name, false), span: pattern.span }
+            }
+            _ => pattern.clone()
+        }
+    }
+
     // A record pattern is irrefutable. Reuse case analysis for its dependent
     // telescope, private fields and ownership; the initializer occurs once.
     fn record_binding(
@@ -706,30 +732,10 @@ impl Elaborator {
         var flat = Vec(ast.FieldPat).new()
         var nested = Vec(ast.Stmt).new()
         for field in fields {
-            match field.pat.kind {
-                Struct(_, _, _) => {
-                    let name = "<record:" + self.record_serial.to_string() + ">"
-                    self.record_serial += 1
-                    flat.push(ast.FieldPat {
-                        name: field.name.clone(),
-                        pat: ast.Pat {
-                            kind: ast.PatKind.Name(name.clone(), false),
-                            span: field.pat.span
-                        }
-                    })
-                    nested.push(ast.Stmt {
-                        kind: ast.StmtKind.Let(ast.LetStmt {
-                            kind: ast.LetKind.Let,
-                            pat: field.pat.clone(),
-                            ty: None,
-                            value: ast.Expr { kind: ast.ExprKind.Name(name), span: field.pat.span },
-                            els: None
-                        }),
-                        span: field.pat.span
-                    })
-                }
-                _ => flat.push(field.clone())
-            }
+            flat.push(ast.FieldPat {
+                name: field.name.clone(),
+                pat: self.record_field(field.pat, &nested)
+            })
         }
         let pattern = ast.Pat {
             kind: ast.PatKind.Struct(path.clone(), flat, omitted),
@@ -1718,8 +1724,12 @@ impl Elaborator {
                 sp,
                 core.DEPTH
             )? }
+            var names = Vec(String).new()
+            for binder in binders { self.record_names(binder, &names, depth)? }
+            var nested = Vec(ast.Stmt).new()
             var domains = Vec((bool, u32)).new()
-            for b in binders {
+            for original in binders {
+                let b = self.record_field(original, &nested)
                 let binder = match b.kind {
                     Name(n, false) if !reserved(n.as_str()) => n.clone()
                     Wild => "_".to_string()
@@ -1762,8 +1772,16 @@ impl Elaborator {
                 _ => {}
             }
             let infer_result = expected.is_none() && k == 0
+            let body = if nested.len() == 0 { arm.body.clone() } else { ast.Expr {
+                kind: ast.ExprKind.Block(ast.Block {
+                    stmts: nested,
+                    tail: Some(Box.new(arm.body.clone())),
+                    span: arm.span
+                }),
+                span: arm.span
+            } }
             var value = self.scope_expr(
-                arm.body,
+                body,
                 if infer_result { None } else { Some(result) },
                 depth - 1
             )?

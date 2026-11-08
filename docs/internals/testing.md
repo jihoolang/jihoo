@@ -72,7 +72,8 @@ the runner. Its suites:
   evidence, types, scopes and ABI preconditions. Kernel unit tests also
   bypass the parser to check malformed term graphs and false evidence.
   `tests/core_bindings.py` compares record lets, including nested patterns,
-  with explicit match MIR. It checks owned/borrowed dependent fields, nested
+  with explicit match MIR, including nested record patterns in enum arms and
+  constant-result matches. It checks owned/borrowed dependent fields, nested
   inout reconstruction, discarded initializer traps, both object targets and
   native allocation balance at O0/O2, plus exact privacy, type and ownership
   diagnostics. Allocation counts do not replace memory instrumentation.
