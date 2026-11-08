@@ -111,14 +111,38 @@ def test(compiler, checker, output):
     changed = shared(graph)
     changed[1] = snapshot_bytes(n, graph=graph, ty=len(graph)-1)
     reject('false-normalization-observation', changed, roots_of(changed))
-    graph = [*f.graph, (1, 42)]
-    app = graph[i.term]
-    graph[i.term] = (10, app[1], len(graph)-1)
-    changed = shared(graph)
-    reject('changed-selected-argument', changed)
-    graph = [*f.graph, f.graph[f.term]]
-    graph[i.term] = (10, len(graph)-1, app[2])
-    reject('equivalent-but-distinct-function-id', shared(graph))
+    # Hand-built backward-edge graph isolates the intended checks. Both
+    # equivalent lambdas and both literal arguments precede the application.
+    # The unchanged counterpart must pass the complete application validator.
+    valid = [(3,), (0, 0), (13, 1), (9, 0, 0, 2), (9, 0, 0, 2),
+             (1, 7), (1, 8), (7, 1, 1), (8, 0, 0, 7), (7, 5, 5), (10, 3, 5)]
+    def valid_trace(graph, function=3, result=9):
+        trace = [snapshot_bytes(f, graph=graph, term=function, ty=8),
+                 snapshot_bytes(f, graph=graph, term=function, ty=8),
+                 snapshot_bytes(f, graph=graph, term=10, ty=result),
+                 snapshot_bytes(f, graph=graph, term=10, ty=result)]
+        # Python explicitly checks every backward edge. Lean additionally
+        # checks whole-graph validity/resources and the retained function type.
+        for artifact in trace:
+            Snapshot.read(artifact)
+        success(command(['lake', 'env', 'lean', '--run', 'CheckCorePrincipal.lean', function, 8, 8],
+                        trace[0] + b'\n' + trace[1], cwd=ROOT / 'proofs'))
+        return trace
+    control = valid_trace(valid)
+    success(gate.validate(control, roots_of(control)))
+    graph = list(valid); graph[10] = (10, 3, 6)
+    changed = valid_trace(graph)
+    reject('graph-valid-changed-argument-7-to-8', changed, roots_of(changed))
+    # Changing the result consistently to Eq 8 8 restores acceptance.
+    repaired = valid_trace([*graph, (7, 6, 6)], result=11)
+    success(gate.validate(repaired, roots_of(repaired)))
+    graph = list(valid); graph[10] = (10, 4, 5)
+    changed = valid_trace(graph)
+    reject('graph-valid-equivalent-distinct-function-id', changed, roots_of(changed))
+    # Selecting that exact equivalent lambda restores acceptance, proving the
+    # failure above is ID association rather than type or graph invalidity.
+    repaired = valid_trace(graph, function=4)
+    success(gate.validate(repaired, roots_of(repaired)))
     extended = shared([*f.graph, (18,)])
     success(gate.validate(extended, roots))
     extended[1] = snapshot_bytes(n, graph=[*f.graph, (19, 0)])
