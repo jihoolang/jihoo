@@ -62,6 +62,20 @@ signedness from the first nonliteral operand, looking through nested arithmetic:
 Literal-only arithmetic still defaults to i64. This is inference, not a conversion:
 mixing an i64 value with a u64 value is an error, and overflow still traps.
 
+An immutable `u64` let retains its definition for subsequent types and evidence
+when its initializer consists of literals, scalar variables, addition and checked
+`sub`. For example, after `let remaining = sub(n, offset, start)`, evidence using
+`remaining + offset` can convert to evidence using `n`. Nested lets and shadowing
+follow ordinary lexical scope. The original initializer still runs before the
+rest, so an unused or proof-only arithmetic result can still trap.
+
+This transparency is conservative: function calls, memory reads, effectful
+initializers, owned values and mutable bindings retain their previous behavior.
+The initializer is inspected before ghost normalization, with at most 4096 term
+occurrences and the existing nesting limit; larger expressions retain an opaque
+binding. This does not add a kernel equality rule or prove general elaborator
+soundness.
+
 Contextual lambdas may spell out their parameter types. For example, a loop body
 can be `fn(i: u64, p: Lt(i, n), acc: i64) -> i64 { acc + 1 }`. Its types are checked
 against the loop's signature; `p` remains erased even though its annotation does

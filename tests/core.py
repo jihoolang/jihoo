@@ -636,6 +636,8 @@ def main():
         source_frontend(compiler, root, temporary, environment)
         from core_modules import validate_modules
         validate_modules(compiler, root, temporary, environment, run)
+        from core_natural_lets import validate_natural_lets
+        validate_natural_lets(compiler, root, temporary, environment, run)
         from core_context import validate_context
         validate_context(compiler, root, temporary, environment, run)
         from core_constructors import validate_constructors

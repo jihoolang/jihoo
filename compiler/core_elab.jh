@@ -64,6 +64,20 @@ struct TypeAlias {
     term: u32
 }
 
+// Natural arithmetic is stable under replay: its operands are immutable
+// scalar values, and subtraction evidence never runs. Do not normalize
+// first: ghost reduction could hide a memory read or an effectful call.
+fn natural_alias(c: core.Core, value: u32, depth: u32, inout fuel: u32) -> bool {
+    if depth == 0 || fuel == 0 { return false }
+    fuel -= 1
+    match c.term(value) {
+        Natural(_) | Var(_) => true
+        UAdd(a, b) | USub(a, b, _) => natural_alias(c, a, depth - 1, &fuel) &&
+            natural_alias(c, b, depth - 1, &fuel)
+        _ => false
+    }
+}
+
 struct Elaborator {
     c: core.Core
     names: Vec(String)
@@ -86,9 +100,9 @@ struct Elaborator {
     // Set for the one call that may take `&x`: a let's value, a statement or
     // a block's value.
     allowed: bool
-    // Assignments to inout parameters at the end of a block: the name, the
-    // context length there and the value. The value is what is given back, so
-    // the block's value can prove facts about it by computing.
+    // Scoped transparent definitions: immutable natural lets and final inout
+    // assignments. Each stores the name, context length and value. Final
+    // assignments are the values given back by the block.
     aliases: Vec((String, i64, u32))
     // Per struct, its family and the names of its fields in order.
     structs: Vec((u32, Vec(String), Vec(bool)))
@@ -871,7 +885,23 @@ impl Elaborator {
                     Some(t) => Some(self.c.shift(t, 1, 0, core.DEPTH)?)
                     None => None
                 }
+                // Keep the original application: an unused initializer still
+                // runs and traps before the rest. Transparent occurrences use
+                // the same pure scalar expression in runtime and ghost code.
+                var alias_fuel: u32 = 4096
+                let transparent = !is_var && !rebound &&
+                    self.c.term(a) == core.Term.U64 && natural_alias(
+                    self.c,
+                    value,
+                    core.DEPTH,
+                    &alias_fuel
+                )
+                if transparent {
+                    let shifted = self.c.shift(value, 1, 0, core.DEPTH)?
+                    self.aliases.push((name.to_string(), self.ctx.len(), shifted))
+                }
                 let rest = self.lets(stmts, tail, inner, depth - 1)
+                if transparent { self.aliases.pop() }
                 let rest: Result(u32, diag.Diag) = match rest {
                     Ok(r) => if ghost { Ok(r) } else { self.settle(r, 1) }
                     Err(d) => Err(d)
@@ -1140,7 +1170,7 @@ impl Elaborator {
         Ok(out)
     }
 
-    // The value assigned to `name` that no later binder shadows, if any: its
+    // The transparent definition of `name` that no later binder shadows: its
     // context length and term.
     fn assigned(self, name: str) -> Option((i64, u32)) {
         var i = self.names.len()
@@ -3648,4 +3678,15 @@ pub fn compile(
         )) }
     }
     Ok(p)
+}
+
+#[test]
+fn natural_alias_bounds_shared_graph_work() {
+    var c = core.Core.new()
+    let sp = diag.Span.nowhere()
+    var x = c.add(core.Term.Natural(1), sp).unwrap()
+    for _ in 0..20 { x = c.add(core.Term.UAdd(x, x), sp).unwrap() }
+    var fuel: u32 = 4096
+    assert(!natural_alias(c, x, core.DEPTH, &fuel), "shared expansion falls back to an opaque let")
+    assert(fuel == 0, "every repeated occurrence consumes alias work")
 }
