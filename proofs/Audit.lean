@@ -616,3 +616,17 @@ import Jihoo
 #print axioms Jihoo.Quantity.Binders.projected_alias_finished
 #print axioms Jihoo.Quantity.Binders.projected_alias_prefix
 #print axioms Jihoo.Quantity.Binders.projectAlias_context
+
+#print axioms Jihoo.Quantity.ContextProjection.enter_origin
+#print axioms Jihoo.Quantity.ContextProjection.enter_authentic
+#print axioms Jihoo.Quantity.ContextProjection.walk_sound
+#print axioms Jihoo.Quantity.ContextProjection.Path.authentic
+#print axioms Jihoo.Quantity.ContextProjection.rooted_authentic
+#print axioms Jihoo.Quantity.ContextProjection.lookup_core
+#print axioms Jihoo.Quantity.ContextProjection.lookup_fresh
+#print axioms Jihoo.Quantity.ContextProjection.lookup_outer
+#print axioms Jihoo.Quantity.ContextProjection.variable_alias_origin
+#print axioms Jihoo.Quantity.ContextProjection.lend_alias_origin
+#print axioms Jihoo.Quantity.ContextProjection.rooted_alias_origin
+#print axioms Jihoo.Quantity.ContextProjection.rooted_alias_finished
+#print axioms Jihoo.Quantity.ContextProjection.rooted_alias_prefix

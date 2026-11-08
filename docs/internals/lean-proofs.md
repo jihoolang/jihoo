@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 582 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 595 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1264,3 +1264,57 @@ produces no observations from an otherwise valid telescope prefix; its repaired
 control is accepted. The exporter,
 constructor-summary association and trusted checker remain finite tested
 boundaries, with no theorem equating arbitrary Core execution to this model.
+
+
+## Rooted context and Lend owner provenance
+
+`QuantityContextProjection.lean` adds structural provenance to the capability
+layer. A bounded walk starts at one root in an immutable syntax view and an
+empty context. Each original lambda supplies its domain ID, erased flag and
+body ID; a contextual observer receives that exact domain ID and the preceding
+raw context. The observer's classification must pass the binder permission check
+before the new entry is appended. No descriptor list, mode vector or owner
+index is accepted from the caller of this rooted operation.
+
+`walk_sound` proves a path judgment retaining every original lambda edge and
+contextual observation. `rooted_authentic` proves that every entry was produced
+by those observations with permitted erasure. Here **authentic means provenance
+relative to the supplied view and observer**, not a proof of kernel typing.
+`lookup_core` identifies reverse-list lookup with Core's bounds-checked
+`ctx[ctx.length - 1 - k]`; fresh/outer lookup lemmas prove that entering any
+binder, including an erased binder, shifts every existing de Bruijn slot once.
+Telescopes remain stored outermost first, while owner lookup is innermost first.
+
+At the endpoint the projector requires an actual Lend view, follows its original
+owner node, and requires a Var view there. The alias uses that exact variable
+index and original binding, after checking the complete context's permissions
+and the selected owner's lend capability. Distinct owners with equal types keep
+distinct identities. `rooted_alias_origin` combines these structural facts with
+the capability evidence; finished/prefix corollaries apply the existing single
+alias-slot trace accounting to the supplied control body.
+
+**Remaining boundary:** the syntax view must faithfully expose the retained Core
+nodes, and the observer must correctly implement contextual formation, sort and
+domain normalization and family classification. This development does not prove
+those interfaces correct. The test driver performs whole-program Core.check
+before observing them. No translation of a Lend reader or continuation is added:
+the control body in the trace corollaries is still supplied independently. In
+particular the result binder and returned-owner binder of a real continuation
+must be handled separately before those corollaries describe its execution.
+Non-variable owners, nested execution paths beyond the leading lambda telescope,
+first-order substitution stability, heap identity, leases and borrow lifetime,
+and erasure/lowering correspondence remain open. Fuel exhaustion rejects rather
+than returning a partially authenticated context; no completeness is claimed.
+
+Lean regression examples change original annotation IDs, erased flags, lambda
+edges, owner nodes and indices; exercise equal-typed distinct owners; and reject
+cycles, insufficient fuel and non-variable owners. The existing real-Core probe
+has a `context` observation mode that retains original node IDs and checks the
+exact Lend owner selection. Seven accepted dependent/mixed/multiple-owner programs move a
+buffer across erased and unrestricted slots and select either of two equal-typed
+owners, including a Buffer(n) annotation depending on an earlier index. Tests verify every lambda body link, selected original domain ID and
+forward/de Bruijn position. Valid non-variable-owner and non-Lend programs pass
+the ordinary checker observation mode but fail this projection mode with the
+intended diagnostic and no partial output. These are regression evidence for
+the trusted interfaces, not a mechanized implementation refinement or a new
+certificate admission profile.
