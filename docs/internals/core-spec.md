@@ -188,7 +188,10 @@ These are evidence, and every part is in ghost position.
   - `Arith` on two integers folds unless it overflows, which stays a runtime trap.
   - `UAdd` becomes the canonical sum (`sum`): variables in index order, then other terms, in
     structural order in the pure model and in their evaluation order in runtime mode, then
-    the constant. A constant beyond 2^64 - 1 leaves the sum as written. `(x - y) + y` cancels to
+    the constant. In ghost mode a constant beyond 2^64 - 1 is a deterministic balanced
+    `UAdd` tree of U64 literals; runtime mode leaves such a sum as written. Collection charges
+    every visited occurrence, including repeated graph references, to the checker step budget.
+    `(x - y) + y` cancels to
     x when the sum has y's parts, unless a part is effectful or y holds a `Strict`, keeping y's
     traps. At most 64 cancellations are tried, after which the sum simply stays as it is.
   - `USub` cancels `(r + b) - b` to r under the same conditions.

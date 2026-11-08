@@ -829,10 +829,10 @@ impl Core {
                 var atoms = Vec(u32).new()
                 var constant: u128 = 0
                 var pending = Vec(u32).new()
-                self.collect(a, &atoms, &constant, &pending, depth - 1)
+                self.collect(a, &atoms, &constant, &pending, depth - 1)?
                 var minus = Vec(u32).new()
                 var less: u128 = 0
-                self.collect(b, &minus, &less, &pending, depth - 1)
+                self.collect(b, &minus, &less, &pending, depth - 1)?
                 // Operands that touch memory are evaluated exactly once, so
                 // they are neither cancelled nor kept twice.
                 let effects = self.effectful(a, depth - 1) || self.effectful(b, depth - 1)
@@ -1101,15 +1101,15 @@ impl Core {
 
     // The canonical sum of two normal U64 terms: variables in index order,
     // then other terms in their order, then the constant, without zero.
-    // These are equations of the naturals. A constant that does not fit
-    // a U64 leaves the sum as it is.
+    // These are equations of the naturals. Runtime constants beyond U64
+    // leave the sum as it is; ghost constants use balanced literal trees.
     fn sum(inout self, a: u32, b: u32, sp: diag.Span, depth: u32) -> Result(u32, diag.Diag) {
         var atoms = Vec(u32).new()
         var constant: u128 = 0
         // Traps of Strict terms in the sum, evaluated before the result.
         var pending = Vec(u32).new()
-        self.collect(a, &atoms, &constant, &pending, depth)
-        self.collect(b, &atoms, &constant, &pending, depth)
+        self.collect(a, &atoms, &constant, &pending, depth)?
+        self.collect(b, &atoms, &constant, &pending, depth)?
         // (x - y) + y is x when the sum has all of y's parts.
         var changed = true
         var rounds = 0
@@ -1123,7 +1123,7 @@ impl Core {
                 var minus = Vec(u32).new()
                 var less: u128 = 0
                 var traps = Vec(u32).new()
-                self.collect(y, &minus, &less, &traps, depth)
+                self.collect(y, &minus, &less, &traps, depth)?
                 if less > constant || traps.len() != 0 { continue }
                 var others = Vec(u32).new()
                 for j in 0..atoms.len() { if j != k { others.push(atoms[j]) } }
@@ -1134,7 +1134,7 @@ impl Core {
                 constant -= less
                 // y is no longer evaluated; its traps still happen.
                 if self.may_trap(y, depth) { pending.push(y) }
-                self.collect(x, &atoms, &constant, &pending, depth)
+                self.collect(x, &atoms, &constant, &pending, depth)?
                 changed = true
                 break
             }
@@ -1149,15 +1149,15 @@ impl Core {
         }
     }
 
-    // Variables in index order, then other terms in their order, then the
-    // constant; None when the constant does not fit a U64.
+    // Variables, other atoms, then one canonical constant tree. Ghost sums
+    // can exceed U64; runtime sums retain the existing overflow boundary.
     fn canonical(
         inout self,
         atoms: [u32],
         constant: u128,
         sp: diag.Span
     ) -> Result(Option(u32), diag.Diag) {
-        if constant > 0xffffffffffffffff { return Ok(None) }
+        if self.runtime && constant > 0xffffffffffffffff { return Ok(None) }
         var vars = Vec((u32, u32)).new()
         var others = Vec(u32).new()
         for x in atoms {
@@ -1185,15 +1185,23 @@ impl Core {
         var ordered = Vec(u32).new()
         for v in vars { ordered.push(v.1) }
         for x in others { ordered.push(x) }
-        if constant > 0 || ordered.len() == 0 { ordered.push(self.add(
-            Term.Natural(constant as u64),
-            sp
-        )?) }
+        if constant > 0 || ordered.len() == 0 { ordered.push(self.natural_sum(constant, sp)?) }
         var result: Option(u32) = None
         for x in ordered {
             result = Some(match result { Some(r) => self.add(Term.UAdd(r, x), sp)?, None => x })
         }
         Ok(result)
+    }
+
+    // Every leaf is a valid U64 literal. Halving gives a deterministic,
+    // balanced representation of larger ghost naturals without wrapping.
+    // Recursion has at most 65 levels; add enforces the total node limit.
+    fn natural_sum(inout self, value: u128, sp: diag.Span) -> Result(u32, diag.Diag) {
+        if value <= 0xffffffffffffffff { return self.add(Term.Natural(value as u64), sp) }
+        let half = value / 2
+        let left = self.natural_sum(half, sp)?
+        let right = if value - half == half { left } else { self.natural_sum(value - half, sp)? }
+        self.add(Term.UAdd(left, right), sp)
     }
 
     // A total order on terms by structure, for sorting sums; 0 for
@@ -1238,26 +1246,30 @@ impl Core {
     }
 
     fn collect(
-        self,
+        inout self,
         id: u32,
         inout atoms: Vec(u32),
         inout constant: u128,
         inout pending: Vec(u32),
         depth: u32
-    ) {
+    ) -> Result((), diag.Diag) {
+        // Charge repeated references as work too. With at most STEPS leaves
+        // per operation, summing U64 literals cannot overflow this U128.
+        self.tick(id, depth)?
         match self.term(id) {
             UAdd(a, b) if depth > 0 => {
-                self.collect(a, &atoms, &constant, &pending, depth - 1)
-                self.collect(b, &atoms, &constant, &pending, depth - 1)
+                self.collect(a, &atoms, &constant, &pending, depth - 1)?
+                self.collect(b, &atoms, &constant, &pending, depth - 1)?
             }
             // Strict(t, r) is r in the naturals; t is evaluated first.
             Strict(t, r) if depth > 0 => {
                 pending.push(t)
-                self.collect(r, &atoms, &constant, &pending, depth - 1)
+                self.collect(r, &atoms, &constant, &pending, depth - 1)?
             }
             Natural(n) => constant += n as u128
             _ => atoms.push(id)
         }
+        Ok(())
     }
 
     // Whether evaluating a runtime term can trap: it contains arithmetic,
@@ -5372,4 +5384,43 @@ fn dependent_eliminations_preserve_symbolic_branches_without_frontends() {
             }, "runtime normalization distributes over symbolic comparisons")
         }
     }
+}
+
+#[test]
+fn wide_ghost_sums_are_canonical_without_wrapping() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let zero = c.add(Term.Natural(0), sp).unwrap()
+    let one = c.add(Term.Natural(1), sp).unwrap()
+    let max = c.add(Term.Natural(0xffffffffffffffff), sp).unwrap()
+    let left = c.add(Term.UAdd(max, one), sp).unwrap()
+    let right = c.add(Term.UAdd(one, max), sp).unwrap()
+    assert(c.equal(left, right, DEPTH).unwrap(), "wide ghost addition commutes")
+    assert(!c.equal(left, zero, DEPTH).unwrap(), "ghost addition does not wrap")
+    let normal = c.normal(left, DEPTH).unwrap()
+    let u = c.add(Term.U64, sp).unwrap()
+    c.require(normal, u, [], true, DEPTH).unwrap()
+    let again = c.normal(normal, DEPTH).unwrap()
+    assert(c.identical(normal, again, DEPTH), "wide canonical form is stable")
+    let x = c.add(Term.Var(0), sp).unwrap()
+    let a = c.add(Term.UAdd(left, x), sp).unwrap()
+    let b = c.add(Term.UAdd(x, right), sp).unwrap()
+    assert(c.equal(a, b, DEPTH).unwrap(), "symbolic atoms retain canonical ordering")
+    c.runtime = true
+    let runtime = c.normal(left, DEPTH).unwrap()
+    assert(c.identical(runtime, left, DEPTH), "runtime overflow expression is unchanged")
+}
+
+#[test]
+fn sum_collection_charges_repeated_graph_references() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    var root = c.add(Term.Natural(1), sp).unwrap()
+    for _ in 0..30 { root = c.add(Term.UAdd(root, root), sp).unwrap() }
+    var atoms = Vec(u32).new()
+    var pending = Vec(u32).new()
+    var constant: u128 = 0
+    let result = c.collect(root, &atoms, &constant, &pending, DEPTH)
+    assert(result.is_err(), "shared exponential expansion must be rejected")
+    assert(c.steps == STEPS + 1, "repeated references consume the step budget")
 }
