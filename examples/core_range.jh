@@ -1,0 +1,23 @@
+// An owned snapshot of a runtime-selected range, with imported offset evidence.
+// The source stays borrowed and the result has exactly count elements.
+// The example checks endpoints at runtime; additions retain overflow checks.
+// main returns 30.
+#![dependent_core]
+import dependent.range
+
+fn total(n: u64, xs: ref buffer(n)) -> i64 {
+    fold(n, 0, fn(i, p, acc) { acc + index(xs, i, p) })
+}
+
+export fn selected(n: u64, offset: u64, count: u64, value: i64) -> i64 {
+    let source = alloc(n, value)
+    if_lt(offset, n + 1, fn(start) {
+        if_lt(count, sub(n, offset, start) + 1, fn(fits) {
+            let copied: buffer(count) = range.copy(n, source, offset, count,
+                lt_add(count, sub(n, offset, start) + 1, offset, fits))
+            total(count, copied)
+        }, -1)
+    }, -1)
+}
+
+fn main() -> i64 { selected(5, 1, 3, 10) }

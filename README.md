@@ -118,6 +118,8 @@ Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
 Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations.
+[Proof-bounded buffer ranges](docs/language/buffer-ranges.md) provide independent
+owned snapshots, using an imported offset theorem for every loop read.
 [The list proof library](docs/language/list-proofs.md) adds borrowed observations,
 owned copies, proof-bounded head/nth access and higher-order map with structural
 clone/append/map length theorems. Imported theorems prove executable array bounds.

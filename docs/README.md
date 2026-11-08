@@ -34,6 +34,7 @@ same on GitHub.
 - [Natural-index proof library](language/natural-proofs.md)
 - [List proof library](language/list-proofs.md)
 - [Lists with exact lengths](language/sized-lists.md)
+- [Proof-bounded buffer ranges](language/buffer-ranges.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)
