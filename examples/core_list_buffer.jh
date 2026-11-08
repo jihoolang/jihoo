@@ -1,0 +1,25 @@
+// Materialize runtime-selected values in contiguous storage with one structural
+// list traversal. The vector owns its buffer after the collection is released.
+// main returns 6.
+#![dependent_core]
+import dependent.collect
+import dependent.vec
+
+fn materialize(limit: u64) -> vec.Vec {
+    let xs = collect.build(4, fn(i, p) {
+        if_lt(i, limit, fn(q) { collect.Entry.Keep(index([1, 2, 3, 4], i, p)) },
+            collect.Entry.Skip)
+    })
+    collect.to_vec(4, xs)
+}
+
+fn total(v: ref vec.Vec) -> i64 {
+    fold(vec.len(v), 0, fn(i, p, acc) { acc + vec.get(v, i, p) })
+}
+
+export fn selected_sum(limit: u64) -> i64 {
+    let v = materialize(limit)
+    total(v)
+}
+
+fn main() -> i64 { selected_sum(3) }
