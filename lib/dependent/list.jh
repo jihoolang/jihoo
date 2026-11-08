@@ -1,5 +1,6 @@
 // Owned lists of i64 with borrowing observations and structural length proofs.
 #![dependent_core]
+import dependent.nat
 
 pub enum List {
     Nil
@@ -121,4 +122,33 @@ pub fn append_into_length(
             transport(fn(k) { Eq(length(append_into(rest, ys)) + 1, k + 1) }, ih,
                 refl(length(append_into(rest, ys)) + 1))
         }, xs)
+}
+
+// Copy a borrowed list into an owned destination range. The extended induction
+// passes the destination explicitly, preserving one owner through every step.
+pub fn write_into(
+    cap: erased(u64),
+    xs: ref List,
+    start: u64,
+    dest: buffer(cap),
+    fits: erased(Lt(start + length(xs), cap + 1))
+) -> buffer(cap) {
+    induct(
+        fn(t, offset: u64, acc: buffer(cap), p: erased(Lt(offset + length(t), cap + 1))) { buffer(
+            cap
+        ) },
+        fn(offset, acc, p) { acc },
+        fn(x, rest, ih, offset, acc, p) {
+            ih(offset + 1, store(acc, offset, x,
+                lt_le(offset, offset + length(rest) + 1, cap,
+                    lt_add(0, length(rest) + 1, offset, zero_le(length(rest))), p)), p)
+        },
+        xs
+    )(start, dest, fits)
+}
+
+// The caller's exact length avoids a separate runtime length traversal.
+pub fn to_buffer(n: u64, xs: ref List, exact: erased(Eq(length(xs), n))) -> buffer(n) {
+    write_into(n, xs, 0, alloc(n, 0),
+        transport(fn(k) { Lt(k, n + 1) }, nat.eq_sym(length(xs), n, exact), nat.le_refl(n)))
 }

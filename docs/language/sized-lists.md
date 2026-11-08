@@ -124,6 +124,9 @@ the erased index does not make runtime arithmetic wrapping or trap-free.
 - `tabulate(n, f) -> Sized(n)` constructs elements from bounded indices,
   invoking callbacks in descending-index order.
 - `from_buffer(n, source) -> Sized(n)` copies a borrowed buffer directly.
+- `to_buffer(n, xs) -> buffer(n)` copies a borrowed exact-length list in one
+  structural pass; `n` is a runtime allocation count. See
+  [buffer materialization](list-buffer-transfer.md).
 - `from_range(n, source, offset, count, fits) -> Sized(count)` copies a proved
   range directly; `n` and `fits` are erased.
 - `append_into(n, m, xs, ys) -> Sized(n + m)` borrows/copies the prefix
@@ -136,9 +139,9 @@ the erased index does not make runtime arithmetic wrapping or trap-free.
 - `into_list(n, xs)` consumes the wrapper and returns its ordinary owned list.
   The result no longer carries `n` in its type.
 
-The `n` arguments above are erased except in `repeat`, `tabulate` and
-`from_buffer`, which need their runtime iteration count. `from_range` uses
-its runtime `count` instead. Indices and equality proofs add no record fields, proof
+The `n` arguments above are erased except in `repeat`, `tabulate`,
+`from_buffer` and `to_buffer`, which need runtime iteration or allocation counts.
+`from_range` uses its runtime `count` instead. Indices and equality proofs add no record fields, proof
 traversals or runtime checks. The wrapper itself is a runtime heap node and is
 not free: the current repeat implementation allocates `n + 1` wrappers and
 `n + 1` list nodes, freeing replaced wrappers during the loop. Mapping copies

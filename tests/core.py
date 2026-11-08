@@ -706,6 +706,8 @@ def main():
         validate_preservation(compiler, root, environment, run)
         from core_wide_sums import validate_wide_sums
         validate_wide_sums(compiler, root, temporary, environment, run)
+        from core_list_buffer import validate_list_buffer
+        validate_list_buffer(compiler, root, temporary, environment, run)
         from core_collect import validate_collect
         validate_collect(compiler, root, temporary, environment, run)
         from core_tabulate import validate_tabulate

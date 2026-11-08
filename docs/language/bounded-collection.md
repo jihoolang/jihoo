@@ -59,6 +59,10 @@ only the final count is used. This API does not promise callback totality.
 - `nth(n, xs, i, p)` requires `p: erased(Lt(i, len(n, xs)))` and reads the
   selected element. The input bound `i < n` alone is insufficient, since some
   candidates may have been skipped. Reading still traverses the selected prefix.
+- `to_vec(n, xs)` borrows the collection and copies kept values to an independent
+  vector with length and capacity equal to the stored count.
+- `to_vec_length(n, xs)` supplies an erased equality for that conversion. See
+  [buffer materialization](list-buffer-transfer.md).
 - `into_list(n, xs)` consumes the wrapper and returns the owned list, losing the
   public length/bound interface.
 
