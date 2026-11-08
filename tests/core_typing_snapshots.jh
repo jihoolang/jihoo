@@ -71,7 +71,7 @@ fn stdin_once() -> Result(String, String) {
 }
 
 fn snapshot(mode: str) -> Result(String, String) {
-    if mode != "infer" && mode != "require" && mode != "both" { return Err("expected infer, require or both".to_string()) }
+    if mode != "infer" && mode != "require" && mode != "both" && mode != "apply" { return Err("expected infer, require, both or apply".to_string()) }
     let source = stdin_once()?
     var c = match core_parse.parse(source.as_str(), 0) {
         Ok(c) => c
@@ -87,13 +87,39 @@ fn snapshot(mode: str) -> Result(String, String) {
         Ok(t) => t
         Err(e) => return Err(e.msg.clone())
     }
-    let selected = if mode == "require" || mode == "both" {
+    let selected = if mode == "require" || mode == "both" || mode == "apply" {
         match c.require(value, declared, [], true, core.DEPTH) {
             Ok(_) => {}
             Err(e) => return Err(e.msg.clone())
         }
         declared
     } else { inferred }
+    if mode == "apply" {
+        let App(function, _) = c.term(value) else { return Err("expected a selected application".to_string()) }
+        let function_type = match c.infer(function, [], true, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        let normalized = match c.normal(function_type, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        // Freeze all observations after the last actual Core call. Keep the
+        // original inference roots; do not synthesize a substitute output type.
+        var trace = String.new()
+        fields(&trace, [3, function as u64, function_type as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, function as u64, normalized as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, value as u64, inferred as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, value as u64, declared as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        return Ok(trace)
+    }
     // Freeze the full arena immediately after the actual operation. Snapshot
     // schema 3 is distinct from the theorem checker's certificate schema 2.
     var out = String.new()
@@ -112,7 +138,7 @@ fn snapshot(mode: str) -> Result(String, String) {
 fn main() -> i32 {
     let args = env.args()
     if args.len() != 2 {
-        eprintln("usage: core-typing-snapshots infer|require|both < one-definition.core")
+        eprintln("usage: core-typing-snapshots infer|require|both|apply < one-definition.core")
         return 2
     }
     match snapshot(args[1]) {

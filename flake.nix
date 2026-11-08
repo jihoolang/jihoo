@@ -241,6 +241,7 @@
                 ./proofs/CheckLinearNormal.lean
                 ./proofs/CheckLinearEvidence.lean
                 ./proofs/CheckCorePrincipal.lean
+                ./proofs/CheckFirstOrderApplication.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -262,6 +263,7 @@
             python3 tests/core_linear_normalization.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_linear_evidence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_principal_evidence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_first_order_application.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 

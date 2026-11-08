@@ -84,3 +84,7 @@ import Jihoo.LinearEvidenceExamples
 import Jihoo.CorePrincipalEvidence
 import Jihoo.CheckedCorePrincipal
 import Jihoo.CorePrincipalExamples
+
+import Jihoo.LinearSubstitution
+import Jihoo.CheckedFirstOrderApplication
+import Jihoo.FirstOrderApplicationExamples
