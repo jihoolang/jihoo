@@ -18,7 +18,7 @@ fn first(n: erased(u64), s: ref Sized(n), p: erased(Lt(0, n))) -> i64 {
 }
 
 fn main() -> i64 {
-    let s = make(3, 17)
+    let s = Sized(3) { data: alloc(3, 17) }
     first(3, s, decide_lt(0, 3))
 }
 ```
@@ -28,12 +28,21 @@ owns `s`, which is freed when the scope ends. The struct parameter introduces
 no runtime field. A separate runtime argument such as `make`'s `n` is still
 needed to allocate a buffer dynamically.
 
-Construction gets all parameters from the expected type: a return type, an
+Construction can get parameters from an expected type: a return type, an
 annotated binding such as `let s: Sized(n) = Sized { ... }`, or a field's type.
-Without an expected type, the constructor is rejected; parameters are not
-inferred from the fields. Struct literals use `Sized { ... }`, not an explicit
-index application. Imported records use `module.Sized(n)` in types and
-`module.Sized { ... }` in literals and patterns.
+Alternatively, write the indices explicitly: `let s = Sized(n) { data: alloc(n, 0) }`.
+This also works for imported and nested records, such as
+`module.Sized(n) { data: alloc(n, 0) }`. Parameters are not inferred from fields;
+without either an expected type or explicit indices, construction is rejected.
+Patterns still use `Sized { ... }` or `module.Sized { ... }` without indices.
+
+Explicit indices are checked in ghost context, including evidence inside an
+index, and must agree with any surrounding expected type. They add no runtime
+fields or evaluation: an overflowing natural index may be valid erased data,
+but does not make a corresponding runtime allocation or arithmetic safe.
+Fields retain their declaration-order evaluation, dependent checks and ownership
+rules. Unknown and duplicate initializer fields are rejected. Private fields
+cannot be constructed by spelling explicit indices.
 
 Fields may refer to parameters and earlier fields. For example, a record with
 parameters `n: u64, m: u64` can declare, in order, `len: u64`,

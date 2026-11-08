@@ -128,6 +128,9 @@ negation uses checked subtraction, preserving overflow traps and operand effects
 Function-producing blocks support direct calls with lexical scope and ordered
 effects; function-valued match results retain their ownership restriction with
 an explicit diagnostic.
+[Explicit indexed record literals](docs/language/dependent-records.md) support
+`Sized(n) { data: alloc(n, x) }` without a surrounding type annotation, with
+checked erased indices and the same field, privacy and ownership rules.
 [Nested record patterns](docs/language/dependent-records.md) in lets and match
 arms unpack owned or borrowed
 indexed fields while preserving evidence, private fields and single ownership.
