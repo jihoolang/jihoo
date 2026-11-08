@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 549 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 558 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1083,3 +1083,78 @@ and checks paired invalid programs against working controls and intended type
 diagnostics. It also distinguishes an erased overflowing bound from a runtime
 addition that traps. These finite tests support correspondence with the trusted
 implementation; they do not establish compiler refinement.
+
+
+## Quantity control and partial executions
+
+`QuantityControl.lean` starts the runtime quantity obligation with a control-flow
+semantics, separate from ghost typing and pure conversion. It does not impose a
+new accepted source profile. Resource events record uses of individual outer
+owners. Sequential execution adds demands; nondeterministic branches must agree
+for each owner separately. A known once-called continuation executes its body.
+Reusable closures and repeated code must have zero outer demand. Erased code
+executes no resource events. A local `bind` shifts outer resource indices and
+requires demand one for its own resource before hiding its events at scope exit.
+This allows each iteration to consume a new local owner while rejecting capture
+of an outer owner by repeated code. Demand counts are mathematical naturals. The
+checker is conservative, not complete: it also checks syntactically present code
+that a particular execution might never reach.
+
+`Finishes` describes successful finite executions. `Prefix` independently
+describes partial executions, including paths ending in a trap and finite
+prefixes of infinite repetition. A prefix need not extend to a successful run.
+The checked-demand theorems establish:
+
+- Every successful run has exactly the checked count for each resource.
+- Every finite prefix has at most the checked count, even if it traps.
+- Each local binder is consumed once on successful exit and at most once before
+  interruption; discharging its scope preserves all outer resource counts.
+- Demand one gives independent linear guarantees for a set of owners, and demand
+  zero excludes runtime use even on partial runs.
+
+The distinction between completion and interruption is essential: a well-checked
+control can trap before using an owner. An exactly-once assertion for all partial
+runs would be false. `QuantityExamples.lean` supplies that counterexample, traces
+showing why branch agreement and repeated-capture checks are necessary, and
+nested-binder/iteration examples. The semantics does not define a use as a free:
+a move or return also uses an owner. Heap conservation and eventual deallocation
+require an additional ownership semantics.
+
+`tests/core_quantities.py` rebuilds a small probe against the checkout's actual
+`compiler/core.jh`. It compares `runtime_uses` counts and kernel acceptance for
+single use, duplication, discarding, balanced branches, immediate calls,
+accumulator passing and trapping arithmetic. Rejected unequal branches,
+escaping closures and repeated capture have successful repaired counterparts.
+This is finite correspondence evidence for manually paired control patterns,
+not a verified Core-to-control translation or a new certificate interface.
+
+### Obligations connecting quantities to the whole core
+
+The following are required before the quantity release gate is discharged:
+
+1. Define a total, scope-preserving projection of the specified runtime terms
+   into resource controls. It must follow erased argument classification,
+   application saturation, constructor fields, elimination/view cases,
+   continuations and dependent lends. No caller may simply label arbitrary
+   code as erased, once-called or capture-free.
+2. Prove that the specified quantity judgment implies control-demand acceptance.
+   Resolve `uses_function`, `uses_under`, case binders and recursive accumulators,
+   including the distinction between an outer owner and a newly bound one.
+   Testing the trusted executable checker does not substitute for this theorem.
+   Relate the implementation's bounded counters and resource limits separately;
+   the natural-number model alone establishes no machine-counter invariant.
+3. Give runtime operational semantics and prove every concrete finite execution
+   projects to `Prefix`, and every successful execution to `Finishes`. Include
+   arithmetic/allocation traps and the evaluation order retained by `Strict`.
+   The current control semantics is not a model of `Core.normal` or lowering.
+4. Connect resource events to unique heap ownership and moves. Add borrow leases,
+   lend return and non-escape invariants; prove allocation/free conservation and
+   that borrowers cannot access an owner after its lifetime. Current controls
+   contain neither heaps nor borrowed pointers, so no borrow theorem is claimed.
+5. Establish erasure/runtime-normalization and lowering correspondence separately.
+   Pure beta preservation cannot justify duplicating effects or owned resources.
+
+Whole-specified-core consistency/preservation, quantity/borrow soundness and
+lowering correspondence remain open. This milestone supplies the path-sensitive
+accounting lemmas for the second and third obligations; it does not replace them
+with an assumption advertised as a completed compiler theorem.

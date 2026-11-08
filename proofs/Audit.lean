@@ -580,3 +580,13 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_usub_reconstructs
 #print axioms Jihoo.CoreBridge.Raw.Beta.HasType.evaluated_index_safe
 #print axioms Jihoo.CoreBridge.Raw.Beta.HasType.evaluated_usub_safe
+
+#print axioms Jihoo.Quantity.discharge_count
+#print axioms Jihoo.Quantity.Finishes.count_eq
+#print axioms Jihoo.Quantity.Prefix.count_le
+#print axioms Jihoo.Quantity.Finishes.prefix
+#print axioms Jihoo.Quantity.bound_finished
+#print axioms Jihoo.Quantity.bound_prefix
+#print axioms Jihoo.Quantity.Linear.finished
+#print axioms Jihoo.Quantity.Linear.prefix
+#print axioms Jihoo.Quantity.erased_unreachable
