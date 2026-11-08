@@ -999,6 +999,13 @@ Regression controls preserve local/imported nullary functions, callback factorie
 erased certificates and fresh owned results, with exact MIR and native allocation
 checks. This closes a source arity-validation gap, not a kernel soundness claim.
 
+Repeated wildcard parameters are now consistent across contextual and annotated
+lambdas, proof families and extended data motives. Each `_` is a distinct,
+inaccessible binder; named duplicates remain errors. Regression tests compare
+named/wildcard MIR, prove ignored fields still enforce ownership/evidence, and
+exercise captured effects, traps, folds and structural induction. This is a
+source ergonomics change with no new kernel rule or formal soundness claim.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.

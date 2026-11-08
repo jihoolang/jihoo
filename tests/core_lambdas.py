@@ -84,6 +84,52 @@ export fn owned(n: u64, x: i64) -> i64 { release(n, make_buffer(n, x), x) }
 export fn unused_owner() -> i64 { ignore(alloc(1, 7)) }
 export fn shadow(n: u64) -> u64 { keep(n, refl(n)) }
 '''
+WILDCARDS = '''
+enum WildList { Nil; Cons(i64, WildList) }
+trait Both(a: u64, b: u64) { fn both(a: u64, b: u64) -> Both(a, b) }
+fn fixed(a: u64, b: u64, p: erased(Both(a, b))) -> Eq(0, 0) {
+    induct(fn(_, _) { Eq(0, 0) }, fn(_, _) { refl(0) }, p)
+}
+export fn wildcard_proof(n: u64) -> u64 { let p = fixed(n, n, both(n, n)); n }
+export fn wildcard_fold(n: u64) -> i64 { fold(n, 0, fn(_, _, acc) { acc + 1 }) }
+export fn wildcard_partial(n: u64) -> u64 { (fn(_: u64, _: u64, result: u64) -> u64 { result })(n)(n)(n) }
+export fn wildcard_nested(n: u64) -> u64 {
+    let f: fn(u64) -> fn(u64) -> u64 = fn(_) { fn(_) { n } }
+    f(1)(2)
+}
+export fn wildcard_dependent(n: u64) -> u64 {
+    let f = fn(k: u64, _: erased(Eq(k, k)), _: u64) -> u64 { k }
+    f(n, refl(n), 0)
+}
+export fn wildcard_effect(n: u64) -> i64 {
+    let f = fn(_: i64, _: i64) -> i64 { 7 }
+    let g = f(free(alloc(n, 7), 5))
+    0
+}
+export fn wildcard_owned(n: u64) -> i64 {
+    let f = fn(_: buffer(n), _: buffer(n)) -> i64 { 7 }
+    f(alloc(n, 3), alloc(n, 4))
+}
+fn wildcard_length(xs: ref WildList) -> u64 {
+    induct(fn(_, _: u64, _: u64) { u64 }, fn(_, _) { 0 },
+        fn(_, _, ih, _, _) { ih(0, 0) + 1 }, xs)(0, 0)
+}
+export fn wildcard_motive(n: u64) -> u64 {
+    let xs = fold(n, WildList.Nil, fn(_, _, acc) { WildList.Cons(1, acc) })
+    wildcard_length(xs)
+}
+'''
+NAMED_WILDCARDS = WILDCARDS.replace('fn(_, _) {', 'fn(first, second) {')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_, _, acc)', 'fn(i, bound, acc)')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_: u64, _: u64, result:', 'fn(first: u64, second: u64, result:')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_) { fn(_) {', 'fn(first) { fn(second) {')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('_: erased(Eq(k, k)), _: u64', 'evidence: erased(Eq(k, k)), ignored: u64')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_: i64, _: i64)', 'fn(first: i64, second: i64)')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_: buffer(n), _: buffer(n))', 'fn(first: buffer(n), second: buffer(n))')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_, _: u64, _: u64)', 'fn(node, first: u64, second: u64)')
+NAMED_WILDCARDS = NAMED_WILDCARDS.replace('fn(_, _, ih, _, _)', 'fn(value, rest, ih, first, second)')
+PROGRAM += WILDCARDS
+REFERENCE += NAMED_WILDCARDS
 INVALID = {
     'missing-parameter': ('fn bad() -> u64 { let f = fn(x) -> u64 { x }; 0 }', 'a lambda without context needs parameter annotations'),
     'missing-result': ('fn bad() -> u64 { let f = fn(x: u64) { x }; 0 }', 'a lambda without context needs a result annotation'),
@@ -103,6 +149,14 @@ INVALID = {
     'captured-owner': ('fn bad(b: buffer(1)) -> i64 { let f = fn(x: i64) -> i64 { free(b, x) }; f(1) + f(2) }', 'a function cannot capture an owned value'),
     'direct-missing-result': ('fn bad() -> u64 { (fn(x: u64) { x })(0) }', 'a lambda without context needs a result annotation'),
 }
+INVALID.update({
+    'wildcard-reference': ('fn bad() -> u64 { let f = fn(_: u64, _: u64) -> u64 { _ }; f(0, 0) }', 'a discarded binding is not a value'),
+    'wildcard-domain': ('fn bad() -> u64 { let f = fn(_: u64, b: buffer(_)) -> i64 { free(b, 0) }; 0 }', 'a discarded binding is not a value'),
+    'wildcard-evidence': ('fn bad() -> Eq(0, 0) { let f: fn(erased(Eq(0, 0)), erased(Eq(0, 0))) -> Eq(0, 0) = fn(_, _) { _ }; f(refl(0), refl(0)) }', 'a discarded binding is not a value'),
+    'wildcard-invalid-evidence': ('fn bad() -> u64 { let f = fn(_: erased(Eq(0, 1)), _: u64) -> u64 { 0 }; f(refl(0), 0) }', 'type mismatch'),
+    'wildcard-owner-reuse': ('fn bad(b: buffer(1)) -> i64 { let f = fn(_: buffer(1), _: buffer(1)) -> i64 { 0 }; f(b, b) }', 'an owned value is used more than once'),
+    'wildcard-named-duplicate': ('fn bad() -> u64 { let f: fn(u64, u64, u64) -> u64 = fn(_, x, x) { x }; 0 }', 'duplicate lambda parameter'),
+})
 ANCHOR = '\nexport fn harness_anchor() -> i64 { 0 }\n'
 
 
@@ -133,12 +187,21 @@ def validate_lambdas(compiler, root, temporary, environment, run):
             run([*shlex.split(os.environ.get('JIHOO_CC', 'clang')), '-shared', '-fPIC', str(obj), str(counter),
                  '-Wl,--wrap=malloc', '-Wl,--wrap=free', '-o', str(library)])
             native = ctypes.CDLL(str(library))
-            for name in ('identity', 'immediate', 'captured', 'curried', 'direct_curried', 'family', 'shadow', 'captured_partial', 'unused_partial', 'repeated_partial'):
+            for name in ('identity', 'immediate', 'captured', 'curried', 'direct_curried', 'family', 'shadow', 'captured_partial', 'unused_partial', 'repeated_partial', 'wildcard_partial', 'wildcard_nested', 'wildcard_dependent', 'wildcard_proof'):
                 fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_uint64
             native.dependent.argtypes, native.dependent.restype = [ctypes.c_int64], ctypes.c_int64
             native.owned.argtypes, native.owned.restype = [ctypes.c_uint64, ctypes.c_int64], ctypes.c_int64
+            for name in ('wildcard_fold', 'wildcard_motive', 'wildcard_owned'):
+                fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_uint64
+            for n in (0, 1, 8):
+                assert native.wildcard_fold(n) == n and native.wildcard_motive(n) == n
+                before = ctypes.c_long.in_dll(native, 'allocations').value
+                assert native.wildcard_owned(n) == 7
+                if level == '-O0': assert ctypes.c_long.in_dll(native, 'allocations').value == before + 2
             for n in (0, 1, 3, 16, 1 << 62):
                 assert native.identity(n) == n and native.shadow(n) == n
+                assert native.wildcard_partial(n) == n and native.wildcard_nested(n) == n
+                assert native.wildcard_dependent(n) == n and native.wildcard_proof(n) == n
                 assert native.immediate(n) == n + 1 and native.captured(n) == 2*n + 7
                 assert native.curried(n) == n + 4 and native.direct_curried(n) == n + 4
                 assert native.family(n) == 7
@@ -148,6 +211,7 @@ def validate_lambdas(compiler, root, temporary, environment, run):
                 ('effect_partial', 7, [32, -1]),
                 ('nested_effect_partial', 13, [32, -1, 40, -1]),
                 ('unused_effect_partial', 0, [32, -1]),
+                ('wildcard_effect', 0, [32, -1]),
                 ('ordered_effect_partial', 15, [32, -1, 40, -1, 40, -1]),
             ):
                 fn = getattr(native, name); fn.argtypes, fn.restype = [ctypes.c_uint64], ctypes.c_int64
@@ -181,7 +245,7 @@ def validate_lambdas(compiler, root, temporary, environment, run):
     # the resulting function is discarded or its body would ignore that value.
     for name, result in (('called', 'g(2)'), ('unused', '0')):
         capture = temporary / f'lambda-capture-trap-{name}.jh'
-        capture.write_text(PREFIX + 'fn main() -> i64 { let f = fn(x: u64, y: i64) -> i64 { y }; '
+        capture.write_text(PREFIX + 'fn main() -> i64 { let f = fn(_: u64, _: i64) -> i64 { 7 }; '
                            'let g = f(18446744073709551615 + 1); ' + result + ' }')
         for level in ('-O0', '-O2'):
             assert command('run', capture, level, success=False).returncode == 132
