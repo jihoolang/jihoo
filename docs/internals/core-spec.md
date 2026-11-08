@@ -508,3 +508,10 @@ bounds for finite prefixes, including traps. Local binders, branches, repetition
 known once-called continuations and erased code have separate rules. The missing
 whole-core projection, operational simulation and heap/borrow lifetime obligations
 are explicit; these results do not yet establish item 3 above.
+
+
+[Mixed binder and owner-alias accounting](lean-proofs.md#mixed-binders-and-owner-aliases)
+extends that foundation with mode-aware scopes and capture-avoiding identification
+of variable slots. Returned-owner aliases are counted together before branch
+agreement. Authenticating the modes and aliases from whole-core typing, and
+proving heap/borrow and runtime correspondence, remain separate obligations.

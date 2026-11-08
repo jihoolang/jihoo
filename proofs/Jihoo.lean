@@ -98,3 +98,6 @@ import Jihoo.CorePrimitiveExamples
 
 import Jihoo.QuantityControl
 import Jihoo.QuantityExamples
+
+import Jihoo.QuantityAliases
+import Jihoo.QuantityAliasExamples

@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 558 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 570 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1158,3 +1158,54 @@ Whole-specified-core consistency/preservation, quantity/borrow soundness and
 lowering correspondence remain open. This milestone supplies the path-sensitive
 accounting lemmas for the second and third obligations; it does not replace them
 with an assumption advertised as a completed compiler theorem.
+
+
+## Mixed binders and owner aliases
+
+The quantity control foundation now distinguishes `linear`, `erased`,
+`unrestricted` and `borrowed` scope modes. `Control.bind` remains an abbreviation
+for a fresh linear scope. All modes occupy a de Bruijn slot and shift outer
+owners, as proved for arbitrary mixed telescopes by `scopes_outer`. Linear
+locals require demand one, erased locals require zero, and unrestricted or
+borrowed locals impose no local-demand check. In particular, demanding even a
+*defined* local count for unrestricted binders would incorrectly reject different
+use counts on different branches. The original completion and prefix accounting
+theorems are re-proved for all four modes. Erased local uses are excluded even
+from partial runs before a trap.
+
+`QuantityAliases.lean` separates a variable slot from its owner identity through
+scope-preserving renaming. The map may identify multiple slots; lifting it under
+a scope fixes the fresh local slot and shifts every outer identity. Renaming
+obeys identity and composition and transports both successful executions and
+finite prefixes, without an injectivity assumption. `openOwner` identifies a
+returned-owner slot with an existing outer owner and removes the slot. Its
+count theorem adds that slot's uses to the chosen original owner's uses.
+
+`AliasLinear` checks demand **after** identification. A branch that consumes the
+original name on one side and the returned name on the other then has demand
+one. Consuming both names sequentially has demand two and fails a linear
+obligation. Summing independently checked demands would miss this distinction:
+individual slot demands can be undefined on branches even though the combined
+owner demand is exactly one. The mapped-trace equality and prefix bounds also
+hold below nested mixed scopes.
+
+The mapping's authenticity is an explicit remaining obligation. Arbitrarily
+identifying two distinct physical owners can hide the omission of one of them;
+renaming algebra alone does not authorize that identification. A future typed
+projection must obtain modes from checked binder classifications and aliases
+from validated dependent-lend structure. These results concern identification of
+use events, **not** substitution of arbitrary effectful arguments. Borrowed mode
+is unrestricted only for quantity counting and proves no borrow lease, non-escape
+or lifetime invariant. No claim of whole-core quantity soundness is added.
+
+`QuantityAliasExamples.lean` checks unequal unrestricted branch counts, mixed
+scope shifts, erased use, alternate/doubled owner aliases, nested scopes and
+capture rejection. It also demonstrates why an unauthenticated alias map can
+hide a missing distinct owner. The actual-Core quantity probe tests checked
+mixed telescopes, erased-runtime rejection, dependent lends using either owner
+name, branches between names, duplicate/discarded aliases, repeated/unequal
+borrow reads, and borrow escape. A separate distinct-owner rejection and its
+repaired control ensure that these tests do not treat arbitrary owners as aliases.
+These are manually paired finite regression cases, not a proved translation of
+Core terms. The full projection, operational simulation, machine-counter,
+heap/borrow and lowering obligations in the preceding section remain open.
