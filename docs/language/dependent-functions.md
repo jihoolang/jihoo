@@ -36,6 +36,17 @@ Named results such as `fn(n: u64) -> buffer(n)` and nested types such as
 do not affect type equality: a lambda can call the same argument `k`. A named
 binder may shadow an outer name; duplicate names within one function type and
 reserved built-in names are rejected. `_` introduces an inaccessible binder.
+
+Lambda parameters follow the same rule: `_` may be repeated in contextual or
+fully annotated lambdas, proof families and extended induction motives. For
+example, `fold(n, 0, fn(_, _, acc) { acc + 1 })` ignores the index and its bound.
+A named parameter must still be unique within the lambda. Each `_` introduces
+a separate checked parameter, but its value cannot be referred to in the body,
+later parameter types or evidence. Use a name if a later type depends on it.
+Ignoring a parameter does not skip argument evaluation, annotation/proof checks
+or ownership rules. Owned arguments are consumed and freed when unused; partial
+application still evaluates captured runtime arguments even if the resulting
+function is discarded.
 Unnamed domains keep their previous outer-scope meaning, even when mixed with
 named domains.
 
