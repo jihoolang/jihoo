@@ -677,6 +677,10 @@ mechanize its soundness, starting from that specification:
    including imported and nested records. Contextual and explicit constructions
    lower identically; malformed indices and duplicate/unknown fields are rejected.
    This changes source elaboration, not the kernel or its soundness coverage.
+   Flat constructor fields that touch memory now sequence through scalar bindings
+   during runtime normalization, so repeated/discarded records preserve effects
+   without acquiring a heap layout. Paired source/core/explicit-binding tests
+   check this boundary; flat results crossing continuations remain restricted.
    Continue auditing conversion, substitution, erased indices, indexed
    elimination and ownership boundaries against accepted and rejected programs.
    Record remaining source-subset restrictions and settle the kernel rules

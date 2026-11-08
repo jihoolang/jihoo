@@ -467,6 +467,42 @@ impl Core {
         Ok(out)
     }
 
+    // Sequence a flat constructor's telescope, preserving dependent domains
+    // and erased arguments. Runtime fields are bound in declaration order;
+    // the resulting constructor contains only their values. Pure conversion
+    // never calls this runtime-only normalization helper.
+    fn constructor_fields(
+        inout self, f: u32, k: u32, ty: u32, fields: [u32], values: [u32],
+        sp: diag.Span, depth: u32
+    ) -> Result(u32, diag.Diag) {
+        self.tick(ty, depth)?
+        if fields.len == 0 {
+            var out = Vec(u32).new()
+            for value in values { out.push(value) }
+            return self.add(Term.Con(f, k, out), sp)
+        }
+        let normal = self.normal(ty, depth - 1)?
+        let Pi(erased, domain, rest) = self.term(normal) else {
+            return Err(self.error(ty, "malformed constructor telescope"))
+        }
+        var out = Vec(u32).new()
+        if erased {
+            for value in values { out.push(value) }
+            out.push(fields[0])
+            let rest = self.substitute(rest, fields[0], depth - 1)?
+            return self.constructor_fields(f, k, rest, fields[1..], out.as_slice(), sp, depth - 1)
+        }
+        for value in values { out.push(self.shift(value, 1, 0, depth - 1)?) }
+        out.push(self.add(Term.Var(0), sp)?)
+        var remaining = Vec(u32).new()
+        for field in fields[1..] { remaining.push(self.shift(field, 1, 0, depth - 1)?) }
+        let body = self.constructor_fields(
+            f, k, rest, remaining.as_slice(), out.as_slice(), sp, depth - 1
+        )?
+        let lam = self.add(Term.Lam(false, domain, body), sp)?
+        self.add(Term.App(lam, fields[0]), sp)
+    }
+
     fn normal_all(inout self, xs: [u32], depth: u32) -> Result(Vec(u32), diag.Diag) {
         var out = Vec(u32).new()
         for x in xs { out.push(self.normal(x, depth - 1)?) }
@@ -618,7 +654,39 @@ impl Core {
             Eq(a, b) => Term.Eq(self.normal(a, depth - 1)?, self.normal(b, depth - 1)?)
             Refl(a) => Term.Refl(self.normal(a, depth - 1)?)
             Ind(f, xs) => Term.Ind(f, self.normal_all(xs.as_slice(), depth)?)
-            Con(f, k, xs) => Term.Con(f, k, self.normal_all(xs.as_slice(), depth)?)
+            Con(f, k, xs) => {
+                let xs = self.normal_all(xs.as_slice(), depth)?
+                // Flat data has no runtime aggregate representation. Bind its
+                // effectful fields before substitution can duplicate the data,
+                // rather than retaining a let around the whole constructor.
+                var sequence = false
+                if self.runtime && self.is_data(f) && !self.is_boxed(f) &&
+                    f as i64 < self.signatures.len() && k as i64 < self.signatures[f as i64].len() {
+                    let fields = self.signatures[f as i64][k as i64].fields
+                    if xs.len() == fields.len() {
+                        for j, x in xs {
+                            if !fields[j].erased && (
+                                self.effectful(x, depth - 1) || self.reads(x, depth - 1)
+                            ) { sequence = true }
+                        }
+                    }
+                }
+                if sequence && f as i64 < self.families.len() &&
+                    k as i64 < self.families[f as i64].constructors.len() {
+                    let ty = self.families[f as i64].constructors[k as i64].ty
+                    let ordered = self.constructor_fields(
+                        f,
+                        k,
+                        ty,
+                        xs.as_slice(),
+                        [],
+                        sp,
+                        depth - 1
+                    )?
+                    return self.normal(ordered, depth - 1)
+                }
+                Term.Con(f, k, xs)
+            }
             Elim(f, p, cases, x) => {
                 let p = self.normal(p, depth - 1)?
                 let cases = self.normal_all(cases.as_slice(), depth)?

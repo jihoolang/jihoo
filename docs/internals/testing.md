@@ -109,6 +109,10 @@ the runner. Its suites:
   false or mismatched evidence and the export ABI.
   `tests/core_data.py` adds data types: `match`, proofs by cases, kept
   field traps, positivity of fields and motives.
+  `tests/core_record_effects.py` compares textual-core, source and explicit scalar
+  binding MIR for effectful flat fields. Both-target O0/O2 objects and native
+  execution check exact allocation counts, declaration-order effects, nesting,
+  enum fields, scalar branches, erased indices, traps and ownership rejections.
   `tests/core_structs.py` compares explicit indexed record literals against
   contextual construction MIR, including imported/nested records, borrowed and
   discarded owners, erased overflowing indices and runtime traps. Exact negatives
