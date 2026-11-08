@@ -243,6 +243,7 @@
                 ./proofs/CheckCorePrincipal.lean
                 ./proofs/CheckFirstOrderApplication.lean
                 ./proofs/CheckApplicationSpine.lean
+                ./proofs/CheckPropositionalEvidence.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -267,6 +268,8 @@
             python3 tests/core_first_order_application.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_application_spine.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_application_spine.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_propositional_evidence.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_propositional_evidence.py --compiler ${jihoo}/bin/jihoo
             touch $out
           '';
 
