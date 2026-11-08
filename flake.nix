@@ -36,6 +36,7 @@
           ./docs/language/dependent-aliases.md
           ./docs/language/dependent-records.md
           ./docs/language/buffer-ranges.md
+          ./docs/language/bounded-collection.md
         ];
       };
 

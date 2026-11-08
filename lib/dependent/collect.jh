@@ -1,0 +1,48 @@
+// Runtime-selected i64 sequences with an exact stored count and erased upper bound.
+#![dependent_core]
+import dependent.sized_list
+import dependent.list
+import dependent.nat
+// A runtime selection result. Keep contributes one value, Skip contributes none.
+pub enum Entry {
+    Skip
+    Keep(i64)
+}
+pub struct Bounded(n: u64) {
+    count: u64
+    data: sized_list.Sized(count)
+    within: erased(Lt(count, n + 1))
+}
+pub fn empty() -> Bounded(0) {
+    Bounded { count: 0, data: sized_list.empty(), within: decide_lt(0, 1) }
+}
+fn step(k: erased(u64), entry: Entry, acc: Bounded(k)) -> Bounded(k + 1) {
+    match acc {
+        Bounded { count, data, within } => match entry {
+            Skip => Bounded { count, data, within: nat.weaken(count, k + 1, within) }
+            Keep(x) => Bounded { count: count + 1, data: sized_list.cons(count, x, data),
+                within: lt_add(count, k + 1, 1, within) }
+        }
+    }
+}
+// Visit indices in descending order and retain kept values in ascending order.
+// The owned accumulator carries both its actual length and the processed-count bound.
+pub fn build(n: u64, f: fn(i: u64, erased(Lt(i, n))) -> Entry) -> Bounded(n) {
+    fold(n, fn(k) { Bounded(k) }, empty(), fn(i, p, acc) {
+        step(i, f(sub(n, i + 1, lt_add(i, n, 1, p)), nat.mirror_lt(i, n, p)), acc)
+    })
+}
+pub fn len(
+    n: erased(u64),
+    xs: ref Bounded(n)
+) -> u64 { match xs { Bounded { count, .. } => count } }
+pub fn bound(
+    n: erased(u64),
+    xs: ref Bounded(n)
+) -> Lt(len(n, xs), n + 1) { match xs { Bounded { within, .. } => within } }
+pub fn nth(n: erased(u64), xs: ref Bounded(n), i: u64, p: erased(Lt(i, len(n, xs)))) -> i64 {
+    match xs { Bounded { count, data, .. } => sized_list.nth(count, data, i, p) }
+}
+pub fn into_list(n: erased(u64), xs: Bounded(n)) -> list.List {
+    match xs { Bounded { count, data, .. } => sized_list.into_list(count, data) }
+}

@@ -891,6 +891,14 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+`dependent.collect` adds variable-cardinality construction: a Keep/Skip callback
+produces a private exact-length payload and a runtime count proved no greater
+than the input count. The indexed loop transfers or extends its owner while
+maintaining this bound; a consumer uses it for a subsequent array read. Exact
+erasure, skipped callback effects, ownership, allocation costs and rejected
+invariants are tested. This is not a pointwise membership theorem or ordinary
+`ensures` syntax.
+
 `dependent.range` supplies proof-bounded owned buffer snapshots and a reusable
 offset-bound theorem. Its runtime copy loop applies imported evidence to each
 read; the result retains its exact count in its buffer type. Tests compare exact
