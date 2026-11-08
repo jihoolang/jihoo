@@ -3,6 +3,7 @@
 import dependent.sized_list
 import dependent.list
 import dependent.nat
+import dependent.vec
 // A runtime selection result. Keep contributes one value, Skip contributes none.
 pub enum Entry {
     Skip
@@ -45,4 +46,21 @@ pub fn nth(n: erased(u64), xs: ref Bounded(n), i: u64, p: erased(Lt(i, len(n, xs
 }
 pub fn into_list(n: erased(u64), xs: Bounded(n)) -> list.List {
     match xs { Bounded { count, data, .. } => sized_list.into_list(count, data) }
+}
+
+// Materialize only the kept elements in contiguous storage. Vec retains their
+// exact runtime count and capacity without making a result type depend on xs.
+pub fn to_vec(n: erased(u64), xs: ref Bounded(n)) -> vec.Vec {
+    match xs {
+        Bounded { count, data, .. } => vec.Vec {
+            len: count,
+            cap: count,
+            data: sized_list.to_buffer(count, data),
+            room: nat.le_refl(count)
+        }
+    }
+}
+
+pub fn to_vec_length(n: erased(u64), xs: ref Bounded(n)) -> Eq(vec.len(to_vec(n, xs)), len(n, xs)) {
+    match xs { Bounded { count, .. } => refl(count) }
 }

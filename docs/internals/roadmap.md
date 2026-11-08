@@ -891,6 +891,13 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+Structural list-to-buffer transfer now preserves a single destination owner
+through imported recursion, with capacity evidence for every write. Sized
+results convert without a length-discovery pass; bounded collections materialize
+as existing vectors with exact runtime length/capacity and a checked length
+lemma. Tests cover erasure, allocation costs, source independence and rejected
+evidence. Pointwise content preservation remains a regression-tested boundary.
+
 `dependent.collect` adds variable-cardinality construction: a Keep/Skip callback
 produces a private exact-length payload and a runtime count proved no greater
 than the input count. The indexed loop transfers or extends its owner while

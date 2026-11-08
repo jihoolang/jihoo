@@ -105,3 +105,8 @@ pub fn from_range(
         index(source, offset + i, range.offset_lt(n, offset, count, i, fits, p))
     })
 }
+
+// Copy to contiguous storage in one structural traversal, retaining exact length.
+pub fn to_buffer(n: u64, xs: ref Sized(n)) -> buffer(n) {
+    match xs { Sized { data, exact } => list.to_buffer(n, data, exact) }
+}

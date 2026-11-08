@@ -36,6 +36,7 @@ same on GitHub.
 - [Lists with exact lengths](language/sized-lists.md)
 - [Proof-bounded buffer ranges](language/buffer-ranges.md)
 - [Runtime-selected collections](language/bounded-collection.md)
+- [Materializing lists in buffers](language/list-buffer-transfer.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)

@@ -118,6 +118,9 @@ Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
 Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations.
+[Structural buffer materialization](docs/language/list-buffer-transfer.md)
+copies proved-length list results to contiguous storage without repeated indexed
+list reads or an extra length-discovery pass.
 [Runtime-selected collections](docs/language/bounded-collection.md) retain a
 proved upper bound and exact stored count when callbacks skip candidates.
 [Proof-bounded buffer ranges](docs/language/buffer-ranges.md) provide independent
