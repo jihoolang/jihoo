@@ -71,6 +71,11 @@ the runner. Its suites:
   independent evaluator at `-O0` and `-O2`, and requires rejection of bad
   evidence, types, scopes and ABI preconditions. Kernel unit tests also
   bypass the parser to check malformed term graphs and false evidence.
+  `tests/core_bindings.py` compares record lets, including nested patterns,
+  with explicit match MIR. It checks owned/borrowed dependent fields, nested
+  inout reconstruction, discarded initializer traps, both object targets and
+  native allocation balance at O0/O2, plus exact privacy, type and ownership
+  diagnostics. Allocation counts do not replace memory instrumentation.
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.
