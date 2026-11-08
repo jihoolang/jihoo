@@ -37,6 +37,7 @@ same on GitHub.
 - [Proof-bounded buffer ranges](language/buffer-ranges.md)
 - [Runtime-selected collections](language/bounded-collection.md)
 - [Materializing lists in buffers](language/list-buffer-transfer.md)
+- [Bulk vector extension](language/vector-extension.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)

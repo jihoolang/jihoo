@@ -1,0 +1,25 @@
+// Bulk append preserves a typed length postcondition across two mutations.
+// Capacity is reused when it suffices. A checked list materializer supplies the
+// first buffer; composed mutation evidence justifies the final read. main returns 9.
+#![dependent_core]
+import dependent.vec
+import dependent.vec_bulk
+import dependent.sized_list
+import dependent.nat
+
+export fn appended(cap: u64, i: u64) -> i64 {
+    var v = vec.with_capacity(cap)
+    let empty = vec.clear(&v)
+    let list = sized_list.repeat(2, 7)
+    let xs: buffer(2) = sized_list.to_buffer(2, list)
+    let first = vec_bulk.extend(&v, 2, xs)
+    let two = transport(fn(k) { Eq(vec.len(v), k + 2) }, empty, first)
+    let ys = alloc(3, 9)
+    let second = vec_bulk.extend(&v, 3, ys)
+    let five = transport(fn(k) { Eq(vec.len(v), k + 3) }, two, second)
+    if_lt(i, 5, fn(p) {
+        vec.get(v, i, nat.rewrite_upper(i, 5, vec.len(v), nat.eq_sym(vec.len(v), 5, five), p))
+    }, -1)
+}
+
+fn main() -> i64 { appended(8, 4) }

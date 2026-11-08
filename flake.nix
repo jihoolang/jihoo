@@ -38,6 +38,7 @@
           ./docs/language/buffer-ranges.md
           ./docs/language/bounded-collection.md
           ./docs/language/list-buffer-transfer.md
+          ./docs/language/vector-extension.md
         ];
       };
 

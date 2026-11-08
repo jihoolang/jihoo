@@ -211,6 +211,9 @@ size reuses it.
 
 ## Vectors
 
+[Bulk extension](vector-extension.md) appends borrowed buffers with a checked
+length postcondition, reusing available capacity when possible.
+
 [`dependent.vec`](../../lib/dependent/vec.jh) is a growable vector of i64 whose contracts are
 types, so evidence follows it as it changes:
 

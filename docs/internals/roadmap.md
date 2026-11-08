@@ -891,6 +891,14 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+`dependent.vec_bulk.extend` appends a borrowed buffer with an old-to-new length
+postcondition. It reuses available capacity or copies the prefix into exact-fit
+storage, and callers compose its evidence across mutations. An acceptance
+example supplies a buffer through imported structural list materialization
+before two extensions. Tests cover proof erasure, stale evidence, source
+independence and measured allocation costs; no amortized growth or pointwise
+content theorem is claimed.
+
 Structural list-to-buffer transfer now preserves a single destination owner
 through imported recursion, with capacity evidence for every write. Sized
 results convert without a length-discovery pass; bounded collections materialize

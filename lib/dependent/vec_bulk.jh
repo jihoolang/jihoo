@@ -1,0 +1,69 @@
+// Optional bulk operations over the existing dependent vector representation.
+#![dependent_core]
+import dependent.vec
+import dependent.nat
+
+// The first `n` elements of `from` in a new buffer of `to` elements.
+fn copied(
+    n: u64,
+    cap: u64,
+    to: u64,
+    from: ref buffer(cap),
+    fits: erased(Lt(n, cap + 1)),
+    room: erased(Lt(n, to + 1))
+) -> buffer(to) {
+    fold(n, alloc(to, 0), fn(i, p, acc) {
+        store(acc, i, index(from, i, lt_le(i, n, cap, p, fits)), lt_le(i, n, to, p, room))
+    })
+}
+
+// Copy a source buffer into the already-proved spare destination range.
+fn appended(
+    len: u64,
+    cap: erased(u64),
+    n: u64,
+    dest: buffer(cap),
+    source: ref buffer(n),
+    fits: erased(Lt(len + n, cap + 1))
+) -> buffer(cap) {
+    fold(n, dest, fn(i, p, acc) {
+        store(
+            acc,
+            len + i,
+            index(source, i, p),
+            lt_le(len + i, len + n, cap, lt_add(i, n, len, p), fits)
+        )
+    })
+}
+
+// Append a borrowed buffer. Reuse available capacity, otherwise allocate
+// exactly the combined length and copy the old prefix once.
+pub fn extend(
+    inout v: vec.Vec,
+    n: u64,
+    source: ref buffer(n)
+) -> Eq(vec.len(v), vec.len(old(v)) + n) {
+    match v {
+        vec.Vec { len, cap, data, room } => {
+            let total = len + n
+            if_lt(total, cap + 1, fn(fits) {
+                v = vec.Vec {
+                    len: total,
+                    cap,
+                    data: appended(len, cap, n, data, source, fits),
+                    room: fits
+                }
+                refl(total)
+            }, {
+                let grown = copied(len, cap, total, data, room, nat.add_le(len, n))
+                v = vec.Vec {
+                    len: total,
+                    cap: total,
+                    data: appended(len, total, n, grown, source, nat.le_refl(total)),
+                    room: nat.le_refl(total)
+                }
+                refl(total)
+            })
+        }
+    }
+}
