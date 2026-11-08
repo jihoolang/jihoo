@@ -6,6 +6,12 @@ and recursive cases into this control language remains an explicit obligation.
 Events identify uses of an outer resource, not allocation/free actions. -/
 namespace Jihoo.Quantity
 
+/-- Borrowed slots are unrestricted only for quantity accounting. This mode
+carries no claim about lease validity or lifetime safety. -/
+inductive BinderMode where
+  | linear | erased | unrestricted | borrowed
+  deriving DecidableEq, Repr
+
 inductive Control where
   | pure
   | use (resource : Nat)
@@ -16,8 +22,11 @@ inductive Control where
   | closure (body : Control)
   | erased (body : Control)
   | trap
-  | bind (body : Control)
+  | scope (mode : BinderMode) (body : Control)
   deriving DecidableEq, Repr
+
+/-- Compatibility spelling for a fresh linear local owner. -/
+abbrev Control.bind (body : Control) : Control := .scope .linear body
 
 /-- Check one resource. Reusable code must not capture it. Branches must agree
 on demand. Erased code and a returned closure execute no events. -/
@@ -32,10 +41,18 @@ def Control.demand (resource : Nat) : Control → Option Nat
   | .repeat b | .closure b => do
       let n ← b.demand resource
       if n = 0 then some 0 else none
-  | .bind b => do
+  | .scope .linear b => do
       let localDemand ← b.demand 0
       if localDemand = 1 then b.demand (resource + 1) else none
+  | .scope .erased b => do
+      let localDemand ← b.demand 0
+      if localDemand = 0 then b.demand (resource + 1) else none
+  | .scope .unrestricted b | .scope .borrowed b => b.demand (resource + 1)
   | .once b => b.demand resource
+
+/-- Telescopes are written outermost first; every mode occupies one slot. -/
+def Control.scopes (modes : List BinderMode) (body : Control) : Control :=
+  modes.foldr Control.scope body
 
 /-- Remove the locally bound resource and shift outer resource names down.
 A new iteration's local owner is distinct from owners of previous iterations. -/
@@ -65,7 +82,7 @@ inductive Finishes : Control → List Nat → Prop where
   | once : Finishes b xs → Finishes (.once b) xs
   | closure : Finishes (.closure b) []
   | erased : Finishes (.erased b) []
-  | bind : Finishes b xs → Finishes (.bind b) (discharge xs)
+  | bind : Finishes b xs → Finishes (.scope mode b) (discharge xs)
 
 /-- Any finite execution prefix, including a trap and a prefix of a diverging
 repeat. No assumption that a successful continuation exists is made. -/
@@ -80,7 +97,7 @@ inductive Prefix : Control → List Nat → Prop where
       Prefix (.repeat b) (xs ++ ys)
   | repeatBody : Prefix b xs → Prefix (.repeat b) xs
   | once : Prefix b xs → Prefix (.once b) xs
-  | bind : Prefix b xs → Prefix (.bind b) (discharge xs)
+  | bind : Prefix b xs → Prefix (.scope mode b) (discharge xs)
 
 private theorem seq_demand (h : (Control.seq a b).demand r = some n) :
     ∃ x y, a.demand r = some x ∧ b.demand r = some y ∧ x + y = n := by
@@ -101,6 +118,30 @@ private theorem bind_demand (h : (Control.bind b).demand r = some n) :
     b.demand 0 = some 1 ∧ b.demand (r + 1) = some n := by
   simp only [Control.demand] at h
   cases hb : b.demand 0 <;> simp_all
+
+private theorem scope_outer (h : (Control.scope mode b).demand r = some n) :
+    b.demand (r + 1) = some n := by
+  cases mode <;> simp only [Control.demand] at h
+  · cases hb : b.demand 0 <;> simp_all
+  · cases hb : b.demand 0 <;> simp_all
+  · exact h
+  · exact h
+
+private theorem scope_erased (h : (Control.scope .erased b).demand r = some n) :
+    b.demand 0 = some 0 := by
+  simp only [Control.demand] at h
+  cases hb : b.demand 0 <;> simp_all
+
+/-- All slots, including erased and unrestricted slots, shift an outer owner.
+No assumption of uniform linear binder modes is used. -/
+theorem scopes_outer (h : (Control.scopes modes b).demand r = some n) :
+    b.demand (r + modes.length) = some n := by
+  induction modes generalizing r with
+  | nil => simpa [Control.scopes] using h
+  | cons mode modes ih =>
+      have ho := scope_outer h
+      have hi := ih ho
+      simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using hi
 
 private theorem closure_demand (h : (Control.closure b).demand r = some n) : n = 0 :=
   (repeat_demand h).2
@@ -129,7 +170,7 @@ theorem Finishes.count_eq (run : Finishes c xs) :
       have hz := repeat_demand h
       simp [List.count_append, iha hz.1, ihb h, hz.2]
   | once ha ih => exact ih
-  | bind ha ih => intro h; rw [discharge_count]; exact ih (bind_demand h).2
+  | bind ha ih => intro h; rw [discharge_count]; exact ih (scope_outer h)
   | closure => intro h; simpa using (closure_demand h).symm
 
 /-- A trap may abandon a resource, but no finite execution prefix can consume
@@ -166,7 +207,7 @@ theorem Prefix.count_le (run : Prefix c xs) :
       have hz := repeat_demand h
       simpa [hz.2] using ih hz.1
   | once ha ih => exact ih
-  | bind ha ih => intro h; rw [discharge_count]; exact ih (bind_demand h).2
+  | bind ha ih => intro h; rw [discharge_count]; exact ih (scope_outer h)
 
 theorem Finishes.prefix (run : Finishes c xs) : Prefix c xs := by
   induction run with
@@ -187,6 +228,12 @@ theorem bound_finished (h : (Control.bind b).demand r = some n)
 
 theorem bound_prefix (h : (Control.bind b).demand r = some n)
     (run : Prefix b xs) : xs.count 0 ≤ 1 := run.count_le (bind_demand h).1
+
+/-- Erased binders cannot occur even in a trapped runtime prefix. Unlike an
+unrestricted slot, they require zero local demand before scope discharge. -/
+theorem erased_bound_prefix (h : (Control.scope .erased b).demand r = some n)
+    (run : Prefix b xs) : xs.count 0 = 0 :=
+  Nat.eq_zero_of_le_zero (run.count_le (scope_erased h))
 
 /-- Simultaneous independent-resource guarantee. Quantities are not collapsed
 into a total count that could hide duplication of one and loss of another. -/

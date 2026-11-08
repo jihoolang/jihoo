@@ -590,3 +590,16 @@ import Jihoo
 #print axioms Jihoo.Quantity.Linear.finished
 #print axioms Jihoo.Quantity.Linear.prefix
 #print axioms Jihoo.Quantity.erased_unreachable
+
+#print axioms Jihoo.Quantity.scopes_outer
+#print axioms Jihoo.Quantity.erased_bound_prefix
+#print axioms Jihoo.Quantity.Control.rename_id
+#print axioms Jihoo.Quantity.Control.rename_comp
+#print axioms Jihoo.Quantity.discharge_map
+#print axioms Jihoo.Quantity.Finishes.rename
+#print axioms Jihoo.Quantity.Prefix.rename
+#print axioms Jihoo.Quantity.AliasLinear.finished
+#print axioms Jihoo.Quantity.AliasLinear.prefix
+#print axioms Jihoo.Quantity.openOwner_count
+#print axioms Jihoo.Quantity.alias_finished
+#print axioms Jihoo.Quantity.alias_prefix
