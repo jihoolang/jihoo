@@ -9,9 +9,11 @@ page is how it got there and how it stays there.
 
 ## Stages
 
-- **Stage 0**, the seed, is the compiler of the latest release, downloaded
-  from [GitHub releases](https://github.com/jihoolang/jihoo/releases)
-  (`jihoo-seed` in `flake.nix`, which pins its hash).
+- **Stage 0**, the seed, is the compiler of a selected
+  [release](https://github.com/jihoolang/jihoo/releases). Exact x86_64 and
+  aarch64 release archives are checked into `bootstrap/`; `jihoo-seed` in
+  `flake.nix` verifies the selected archive's pinned SHA-256 hash. Builds do
+  not fetch the seed from GitHub Releases.
 - **Stage 1** is `compiler/main.jh` compiled by the seed.
 - **Stage 2** is `compiler/main.jh` compiled by stage 1.
 
@@ -50,12 +52,29 @@ compiler:
 1. Add it to the compiler, with tests and documentation, without using it
    in `compiler/` yet.
 2. Tag a release and let the workflow attach the binaries.
-3. Move the seed in `flake.nix` to that release: its version and the
-   hashes of both archives (`nix hash convert --hash-algo sha256 --to sri`
-   of the `.sha256` files).
+3. Run `scripts/bump-version.sh seed X.Y.Z` from a clean checkout. It downloads
+   both release archives and their published `.sha256` files, verifies both
+   before replacing the bundled copies, and commits the archives with the
+   new version and hashes in `flake.nix`. It does not push. Review the diff
+   and run `nix build` and `nix flake check` on both supported systems.
 4. Use the feature in `compiler/`.
 
 A released archive is never replaced, since the flake pins its hash.
+
+Only a seed update needs the release download service. Each checked-out
+revision carries its own seed, so a cold CI runner is not blocked by a Release
+download outage. Nix still needs its other dependencies, such as LLVM and
+Lean, unless those are already cached. `python3 tests/bootstrap_seed.py`
+checks both archive hashes, versioned layouts and compiler architectures
+without Nix or network access; CI runs it before bootstrapping. This also
+detects a changed local archive when Nix already has the expected seed cached.
+
+The v0.5.0 archives together add about 2.23 MiB to a checkout. Each seed update
+adds binary data to Git history, so keep only the current pair in the working
+tree and update the seed only when needed. Git LFS is not used: its extra
+download service would reintroduce an external dependency. These released
+binaries remain a trusted bootstrap input; vendoring them does not prove
+their correspondence with source or remove the compiler's other trust assumptions.
 
 ## History
 
