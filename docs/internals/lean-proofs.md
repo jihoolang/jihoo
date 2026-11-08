@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 524 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 527 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -916,10 +916,63 @@ most 128. Repeated occurrences are charged. A regression has individually valid
 bounded trees but fails this product guard even with an unused argument. These
 are executable resource defenses, not a formal time/memory cost theorem.
 
-The compositional model is broader than this artifact checker: the checker
-currently requires its function term to pass the prior principal profile, so a
+The compositional model is broader than this single-application artifact checker: it
+requires its function term to pass the prior principal profile, so a
 function that is itself an application is rejected. Applications under an open
 outer context, arbitrary higher-order functions, proof arguments, subtraction,
 runtime traps/effects and general compiler refinement remain outside the
 executable validation profile. Partial applications returning natural-quantified
 evidence and wide ghost-natural arguments are covered by actual-core tests.
+
+
+## Retained application spines
+
+`CheckedApplicationSpine.lean` closes the single-application checker's rejection
+of a function that is itself an application. The exporter first walks the
+selected application spine back to its base function. It obtains one principal
+inference observation, then normalizes the saved current type and infers the
+next selected application, proceeding from the innermost call outward. These
+are explicit actual Core calls, not instrumentation of Core's internal trace.
+The returned roots are retained unchanged. All observations are serialized only
+after the last call, against one complete frozen arena. Repeated inference can
+allocate equivalent but distinct type nodes; the new result root is retained,
+not replaced with the earlier result from the initial whole-program check.
+
+A proof-carrying state contains the exact previous snapshot, decoded term and
+formula, remaining work budget, and an `Applied` derivation. Only the base is
+seeded from `Principal`. Each link checks the complete graph, the normalization
+observation's term root, and the exact previous term ID in the next `App` node.
+Coefficient conversion justifies the observed Pi type, and capture-avoiding
+substitution must equal the next inferred type structurally. The resulting
+`Applied` derivation and exact output snapshot become the next state. No
+intermediate output typing premise or independent principal certificate is
+assumed. The final requested type follows by proved coefficient conversion.
+`validate_sound` derives this chain and truth of the final formula for every
+natural environment. `validateBytes_sound` binds all retained canonical
+snapshot bytes to the same result; it does not establish their source provenance.
+
+The public validator accepts 1–16 links. Each snapshot retains the existing
+whole-graph, expanded-tree and depth bounds, and each substitution retains the
+8192 product / 128 depth guard. An additional budget of 32768 charges
+`(body size + 1) * (argument size + 1)` **before** every substitution, including
+unused arguments and repeated graph references. The state deducts this charge
+and carries the remainder to the next link; `Chain.remaining_le` proves that
+successful chains cannot increase it. The CLI limits the total input to 8 MiB
+and at most 34 snapshots before parsing individual snapshots. These conservative
+bounds are executable defenses, not an asymptotic cost or completeness theorem.
+
+Actual-Core tests cover curried calls with two and three arguments, remaining
+dependent binders, symbolic conversion, wide ghost sums and the 16-link boundary.
+Graph-valid tamper tests have repaired passing controls. A repeated-reference
+fixture passes each substitution in isolation and a seven-link prefix, while
+its eight-link chain fails the cumulative budget. Failed source checks, nonzero
+exporter exits with valid stdout, and failed validation prevent publication,
+including with Python assertions disabled.
+
+This is a per-artifact extension of the closed, first-order natural-index
+profile. Higher-order/proof arguments, subtraction, open-context applications,
+runtime evaluation, ownership and traps remain excluded. Observed normalization
+is checked for semantic equivalence, not normality. The parser, exporter,
+compilation and execution/IO association are tested boundaries. General
+`Beta.HasType`, unrestricted conversion consistency, completeness of the actual
+checker and full compiler soundness are neither assumed nor established.
