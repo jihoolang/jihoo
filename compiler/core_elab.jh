@@ -2614,12 +2614,21 @@ impl Elaborator {
                 }
             }
             Unary(ast.UnOp.Neg, value) => {
-                let ast.ExprKind.Int(n) = value.kind else { return Err(error(
-                    sp,
-                    "only literal negation is supported"
-                )) }
-                if n > 0x8000000000000000 { return Err(error(sp, "I64 literal underflow")) }
-                self.c.add(core.Term.Integer((0 - n as i128) as i64), sp)
+                // Keep the signed minimum literal representable without first
+                // constructing its out-of-range positive operand.
+                match value.kind {
+                    Int(n) => {
+                        if n > 0x8000000000000000 { return Err(error(sp, "I64 literal underflow")) }
+                        return self.c.add(core.Term.Integer((0 - n as i128) as i64), sp)
+                    }
+                    _ => {}
+                }
+                // Computed negation is checked subtraction, with the operand
+                // elaborated once. Negating I64 minimum traps rather than wraps.
+                let i = self.c.add(core.Term.I64, sp)?
+                let operand = self.expr(value.deref(), Some(i), depth - 1)?
+                let zero = self.c.add(core.Term.Integer(0), sp)?
+                self.c.add(core.Term.Arith(core.Arith.Sub, zero, operand), sp)
             }
             Array(values) => {
                 let i = self.c.add(core.Term.I64, sp)?
