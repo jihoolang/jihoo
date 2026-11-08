@@ -10,6 +10,10 @@ from core_buffer import COUNTER
 
 PREFIX = '#![dependent_core]\nimport dependent.nat\n'
 HELPER = '''#![dependent_core]
+pub fn answer() -> u64 { 23 }
+pub fn factory() -> fn(u64) -> u64 { fn(x) { x + 1 } }
+pub fn certificate() -> Eq(18446744073709551615 + 1, 18446744073709551615 + 1) { refl(18446744073709551615 + 1) }
+pub fn owned() -> buffer(2) { alloc(2, 7) }
 pub fn twice(f: fn(u64) -> u64, x: u64) -> u64 { f(f(x)) }
 pub fn compose(f: fn(u64) -> u64, g: fn(u64) -> u64) -> fn(u64) -> u64 { fn(x) { f(g(x)) } }
 '''
@@ -34,6 +38,18 @@ export fn congruent(n: u64) -> u64 { keep(n, nat.eq_congr(fn(k) { k + 1 }, n, n,
 export fn ghost(n: u64) -> u64 { let p = evidence(n, fn(k) { refl(n) }); n }
 export fn unused_body(n: u64) -> u64 { let f: fn(u64) -> buffer(n) = fn(k) { alloc(n, 7) }; n }
 '''
+PROGRAM += '''fn answer() -> u64 { 11 }
+export fn nullary(n: u64) -> u64 {
+    let f = function_helper.factory()
+    let p = function_helper.certificate()
+    answer() + function_helper.answer() + f(n)
+}
+export fn nullary_owned(n: u64) -> i64 {
+    let a = function_helper.owned()
+    let b = function_helper.owned()
+    free(a, free(b, 11))
+}
+'''
 REFERENCE = PREFIX + '''
 fn value_buffer(x: i64) -> buffer(1) { alloc(1, x) }
 export fn increment(n: u64) -> u64 { let first = n + 1; first + 1 }
@@ -46,6 +62,9 @@ export fn effects(x: i64) -> i64 { let a = value_buffer(x); let b = value_buffer
 export fn congruent(n: u64) -> u64 { n }
 export fn ghost(n: u64) -> u64 { n }
 export fn unused_body(n: u64) -> u64 { n }
+'''
+REFERENCE += '''export fn nullary(n: u64) -> u64 { 11 + 23 + (n + 1) }
+export fn nullary_owned(n: u64) -> i64 { let a = alloc(2, 7); let b = alloc(2, 7); free(a, free(b, 11)) }
 '''
 INVALID = {
     'empty': ('fn bad(f: fn() -> u64) -> u64 { 0 }', 'a dependent function type needs at least one parameter'),
@@ -67,6 +86,19 @@ INVALID = {
 }
 nested = 'u64'
 for _ in range(140): nested = f'fn({nested}) -> u64'
+EMPTY_CALL = 'a function-valued call needs at least one argument'
+INVALID.update({
+    'empty-local': ('fn bad(f: fn(u64) -> u64) -> fn(u64) -> u64 { f() }', EMPTY_CALL),
+    'empty-unused': ('fn bad(f: fn(u64) -> u64) -> u64 { let ignored = f(); 0 }', EMPTY_CALL),
+    'empty-lambda': ('fn bad() -> fn(u64) -> u64 { (fn(x: u64) -> u64 { x })() }', EMPTY_CALL),
+    'empty-partial': ('fn bad(f: fn(u64, u64) -> u64) -> fn(u64) -> u64 { f(1)() }', EMPTY_CALL),
+    'empty-scalar-result': ('fn value() -> i64 { 17 } fn bad() -> i64 { value()() }', EMPTY_CALL),
+    'empty-owned-result': ('fn value() -> buffer(1) { alloc(1, 7) } fn bad() -> buffer(1) { value()() }', EMPTY_CALL),
+    'empty-proof-result': ('fn certificate() -> Eq(1, 1) { refl(1) } fn bad() -> Eq(1, 1) { certificate()() }', EMPTY_CALL),
+    'empty-imported-result': ('import function_helper\nfn bad() -> u64 { function_helper.answer()() }', EMPTY_CALL),
+    'empty-factory-result': ('import function_helper\nfn bad() -> fn(u64) -> u64 { function_helper.factory()() }', EMPTY_CALL),
+    'empty-erased-callback': ('fn bad(f: erased(fn(u64) -> Eq(1, 1))) -> fn(u64) -> Eq(1, 1) { f() }', EMPTY_CALL),
+})
 INVALID['nesting-limit'] = (f'fn bad(f: {nested}) -> u64 {{ 0 }}', 'elaboration nesting limit reached')
 ANCHOR = '\nexport fn positive_anchor() -> i64 { 0 }\n'
 
@@ -97,10 +129,11 @@ def validate_functions(compiler, root, temporary, environment, run):
             run([*shlex.split(os.environ.get('JIHOO_CC','clang')),'-shared','-fPIC',str(obj),str(counter),
                  '-Wl,--wrap=malloc','-Wl,--wrap=free','-o',str(library)])
             native=ctypes.CDLL(str(library))
-            for name in ('increment','composed','annotated','congruent','ghost','unused_body'):
+            for name in ('increment','composed','annotated','congruent','ghost','unused_body','nullary'):
                 f=getattr(native,name); f.argtypes,f.restype=[ctypes.c_uint64],ctypes.c_uint64
             for n in (0,1,9,1<<62):
                 assert native.increment(n)==n+2 and native.composed(n)==n+5 and native.annotated(n)==n+4
+                assert native.nullary(n)==n+35
             count=ctypes.c_long.in_dll(native,'allocations').value
             for n in (0,1,(1<<64)-1):
                 assert native.congruent(n)==n and native.ghost(n)==n and native.unused_body(n)==n
@@ -108,6 +141,7 @@ def validate_functions(compiler, root, temporary, environment, run):
             native.selected.argtypes,native.selected.restype=[ctypes.c_int64],ctypes.c_int64
             native.accumulated.argtypes,native.accumulated.restype=[ctypes.c_uint64,ctypes.c_int64],ctypes.c_int64
             native.owned.argtypes,native.owned.restype=[ctypes.c_uint64],ctypes.c_int64
+            native.nullary_owned.argtypes,native.nullary_owned.restype=[ctypes.c_uint64],ctypes.c_int64
             for x in (-9,0,10):
                 assert native.selected(x)==x
                 for n in (0,1,5): assert native.accumulated(n,x)==n*(x+1)
@@ -118,6 +152,9 @@ def validate_functions(compiler, root, temporary, environment, run):
             native.effects.argtypes,native.effects.restype=[ctypes.c_int64],ctypes.c_int64
             count=ctypes.c_long.in_dll(native,'allocations').value
             assert native.effects(3)==7
+            if level=='-O0': assert ctypes.c_long.in_dll(native,'allocations').value==count+2
+            count=ctypes.c_long.in_dll(native,'allocations').value
+            assert native.nullary_owned(0)==11
             if level=='-O0': assert ctypes.c_long.in_dll(native,'allocations').value==count+2
             assert ctypes.c_long.in_dll(native,'allocations').value==ctypes.c_long.in_dll(native,'frees').value
     snippets=re.findall(r'```jihoo\n(.*?)```', (root/'docs/language/dependent-functions.md').read_text(), re.S)
