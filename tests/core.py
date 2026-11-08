@@ -702,6 +702,8 @@ def main():
         validate_spec(root)
         validate_guide(compiler, root, temporary, environment, run)
         validate_preservation(compiler, root, environment, run)
+        from core_tabulate import validate_tabulate
+        validate_tabulate(compiler, root, temporary, environment, run)
         from core_range import validate_range
         validate_range(compiler, root, temporary, environment, run)
         from core_sized_concat import validate_sized_concat

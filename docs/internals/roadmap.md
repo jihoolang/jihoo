@@ -898,6 +898,12 @@ erasure to primitive proofs, model small ranges and owner independence, and
 reject invalid bounds and malformed imported lemmas. This starts slice-library
 work with explicit copies, not stored borrowing views or generic elements.
 
+`dependent.sized_list.tabulate` now constructs exact-length lists directly
+from bounded-index callbacks. Buffer and proved-range conversion reuse the
+imported mirror/offset lemmas, with no intermediate buffer or repeat-then-map
+pass. Callback order, traps, erasure, owner independence and real allocation
+costs are regression-tested; this is not a pointwise content theorem.
+
 `dependent.sized_list` packages an owned list with a private erased length
 proof in `Sized(n)`. Its runtime repeat loop maintains `Sized(iteration)`;
 imported structural map evidence preserves the index for subsequent bounded

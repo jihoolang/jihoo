@@ -123,7 +123,8 @@ owned snapshots, using an imported offset theorem for every loop read.
 [The list proof library](docs/language/list-proofs.md) adds borrowed observations,
 owned copies, proof-bounded head/nth access and higher-order map with structural
 clone/append/map length theorems. Imported theorems prove executable array bounds.
-[Indexed owned lists](docs/language/sized-lists.md) preserve exact lengths through
+[Indexed owned lists](docs/language/sized-lists.md) support bounded-index callbacks
+and direct buffer/range conversion, preserving exact lengths through
 a runtime construction loop and structural mapping, allowing reads from a
 caller-supplied index bound without recomputing the length. Ownership-transferring
 concatenation applies imported structural evidence inside a runtime loop while

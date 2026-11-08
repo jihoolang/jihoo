@@ -1,0 +1,18 @@
+// Directly convert a proved buffer range to an exact-length owned list.
+// Imported mirror and offset lemmas justify callback reads during construction.
+// The source remains usable; the list owns its copied elements. main returns 9.
+#![dependent_core]
+import dependent.sized_list
+
+fn converted(n: u64, source: ref buffer(n), offset: u64, count: u64,
+    fits: erased(Lt(offset + count, n + 1)), i: u64, inside: erased(Lt(i, count))) -> i64 {
+        let xs = sized_list.from_range(n, source, offset, count, fits)
+        sized_list.nth(count, xs, i, inside)
+    }
+
+export fn selected(i: u64) -> i64 {
+    let source = store(alloc(4, 3), 2, 9, decide_lt(2, 4))
+    if_lt(i, 2, fn(p) { converted(4, source, 1, 2, decide_lt(3, 5), i, p) }, -1)
+}
+
+fn main() -> i64 { selected(1) }
