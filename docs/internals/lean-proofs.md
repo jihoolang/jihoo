@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 424 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 444 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -598,7 +598,7 @@ calculus**. Reduction stops at lambdas and non-application constructors. A lambd
 can be head normal while containing a contextual beta redex, and `3 + 4` is head
 normal without evaluating the sum; explicit regression proofs record both facts.
 There is no theorem here of full contextual/strong beta normalization, arbitrary
-open-context normalization, arithmetic or array evaluation, compiler termination,
+open-context normalization without a context condition, arithmetic or array evaluation, compiler termination,
 actual ghost `Core.normal` refinement, runtime behavior or full checker soundness.
 
 The proof supplies no uniform step/time/space bound and no total bounded producer.
@@ -610,6 +610,45 @@ export/import and IO correspondence remain independent trust boundaries. Actual
 `Core.normal` still canonicalizes symbolic arithmetic and subtraction beyond the
 modeled head-beta relation and requires separate correspondence work.
 
+
+## Open head normalization in formed contexts
+
+`OpenHeadNormalization.lean` extends head accessibility from closed simply typed
+terms to **every simply typed term in an arbitrary simple context**. It constructs
+a closed reducible inhabitant of each simple type, then a closing substitution
+for the context. The existing fundamental lemma normalizes the substituted term.
+A new substitution/instantiation commuting lemma proves that each original head
+step remains a genuine head step after substitution. Accessibility therefore
+reflects back to the original open term. Substitution may introduce extra redexes;
+the proof does not assume the converse simulation or preservation of normal forms.
+
+These simple inhabitants are not inhabitants of arbitrary dependent propositions:
+all base sorts have collapsed to the simple atom. The new `FormedContext` judgment
+instead describes finite dependent telescopes whose successive domains are formed
+in the preceding context. Induction on that telescope supplies the existing
+conversion-stable simple context correspondence. The resulting theorems are:
+
+- `HasType.head_accessible_of_match` for an explicitly matching simple context;
+- `HasType.head_accessible` and `head_normalizes` for a formed dependent telescope;
+- `HasType.typed_head_normalizes`, retaining the original dependent result type
+  through the existing contextual preservation theorem.
+
+This removes closedness for **head beta normalization**, not for literal truth.
+Examples cover an arbitrary open identity chain, a 65-step instance, an open
+higher-order argument, and an evidence hypothesis whose type depends on an earlier
+natural. A separate example deliberately hypothesizes `Eq(0, 1)`: its proof variable
+is typed and normalizable, while `0 ≠ 1` still holds. Open literal consistency
+would require a semantic validity condition on assumptions and is not claimed.
+An explicit self-reducing untyped loop is proved to lack head accessibility
+and therefore to be untypable in every formed context.
+
+The head relation still stops at lambdas and arithmetic/data constructors. This
+does not establish full contextual/strong normalization, normalization in an
+arbitrary raw context without the stated correspondence, arithmetic evaluation,
+source alias purity, actual `Core.normal` refinement, runtime correspondence or
+full checker soundness. No certificate admission, producer fuel, graph limit or
+wire format changes. All new public proof results and boundary examples are
+included in the axiom audit.
 
 ## Checked actual ghost Core.normal output
 
