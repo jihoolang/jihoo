@@ -63,13 +63,13 @@ Literal-only arithmetic still defaults to i64. This is inference, not a conversi
 mixing an i64 value with a u64 value is an error, and overflow still traps.
 
 An immutable `u64` let retains its definition for subsequent types and evidence
-when its initializer consists of literals, scalar variables, addition and checked
-`sub`. For example, after `let remaining = sub(n, offset, start)`, evidence using
+when its initializer consists of literals, scalar variables, addition, checked
+`sub`, or supported [pure natural function calls](dependent-functions.md#pure-natural-local-definitions). For example, after `let remaining = sub(n, offset, start)`, evidence using
 `remaining + offset` can convert to evidence using `n`. Nested lets and shadowing
 follow ordinary lexical scope. The original initializer still runs before the
 rest, so an unused or proof-only arithmetic result can still trap.
 
-This transparency is conservative: function calls, memory reads, effectful
+This transparency is conservative: unknown callbacks, memory reads, effectful
 initializers, owned values and mutable bindings retain their previous behavior.
 The initializer is inspected before ghost normalization, with at most 4096 term
 occurrences and the existing nesting limit; larger expressions retain an opaque

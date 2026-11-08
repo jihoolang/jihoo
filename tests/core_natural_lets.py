@@ -67,7 +67,6 @@ INVALID = {
         }, 0)
     }''',
     'effectful-alias': 'fn bad(n: u64) -> i64 { let x = free(alloc(1, 7), n); let p: Eq(x, n) = refl(n); 0 }',
-    'call-alias': 'fn identity(n: u64) -> u64 { n } fn bad(n: u64) -> i64 { let x = identity(n); let p: Eq(x, n) = refl(n); 0 }',
 }
 
 
@@ -148,4 +147,4 @@ def validate_natural_lets(compiler, root, temporary, environment, run):
             assert result.returncode == 1 and len(errors) == 1, (name, result.stderr)
             assert errors[0]['message'] == 'core: type mismatch', (name, result.stderr)
         assert not obj.exists()
-    print('natural lets: range conversion, shadowing, both targets, O0/O2 traps and 7 exact rejections passed')
+    print('natural lets: range conversion, shadowing, both targets, O0/O2 traps and 6 exact rejections passed')

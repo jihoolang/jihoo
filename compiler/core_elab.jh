@@ -64,16 +64,33 @@ struct TypeAlias {
     term: u32
 }
 
-// Natural arithmetic is stable under replay: its operands are immutable
-// scalar values, and subtraction evidence never runs. Do not normalize
-// first: ghost reduction could hide a memory read or an effectful call.
-fn natural_alias(c: core.Core, value: u32, depth: u32, inout fuel: u32) -> bool {
+// Inspect the original checked syntax: ghost normalization can erase effects.
+// Only immutable U64 variables and closed, syntactically pure natural functions
+// may be replayed. A variable of function type is an unknown callback, not a
+// proof of purity. Repeated graph/global references consume the same budget.
+fn natural_alias(
+    c: core.Core,
+    value: u32,
+    ctx: [core.Binding],
+    depth: u32,
+    inout fuel: u32
+) -> bool {
     if depth == 0 || fuel == 0 { return false }
     fuel -= 1
     match c.term(value) {
-        Natural(_) | Var(_) => true
-        UAdd(a, b) | USub(a, b, _) => natural_alias(c, a, depth - 1, &fuel) &&
-            natural_alias(c, b, depth - 1, &fuel)
+        Natural(_) => true
+        Var(k) => k as i64 < ctx.len && c.term(ctx[ctx.len - 1 - k as i64].ty) == core.Term.U64
+        UAdd(a, b) | USub(a, b, _) | App(a, b) =>
+            natural_alias(c, a, ctx, depth - 1, &fuel) &&
+            natural_alias(c, b, ctx, depth - 1, &fuel)
+        Lam(false, domain, body) if c.term(domain) == core.Term.U64 => {
+            var inner = Vec(core.Binding).new()
+            for binding in ctx { inner.push(binding) }
+            inner.push(core.Binding { ty: domain, erased: false })
+            natural_alias(c, body, inner.as_slice(), depth - 1, &fuel)
+        }
+        Global(g) if g as i64 < c.definitions.len() =>
+            natural_alias(c, c.definitions[g as i64].value, [], depth - 1, &fuel)
         _ => false
     }
 }
@@ -889,13 +906,25 @@ impl Elaborator {
                 // runs and traps before the rest. Transparent occurrences use
                 // the same pure scalar expression in runtime and ghost code.
                 var alias_fuel: u32 = 4096
-                let transparent = !is_var && !rebound &&
-                    self.c.term(a) == core.Term.U64 && natural_alias(
+                var transparent = !is_var && !rebound &&
+                    match self.c.term(a) { U64 | Pi(_, _, _) => true, _ => false } && natural_alias(
                     self.c,
                     value,
+                    self.ctx.as_slice()[..at],
                     core.DEPTH,
                     &alias_fuel
                 )
+                // A partially applied function can evaluate a trapping prefix
+                // while capturing arguments. Keep such a binding opaque so
+                // later calls do not replay that prefix. Purity is established
+                // above before examining a runtime normal form.
+                if transparent && match self.c.term(a) { Pi(_, _, _) => true, _ => false } {
+                    let runtime = self.c.runtime
+                    self.c.runtime = true
+                    let normalized = self.c.normal(value, core.DEPTH)
+                    self.c.runtime = runtime
+                    transparent = match self.c.term(normalized?) { Lam(_, _, _) => true, _ => false }
+                }
                 if transparent {
                     let shifted = self.c.shift(value, 1, 0, core.DEPTH)?
                     self.aliases.push((name.to_string(), self.ctx.len(), shifted))
@@ -2537,11 +2566,13 @@ impl Elaborator {
                 Ok(value)
             }
             Field(_, _) => {
-                let Some((f, k)) = self.find_variant(e) else { return Err(error(
-                    sp,
-                    "unsupported expression in dependent_core"
-                )) }
-                self.variant(e, f, k, [], expected, sp, depth)
+                match self.find_variant(e) {
+                    Some((f, k)) => self.variant(e, f, k, [], expected, sp, depth)
+                    None => match self.path_name(e) {
+                        Some(name) => self.name(name.as_str(), sp)
+                        None => Err(error(sp, "unsupported expression in dependent_core"))
+                    }
+                }
             }
             // `S { field: value, ... }`, every field once.
             StructLit(path, inits) => {
@@ -3074,9 +3105,10 @@ impl Elaborator {
                 }
                 let mut_f = self.name(n.as_str(), f.span)?
                 match self.c.term(mut_f) {
-                    Global(g) => self.check_arguments(g, args.as_slice(), sp)?
-                    // A recursion's result in its case.
-                    Var(_) => {
+                    Global(g) if self.assigned(n.as_str()).is_none() =>
+                        self.check_arguments(g, args.as_slice(), sp)?
+                    // A local function, recursion result or transparent alias.
+                    _ => {
                         let ty = self.c.infer(mut_f, self.ctx.as_slice(), true, core.DEPTH)?
                         let ty = self.c.normal(ty, core.DEPTH)?
                         match self.c.term(ty) {
@@ -3084,7 +3116,6 @@ impl Elaborator {
                             _ => return Err(error(f.span, "only declared functions can be called"))
                         }
                     }
-                    _ => return Err(error(f.span, "only declared functions can be called"))
                 }
                 self.apply(mut_f, args.as_slice(), sp, depth)
             }
@@ -3687,6 +3718,34 @@ fn natural_alias_bounds_shared_graph_work() {
     var x = c.add(core.Term.Natural(1), sp).unwrap()
     for _ in 0..20 { x = c.add(core.Term.UAdd(x, x), sp).unwrap() }
     var fuel: u32 = 4096
-    assert(!natural_alias(c, x, core.DEPTH, &fuel), "shared expansion falls back to an opaque let")
+    assert(
+        !natural_alias(c, x, [], core.DEPTH, &fuel),
+        "shared expansion falls back to an opaque let"
+    )
     assert(fuel == 0, "every repeated occurrence consumes alias work")
+}
+
+#[test]
+fn natural_alias_does_not_trust_unknown_callbacks() {
+    var c = core.Core.new()
+    let sp = diag.Span.nowhere()
+    let u = c.add(core.Term.U64, sp).unwrap()
+    let v = c.add(core.Term.Var(0), sp).unwrap()
+    let function = c.add(core.Term.Pi(false, u, u), sp).unwrap()
+    var fuel: u32 = 4096
+    assert(natural_alias(c, v, [core.Binding { ty: u, erased: false }], core.DEPTH, &fuel),
+        "a scalar capture is stable")
+    fuel = 4096
+    assert(!natural_alias(c, v, [core.Binding { ty: function, erased: false }], core.DEPTH, &fuel),
+        "a function type alone does not establish purity")
+    let identity = c.add(core.Term.Lam(false, u, v), sp).unwrap()
+    fuel = 4096
+    assert(natural_alias(c, identity, [], core.DEPTH, &fuel), "a checked natural identity is pure")
+    let outer = c.add(core.Term.Var(1), sp).unwrap()
+    let hiding = c.add(core.Term.Lam(false, u, outer), sp).unwrap()
+    fuel = 4096
+    assert(
+        !natural_alias(c, hiding, [core.Binding { ty: function, erased: false }], core.DEPTH, &fuel),
+        "returning an unknown callback does not establish its purity"
+    )
 }
