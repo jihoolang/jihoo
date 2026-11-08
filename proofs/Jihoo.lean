@@ -69,3 +69,6 @@ import Jihoo.CoreBridgeComputation
 import Jihoo.CheckedCoreNormalization
 import Jihoo.CheckedCoreNormalizationCodec
 import Jihoo.CheckedCoreNormalizationExamples
+
+import Jihoo.OpenHeadNormalization
+import Jihoo.OpenHeadNormalizationExamples

@@ -446,3 +446,25 @@ import Jihoo
 #print axioms Jihoo.GraphCertificates.CoreNormal.Examples.literal_add_step
 #print axioms Jihoo.GraphCertificates.CoreNormal.Examples.evidence_original_type
 #print axioms Jihoo.GraphCertificates.CoreNormal.Examples.overflowing_add_rejected
+
+-- Open head normalization: closing substitution and accessibility reflection.
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.Term.subst_instantiate
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.Term.inhabit_subst
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.Term.inhabit_reducible
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.SimpleStep.substitution
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.substitution_accessibility
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.closing_reducible
+#print axioms Jihoo.CoreBridge.Raw.Beta.SimpleErasure.Typed.accessible
+#print axioms Jihoo.CoreBridge.Raw.Beta.FormedContext.simple_context
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_accessible_of_match
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_accessible
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.head_normalizes
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.typed_head_normalizes
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.arbitrary_open_chain
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.beyond_producer_fuel
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.open_higher_order_normalizes
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.dependent_evidence_context
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.false_hypothesis_still_normalizes
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.closing_can_introduce_redex
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.untyped_loop_not_accessible
+#print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.looping_term_not_typable
