@@ -781,7 +781,7 @@ fn item_name(it: ast.Item) -> Option(str) {
         Trait(t) => Some(t.name.as_str())
         Const(c) => Some(c.name.as_str())
         Static(c) => Some(c.name.as_str())
-        TypeAlias(n, _) => Some(n.as_str())
+        TypeAlias(n, _, _) => Some(n.as_str())
         _ => None
     }
 }
@@ -833,7 +833,7 @@ fn items_named_in(items: Vec(ast.Item), sources: diag.Sources, name: str, inout 
     for it in items {
         match it.kind {
             Fn(f) => if f.name == name { out.push(f.name_span) }
-            TypeAlias(n, _) => if n == name { out.push(narrow(sources, it.span, name)) }
+            TypeAlias(n, _, _) => if n == name { out.push(narrow(sources, it.span, name)) }
             _ => {}
         }
     }

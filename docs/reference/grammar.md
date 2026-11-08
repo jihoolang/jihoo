@@ -65,7 +65,7 @@ impl     = "impl" [ params ] type [ "for" type ] "{" { item | ";" } "}"
 trait    = "trait" name [ params ] [ ":" type { "+" type } ] "{" { item | ";" } "}"
 const    = "const" name [ ":" type ] "=" expr
 static   = "static" name [ ":" type ] "=" expr
-alias    = "type" name [ "=" type ]
+alias    = "type" name [ params ] [ "=" type ]
 ```
 
 - `#![...]` attributes come first in the file. `#![freestanding]` and
@@ -102,6 +102,9 @@ alias    = "type" name [ "=" type ]
   whether or not they say `comptime`: `struct Pair(T: type)`. Those of an
   `impl` are written the same way: `impl(T: Ord) Ord for Vec(T)`.
 - `type Item` without `= T` declares an associated type in a trait.
+  Parameterized aliases, such as `type Mem(n: u64) = buffer(n)`, are supported
+  only in `#![dependent_core]` modules, with erased `u64` parameters and a
+  required body. See [dependent type aliases](../language/dependent-aliases.md).
 
 ## Types
 

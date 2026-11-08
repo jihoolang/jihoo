@@ -1,0 +1,18 @@
+// Transparent type names keep an indexed callback's interface readable.
+// exit: 17
+#![dependent_core]
+
+type Mem(n: u64) = buffer(n)
+type Positive(n: u64) = Lt(0, n)
+type Reader = fn(n: erased(u64), ref Mem(n), erased(Positive(n))) -> i64
+
+fn read(n: erased(u64), b: ref Mem(n), p: erased(Positive(n))) -> i64 {
+    index(b, 0, p)
+}
+
+fn main() -> i64 {
+    let b: Mem(3) = alloc(3, 17)
+    let f: Reader = read
+    let value = f(3, b, decide_lt(0, 3))
+    free(b, value)
+}
