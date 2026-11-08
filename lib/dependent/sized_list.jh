@@ -3,6 +3,7 @@
 #![dependent_core]
 import dependent.list
 import dependent.nat
+import dependent.range
 
 pub struct Sized(n: u64) {
     data: list.List
@@ -77,4 +78,30 @@ pub fn append_into(n: erased(u64), m: erased(u64), xs: ref Sized(n), ys: Sized(m
             }
         }
     }
+}
+
+// Build directly from bounded indices. Prepending visits callbacks from n - 1
+// down to 0, once each, while the final list retains ascending index order.
+pub fn tabulate(n: u64, f: fn(i: u64, erased(Lt(i, n))) -> i64) -> Sized(n) {
+    fold(n, fn(k) { Sized(k) }, empty(), fn(i, p, acc) {
+        cons(i, f(sub(n, i + 1, lt_add(i, n, 1, p)), nat.mirror_lt(i, n, p)), acc)
+    })
+}
+
+pub fn from_buffer(n: u64, source: ref buffer(n)) -> Sized(n) {
+    tabulate(n, fn(i, p) { index(source, i, p) })
+}
+
+// Copy the selected range directly into list nodes, without an intermediate
+// buffer. The source stays borrowed; the returned list is an independent owner.
+pub fn from_range(
+    n: erased(u64),
+    source: ref buffer(n),
+    offset: u64,
+    count: u64,
+    fits: erased(Lt(offset + count, n + 1))
+) -> Sized(count) {
+    tabulate(count, fn(i, p) {
+        index(source, offset + i, range.offset_lt(n, offset, count, i, fits, p))
+    })
 }

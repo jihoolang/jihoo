@@ -50,6 +50,43 @@ builds and maps `Sized(n)`, and checks `i < n` once before calling `nth`.
 No runtime length traversal or additional bounds check is needed for that read.
 `nth` still traverses the selected prefix to find the element.
 
+## Constructing from bounded indices
+
+`tabulate(n, f)` constructs `Sized(n)` directly from a callback of type
+`fn(i: u64, erased(Lt(i, n))) -> i64`. Each callback receives its index and
+proof that the index is in range. A callback can therefore read a borrowed
+buffer without a separate bounds check or a list-length traversal. This avoids
+building a repeated list and then mapping it.
+
+The construction loop carries `Sized(k)` after `k` iterations. It prepends
+one value at each step, using the imported `nat.mirror_lt` theorem to visit
+indices from `n - 1` down to `0`. The final list contains `f(0), f(1), ...`
+in ascending-index order, but callback effects happen in descending-index
+order, exactly once per index on a successful run. For `n == 0`, no callback
+runs. Callbacks may allocate or trap; this API does not promise purity or
+totality. Passing an owned capture that would be consumed repeatedly is rejected.
+
+`from_buffer(n, source)` uses this callback to copy a borrowed `buffer(n)`
+directly into an independent `Sized(n)`. `from_range(n, source, offset, count,
+fits)` copies only the selected range and returns `Sized(count)`, using
+`fits: erased(Lt(offset + count, n + 1))`. Empty ranges and ranges ending
+exactly at the source length are valid. Both helpers preserve element order
+and leave the source usable. The result can outlive the source or remain
+unchanged when the source is later modified.
+
+The [complete conversion example](../../examples/core_tabulate.jh) applies the
+imported mirror and [range-offset theorem](buffer-ranges.md#range-bounds) inside
+the indexed loop, then reads the exact-length result using the caller's bound.
+There is no intermediate buffer or structural traversal to rediscover the
+result length. These are owned copies, not borrowing views.
+
+The current construction allocates `n + 1` list nodes and `n + 1` wrapper
+nodes, freeing replaced wrappers during the loop. It avoids the second list
+allocation/traversal of repeat-then-map, but it is not a zero-allocation API.
+The existing checked runtime subtraction/addition and allocation failure rules
+remain in force. The library proves length and access bounds, not a formal
+pointwise correspondence theorem for callback results.
+
 ## Imported induction inside a runtime loop
 
 `append_into(n, m, prefix, suffix)` borrows `prefix: Sized(n)`, consumes
@@ -84,6 +121,11 @@ the erased index does not make runtime arithmetic wrapping or trap-free.
 - `empty() -> Sized(0)` creates an empty list.
 - `cons(n, x, xs) -> Sized(n + 1)` consumes `xs: Sized(n)`.
 - `repeat(n, x) -> Sized(n)` builds the indexed list with a runtime loop.
+- `tabulate(n, f) -> Sized(n)` constructs elements from bounded indices,
+  invoking callbacks in descending-index order.
+- `from_buffer(n, source) -> Sized(n)` copies a borrowed buffer directly.
+- `from_range(n, source, offset, count, fits) -> Sized(count)` copies a proved
+  range directly; `n` and `fits` are erased.
 - `append_into(n, m, xs, ys) -> Sized(n + m)` borrows/copies the prefix
   and consumes/transfers the suffix. Both indices are erased.
 - `map(n, xs, f) -> Sized(n)` borrows `xs` and copies its transformed elements.
@@ -94,8 +136,9 @@ the erased index does not make runtime arithmetic wrapping or trap-free.
 - `into_list(n, xs)` consumes the wrapper and returns its ordinary owned list.
   The result no longer carries `n` in its type.
 
-The `n` arguments above are erased except in `repeat`, which needs its runtime
-iteration count. Indices and equality proofs add no record fields, proof
+The `n` arguments above are erased except in `repeat`, `tabulate` and
+`from_buffer`, which need their runtime iteration count. `from_range` uses
+its runtime `count` instead. Indices and equality proofs add no record fields, proof
 traversals or runtime checks. The wrapper itself is a runtime heap node and is
 not free: the current repeat implementation allocates `n + 1` wrappers and
 `n + 1` list nodes, freeing replaced wrappers during the loop. Mapping copies
@@ -116,6 +159,11 @@ unindexed wrapper reference. It checks order, retained prefix ownership,
 linear allocation counts, no suffix copying, and rejection of aliased or reused
 owners, wrong indices, broken loop steps and malformed imported equalities.
 Both object targets and native O0/O2 executions are covered.
+
+`tests/core_tabulate.py` checks direct buffer/range conversion, callback order
+and effects, no callbacks for empty results, retained and released source owners,
+independent mutation, exact erasure against an unindexed wrapper, allocation
+counts, both object targets and malformed imported callback/loop/range evidence.
 
 The index is a natural-number expression in evidence. Runtime arithmetic retains
 its overflow rules. These are checked library proofs and finite regression tests,
