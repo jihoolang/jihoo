@@ -55,6 +55,39 @@ proof are ghost computations. They do not execute runtime arithmetic or make
 an overflowing runtime application safe. The complete
 [example](../../examples/core_functions.jh) demonstrates both modes.
 
+## Pure natural local definitions
+
+An immutable local may retain a pure natural function definition for later calls
+and dependent conversion. For example, given `fn next(n: u64) -> u64 { n + 1 }`,
+`let y = next(n)` lets a subsequent `Eq(y, n + 1)` annotation check using
+`refl(n + 1)`. The same applies to imported helpers, local typed lambdas, curried
+natural functions and aliases of those functions. An imported public function
+can be referenced as a value, such as `let f = module.next`; private declarations
+and shadowed module names are not exposed by this syntax. Captured scalar values retain
+their lexical binding when another name shadows them.
+
+The compiler inspects original checked syntax, including global bodies and actual
+arguments, before ghost normalization. Supported terms are U64 literals and
+variables, addition, checked subtraction, application and lambdas with non-erased
+U64 parameters. A variable of function type is an unknown callback, so neither
+calling nor returning one establishes purity. Explicit proof parameters, general
+higher-order combinators, memory access and effectful function bodies remain
+outside this conservative fragment. Existing code can still call these functions;
+their local results do not gain this transparency.
+
+The original initializer remains evaluated at its binding point. Unused or
+proof-only overflowing calls still trap, while discarding a lambda does not run
+its body. A prior effectful scalar result can be captured without replaying its
+effects. A function alias must also normalize in runtime mode to a lambda with
+no preceding capture-time computation. A partial application that evaluates
+trapping arithmetic while capturing an argument retains its original opaque
+binding, so subsequent calls do not replay that prefix. Pure arithmetic in
+scalar definitions may be recomputed under existing beta normalization;
+this is not an exactly-once arithmetic guarantee. The shared 4096-occurrence
+inspection budget counts repeated graph and global references and falls back to
+an opaque binding on exhaustion. No kernel equality rule is added, and this is
+not a theorem of general purity inference or elaborator soundness.
+
 ## Ownership and runtime boundaries
 
 Callbacks can take owned buffers and must obey the existing ownership rules.
