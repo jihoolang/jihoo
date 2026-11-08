@@ -552,3 +552,7 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.capture_would_change_truth
 #print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.two_binders_avoid_capture
 #print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.nested_application_sound
+
+#print axioms Jihoo.GraphCertificates.ApplicationSpine.Chain.remaining_le
+#print axioms Jihoo.GraphCertificates.ApplicationSpine.validate_sound
+#print axioms Jihoo.GraphCertificates.ApplicationSpine.validateBytes_sound

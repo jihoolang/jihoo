@@ -88,3 +88,4 @@ import Jihoo.CorePrincipalExamples
 import Jihoo.LinearSubstitution
 import Jihoo.CheckedFirstOrderApplication
 import Jihoo.FirstOrderApplicationExamples
+import Jihoo.CheckedApplicationSpine

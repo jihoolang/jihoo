@@ -577,3 +577,32 @@ publication. The suite also runs with Python assertions disabled. The general
 open-variable capture-avoidance proofs and the distinction between the
 compositional model and selected closed-call checker are documented in
 [Lean proofs](lean-proofs.md#capture-avoiding-first-order-application).
+
+
+### Retained multi-argument application observations
+
+`CheckApplicationSpine.lean INITIAL_TERM INITIAL_TYPE FINAL_TERM
+FINAL_INFERRED_TYPE REQUESTED_TYPE` reads LF-separated canonical snapshots:
+one initial function inference, 1–16 pairs of observed function-type
+normalization and application inference, then one final requested type.
+`core_typing_snapshots.jh spine` obtains these observations in order using the
+actual Core implementation. Every snapshot contains the same final full graph.
+
+```sh
+python3 tests/core_application_spine.py --compiler jihoo
+python3 -O tests/core_application_spine.py --compiler jihoo
+```
+
+Each link consumes the preceding inferred snapshot and its derived evidence.
+Only the initial function is principal-checked; intermediate outputs are derived
+by exact capture-avoiding substitution. The next application must reference the
+exact previous term node. Reordering, skipping, replaying or substituting a
+different valid intermediate snapshot fails these association checks. A change
+to an unreachable node also fails whole-graph agreement. The consumer receives
+the original retained bytes only after every link and the final request pass.
+
+Tests include actual curried calls, wide ghost arguments, partial applications,
+legacy exporter compatibility, graph-valid tampering with repaired positive
+controls, and the per-chain 32768 substitution budget. The maximum is 16 links
+and 8 MiB total input, with existing per-snapshot and substitution limits also
+applied. See the [proof boundary and resource accounting](lean-proofs.md#retained-application-spines).
