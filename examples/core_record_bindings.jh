@@ -1,0 +1,11 @@
+// A record let keeps the same dependent field and ownership rules as match.
+// exit: 17
+#![dependent_core]
+
+struct Sized(n: u64) { data: buffer(n) }
+
+fn main() -> i64 {
+    let Sized { data: bytes }: Sized(3) = Sized { data: alloc(3, 17) }
+    let result = index(bytes, 0, decide_lt(0, 3))
+    free(bytes, result)
+}

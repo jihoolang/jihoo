@@ -13,7 +13,8 @@ fn make(n: u64, value: i64) -> Sized(n) {
 }
 
 fn first(n: erased(u64), s: ref Sized(n), p: erased(Lt(0, n))) -> i64 {
-    match s { Sized { data } => index(data, 0, p) }
+    let Sized { data } = s
+    index(data, 0, p)
 }
 
 fn main() -> i64 {
@@ -40,6 +41,27 @@ parameters `n: u64, m: u64` can declare, in order, `len: u64`,
 Construction checks each field at its substituted type, even when the literal
 lists fields in a different order. Matching binds only fields; it does not
 bind the erased parameters again. Evidence fields remain erased.
+
+A plain `let` can destructure a record: `let Sized { data } = value`. The
+initializer is evaluated once, and the rest of the block sees the fields in
+declaration order, with their dependent types and evidence. Renaming uses
+`data: bytes`; `_` discards one field and `..` omits the remaining fields.
+Duplicate binding names are rejected. A contextual constructor can have an
+explicit annotation, for example
+`let Sized { data }: Sized(n) = Sized { data: alloc(n, 0) }`. The annotation
+and initializer are checked even if all fields are discarded.
+
+This is a single-case elimination, like the corresponding `match`. An owned
+record is consumed; destructuring a `ref` parameter borrows its owned fields.
+Owned fields extracted this way can be passed to `inout` operations, just as
+owned match-arm fields can. Omitted owned fields are cleaned up by the existing
+case ownership rules. Nested records can be unpacked with successive lets.
+
+This form supports struct patterns with name or wildcard fields only. `var`
+destructuring, nested patterns, refutable enum patterns and `let ... else` are
+not supported in this subset. Bind an inout call's result to a name before
+unpacking it. Borrowed fields cannot escape their borrow or be consumed as
+owners, and field-dependent results retain the existing match restrictions.
 
 The existing ownership and visibility rules apply: owned matches consume the
 record, borrowed matches lend its owned fields, and `inout` functions can
