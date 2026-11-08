@@ -42,8 +42,8 @@
         ];
       };
 
-      # The seed: the compiler of a release (see .github/workflows/release.yml),
-      # which builds this one. compiler/ and the lib/ it imports may use only
+      # The seed: exact release archives checked into bootstrap/, so builds do
+      # not depend on GitHub Release downloads. compiler/ and its imports use only
       # what the seed knows; to use something new there, release the compiler
       # that has it and move the seed here.
       seed = {
@@ -92,9 +92,11 @@
           jihoo-seed = pkgs.stdenv.mkDerivation {
             pname = "jihoo-seed";
             inherit (seed) version;
-            src = pkgs.fetchurl {
-              url = "https://github.com/jihoolang/jihoo/releases/download/v${seed.version}/jihoo-v${seed.version}-${pkgs.stdenv.hostPlatform.parsed.cpu.name}-linux.tar.gz";
-              hash = seed.hash.${pkgs.stdenv.hostPlatform.system};
+            src = builtins.path {
+              path = ./bootstrap + "/jihoo-${pkgs.stdenv.hostPlatform.system}.tar.gz";
+              name = "jihoo-v${seed.version}-${pkgs.stdenv.hostPlatform.system}.tar.gz";
+              recursive = false;
+              sha256 = seed.hash.${pkgs.stdenv.hostPlatform.system};
             };
             nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
             buildInputs = [ pkgs.stdenv.cc.cc.lib ];

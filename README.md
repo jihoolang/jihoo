@@ -75,7 +75,9 @@ needs glibc and LLVM 21 (libLLVM, clang, lld).
 
 jihoo is written in jihoo. Everything comes from `flake.nix` (libLLVM,
 clang and lld from LLVM 21, and the seed: the compiler of the latest
-release). `nix build` bootstraps the compiler: the seed builds
+selected release, bundled in `bootstrap/` with pinned hashes). Building does
+not download the seed from GitHub Releases; Nix may still download its other
+dependencies. `nix build` bootstraps the compiler: the seed builds
 `compiler/`, which builds itself again and is installed.
 
 ```sh
@@ -95,6 +97,7 @@ jihoo run tests/runner.jh                    # the tests
 |------|------|
 | `compiler` | the compiler, in jihoo: parser, type checker, MIR, borrow checker, LLVM IR writer |
 | `lib/std` | the standard library, in jihoo |
+| `bootstrap` | checksum-pinned release archives used as the self-hosting seed |
 | `tests/run`, `tests/fail` | programs and their expected output or error; `tests/runner.jh` runs them |
 | `examples` | example programs, which the website shows |
 | `benchmarks` | backend and iterator fusion benchmarks, with recorded measurements |
