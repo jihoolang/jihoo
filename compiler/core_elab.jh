@@ -596,6 +596,13 @@ impl Elaborator {
             stmt.span,
             "dependent_core has plain let statements"
         )) }
+        match l.pat.kind {
+            Struct(_, _, _) => {
+                if is_var { return Err(error(l.pat.span, "struct destructuring uses let")) }
+                return self.record_binding(l, stmts[1..], tail, expected, stmt.span, depth)
+            }
+            _ => {}
+        }
         let name = match l.pat.kind {
             Name(n, false) if !reserved(n.as_str()) => n.clone()
             Wild => "_".to_string()
@@ -616,6 +623,58 @@ impl Elaborator {
             is_var,
             depth
         )
+    }
+
+    // A record pattern is irrefutable. Reuse case analysis for its dependent
+    // telescope, private fields and ownership; the initializer occurs once.
+    fn record_binding(
+        inout self,
+        binding: ast.LetStmt,
+        stmts: [ast.Stmt],
+        tail: ast.Expr,
+        expected: Option(u32),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let ast.PatKind.Struct(_, fields, _) = binding.pat.kind else {
+            return Err(error(sp, "unreachable"))
+        }
+        if is_changing(binding.value) { return Err(error(
+            binding.value.span,
+            "bind an inout call's result to a name before struct destructuring"
+        )) }
+        for i, field in fields {
+            match field.pat.kind {
+                Name(n, false) => {
+                    for j in 0..i {
+                        match fields[j].pat.kind {
+                            Name(m, false) if m == n => return Err(error(
+                                field.pat.span,
+                                "duplicate struct binding name"
+                            ))
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let annotation = match binding.ty {
+            Some(t) => Some(self.ty(t, core.DEPTH)?)
+            None => None
+        }
+        var rest = Vec(ast.Stmt).new()
+        for stmt in stmts { rest.push(stmt.clone()) }
+        let body = ast.Expr {
+            kind: ast.ExprKind.Block(ast.Block {
+                stmts: rest,
+                tail: Some(Box.new(tail.clone())),
+                span: sp
+            }),
+            span: sp
+        }
+        let arm = ast.Arm { pat: binding.pat.clone(), guard: None, body, span: sp }
+        self.case_analysis(binding.value, [arm], expected, sp, depth, annotation)
     }
 
     // `x = v`: x is rebound, and its old value freed if nothing uses it. As an
@@ -1349,12 +1408,34 @@ impl Elaborator {
         arms: [ast.Arm],
         expected: Option(u32),
         sp: diag.Span,
-        depth: u32
+        depth: u32,
+        input: Option(u32)
     ) -> Result(u32, diag.Diag) {
         // With no context, the first constructor arm determines a constant
         // result type. It must not mention that arm's local fields.
         var t = match expected { Some(t) => t, None => self.u64(sp)? }
-        let x = self.expr(scrutinee, None, depth - 1)?
+        // Context guides elaboration but is not itself a checking judgment.
+        // Validate a written annotation before using it to elaborate a value.
+        match input {
+            Some(annotation) => { let _ = self.c.infer(
+                annotation,
+                self.ctx.as_slice(),
+                true,
+                core.DEPTH
+            )? }
+            None => {}
+        }
+        let x = self.expr(scrutinee, input, depth - 1)?
+        match input {
+            Some(annotation) => self.c.require(
+                x,
+                annotation,
+                self.ctx.as_slice(),
+                true,
+                core.DEPTH
+            )?
+            None => {}
+        }
         let ty = self.c.infer(x, self.ctx.as_slice(), true, core.DEPTH)?
         var ty = self.c.normal(ty, core.DEPTH)?
         // A borrow is read without being consumed.
@@ -2468,7 +2549,8 @@ impl Elaborator {
                 arms.as_slice(),
                 expected,
                 sp,
-                depth
+                depth,
+                None
             )
             Binary(op, a, b) => {
                 let plus = match op { Add => true, _ => false }

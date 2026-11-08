@@ -648,6 +648,8 @@ def main():
         validate_named_functions(compiler, root, temporary, environment, run)
         from core_aliases import validate_aliases
         validate_aliases(compiler, root, temporary, environment, run)
+        from core_bindings import validate_bindings
+        validate_bindings(compiler, root, temporary, environment, run)
         from core_functions import validate_functions
         validate_functions(compiler, root, temporary, environment, run)
         from core_equality import validate_equality
