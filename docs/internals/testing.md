@@ -88,6 +88,10 @@ the runner. Its suites:
   subtraction MIR and checks signed boundaries, native traps, lazy branches,
   zero-iteration loops, imported map callbacks, single operand evaluation and
   exact rejection of unsigned/owned/evidence operands on both object targets.
+  `tests/core_callees.py` compares direct block callees with named/immediate
+  references, traces callee/argument/body effects and checks partial application,
+  lexical scope, borrowed/dependent/erased arguments and owned capture boundaries.
+  Match-result restrictions are tested separately from constructor-field arity.
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.

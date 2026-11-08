@@ -94,7 +94,7 @@ INVALID = {
     "wildcard-old": ("fn bad(x: ref a.Box) -> Eq(0, 0) { match x { a.Box { .. } => refl(old(_)) } }", "unknown name"),
     "unknown-field": ("fn bad(x: a.Open) -> i64 { match x { a.Open { missing: _, .. } => 0 } }", "unknown struct pattern field"),
     "duplicate-field": ("fn bad(x: a.Open) -> i64 { match x { a.Open { x: first, x: second, .. } => first } }", "duplicate struct pattern field"),
-    "shadowed-import": ("fn bad() -> i64 { let a = 1; a.only_a() }", "calls require a named function"),
+    "shadowed-import": ("fn bad() -> i64 { let a = 1; a.only_a() }", "calls require a function expression"),
     "alias-definition-collision": ("fn a() -> i64 { 0 }", "duplicate definition"),
 }
 
