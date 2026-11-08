@@ -2,13 +2,14 @@
 # Releases a new version of jihoo, then makes it the seed.
 #
 #   scripts/bump-version.sh release 0.1.2   # on main: bump, commit, tag, push, wait for binaries
-#   scripts/bump-version.sh seed 0.1.2      # pin the released binaries as the seed in flake.nix
+#   scripts/bump-version.sh seed 0.1.2      # vendor and pin the released seed archives
 #
 # `release` sets `version` in flake.nix and the download link in the getting
 # started page, commits "Release <version>", tags v<version>, pushes both and
 # waits for .github/workflows/release.yml to attach the x86_64 and aarch64
-# archives. `seed` then moves flake.nix's seed to that release with the
-# archives' hashes and commits it on the current branch (not pushed); check it
+# archives. `seed` verifies both released archives against their published
+# checksums, replaces bootstrap/'s copies, and updates flake.nix's seed version
+# and hashes. It commits on the current branch (not pushed); check it
 # with `nix build` before opening a pull request. See
 # docs/internals/self-hosting.md.
 set -euo pipefail
@@ -65,18 +66,33 @@ release() {
 seed() {
   clean
   gh release view -R "$repo" "$tag" >/dev/null
+  seed_tmp=$(mktemp -d)
+  trap 'rm -rf -- "$seed_tmp"' EXIT
+  declare -A hashes
+  # Finish both downloads and checksum checks before changing the checkout.
   for arch in x86_64 aarch64; do
-    url=https://github.com/$repo/releases/download/$tag/jihoo-$tag-$arch-linux.tar.gz
-    hash=$(nix store prefetch-file --json --hash-type sha256 "$url" |
-      sed -n 's/.*"hash": *"\([^"]*\)".*/\1/p')
-    [ -n "$hash" ] || { echo "no hash for $url" >&2; exit 1; }
-    sed -i "s|^\(          $arch-linux = \"\).*\(\";\)$|\1$hash\2|" flake.nix
+    archive=jihoo-$tag-$arch-linux.tar.gz
+    gh release download -R "$repo" "$tag" --dir "$seed_tmp" \
+      --pattern "$archive" --pattern "$archive.sha256"
+    mapfile -t checksum_lines < "$seed_tmp/$archive.sha256"
+    [ "${#checksum_lines[@]}" -eq 1 ] || { echo "invalid checksum file: $archive" >&2; exit 1; }
+    read -r digest filename extra <<< "${checksum_lines[0]}"
+    [[ $digest =~ ^[0-9a-fA-F]{64}$ && $filename == "$archive" && -z $extra ]] || \
+      { echo "invalid checksum record: $archive" >&2; exit 1; }
+    (cd "$seed_tmp" && printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --strict)
+    hashes[$arch]=$(nix hash file --type sha256 --sri "$seed_tmp/$archive")
+    [[ ${hashes[$arch]} == sha256-* ]] || { echo "no hash for $archive" >&2; exit 1; }
+  done
+  for arch in x86_64 aarch64; do
+    install -m644 "$seed_tmp/jihoo-$tag-$arch-linux.tar.gz" "bootstrap/jihoo-$arch-linux.tar.gz"
+    sed -i "s|^\(          $arch-linux = \"\).*\(\";\)$|\1${hashes[$arch]}\2|" flake.nix
   done
   # The seed's version is the one followed by its hashes.
   sed -i "/^      seed = {$/,/^      };$/s/^        version = \".*\";$/        version = \"$version\";/" flake.nix
   git diff --stat
-  git add flake.nix
-  git commit -q -m "Bootstrap from $version" -m "The seed is now the compiler released as $tag, so compiler/ and the lib/ it imports may use what that compiler knows."
+  python3 tests/bootstrap_seed.py
+  git add flake.nix bootstrap/jihoo-*-linux.tar.gz
+  git commit -q -m "Bootstrap from $version" -m "Vendor the exact released $tag archives and pin their hashes, so compiler/ and the lib/ it imports may use what that compiler knows."
   echo "committed; check it with: nix build"
 }
 
