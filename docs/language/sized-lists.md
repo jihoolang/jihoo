@@ -50,11 +50,42 @@ builds and maps `Sized(n)`, and checks `i < n` once before calling `nth`.
 No runtime length traversal or additional bounds check is needed for that read.
 `nth` still traverses the selected prefix to find the element.
 
+## Imported induction inside a runtime loop
+
+`append_into(n, m, prefix, suffix)` borrows `prefix: Sized(n)`, consumes
+`suffix: Sized(m)`, and returns `Sized(n + m)`. The prefix is copied, while the
+suffix's existing list nodes become part of the result. Imported
+`list.append_into_length` supplies the structural length proof; the wrapper
+transports it through the private input equalities.
+
+The [concatenation example](../../examples/core_sized_concat.jh) repeats a
+two-element prefix with this loop:
+
+```jihoo
+fold(n, fn(k) { sized_list.Sized(k + k) }, sized_list.empty(),
+    fn(i, p, acc) { sized_list.append_into(2, i + i, pair, acc) })
+```
+
+Every step uses the imported structural theorem to establish the next
+accumulator's exact length. The result has type `Sized(n + n)`, so a caller's
+`i < n + n` proof suffices to read it. This is a loop postcondition proved using
+an imported inductive lemma, with the program and evidence checked and erased
+from the same core. It does not add ordinary `ensures` syntax or establish
+mechanized compiler soundness.
+
+Each iteration copies only the two prefix elements and allocates a new wrapper;
+it transfers the entire old accumulator tail and frees the old wrapper. This
+makes node allocation linear in the number of iterations, rather than repeatedly
+copying a growing tail. Runtime computation of `n + n` still checks overflow;
+the erased index does not make runtime arithmetic wrapping or trap-free.
+
 ## API and ownership
 
 - `empty() -> Sized(0)` creates an empty list.
 - `cons(n, x, xs) -> Sized(n + 1)` consumes `xs: Sized(n)`.
 - `repeat(n, x) -> Sized(n)` builds the indexed list with a runtime loop.
+- `append_into(n, m, xs, ys) -> Sized(n + m)` borrows/copies the prefix
+  and consumes/transfers the suffix. Both indices are erased.
 - `map(n, xs, f) -> Sized(n)` borrows `xs` and copies its transformed elements.
 - `nth(n, xs, i, p)` borrows `xs` and requires `p: erased(Lt(i, n))`.
 - `head(n, xs, p)` borrows `xs` and requires `p: erased(Lt(0, n))`.
@@ -79,6 +110,12 @@ checks both object targets, native O0/O2 length and element models, allocation
 cleanup, retained input ownership, signed edge values, callback overflow and
 intended rejection diagnostics. Malformed base/step/map proofs in unused imported
 functions are rejected, including the structural lemma in `dependent.list`.
+
+`tests/core_sized_concat.py` compares indexed concatenation-loop MIR with an
+unindexed wrapper reference. It checks order, retained prefix ownership,
+linear allocation counts, no suffix copying, and rejection of aliased or reused
+owners, wrong indices, broken loop steps and malformed imported equalities.
+Both object targets and native O0/O2 executions are covered.
 
 The index is a natural-number expression in evidence. Runtime arithmetic retains
 its overflow rules. These are checked library proofs and finite regression tests,

@@ -103,3 +103,22 @@ pub fn map_borrowed_length(xs: ref List, f: fn(i64) -> i64) -> Eq(length(map(xs,
             refl(length(map(rest, f)) + 1))
     }, xs)
 }
+
+// Copy the borrowed prefix and transfer the owned suffix without copying it.
+// The recursive result takes its suffix explicitly, so no repeatedly invoked
+// recursion case captures an outer owner.
+pub fn append_into(xs: ref List, ys: List) -> List {
+    induct(fn(t, tail: List) { List }, fn(tail) { tail },
+        fn(x, rest, ih, tail) { List.Cons(x, ih(tail)) }, xs)(ys)
+}
+
+pub fn append_into_length(
+    xs: ref List,
+    ys: List
+) -> Eq(length(append_into(xs, ys)), length(xs) + length(ys)) {
+    induct(fn(t) { Eq(length(append_into(t, ys)), length(t) + length(ys)) },
+        refl(length(ys)), fn(x, rest, ih) {
+            transport(fn(k) { Eq(length(append_into(rest, ys)) + 1, k + 1) }, ih,
+                refl(length(append_into(rest, ys)) + 1))
+        }, xs)
+}

@@ -897,7 +897,11 @@ imported structural map evidence preserves the index for subsequent bounded
 reads. Exact MIR agrees with an unindexed wrapper reference, while native
 allocation tests state the real wrapper overhead. This supplies a typed loop
 postcondition and imported induction in one executable library consumer, not
-ordinary `ensures` syntax or full mechanized soundness.
+ordinary `ensures` syntax or full mechanized soundness. Indexed `append_into`
+now transfers an owned suffix and copies only a borrowed prefix. The repeated
+pair example uses its imported structural lemma in each runtime loop step to
+establish `Sized(iteration + iteration)`, with exact erasure against an unindexed
+reference and linear allocation regressions.
 
 `dependent.list` supplies owned i64 lists, borrowing observations, clone/append
 operations, proof-bounded head/nth access and higher-order map with structural
