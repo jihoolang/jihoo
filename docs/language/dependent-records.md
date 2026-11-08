@@ -74,6 +74,18 @@ then its nested patterns are unpacked in the order written. The initializer
 runs once, even when every nested field is discarded. Omitted owned fields
 are freed, and private fields remain inaccessible at every level.
 
+Match arms also accept nested irrefutable record patterns, including inside
+enum payloads: `Delivery.Present(Envelope { inner: Sized { data }, .. })`.
+The outer match must still cover each variant exactly once. Record subpatterns
+are unpacked only inside the selected arm; their field types and evidence come
+from that arm's constructor telescope. In a record match, sibling subpatterns
+are unpacked in declaration order, even if fields were written out of order.
+All named bindings in one arm must be distinct, including bindings at different
+nesting levels. This also rejects duplicate names in flat match arms.
+Borrowing, private fields, dropped fields and inout reconstruction behave as
+with explicit nested matches. Nested enum variants, literals and other refutable
+subpatterns remain unsupported; use a separate match for those cases.
+
 This form supports struct patterns with names, wildcards and nested struct
 patterns. `var` destructuring, refutable enum patterns and `let ... else` are
 not supported in this subset. Bind an inout call's result to a name before

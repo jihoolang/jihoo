@@ -985,8 +985,12 @@ rejected before any binding enters scope; each nested level retains dependent
 indices, evidence, privacy and ownership checks. The regression suite compares
 nested patterns with explicit matches, including borrowed and inout values,
 checks deep/reordered patterns and allocation balance, and preserves initializer
-traps. Refutable patterns, nested match-arm patterns and general pattern
-inference remain outside this change. No kernel rule or Lean claim changes.
+traps. Nested irrefutable record patterns also work inside match arms, including
+indexed enum payloads, using the same hygienic expansion. Outer exhaustiveness
+is unchanged, and duplicate names across an entire arm are rejected. Tests
+compare explicit nested matches, conditional owned/borrowed payloads and
+constant-result inference. Refutable subpatterns and general pattern inference
+remain outside this change. No kernel rule or Lean claim changes.
 
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
