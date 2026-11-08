@@ -536,3 +536,19 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.CorePrincipal.Examples.symbolic_decision_rejected
 #print axioms Jihoo.CoreBridge.CorePrincipal.Examples.computed_endpoint_steps
 #print axioms Jihoo.CoreBridge.CorePrincipal.Examples.original_refl_type_preserved
+
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.encode_rename
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.eval_rename
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.encode_substitute
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.eval_substitute
+#print axioms Jihoo.CoreBridge.LinearEvidence.Formula.encode_substitute
+#print axioms Jihoo.CoreBridge.LinearEvidence.Formula.holds_substitute
+#print axioms Jihoo.CoreBridge.LinearEvidence.Formula.encode_instantiate
+#print axioms Jihoo.CoreBridge.LinearEvidence.Formula.holds_instantiate
+#print axioms Jihoo.CoreBridge.LinearEvidence.Applied.sound
+#print axioms Jihoo.GraphCertificates.FirstOrderApplication.validate_sound
+#print axioms Jihoo.GraphCertificates.FirstOrderApplication.validateBytes_sound
+#print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.capture_avoided
+#print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.capture_would_change_truth
+#print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.two_binders_avoid_capture
+#print axioms Jihoo.CoreBridge.LinearEvidence.ApplicationExamples.nested_application_sound

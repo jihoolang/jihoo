@@ -547,3 +547,33 @@ covers malformed/unsupported proof shapes, shared-expansion limits, valid stdout
 from a failed exporter, invalid inferred results, and compatibility of the
 existing `infer` and `require` exporter modes. The same checks run under Python
 optimization locally. See the [conditional model bridge and exclusions](lean-proofs.md#principal-inference-correspondence-for-first-order-evidence).
+
+### First-order application observations
+
+`CheckFirstOrderApplication.lean FUNCTION FUNCTION_TYPE NORMAL_TYPE APPLICATION
+INFERRED_TYPE REQUESTED_TYPE` reads four LF-separated canonical snapshots in
+that order: function inference, observed function-type normalization, application
+inference and requested type. `core_typing_snapshots.jh apply` obtains them from
+actual Core calls and freezes one common final graph. The returned inferred type
+is never replaced by a producer-computed expected type.
+
+```sh
+python3 tests/core_first_order_application.py --compiler jihoo
+```
+
+This profile checks exact function inference, a proved semantic conversion to
+the observed natural Pi type, and exact Raw substitution into that Pi body. Only
+the final requested type may differ by coefficient conversion. It validates
+whole-graph agreement and root identities, including the function ID in the
+selected application node. The exact retained four-artifact bundle reaches a
+consumer only after successful validation.
+
+Tests cover scalar and wide arguments, normalized function indices, partial
+applications retaining one or two quantifiers, incorrect but convertible output
+types, false normalization observations, changed arguments/function IDs,
+unreachable-node differences, input/token limits, the pre-expansion substitution
+product guard, unsupported actual-core programs, and failed exporter/validator
+publication. The suite also runs with Python assertions disabled. The general
+open-variable capture-avoidance proofs and the distinction between the
+compositional model and selected closed-call checker are documented in
+[Lean proofs](lean-proofs.md#capture-avoiding-first-order-application).

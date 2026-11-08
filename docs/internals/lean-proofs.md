@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 509 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 524 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -865,3 +865,61 @@ normalization and equality implementation, parser, exporter, compilation and IO
 provenance are not formally verified. No general `Beta.HasType` or `Beta.Conv`
 soundness is assumed or established. Arbitrary beta applications, higher-order
 domains, proof hypotheses, subtraction and runtime behavior remain excluded.
+
+## Capture-avoiding first-order application
+
+`LinearSubstitution.lean` proves substitution for scoped natural expressions
+and quantified formulas. Substitution lifts the argument under each retained
+quantifier, preserving its free variables. Encoding commutes with the existing
+`Raw.subst` and `Raw.single`; semantic substitution commutes with environment
+extension. Open-variable regression proofs demonstrate that omitting the lift
+would change a false proposition into a true one, and cover two retained binders.
+These are general scoped substitution theorems, not closed-instance tests.
+
+The `Applied` judgment extends the earlier evidence model compositionally with
+natural-index application, scalar lambdas and proved coefficient conversion.
+`Applied.sound` derives truth for all natural environments using the substitution
+lemma. It permits only natural arguments, not higher-order or proof arguments.
+The historical `Derives`, `Principal`, general Beta typing and conversion
+judgments are unchanged.
+
+`CheckedFirstOrderApplication.lean` validates one selected **closed** application
+from four retained actual-core observations: function inference, normalization
+of that function type, application inference, and the requested type. The test
+exporter's `apply` mode freezes all four in one final arena. The explicit
+normalization observation is a separate actual Core call; it is not asserted
+to expose the internal execution trace of the earlier application inference.
+The validator instead checks the relationships between the returned data:
+
+- All complete graphs agree, all six requested roots match, and the selected
+  application node points to the exact retained function root.
+- The function has the exact first-order principal type. Its observed normalized
+  type is a natural Pi whose coefficient conversion is proved sound.
+- The argument is a closed linear-natural expression with derived `U64` typing.
+- The actual inferred application type equals the exact capture-avoiding Raw
+  substitution of the argument into the observed Pi body. Merely convertible
+  output types do not satisfy this equality.
+- The requested type follows by proved coefficient conversion, yielding an
+  `Applied` derivation, truth in every natural environment and type formation.
+
+The normalization observation is checked for semantic equivalence, not for
+normality. Execution/export provenance remains outside the pure theorem. The
+checker does not assume general normalizer correctness, source typing soundness
+or unrestricted Beta conversion consistency. It also does not derive general
+`Beta.HasType` for the applied proof term; its semantic evidence judgment is
+explicitly `Applied`.
+
+Existing graph, byte, token and depth limits apply to every observation. Before
+constructing the substituted formula, an additional conservative product guard
+requires `(body size + 1) * (argument size + 1) <= 8192` and a combined depth at
+most 128. Repeated occurrences are charged. A regression has individually valid
+bounded trees but fails this product guard even with an unused argument. These
+are executable resource defenses, not a formal time/memory cost theorem.
+
+The compositional model is broader than this artifact checker: the checker
+currently requires its function term to pass the prior principal profile, so a
+function that is itself an application is rejected. Applications under an open
+outer context, arbitrary higher-order functions, proof arguments, subtraction,
+runtime traps/effects and general compiler refinement remain outside the
+executable validation profile. Partial applications returning natural-quantified
+evidence and wide ghost-natural arguments are covered by actual-core tests.
