@@ -1,0 +1,25 @@
+// Imported structural concatenation evidence proves every step of this loop.
+// The accumulator is Sized(k + k) after k iterations. Each step copies two
+// prefix nodes and transfers its entire owned tail, rather than copying it.
+// Reading the result uses only the caller's bound on n + n. main returns 9.
+#![dependent_core]
+import dependent.sized_list
+
+fn pairs(n: u64, pair: ref sized_list.Sized(2)) -> sized_list.Sized(n + n) {
+    fold(n, fn(k) { sized_list.Sized(k + k) }, sized_list.empty(),
+        fn(i, p, acc) { sized_list.append_into(2, i + i, pair, acc) })
+}
+
+export fn at(n: u64, i: u64, x: i64, y: i64) -> i64 {
+    let pair = sized_list.cons(1, x, sized_list.cons(0, y, sized_list.empty()))
+    let xs = pairs(n, pair)
+    if_lt(i, n + n, fn(p) { sized_list.nth(n + n, xs, i, p) }, -1)
+}
+
+export fn measured(n: u64) -> u64 {
+    let pair = sized_list.repeat(2, 0)
+    let xs = pairs(n, pair)
+    witness(sized_list.size(n + n, xs))
+}
+
+fn main() -> i64 { at(3, 3, 7, 9) }

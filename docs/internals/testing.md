@@ -93,6 +93,9 @@ the runner. Its suites:
   `tests/core_buffer.py` adds owned buffers: native calls are linked
   with counting `malloc`/`free` wrappers, and each must free what it
   allocates; leaks, double frees, uses after free and captures are rejected.
+  `tests/core_sized_concat.py` checks ownership-transferring concatenation and
+  imported induction inside an indexed loop, including exact erasure, linear
+  allocation costs, suffix ownership and malformed imported equalities.
   `tests/core_sized_list.py` checks indexed owned-list construction and mapping,
   exact erasure against an unindexed reference, allocation costs, private fields
   and malformed imported loop/induction proofs.

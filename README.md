@@ -123,7 +123,9 @@ owned copies, proof-bounded head/nth access and higher-order map with structural
 clone/append/map length theorems. Imported theorems prove executable array bounds.
 [Indexed owned lists](docs/language/sized-lists.md) preserve exact lengths through
 a runtime construction loop and structural mapping, allowing reads from a
-caller-supplied index bound without recomputing the length.
+caller-supplied index bound without recomputing the length. Ownership-transferring
+concatenation applies imported structural evidence inside a runtime loop while
+copying only its fixed prefix.
 Dependent modules now keep separate namespaces and enforce public item and field
 boundaries, including qualified patterns and structural elimination.
 An initial [Lean 4 proof](docs/internals/lean-proofs.md) establishes consistency
