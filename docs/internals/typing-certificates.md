@@ -518,3 +518,32 @@ derive general Beta typing or establish compiler/runtime soundness. The artifact
 and requested root IDs are checked, but source provenance and fidelity of the
 exported graph remain outside the theorem. See the full
 [proof boundary](lean-proofs.md#first-order-evidence-with-symbolic-conversion).
+
+### Checking the actual inferred type
+
+`CheckCorePrincipal.lean TERM_ROOT REQUESTED_ROOT INFERRED_ROOT` reads two
+LF-separated canonical snapshots: the requested type followed by the actual
+inferred type. The exporter obtains them in one invocation using its `both`
+mode, after actual `Core.check`, `Core.infer` and `Core.require`. Both snapshots
+contain the same frozen full arena and term root. The root returned by the
+explicit `infer` call is retained even if `require` performs its own internal
+inference; no producer-synthesized type replaces it.
+
+```sh
+python3 tests/core_principal_evidence.py --compiler jihoo
+```
+
+This checker requires the inferred type to match the selected inference rules
+**structurally**. For example, `refl 5` infers `Eq 5 5`; substituting a convertible
+`Eq (2 + 3) 5` as its inferred type is rejected even though that type is a valid
+requested type. Whole-graph disagreement, including an unreachable node, also
+rejects the pair. Three requested root IDs are checked independently. The
+producer publishes the exact retained pair only after successful validation.
+
+Computed `decide-lt` endpoints must fit `Natural` nodes. The suite verifies the
+actual diagnostic for a wide endpoint, the difference from the broader semantic
+evidence checker, and continued acceptance of wide `zero-le` and `refl`. It also
+covers malformed/unsupported proof shapes, shared-expansion limits, valid stdout
+from a failed exporter, invalid inferred results, and compatibility of the
+existing `infer` and `require` exporter modes. The same checks run under Python
+optimization locally. See the [conditional model bridge and exclusions](lean-proofs.md#principal-inference-correspondence-for-first-order-evidence).

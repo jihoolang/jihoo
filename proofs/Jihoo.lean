@@ -80,3 +80,7 @@ import Jihoo.LinearNormalizationExamples
 import Jihoo.LinearEvidence
 import Jihoo.CheckedLinearEvidence
 import Jihoo.LinearEvidenceExamples
+
+import Jihoo.CorePrincipalEvidence
+import Jihoo.CheckedCorePrincipal
+import Jihoo.CorePrincipalExamples
