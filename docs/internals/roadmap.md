@@ -891,6 +891,13 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+`dependent.range` supplies proof-bounded owned buffer snapshots and a reusable
+offset-bound theorem. Its runtime copy loop applies imported evidence to each
+read; the result retains its exact count in its buffer type. Tests compare exact
+erasure to primitive proofs, model small ranges and owner independence, and
+reject invalid bounds and malformed imported lemmas. This starts slice-library
+work with explicit copies, not stored borrowing views or generic elements.
+
 `dependent.sized_list` packages an owned list with a private erased length
 proof in `Sized(n)`. Its runtime repeat loop maintains `Sized(iteration)`;
 imported structural map evidence preserves the index for subsequent bounded

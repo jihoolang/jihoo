@@ -1,0 +1,29 @@
+// Bounds for an offset/count range and independent owned buffer snapshots.
+#![dependent_core]
+
+// Translate a relative index into its enclosing buffer. All arithmetic here
+// is ghost natural arithmetic; no endpoint is computed at runtime.
+pub fn offset_lt(
+    n: u64,
+    offset: u64,
+    count: u64,
+    i: u64,
+    fits: erased(Lt(offset + count, n + 1)),
+    inside: erased(Lt(i, count))
+) -> Lt(offset + i, n) {
+    lt_le(offset + i, offset + count, n, lt_add(i, count, offset, inside), fits)
+}
+
+// Borrow the source and copy [offset, offset + count) into a fresh owner.
+// The endpoint evidence permits an empty range at the end of the buffer.
+pub fn copy(
+    n: erased(u64),
+    source: ref buffer(n),
+    offset: u64,
+    count: u64,
+    fits: erased(Lt(offset + count, n + 1))
+) -> buffer(count) {
+    fold(count, alloc(count, 0), fn(i, p, acc) {
+        store(acc, i, index(source, offset + i, offset_lt(n, offset, count, i, fits, p)), p)
+    })
+}
