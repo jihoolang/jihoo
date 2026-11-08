@@ -20,7 +20,7 @@ report = sys.argv[1]
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 570, report
+assert len(entries) + len(closed) == 582, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
@@ -33,3 +33,5 @@ lake env lean -DwarningAsError=true --run EmitCore.lean > "$generated"
 diff -u ../tests/core_preserves/lean-core-translation.jhc "$generated"
 lake env lean -DwarningAsError=true --run EmitPrimitiveSafety.lean > "$generated"
 diff -u ../tests/core_preserves/lean-primitive-safety.jhc "$generated"
+lake env lean -DwarningAsError=true --run EmitBinderClassification.lean > "$generated"
+diff -u ../tests/core_binder_modes.txt "$generated"

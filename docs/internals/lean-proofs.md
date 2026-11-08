@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 570 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 582 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1209,3 +1209,58 @@ repaired control ensure that these tests do not treat arbitrary owners as aliase
 These are manually paired finite regression cases, not a proved translation of
 Core terms. The full projection, operational simulation, machine-counter,
 heap/borrow and lowering obligations in the preceding section remain open.
+
+
+## Binder capabilities from checked domain observations
+
+`QuantityBinderProjection.lean` replaces consumer-chosen binder modes with a
+classification of normalized domain summaries and the binder's erased flag.
+Lendability here means static type eligibility, not a proof that a runtime lease
+is available or that a particular live heap object is currently owned.
+It distinguishes quantity mode from lend permission: `Back` is linear but not
+lendable, a runtime buffer or boxed data is linear and lendable, and erased boxed
+data is neither a runtime owner nor lendable. Propositions require erasure;
+erasure of a non-proposition permits only U64 indices and data. Borrow domains
+are unrestricted for use counting but retain their separate borrowed mode.
+
+The executable classifier is sound and complete for an independently enumerated
+`Permitted` relation. Scope and telescope projection reconstruct their modes
+from those capabilities, with a theorem preserving the outer-resource offset
+through every projected binder. Alias projection first checks permission for every binding in its context,
+including unselected entries, and requires an in-range existing
+non-erased buffer/boxed-data binding. It rejects Back, borrows, erased data and
+unrestricted domains as alias-owner capabilities and composes with the existing
+mapped-trace completion/prefix theorems. No consumer can override a projected
+mode or turn a merely linear Back capability into a lend permission.
+
+**Precisely conditional boundary:** these theorems take normalized-domain
+summaries as inputs. They do not prove those summaries authentic, prove Core
+formation or normalization, or identify the owner selected by a source Lend.
+Authenticating the context and source owner remains necessary. In particular,
+`other` includes neutral type expressions, functions and universes; classifying
+such a binder as unrestricted is not a theorem that every possible type
+instantiation is owner-free. The kernel's first-order type-argument restriction
+and its stability under substitution still need a formal account. This is a
+capability projection conditional on checked observations, not the completed
+typed whole-Core projection or a borrow-lifetime theorem.
+
+The test-only `core_binder_probe.jh` first runs actual `Core.check` on the complete
+program, then walks the original lambda telescope. It obtains each original
+annotation's sort with `Core.infer`, normalizes that sort and domain, and reads
+family data/boxed classification from the checked Core state. Each binder is
+added to the original contextual telescope before observing the next. Inputs
+supply no mode or family flags. Invalid programs produce no observations. The
+probe additionally calls actual `Core.owned`; its results are compared with the
+Lean-derived lend capabilities and actual rejection of discarded linear values.
+
+`EmitBinderClassification.lean` produces the exhaustive 18-row classifier table;
+`check.sh` checks its exact committed fixture. This is a test oracle, not a new
+certificate format or accepted source profile. Tests cover proof/index/scalar,
+flat and recursive or heap-field data, Buffer, Back, Ref, function and universe
+domains; both erasure flags; a beta-normalized Buffer annotation; dependent and
+neutral telescopes; linear discard and Back lend rejection; and a runtime
+first-order type-argument positive/negative pair. An invalid later binder
+produces no observations from an otherwise valid telescope prefix; its repaired
+control is accepted. The exporter,
+constructor-summary association and trusted checker remain finite tested
+boundaries, with no theorem equating arbitrary Core execution to this model.

@@ -603,3 +603,16 @@ import Jihoo
 #print axioms Jihoo.Quantity.openOwner_count
 #print axioms Jihoo.Quantity.alias_finished
 #print axioms Jihoo.Quantity.alias_prefix
+
+#print axioms Jihoo.Quantity.Binders.classify_sound
+#print axioms Jihoo.Quantity.Binders.classify_complete
+#print axioms Jihoo.Quantity.Binders.lendable_iff
+#print axioms Jihoo.Quantity.Binders.lendable_linear
+#print axioms Jihoo.Quantity.Binders.projectScope_origin
+#print axioms Jihoo.Quantity.Binders.capabilities_origin
+#print axioms Jihoo.Quantity.Binders.projectTelescope_origin
+#print axioms Jihoo.Quantity.Binders.projected_telescope_outer
+#print axioms Jihoo.Quantity.Binders.projectAlias_origin
+#print axioms Jihoo.Quantity.Binders.projected_alias_finished
+#print axioms Jihoo.Quantity.Binders.projected_alias_prefix
+#print axioms Jihoo.Quantity.Binders.projectAlias_context
