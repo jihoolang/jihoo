@@ -99,6 +99,13 @@ ordered and evaluated by the existing runtime normalization rules.
 A function type needs at least one parameter and an explicit result. The core
 form accepts plain domains and `erased(T)`; it does not add `sink`, `inout`,
 zero-argument thunks, `fnptr`, `dyn fn`, heap closures or a function-pointer ABI.
+A declared function with no parameters still uses `name()` (or
+`module.name()`). A call through a function value must supply at least one
+argument; `callback()` is not a way to refer to or partially apply it.
+Likewise `value()()` is rejected instead of silently returning the first call's
+result. A nullary factory returning a callback can be used as `factory()(x)`.
+These rules apply in erased evidence and unused expressions too.
+
 An exported function cannot receive a function-valued argument from foreign
 callers. Supported calls specialize through the core's existing normalization
 and lowering; not every higher-order graph has a runtime representation.

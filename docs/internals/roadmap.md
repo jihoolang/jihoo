@@ -992,6 +992,13 @@ compare explicit nested matches, conditional owned/borrowed payloads and
 constant-result inference. Refutable subpatterns and general pattern inference
 remain outside this change. No kernel rule or Lean claim changes.
 
+Empty higher-order applications now reject rather than silently returning the
+callee unchanged, including chained scalar, owned and erased results. Only a
+direct declared call whose source arity is checked may have no arguments.
+Regression controls preserve local/imported nullary functions, callback factories,
+erased certificates and fresh owned results, with exact MIR and native allocation
+checks. This closes a source arity-validation gap, not a kernel soundness claim.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.

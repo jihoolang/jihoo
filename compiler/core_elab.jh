@@ -2501,8 +2501,15 @@ impl Elaborator {
         f: u32,
         args: [ast.Expr],
         sp: diag.Span,
-        depth: u32
+        depth: u32,
+        declared: bool
     ) -> Result(u32, diag.Diag) {
+        // A nullary declared function has no Pi binder in the core. Only
+        // its direct, arity-checked source call may use an empty application.
+        // Empty calls through a value must not silently return that value.
+        if args.len == 0 && !declared { return Err(error(
+            sp, "a function-valued call needs at least one argument"
+        )) }
         var function = f
         var ty = self.c.infer(function, self.ctx.as_slice(), true, core.DEPTH)?
         for a in args {
@@ -2743,14 +2750,14 @@ impl Elaborator {
                         return Err(error(f.span, "only declared functions can be called"))
                     }
                     self.check_arguments(g, args.as_slice(), sp)?
-                    return self.apply(function, args.as_slice(), sp, depth)
+                    return self.apply(function, args.as_slice(), sp, depth, true)
                 }
                 let ast.ExprKind.Name(n) = f.kind else {
                     // A function-valued call or fully annotated lambda, applied directly.
                     let is_call = match f.kind { Call(_, _) | Lambda(_, _, _) => true, _ => false }
                     if !is_call { return Err(error(f.span, "calls require a named function")) }
                     let function = self.expr(f.deref(), None, depth - 1)?
-                    return self.apply(function, args.as_slice(), sp, depth)
+                    return self.apply(function, args.as_slice(), sp, depth, false)
                 }
                 if n == "old" {
                     if args.len() != 1 { return Err(error(sp, "old requires a variable")) }
@@ -3167,9 +3174,11 @@ impl Elaborator {
                     return self.c.add(core.Term.Decide(a, b), sp)
                 }
                 let mut_f = self.name(n.as_str(), f.span)?
-                match self.c.term(mut_f) {
-                    Global(g) if self.assigned(n.as_str()).is_none() =>
+                let declared = match self.c.term(mut_f) {
+                    Global(g) if self.assigned(n.as_str()).is_none() => {
                         self.check_arguments(g, args.as_slice(), sp)?
+                        true
+                    }
                     // A local function, recursion result or transparent alias.
                     _ => {
                         let ty = self.c.infer(mut_f, self.ctx.as_slice(), true, core.DEPTH)?
@@ -3178,9 +3187,10 @@ impl Elaborator {
                             Pi(_, _, _) => {}
                             _ => return Err(error(f.span, "only declared functions can be called"))
                         }
+                        false
                     }
                 }
-                self.apply(mut_f, args.as_slice(), sp, depth)
+                self.apply(mut_f, args.as_slice(), sp, depth, declared)
             }
             _ => Err(error(sp, "unsupported expression in dependent_core"))
         }

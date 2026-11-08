@@ -77,6 +77,9 @@ the runner. Its suites:
   inout reconstruction, discarded initializer traps, both object targets and
   native allocation balance at O0/O2, plus exact privacy, type and ownership
   diagnostics. Allocation counts do not replace memory instrumentation.
+  `tests/core_functions.py` also rejects empty higher-order calls and chained
+  scalar/owned/proof applications, with valid local/imported nullary factories,
+  exact reference MIR, erased certificates and native ownership controls.
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.
