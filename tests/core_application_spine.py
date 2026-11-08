@@ -219,7 +219,7 @@ def test(compiler, checker, output, existing_exporter=None):
     excessive = budget_trace(8)
     reject('cumulative-repeated-reference-substitution-budget', excessive, roots_of(excessive))
     unsupported = {**OUTSIDE, 'higher-order-argument':
-        '(def value (Eq 7 7) (app (lam f (pi x U64 (Eq x x)) (app f 7)) '
+        '(def value (Eq 7 7) (app (lam0 f (pi x U64 (Eq x x)) (app f 7)) '
         '(lam x U64 (refl x))))'}
     for name, source in unsupported.items():
         if name == 'nested-function-application':
