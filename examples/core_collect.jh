@@ -1,0 +1,20 @@
+// Runtime selection retains a proved upper bound on the output length.
+// The bound permits reading a final slot without checking the count again.
+// Callbacks run from the last candidate to the first; kept values retain order.
+// main returns 40.
+#![dependent_core]
+import dependent.collect
+
+fn pick(cutoff: u64) -> collect.Bounded(4) {
+    collect.build(4, fn(i, p) {
+        if_lt(i, cutoff, fn(q) { collect.Entry.Keep(index([1, 2, 3, 4], i, p)) },
+            collect.Entry.Skip)
+    })
+}
+
+export fn after_selected(cutoff: u64) -> i64 {
+    let xs = pick(cutoff)
+    index([10, 20, 30, 40, 50], collect.len(4, xs), collect.bound(4, xs))
+}
+
+fn main() -> i64 { after_selected(3) }
