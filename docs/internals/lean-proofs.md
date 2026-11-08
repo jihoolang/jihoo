@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 444 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 462 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -727,3 +727,47 @@ full compiler soundness. Actual Core can reorder symbolic sums and cancel
 subtractions; tests obtain such actual outputs and show this checker rejecting
 them outside its profile. No arithmetic rule was added to the beta-only head
 normalization or consistency theorems.
+
+## Symbolic natural-sum result validation
+
+`LinearNaturals.lean` adds an independently defined first-order fragment:
+scoped natural variables, word-sized natural literals, and addition. Its
+coefficient normalizer has a proved all-environment evaluation theorem.
+Equal coefficient records imply equal mathematical-natural values, with an
+independent structural `Evaluates` relation and a determinism theorem. The
+extractor supplies exact Raw representation witnesses and derives both input
+and output `Beta.HasType` judgments at `U64`; output typing is not an assumption.
+
+`CheckedLinearNormalization.lean` connects this arithmetic checker to retained
+actual-core graph snapshots. `validateBytes_sound` binds canonical input,
+output and operation-record bytes, including both root IDs and whole graphs.
+It also preserves the input graph prefix and exact scalar type root, and proves
+that the decoded expressions have the same value for **every** natural-valued
+variable environment. This covers symbolic reordering and wide ghost sums that
+remain outside the directed beta/add validator's profile.
+
+The caller supplies a context arity of at most 128; variables must fall within
+that context and all have type `U64`. The integration test extracts open bodies
+from real-core checked scalar lambdas, then runs actual ghost `Core.normal` on
+those retained body roots. Selecting those roots and the arity is a tested
+adapter boundary, not a proof about source elaboration or lambda application.
+The operation record retains the existing version-6 depth/fuel fields; arity is
+an independent semantic-context parameter, and this checker performs no
+fuel-indexed reduction search.
+
+Before graph expansion, the profile caps each selected tree at 8192 occurrences
+and the sum of expanded sizes of **all** graph nodes at 131072. Repeated
+references count repeatedly. Existing 4096-node, depth-128, payload and
+backward-edge bounds apply, as do canonical 64-bit tokens and the CLI's 8 MiB
+input limit. These are executable resource guards, not a proved runtime bound.
+The input gate runs before Core; the exact output is checked before publication.
+
+This checker proves semantic equivalence, **not** a directed reduction or that
+the output is normal. An unchanged valid input is intentionally an acceptable
+semantic result. It does not prove that the recorded operation actually ran:
+import/export, compilation, execution provenance, IO and Python association
+remain tested trust boundaries. No rules are added to `Beta.Conv`; arbitrary
+dependent conversions, subtraction, higher-order application, effects and
+runtime overflow/traps remain outside this fragment. The existing beta-only
+consistency and normalization theorems are unchanged. No completeness or
+universal success claim is made for `Core.normal` or the coefficient checker.

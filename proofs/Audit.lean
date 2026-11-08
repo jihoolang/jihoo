@@ -468,3 +468,22 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.closing_can_introduce_redex
 #print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.untyped_loop_not_accessible
 #print axioms Jihoo.CoreBridge.Raw.Beta.OpenNormalizationExamples.looping_term_not_typable
+
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.typed
+#print axioms Jihoo.CoreBridge.LinearNaturals.coefficientsAdd_eval
+#print axioms Jihoo.CoreBridge.LinearNaturals.basis_eval
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.normalize_eval
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.equal_normal_values
+#print axioms Jihoo.CoreBridge.LinearNaturals.Expr.evaluates
+#print axioms Jihoo.CoreBridge.LinearNaturals.Evaluates.deterministic
+#print axioms Jihoo.GraphCertificates.LinearNormal.validate_sound
+#print axioms Jihoo.GraphCertificates.LinearNormal.validateBytes_sound
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.symbolic_commutativity
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.association_and_multiplicity
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.wrong_coefficient_rejected
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.out_of_scope_rejected
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.subtraction_rejected
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.wide_sum_value
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.wide_sum_not_zero
+#print axioms Jihoo.CoreBridge.LinearNaturals.Examples.application_rejected
+#print axioms Jihoo.GraphCertificates.LinearNormal.admit_sound
