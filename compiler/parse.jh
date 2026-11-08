@@ -417,8 +417,9 @@ impl Parser {
             Type => {
                 self.bump()
                 let name = self.ident()?
+                let params = self.generic_params()?
                 let ty = if self.eat(Tok.Assign) { Some(self.ty()?) } else { None }
-                ItemKind.TypeAlias(name, ty)
+                ItemKind.TypeAlias(name, params, ty)
             }
             _ => return Err(self.found(
                 "expected an item (`fn`, `struct`, `enum`, `impl`, ...), found "

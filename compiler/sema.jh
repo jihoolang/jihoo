@@ -816,13 +816,19 @@ impl Sema {
                 })
                 self.define(module, c.name.as_str(), Sym.Static(id), item.public, item.span)?
             }
-            TypeAlias(name, t) => match t {
-                Some(t) => {
-                    let id = self.aliases.len() as u32
-                    self.aliases.push(AliasInfo { module: module, ty: &t })
-                    self.define(module, name.as_str(), Sym.Alias(id), item.public, item.span)?
+            TypeAlias(name, params, t) => {
+                if params.len() != 0 { return Err(ty_err(
+                    item.span,
+                    "parameterized type aliases require dependent_core"
+                )) }
+                match t {
+                    Some(t) => {
+                        let id = self.aliases.len() as u32
+                        self.aliases.push(AliasInfo { module: module, ty: &t })
+                        self.define(module, name.as_str(), Sym.Alias(id), item.public, item.span)?
+                    }
+                    None => return Err(ty_err(item.span, "a type alias needs `= type`"))
                 }
-                None => return Err(ty_err(item.span, "a type alias needs `= type`"))
             }
             Trait(t) => {
                 let id = self.traits.len() as u32
@@ -843,7 +849,12 @@ impl Sema {
                             panic_handler_attr(sub, false)?
                             fns.insert(f.name.clone(), fid);
                         }
-                        TypeAlias(_, _) => {}
+                        TypeAlias(_, params, _) => {
+                            if params.len() != 0 { return Err(ty_err(
+                                sub.span,
+                                "parameterized type aliases require dependent_core"
+                            )) }
+                        }
                         _ => return Err(ty_err(
                             sub.span,
                             "a trait holds functions and associated types"
@@ -883,14 +894,20 @@ impl Sema {
                             }
                             fns.insert(f.name.clone(), fid);
                         }
-                        TypeAlias(n, t) => match t {
-                            Some(t) => {
-                                assoc.insert(n.clone(), &t);
-                            }
-                            None => return Err(ty_err(
+                        TypeAlias(n, params, t) => {
+                            if params.len() != 0 { return Err(ty_err(
                                 sub.span,
-                                "an impl holds functions and associated types"
-                            ))
+                                "parameterized type aliases require dependent_core"
+                            )) }
+                            match t {
+                                Some(t) => {
+                                    assoc.insert(n.clone(), &t);
+                                }
+                                None => return Err(ty_err(
+                                    sub.span,
+                                    "an impl holds functions and associated types"
+                                ))
+                            }
                         }
                         _ => return Err(ty_err(
                             sub.span,
@@ -1684,7 +1701,7 @@ impl Sema {
             var has = false
             for i in at(self.traits[tr].decl).items {
                 match i.kind {
-                    TypeAlias(n, _) => {
+                    TypeAlias(n, _, _) => {
                         if n == name {
                             has = true
                         }

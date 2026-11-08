@@ -54,6 +54,16 @@ struct Frame {
     used: Vec(bool)
 }
 
+// A checked, closed type function. Parameters are erased U64 values;
+// aliases are expanded in types and never add runtime globals.
+struct TypeAlias {
+    name: String
+    module: u32
+    public: bool
+    params: i64
+    term: u32
+}
+
 struct Elaborator {
     c: core.Core
     names: Vec(String)
@@ -82,6 +92,7 @@ struct Elaborator {
     aliases: Vec((String, i64, u32))
     // Per struct, its family and the names of its fields in order.
     structs: Vec((u32, Vec(String), Vec(bool)))
+    type_aliases: Vec(TypeAlias)
     // Declaration provenance is separate from core names: core references
     // are indices, so independent modules may reuse helper and family names.
     module: u32
@@ -1192,6 +1203,39 @@ impl Elaborator {
         None
     }
 
+    fn find_alias(self, name: str) -> Option(i64) {
+        let Some((module, n)) = self.scope(name) else { return None }
+        for i, a in self.type_aliases {
+            if a.module == module && a.name == n && (module == self.module || a.public) {
+                return Some(i)
+            }
+        }
+        None
+    }
+
+    fn alias_type(
+        inout self,
+        alias: i64,
+        args: [ast.Expr],
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        if args.len != self.type_aliases[alias].params { return Err(error(
+            sp,
+            "wrong number of type alias indices"
+        )) }
+        var value = self.type_aliases[alias].term
+        let u = self.u64(sp)?
+        // Check every argument before reduction, including unused indices.
+        for a in args {
+            let arg = self.expr(a, Some(u), depth - 1)?
+            self.c.require(arg, u, self.ctx.as_slice(), true, core.DEPTH)?
+            value = self.c.add(core.Term.App(value, arg), sp)?
+        }
+        let _ = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+        self.c.normal(value, core.DEPTH)
+    }
+
     // A proposition's constructor; data constructors are qualified.
     fn find_constructor(self, name: str) -> Option((u32, u32)) {
         let Some((module, n)) = self.scope(name) else { return None }
@@ -1713,7 +1757,9 @@ impl Elaborator {
         for i, d in self.c.definitions {
             if self.definitions[i].0 == self.module && d.name == name { return true }
         }
-        self.find_family(name).is_some() || self.find_constructor(name).is_some()
+        self.find_family(name).is_some() || self.find_constructor(name).is_some() || self.find_alias(
+            name
+        ).is_some()
     }
 
     // Qualified patterns must resolve to the scrutinee's actual family,
@@ -1822,6 +1868,10 @@ impl Elaborator {
                     e.span,
                     "unsupported type"
                 )) }
+                match self.find_alias(n.as_str()) {
+                    Some(a) => return self.alias_type(a, args.as_slice(), e.span, depth)
+                    None => {}
+                }
                 match self.find_family(n.as_str()) {
                     Some(family) => return self.indexed(family, args.as_slice(), e.span, depth)
                     None => {}
@@ -1852,6 +1902,10 @@ impl Elaborator {
                     e.span,
                     "unsupported type in dependent_core"
                 )) }
+                match self.find_alias(n.as_str()) {
+                    Some(a) => return self.alias_type(a, [], e.span, depth)
+                    None => {}
+                }
                 let Some(family) = self.find_family(n.as_str()) else {
                     return Err(error(e.span, "unsupported type in dependent_core"))
                 }
@@ -1927,6 +1981,13 @@ impl Elaborator {
             ) => {
                 let name = self.type_path(path.as_slice())
                 let n = name.as_str()
+                match self.find_alias(n) {
+                    Some(a) => return match args {
+                        Some(args) => self.alias_type(a, args.as_slice(), t.span, depth)
+                        None => self.alias_type(a, [], t.span, depth)
+                    }
+                    None => {}
+                }
                 match self.find_family(n) {
                     Some(family) => return match args {
                         Some(args) => self.indexed(family, args.as_slice(), t.span, depth)
@@ -3182,11 +3243,66 @@ impl Elaborator {
         Ok(())
     }
 
+    fn type_alias(
+        inout self,
+        item: ast.Item,
+        name: String,
+        params: Vec(ast.Param),
+        rhs: Option(ast.Ty)
+    ) -> Result((), diag.Diag) {
+        if item.attrs.len() != 0 { return Err(error(item.span, "type aliases have no attributes")) }
+        if reserved(name.as_str()) || self.taken(name.as_str()) {
+            return Err(error(item.span, "duplicate or reserved type alias name"))
+        }
+        let Some(rhs) = rhs else { return Err(error(item.span, "a type alias needs = type")) }
+        let u = self.u64(item.span)?
+        for i, p in params {
+            let valid = match p.ty {
+                Some(t) => match t.kind { Path(path, None) => path.len() == 1 && path[0] == "u64", _ => false }
+                None => false
+            }
+            if !valid || p.bounds.len() != 0 || reserved(p.name.as_str()) ||
+                (p.mode != ast.Mode.Let && p.mode != ast.Mode.Comptime) {
+                return Err(error(p.span, "type aliases are parameterized by u64 values"))
+            }
+            for j in 0..i {
+                if params[j].name == p.name { return Err(error(p.span, "duplicate parameter")) }
+            }
+            self.push(p.name.as_str(), u, true)
+        }
+        var term = self.ty(rhs, core.DEPTH)?
+        let sort = self.c.infer(term, self.ctx.as_slice(), true, core.DEPTH)?
+        let sort = self.c.normal(sort, core.DEPTH)?
+        match self.c.term(sort) {
+            Prop | Universe(_) => {}
+            _ => return Err(error(rhs.span, "expected a type or proposition"))
+        }
+        for _ in 0..params.len() {
+            self.pop()
+            term = self.c.add(core.Term.Lam(true, u, term), item.span)?
+        }
+        let _ = self.c.infer(term, [], true, core.DEPTH)?
+        self.type_aliases.push(TypeAlias {
+            name: name.clone(),
+            module: self.module,
+            public: item.public,
+            params: params.len(),
+            term
+        })
+        Ok(())
+    }
+
     fn definition(inout self, item: ast.Item, entry: bool) -> Result((), diag.Diag) {
         match item.kind {
             Trait(t) => return self.inductive(item, t)
             Enum(e) => return self.data_type(item, e)
             Struct(s) => return self.structure(item, s)
+            TypeAlias(name, params, rhs) => {
+                let before = self.ctx.len()
+                let result = self.type_alias(item, name, params, rhs)
+                while self.ctx.len() > before { self.pop() }
+                return result
+            }
             // Modules are elaborated in the order of their imports.
             Import(_) => return Ok(())
             _ => {}
@@ -3402,6 +3518,7 @@ pub fn compile(
         allowed: false,
         aliases: Vec((String, i64, u32)).new(),
         structs: Vec((u32, Vec(String), Vec(bool))).new(),
+        type_aliases: Vec(TypeAlias).new(),
         module: a.root,
         definitions: Vec((u32, bool)).new(),
         families: Vec((u32, bool)).new(),
