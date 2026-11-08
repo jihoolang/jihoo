@@ -118,6 +118,8 @@ Source elaboration infers unsigned literal arithmetic from either operand and
 accepts checked type annotations in contextual proof and induction lambdas.
 Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations.
+[Bulk vector extension](docs/language/vector-extension.md) retains a checked
+old-to-new length postcondition while reusing capacity or growing the buffer.
 [Structural buffer materialization](docs/language/list-buffer-transfer.md)
 copies proved-length list results to contiguous storage without repeated indexed
 list reads or an extra length-discovery pass.
