@@ -92,3 +92,6 @@ import Jihoo.CheckedApplicationSpine
 import Jihoo.PropositionalEvidence
 import Jihoo.CheckedPropositionalEvidence
 import Jihoo.PropositionalEvidenceExamples
+
+import Jihoo.CorePrimitiveSafety
+import Jihoo.CorePrimitiveExamples

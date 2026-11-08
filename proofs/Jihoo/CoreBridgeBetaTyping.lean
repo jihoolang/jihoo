@@ -34,6 +34,8 @@ mutual
     | decide : a < wordBound → b < wordBound → a < b →
         HasType Γ (.decide (.natural a) (.natural b)) (.lt (.natural a) (.natural b))
     | refl : HasType Γ a .u64 → HasType Γ (.refl a) (.eq a a)
+    | zeroLe : HasType Γ a .u64 → HasType Γ (.zeroLe a)
+        (.lt (.natural 0) (.uadd a (.natural 1)))
     | index : HasType Γ a (.array n) → HasType Γ i .u64 →
         HasType Γ p (.lt i n) → HasType Γ (.index a i p) .i64
     | lam : IsType Γ A → e = A.proposition →
@@ -112,6 +114,8 @@ private theorem renaming_mutual :
       · obtain ⟨x, hx, rfl⟩ := List.mem_map.mp hy
         simpa only [rename] using ih x hx Δ ρ hρ
     case decide ha hb hab Δ ρ hρ => simpa only [rename] using (HasType.decide (Γ := Δ) ha hb hab)
+    case zeroLe ha ih Δ ρ hρ =>
+      simpa only [rename] using HasType.zeroLe (by simpa only [rename] using ih Δ ρ hρ)
     case refl ha ih Δ ρ hρ =>
       simp only [rename]
       exact .refl (by simpa only [rename] using ih Δ ρ hρ)
@@ -179,6 +183,9 @@ private theorem renaming_mutual :
     case decide ha hb hab =>
       intro Δ ρ hρ
       simpa only [rename] using (HasType.decide (Γ := Δ) ha hb hab)
+    case zeroLe ha ih =>
+      intro Δ ρ hρ
+      simpa only [rename] using HasType.zeroLe (by simpa only [rename] using ih Δ ρ hρ)
     case refl ha ih =>
       intro Δ ρ hρ
       simp only [rename]
@@ -282,6 +289,8 @@ private theorem substitution_mutual :
         simpa only [subst] using ih x hx Δ σ hσ
     case decide ha hb hab Δ σ hσ =>
       simpa only [subst] using (HasType.decide (Γ := Δ) ha hb hab)
+    case zeroLe ha ih Δ σ hσ =>
+      simpa only [subst] using HasType.zeroLe (by simpa only [subst] using ih Δ σ hσ)
     case refl ha ih Δ σ hσ =>
       simp only [subst]
       exact .refl (by simpa only [subst] using ih Δ σ hσ)
@@ -349,6 +358,9 @@ private theorem substitution_mutual :
     case decide ha hb hab =>
       intro Δ σ hσ
       simpa only [subst] using (HasType.decide (Γ := Δ) ha hb hab)
+    case zeroLe ha ih =>
+      intro Δ σ hσ
+      simpa only [subst] using HasType.zeroLe (by simpa only [subst] using ih Δ σ hσ)
     case refl ha ih =>
       intro Δ σ hσ
       simp only [subst]
@@ -446,6 +458,7 @@ private theorem context_conversion_mutual :
     case usub ha hb hp iha ihb ihp Δ hc => exact .usub (iha Δ hc) (ihb Δ hc) (ihp Δ hc)
     case elements xs Γ hs hlen ih Δ hc => exact .elements (fun x hx => ih x hx Δ hc) hlen
     case decide ha hb hab Δ hc => exact .decide ha hb hab
+    case zeroLe ha ih Δ hc => exact .zeroLe (ih Δ hc)
     case refl ha ih Δ hc => exact .refl (ih Δ hc)
     case index ha hi hp iha ihi ihp Δ hc => exact .index (iha Δ hc) (ihi Δ hc) (ihp Δ hc)
     case lam hA he hb ihA ihb Δ hc =>
@@ -472,6 +485,7 @@ private theorem context_conversion_mutual :
     case usub ha hb hp iha ihb ihp => intro Δ hc; exact .usub (iha Δ hc) (ihb Δ hc) (ihp Δ hc)
     case elements xs Γ hs hlen ih => intro Δ hc; exact .elements (fun x hx => ih x hx Δ hc) hlen
     case decide ha hb hab => intro Δ hc; exact .decide ha hb hab
+    case zeroLe ha ih => intro Δ hc; exact .zeroLe (ih Δ hc)
     case refl ha ih => intro Δ hc; exact .refl (ih Δ hc)
     case index ha hi hp iha ihi ihp => intro Δ hc; exact .index (iha Δ hc) (ihi Δ hc) (ihp Δ hc)
     case lam hA he hb ihA ihb =>

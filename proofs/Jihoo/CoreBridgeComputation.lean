@@ -148,6 +148,11 @@ private theorem preservation_mutual :
       cases hs with
       | decideLeft hs => cases hs
       | decideRight hs => cases hs
+    case zeroLe ha ih t' hs =>
+      cases hs with
+      | zeroLe hs =>
+          exact .convert (.zeroLe (ih _ hs))
+            (.lt (.refl _) (.uadd (.symm hs.conversion) (.refl _)))
     case refl ha ih t' hs =>
       cases hs with
       | reflTerm hs =>
@@ -236,6 +241,12 @@ private theorem preservation_mutual :
       cases hs with
       | decideLeft hs => cases hs
       | decideRight hs => cases hs
+    case zeroLe ha ih =>
+      intro t' hs
+      cases hs with
+      | zeroLe hs =>
+          exact .convert (.zeroLe (ih _ hs))
+            (.lt (.refl _) (.uadd (.symm hs.conversion) (.refl _)))
     case refl ha ih =>
       intro t' hs
       cases hs with
