@@ -109,6 +109,10 @@ the runner. Its suites:
   false or mismatched evidence and the export ABI.
   `tests/core_data.py` adds data types: `match`, proofs by cases, kept
   field traps, positivity of fields and motives.
+  `tests/core_structs.py` compares explicit indexed record literals against
+  contextual construction MIR, including imported/nested records, borrowed and
+  discarded owners, erased overflowing indices and runtime traps. Exact negatives
+  check malformed indices, privacy, expected-type mismatches and initializer fields.
   `tests/core_indexed.py` adds erased u64 indices, parameterized data
   types and, in `.jhc`, a true index.
   `tests/core_buffer.py` adds owned buffers: native calls are linked
