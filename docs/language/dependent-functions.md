@@ -66,6 +66,26 @@ proof are ghost computations. They do not execute runtime arithmetic or make
 an overflowing runtime application safe. The complete
 [example](../../examples/core_functions.jh) demonstrates both modes.
 
+## Function expressions and scope
+
+A block that produces a function can be invoked directly, for example
+`({ let f = fn(x: i64) -> i64 { x + 1 }; f })(7)`.
+The block's bindings do not escape. Its runtime work happens before the
+arguments and once when a partial application is created; invoking that partial
+application again does not repeat the block's work. The selected function body
+runs on invocation, not when an unused partial application is discarded.
+Annotations, proof arguments and the existing ownership checks still apply.
+An immediate call can consume an owned capture once, as an immediately applied
+lambda already can. This does not make reusable closures that retain owners
+legal or add heap-allocated closures.
+
+A `match` result cannot be a function in this subset: a case continuation must
+not retain owned inputs for later repeated calls. The diagnostic distinguishes
+this restriction from missing constructor fields, including inferred matches
+with just one constructor. Call the chosen function inside each arm and return
+its result instead of returning the function itself. This restriction also
+applies when a match is written in the callee position.
+
 ## Pure natural local definitions
 
 An immutable local may retain a pure natural function definition for later calls
@@ -102,7 +122,7 @@ not a theorem of general purity inference or elaborator soundness.
 ## Ownership and runtime boundaries
 
 Callbacks can take owned buffers and must obey the existing ownership rules.
-Capturing an owned value remains rejected. Calling a callback twice evaluates
+Stored or reusable functions cannot retain owned captures. Calling a callback twice evaluates
 its body twice; passing or discarding the function value does not execute its
 body. Effects performed while constructing a partially applied function remain
 ordered and evaluated by the existing runtime normalization rules.

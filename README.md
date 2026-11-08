@@ -125,6 +125,9 @@ through function values are rejected; direct declared nullary calls remain valid
 Repeated `_` parameters work consistently in dependent lambdas and proof motives,
 without exposing discarded values or skipping their checks. Computed signed
 negation uses checked subtraction, preserving overflow traps and operand effects.
+Function-producing blocks support direct calls with lexical scope and ordered
+effects; function-valued match results retain their ownership restriction with
+an explicit diagnostic.
 [Nested record patterns](docs/language/dependent-records.md) in lets and match
 arms unpack owned or borrowed
 indexed fields while preserving evidence, private fields and single ownership.

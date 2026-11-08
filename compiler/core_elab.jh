@@ -1763,14 +1763,6 @@ impl Elaborator {
                 domains.push((erased, domain))
                 result = rest
             }
-            let normal = self.c.normal(result, core.DEPTH)?
-            match self.c.term(normal) {
-                Pi(_, _, _) => {
-                    for _ in 0..domains.len() { self.pop() }
-                    return Err(error(arm.span, "a match arm binds every field"))
-                }
-                _ => {}
-            }
             let infer_result = expected.is_none() && k == 0
             let body = if nested.len() == 0 { arm.body.clone() } else { ast.Expr {
                 kind: ast.ExprKind.Block(ast.Block {
@@ -1785,11 +1777,13 @@ impl Elaborator {
                 if infer_result { None } else { Some(result) },
                 depth - 1
             )?
+            var final_type = result
             if infer_result {
                 let inferred = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
                 // Normalization may remove a local index that is irrelevant
                 // to the result, but cannot turn invalid evidence into a type.
                 let inferred = self.c.normal(inferred, core.DEPTH)?
+                final_type = inferred
                 t = match self.c.shift(inferred, -domains.len(), 0, core.DEPTH) {
                     Ok(t) => t
                     Err(_) => return Err(error(
@@ -1807,6 +1801,17 @@ impl Elaborator {
                 proof_by_cases = borrowed && ghost
                 motive = if proof_by_cases { p } else { t }
                 owned_motive = p
+            }
+            // Counted fields are distinct from the result's binders. The
+            // kernel does not let a case continuation return a function,
+            // which could retain its owned inputs and run repeatedly.
+            let final_type = self.c.normal(final_type, core.DEPTH)?
+            match self.c.term(final_type) {
+                Pi(_, _, _) => {
+                    for _ in 0..domains.len() { self.pop() }
+                    return Err(error(arm.span, "a match result cannot be a function"))
+                }
+                _ => {}
             }
             // A field the arm does not use is freed.
             if !ghost { value = self.settle(value, domains.len())? }
@@ -2768,9 +2773,13 @@ impl Elaborator {
                     return self.apply(function, args.as_slice(), sp, depth, true)
                 }
                 let ast.ExprKind.Name(n) = f.kind else {
-                    // A function-valued call or fully annotated lambda, applied directly.
-                    let is_call = match f.kind { Call(_, _) | Lambda(_, _, _) => true, _ => false }
-                    if !is_call { return Err(error(f.span, "calls require a named function")) }
+                    // Compound function values keep their own scope and are
+                    // evaluated before their arguments, just like named values.
+                    let is_call = match f.kind {
+                        Call(_, _) | Lambda(_, _, _) | Block(_) | Match(_, _) => true
+                        _ => false
+                    }
+                    if !is_call { return Err(error(f.span, "calls require a function expression")) }
                     let function = self.expr(f.deref(), None, depth - 1)?
                     return self.apply(function, args.as_slice(), sp, depth, false)
                 }

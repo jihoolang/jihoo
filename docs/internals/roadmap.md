@@ -1013,6 +1013,14 @@ Exact-MIR, boundary, ignored-result, partial-capture and owned-effect regression
 check single evaluation and distinguish lazy branches/zero-iteration loops from
 executed arithmetic. No kernel or Lean rule changes.
 
+Compound call stabilization accepts function-producing blocks directly, with
+scope, partial-capture ordering, erased proofs and existing single-use ownership
+semantics. Function-valued match results remain rejected by the continuation
+boundary, with a precise diagnostic instead of a false missing-field error;
+real constructor arity failures retain their own checks. Paired references,
+allocation/effect traces, traps and exact negative diagnostics cover both paths.
+No kernel continuation rule is weakened and no new soundness claim is made.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.
