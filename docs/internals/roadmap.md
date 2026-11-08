@@ -1006,6 +1006,13 @@ named/wildcard MIR, prove ignored fields still enforce ownership/evidence, and
 exercise captured effects, traps, folds and structural induction. This is a
 source ergonomics change with no new kernel rule or formal soundness claim.
 
+Computed i64 unary negation now lowers to the existing checked subtraction
+operation rather than rejecting every nonliteral operand. The signed minimum
+literal retains its special parsing path; negating that value at runtime traps.
+Exact-MIR, boundary, ignored-result, partial-capture and owned-effect regressions
+check single evaluation and distinguish lazy branches/zero-iteration loops from
+executed arithmetic. No kernel or Lean rule changes.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.

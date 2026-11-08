@@ -131,7 +131,7 @@ in the existing grammar, not global keywords or standard-library types:
 | `refl(a)` | reflexivity evidence of `Eq(a, a)` |
 | `transport(fn(k) { P(k) }, e, p)` | move evidence from `P(a)` to `P(b)` using `e: Eq(a, b)` |
 | `induct(P, case, ..., evidence)` | structural induction: one case per constructor, into a proposition |
-| `a + b`, `a - b`, `a * b` | [i64 arithmetic](#loops-and-arithmetic); overflow traps |
+| `a + b`, `a - b`, `a * b`, `-a` | [i64 arithmetic](#loops-and-arithmetic); overflow traps |
 | `fold(n, init, fn(i, p, acc) { body })` | loop for `i` below `n`, with erased `p: Lt(i, n)` |
 | `i + j` on `u64` | [addition in the naturals](#index-arithmetic-and-order); overflow traps |
 | `lt_add(a, b, c, p)`, `lt_cancel(a, b, c, p)`, `lt_le(x, y, z, p, q)` | rules of the order of the naturals |
@@ -365,7 +365,13 @@ data indices.
 
 ## Loops and arithmetic
 
-Runtime code has i64 `+`, `-` and `*` and one loop form:
+Runtime code has i64 `+`, `-`, `*` and unary `-a`, plus one loop form:
+
+Computed negation elaborates to checked `0 - a`, evaluating the operand once.
+Negating `-9223372036854775808` traps, including when its computed result is
+unused. The literal `-9223372036854775808` itself remains valid: its positive
+magnitude need not be representable as i64 first. Negation does not coerce u64
+indices, buffers or evidence into signed integers.
 
 ```text
 fold(n, init, body) : I64
@@ -379,8 +385,8 @@ for each `i` from 0 to `n - 1`. In `.jh` the body is a contextual lambda
 Optional annotations, such as `fn(i: u64, p: Lt(i, n), acc: i64) -> i64 { acc }`,
 are checked against it, without changing which parameters are erased. An explicit
 `erased(T)` annotation requires an erased binder. Parameters are checked in order,
-so a later annotation sees earlier binders; duplicate names within a lambda or
-extended data motive are rejected. The checker validates annotations before
+so a later annotation sees earlier binders; duplicate named parameters within a lambda or
+extended data motive are rejected; repeated `_` binders remain inaccessible. The checker validates annotations before
 conversion so that normalization cannot discard malformed evidence in them.
 Because `p` proves `Lt(i, n)`, a body loads from an array of length `n`
 with `index(xs, i, p)` and no bounds check. A helper over arrays of any
