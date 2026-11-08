@@ -51,6 +51,19 @@ Construction checks each field at its substituted type, even when the literal
 lists fields in a different order. Matching binds only fields; it does not
 bind the erased parameters again. Evidence fields remain erased.
 
+Flat records with scalar fields can contain computations that allocate, free or
+read memory. Construction evaluates runtime fields once in declaration order,
+even when fields are written in a different order, a scalar field is used twice,
+or the record is discarded. Trapping initializers still trap. For example,
+`let s = Scalar { value: free(alloc(n, x), x) }` needs no heap allocation for the
+record itself when `Scalar` contains only that scalar field.
+
+Flat data still has no general runtime aggregate representation. In particular,
+a record returned from a borrow continuation, or an effectful conditional that
+returns alternative flat constructors, may still fail to lower. Bind the borrowed
+or conditional scalar result in a `let` first, then construct the record. This is
+not permission for a borrow or owned capture to escape its checked scope.
+
 A plain `let` can destructure a record: `let Sized { data } = value`. The
 initializer is evaluated once, and the rest of the block sees the fields in
 declaration order, with their dependent types and evidence. Renaming uses

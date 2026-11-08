@@ -257,7 +257,14 @@ These are evidence, and every part is in ghost position.
   on the tag, loads the fields and frees the node at the end of the block, and a node of the same
   size built before then reuses it. `Elim` on boxed data is a recursive function that calls itself
   on each recursive field first, then frees the node. Flat data has no representation: its case
-  analysis must reduce away, and lowering rejects what does not.
+  analysis must reduce away, and lowering rejects what does not. Runtime
+  normalization sequences a flat constructor's effectful or borrowed-reading
+  runtime fields through its checked telescope before substituting the constructor.
+  Fields are evaluated once in declaration order; erased fields stay erased.
+  This sequencing does not run during pure conversion and does not introduce a
+  general flat-data runtime layout. A flat result crossing a lend continuation or
+  an effectful branch may still fail to lower; bind scalar results before building
+  the record in those cases.
 
 ### `Fold`, `Loop`
 

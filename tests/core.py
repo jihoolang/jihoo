@@ -646,6 +646,8 @@ def main():
         validate_context(compiler, root, temporary, environment, run)
         from core_constructors import validate_constructors
         validate_constructors(compiler, root, temporary, environment, run)
+        from core_record_effects import validate_record_effects
+        validate_record_effects(compiler, root, temporary, environment, run)
         from core_callees import validate_callees
         validate_callees(compiler, root, temporary, environment, run)
         from core_negation import validate_negation
