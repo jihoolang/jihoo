@@ -35,6 +35,7 @@
           ./docs/language/dependent-functions.md
           ./docs/language/dependent-aliases.md
           ./docs/language/dependent-records.md
+          ./docs/language/buffer-ranges.md
         ];
       };
 
