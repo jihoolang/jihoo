@@ -489,3 +489,32 @@ returned output and record pass Lean validation. Acceptance guards use explicit
 runtime checks, so they remain active under Python optimization. IO and the
 selection of an open scalar body from a checked lambda are tested adapter
 boundaries, not source-to-model proofs.
+
+### Symbolic first-order evidence
+
+`CheckLinearEvidence.lean TERM_ROOT TYPE_ROOT` validates one canonical snapshot
+on stdin. It supports closed equality/order evidence and natural-quantified
+proof functions whose bodies use `refl`, `zero-le` or a closed computed
+`decide-lt`. Natural endpoints can contain variables, word-sized literals and
+addition, including ghost sums above the word bound. Coefficient conversion
+handles symbolic commutativity and association in the requested proposition.
+
+```sh
+python3 tests/core_linear_evidence.py --compiler jihoo
+```
+
+This suite obtains snapshots from actual `Core.require`, then runs a separate
+proved fragment checker. It covers quantified symbolic equalities, positive
+natural bounds, wide sums, false claims, true claims with wrong evidence,
+binder/scope errors, exact requested roots, malformed unreachable nodes,
+expanded shared-reference limits, and successful core programs outside the
+supported fragment. The producer passes the exact retained bytes to its consumer
+only after validation. A nonzero exporter result is rejected even when its
+stdout contains a valid artifact; the regression remains active with `python -O`.
+
+The theorem derives a `LinearEvidence.Derives` judgment and truth of its encoded
+formula, plus proposition formation in the existing Beta model. It does not
+derive general Beta typing or establish compiler/runtime soundness. The artifact
+and requested root IDs are checked, but source provenance and fidelity of the
+exported graph remain outside the theorem. See the full
+[proof boundary](lean-proofs.md#first-order-evidence-with-symbolic-conversion).
