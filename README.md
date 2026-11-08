@@ -123,7 +123,8 @@ Conditional branches and constant-result matches infer local result types;
 conditional proof lambdas accept validated result annotations. Empty calls
 through function values are rejected; direct declared nullary calls remain valid.
 Repeated `_` parameters work consistently in dependent lambdas and proof motives,
-without exposing discarded values or skipping their checks.
+without exposing discarded values or skipping their checks. Computed signed
+negation uses checked subtraction, preserving overflow traps and operand effects.
 [Nested record patterns](docs/language/dependent-records.md) in lets and match
 arms unpack owned or borrowed
 indexed fields while preserving evidence, private fields and single ownership.

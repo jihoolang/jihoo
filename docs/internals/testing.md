@@ -84,6 +84,10 @@ the runner. Its suites:
   binders in callbacks, proof families and extended induction motives. It checks
   inaccessible values/evidence, owned argument drops, captured effects/traps and
   duplicate real names without changing runtime MIR.
+  `tests/core_negation.py` compares computed unary negation with explicit
+  subtraction MIR and checks signed boundaries, native traps, lazy branches,
+  zero-iteration loops, imported map callbacks, single operand evaluation and
+  exact rejection of unsigned/owned/evidence operands on both object targets.
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.
