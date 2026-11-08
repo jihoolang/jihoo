@@ -71,7 +71,7 @@ fn stdin_once() -> Result(String, String) {
 }
 
 fn snapshot(mode: str) -> Result(String, String) {
-    if mode != "infer" && mode != "require" { return Err("expected infer or require".to_string()) }
+    if mode != "infer" && mode != "require" && mode != "both" { return Err("expected infer, require or both".to_string()) }
     let source = stdin_once()?
     var c = match core_parse.parse(source.as_str(), 0) {
         Ok(c) => c
@@ -87,7 +87,7 @@ fn snapshot(mode: str) -> Result(String, String) {
         Ok(t) => t
         Err(e) => return Err(e.msg.clone())
     }
-    let selected = if mode == "require" {
+    let selected = if mode == "require" || mode == "both" {
         match c.require(value, declared, [], true, core.DEPTH) {
             Ok(_) => {}
             Err(e) => return Err(e.msg.clone())
@@ -99,13 +99,20 @@ fn snapshot(mode: str) -> Result(String, String) {
     var out = String.new()
     fields(&out, [3, value as u64, selected as u64, c.nodes.len() as u64])
     for n in c.nodes { write_node(&out, n.term)? }
+    // Joint mode retains the exact inferred root as well as the requested
+    // root in the same post-require arena; serialization performs no Core calls.
+    if mode == "both" {
+        out.push('\n')
+        fields(&out, [3, value as u64, inferred as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&out, n.term)? }
+    }
     Ok(out)
 }
 
 fn main() -> i32 {
     let args = env.args()
     if args.len() != 2 {
-        eprintln("usage: core-typing-snapshots infer|require < one-definition.core")
+        eprintln("usage: core-typing-snapshots infer|require|both < one-definition.core")
         return 2
     }
     match snapshot(args[1]) {

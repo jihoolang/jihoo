@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 484 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 509 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -820,3 +820,48 @@ Arbitrary applications, beta-equivalent proof terms, proof hypotheses,
 higher-order domains, subtraction and other arithmetic, runtime behavior and
 full checker soundness are outside this profile. Existing general Beta typing,
 normalization and consistency theorems are unchanged.
+
+## Principal inference correspondence for first-order evidence
+
+`CorePrincipalEvidence.lean` connects the first-order `Derives` judgment to a
+more restrictive `Principal` inference model whose types follow the selected
+actual `Core.infer` cases. `refl a` infers exactly `Eq a a`; `zeroLe a` infers
+exactly `Lt 0 (a + 1)`; `decide a b` retains exactly `Lt a b`; scalar lambdas
+retain the recursively inferred body type. There is no conversion rule inside
+`Principal`, and its encoded type is unique. This is a selected inference-shape
+model, not a theorem about principal types for the whole language.
+
+The additional obligation is `DecisionBounded`: every computed comparison has
+two word-representable values. `principal_iff` proves that a principal derivation
+followed by first-order coefficient conversion exists exactly when the earlier
+`Derives` derivation and this obligation both hold. `Principal.bounded` proves
+the obligation for results of the new checker; callers do not supply an assumed
+proof of it. `closed_reduces` also connects closed coefficient normalization to
+the existing directed `Raw.Computation.Steps` relation: a closed sum below the
+word bound reduces by bounded addition to its literal value.
+
+This restriction is necessary for correspondence with actual code. The earlier
+semantic evidence model accepts `decide 0 (MAX_U64 + 1)` as a true mathematical
+inequality, but `Core.infer` requires normalization to two `Natural` nodes and
+rejects that expression with its closed-inequality diagnostic. The new model
+rejects it too, while retaining wide sums in `refl` and `zeroLe`. Regression
+proofs and real-core tests preserve this distinction rather than silently
+narrowing the earlier semantic theorem.
+
+`core_typing_snapshots.jh both` freezes the declared and actual inferred type
+roots in the same post-`require` graph. `CheckedCorePrincipal.lean` requires
+identical whole graphs, identical term roots and the three independently
+requested root IDs. The inferred type must be structurally identical to the
+model's principal type, not merely convertible or true. Only the declared type
+is checked by proved coefficient conversion. The canonical-byte theorem derives
+the principal judgment, declared `Derives` judgment, comparison bound obligation,
+truth for every natural environment, and declared type formation. The CLI
+retains the existing byte, graph, depth and expanded-tree limits before inference.
+
+This remains per-run validation. The conditional bridge is a theorem about
+explicit Lean models; it does not assert that every compatible `Derives` term
+will be accepted by the executable checker. Core's allocation/resource limits,
+normalization and equality implementation, parser, exporter, compilation and IO
+provenance are not formally verified. No general `Beta.HasType` or `Beta.Conv`
+soundness is assumed or established. Arbitrary beta applications, higher-order
+domains, proof hypotheses, subtraction and runtime behavior remain excluded.
