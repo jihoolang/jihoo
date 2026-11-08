@@ -837,7 +837,7 @@ impl Core {
                 // they are neither cancelled nor kept twice.
                 let effects = self.effectful(a, depth - 1) || self.effectful(b, depth - 1)
                 if less <= constant && !effects {
-                    match self.without(atoms.as_slice(), minus.as_slice(), depth - 1) {
+                    match self.without(atoms.as_slice(), minus.as_slice(), depth - 1)? {
                         Some(rest) => {
                             match self.canonical(rest.as_slice(), constant - less, sp)? {
                                 Some(id) => {
@@ -1127,7 +1127,7 @@ impl Core {
                 if less > constant || traps.len() != 0 { continue }
                 var others = Vec(u32).new()
                 for j in 0..atoms.len() { if j != k { others.push(atoms[j]) } }
-                let Some(rest) = self.without(others.as_slice(), minus.as_slice(), depth) else {
+                let Some(rest) = self.without(others.as_slice(), minus.as_slice(), depth)? else {
                     continue
                 }
                 atoms = rest
@@ -1164,7 +1164,11 @@ impl Core {
             match self.term(x) {
                 Var(k) => {
                     var at = vars.len()
-                    while at > 0 && vars[at - 1].0 > k { at -= 1 }
+                    while at > 0 {
+                        self.tick(x, DEPTH)?
+                        if vars[at - 1].0 <= k { break }
+                        at -= 1
+                    }
                     vars.insert(at, (k, x))
                 }
                 _ => others.push(x)
@@ -1177,7 +1181,7 @@ impl Core {
             var sorted = Vec(u32).new()
             for x in others {
                 var at = sorted.len()
-                while at > 0 && self.compare(sorted[at - 1], x, DEPTH) > 0 { at -= 1 }
+                while at > 0 && self.compare(sorted[at - 1], x, DEPTH)? > 0 { at -= 1 }
                 sorted.insert(at, x)
             }
             others = sorted
@@ -1204,45 +1208,53 @@ impl Core {
         self.add(Term.UAdd(left, right), sp)
     }
 
-    // A total order on terms by structure, for sorting sums; 0 for
+    // A structural order for sorting sums, subject to the checking budget; 0 for
     // identical terms, ignoring Strict and irrelevant evidence as `identical`
     // does. Otherwise replacing a proof can change the order of unequal atoms
     // in a sum, so equal operands no longer give equal sums.
-    fn compare(self, a: u32, b: u32, depth: u32) -> i64 {
-        if depth == 0 || a == b { return 0 }
+    fn compare(inout self, a: u32, b: u32, depth: u32) -> Result(i64, diag.Diag) {
+        self.tick(a, depth)?
+        if a == b { return Ok(0) }
         match self.term(a) { Strict(_, y) => return self.compare(y, b, depth - 1), _ => {} }
         match self.term(b) { Strict(_, y) => return self.compare(a, y, depth - 1), _ => {} }
         let (x, y) = (self.term(a), self.term(b))
         let (rx, ry) = (rank(x.clone()), rank(y.clone()))
-        if rx != ry { return if rx < ry { -1 } else { 1 } }
+        if rx != ry { return Ok(if rx < ry { -1 } else { 1 }) }
         let (px, py) = (payload(x.clone()), payload(y.clone()))
         for i in 0..px.len() {
-            if i >= py.len() { return 1 }
-            if px[i] != py[i] { return if px[i] < py[i] { -1 } else { 1 } }
+            if i >= py.len() { return Ok(1) }
+            if px[i] != py[i] { return Ok(if px[i] < py[i] { -1 } else { 1 }) }
         }
-        if px.len() < py.len() { return -1 }
+        if px.len() < py.len() { return Ok(-1) }
         let (cx, cy) = (conversion_children(x), conversion_children(y))
         for i in 0..cx.len() {
-            if i >= cy.len() { return 1 }
-            let c = self.compare(cx[i], cy[i], depth - 1)
-            if c != 0 { return c }
+            if i >= cy.len() { return Ok(1) }
+            let c = self.compare(cx[i], cy[i], depth - 1)?
+            if c != 0 { return Ok(c) }
         }
-        if cx.len() < cy.len() { -1 } else { 0 }
+        Ok(if cx.len() < cy.len() { -1 } else { 0 })
     }
 
     // The pool without one identical occurrence of each item, if it has them.
-    fn without(self, pool: [u32], items: [u32], depth: u32) -> Option(Vec(u32)) {
+    fn without(
+        inout self,
+        pool: [u32],
+        items: [u32],
+        depth: u32
+    ) -> Result(Option(Vec(u32)), diag.Diag) {
         var rest = Vec(u32).new()
-        for x in pool { rest.push(x) }
+        for x in pool { self.tick(x, depth)?; rest.push(x) }
         for item in items {
             var found = -1
             for k in 0..rest.len() {
-                if self.identical(rest[k], item, depth) { found = k; break }
+                if self.identical(rest[k], item, depth)? { found = k; break }
             }
-            if found < 0 { return None }
+            if found < 0 { return Ok(None) }
+            // Removing an early match shifts the remaining entries too.
+            for j in found + 1..rest.len() { self.tick(rest[j], depth)? }
             rest.remove(found)
         }
-        Some(rest)
+        Ok(Some(rest))
     }
 
     fn collect(
@@ -1379,13 +1391,13 @@ impl Core {
         match self.term(id) { Lam(_, _, body) => self.binders(body, count - 1), _ => false }
     }
 
-    fn identical(self, a: u32, b: u32, depth: u32) -> bool {
-        if depth == 0 { return false }
+    fn identical(inout self, a: u32, b: u32, depth: u32) -> Result(bool, diag.Diag) {
+        self.tick(a, depth)?
         // Strict(x, y) means y: it only orders the evaluation of x's traps.
         match self.term(a) { Strict(_, y) => return self.identical(y, b, depth - 1), _ => {} }
         match self.term(b) { Strict(_, y) => return self.identical(a, y, depth - 1), _ => {} }
-        match (self.term(a), self.term(b)) {
-            (Array(x), Array(y)) | (Refl(x), Refl(y)) => self.identical(x, y, depth - 1)
+        Ok(match (self.term(a), self.term(b)) {
+            (Array(x), Array(y)) | (Refl(x), Refl(y)) => self.identical(x, y, depth - 1)?
             (Eq(a, b), Eq(c, d)) | (Lt(a, b), Lt(c, d)) | (
                 App(a, b),
                 App(c, d)
@@ -1393,110 +1405,110 @@ impl Core {
                 Decide(a, b),
                 Decide(c, d)
             ) =>
-                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+                self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
             (Pi(e, a, b), Pi(f, c, d)) | (Lam(e, a, b), Lam(f, c, d)) =>
-                e == f && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+                e == f && self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
             (Index(a, i, p), Index(b, j, q)) | (Transport(a, i, p), Transport(b, j, q)) => self.identical(
                 a,
                 b,
                 depth - 1
-            ) &&
-                self.identical(i, j, depth - 1) && self.identical(p, q, depth - 1)
+            )? &&
+                self.identical(i, j, depth - 1)? && self.identical(p, q, depth - 1)?
             // Proof irrelevance: any evidence of b <= a gives the same a - b.
             (USub(a, b, _), USub(c, d, _)) =>
-                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
-            (Buffer(a), Buffer(b)) => self.identical(a, b, depth - 1)
+                self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
+            (Buffer(a), Buffer(b)) => self.identical(a, b, depth - 1)?
             (Alloc(a, b), Alloc(c, d)) | (Free(a, b), Free(c, d)) =>
-                self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+                self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
             (Drop(f, a, b), Drop(g, c, d)) =>
-                f == g && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
+                f == g && self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
             (Ref(a), Ref(b)) | (Borrow(a), Borrow(b)) | (Deref(a), Deref(b)) =>
-                self.identical(a, b, depth - 1)
+                self.identical(a, b, depth - 1)?
             (Absurd(a, p), Absurd(b, q)) =>
-                self.identical(a, b, depth - 1) && self.identical(p, q, depth - 1)
-            (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1) &&
-                self.identical(b, y, depth - 1) && self.identical(c, z, depth - 1)
-            (Back(e, a, b), Back(f, x, y)) => e == f && self.identical(a, x, depth - 1) &&
-                self.identical(b, y, depth - 1)
+                self.identical(a, b, depth - 1)? && self.identical(p, q, depth - 1)?
+            (Lend(a, b, c), Lend(x, y, z)) => self.identical(a, x, depth - 1)? &&
+                self.identical(b, y, depth - 1)? && self.identical(c, z, depth - 1)?
+            (Back(e, a, b), Back(f, x, y)) => e == f && self.identical(a, x, depth - 1)? &&
+                self.identical(b, y, depth - 1)?
             // Proof irrelevance: erased evidence does not change the value.
-            (Give(e, m, a, b), Give(f, n, x, y)) => e == f && self.identical(m, n, depth - 1) &&
-                self.identical(a, x, depth - 1) && (e || self.identical(b, y, depth - 1))
-            (Take(a, b), Take(x, y)) => self.identical(a, x, depth - 1) &&
-                self.identical(b, y, depth - 1)
+            (Give(e, m, a, b), Give(f, n, x, y)) => e == f && self.identical(m, n, depth - 1)? &&
+                self.identical(a, x, depth - 1)? && (e || self.identical(b, y, depth - 1)?)
+            (Take(a, b), Take(x, y)) => self.identical(a, x, depth - 1)? &&
+                self.identical(b, y, depth - 1)?
             (View(r, f, t, xs, a), View(q, g, u, ys, b)) => r == q && f == g &&
-                self.identical(t, u, depth - 1) &&
-                self.identical_all(xs.as_slice(), ys.as_slice(), depth) &&
-                self.identical(a, b, depth - 1)
+                self.identical(t, u, depth - 1)? &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth)? &&
+                self.identical(a, b, depth - 1)?
             (Load(a, b, c, d), Load(w, x, y, z)) | (Store(a, b, c, d), Store(w, x, y, z)) =>
-                self.identical(a, w, depth - 1) && self.identical(b, x, depth - 1) &&
-                self.identical(c, y, depth - 1) && self.identical(d, z, depth - 1)
+                self.identical(a, w, depth - 1)? && self.identical(b, x, depth - 1)? &&
+                self.identical(c, y, depth - 1)? && self.identical(d, z, depth - 1)?
             (ZeroLe(a), ZeroLe(b)) | (Refine(a), Refine(b)) | (Witness(a), Witness(b)) | (
                 Proof(a),
                 Proof(b)
-            ) => self.identical(a, b, depth - 1)
+            ) => self.identical(a, b, depth - 1)?
             // Proof irrelevance: the evidence does not change the value.
             (Pack(p, a, _), Pack(q, b, _)) =>
-                self.identical(p, q, depth - 1) && self.identical(a, b, depth - 1)
-            (UAdd(a, b), UAdd(c, d)) => self.identical(a, c, depth - 1) && self.identical(
+                self.identical(p, q, depth - 1)? && self.identical(a, b, depth - 1)?
+            (UAdd(a, b), UAdd(c, d)) => self.identical(a, c, depth - 1)? && self.identical(
                 b,
                 d,
                 depth - 1
-            )
+            )?
             (LtAdd(a, b, c, p), LtAdd(x, y, z, q)) | (LtCancel(a, b, c, p), LtCancel(x, y, z, q)) =>
-                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
-                self.identical(c, z, depth - 1) && self.identical(p, q, depth - 1)
+                self.identical(a, x, depth - 1)? && self.identical(b, y, depth - 1)? &&
+                self.identical(c, z, depth - 1)? && self.identical(p, q, depth - 1)?
             (LtLe(a, b, c, p, q), LtLe(x, y, z, r, t)) =>
-                self.identical(a, x, depth - 1) && self.identical(b, y, depth - 1) &&
-                self.identical(c, z, depth - 1) && self.identical(p, r, depth - 1) &&
-                self.identical(q, t, depth - 1)
+                self.identical(a, x, depth - 1)? && self.identical(b, y, depth - 1)? &&
+                self.identical(c, z, depth - 1)? && self.identical(p, r, depth - 1)? &&
+                self.identical(q, t, depth - 1)?
             (Arith(o, a, b), Arith(p, c, d)) =>
-                o == p && self.identical(a, c, depth - 1) && self.identical(b, d, depth - 1)
-            (Loop(a, t, b, y), Loop(c, u, d, z)) => self.identical(a, c, depth - 1) &&
-                self.identical(t, u, depth - 1) && self.identical(b, d, depth - 1) &&
-                self.identical(y, z, depth - 1)
-            (Fold(a, b, y), Fold(c, d, z)) => self.identical(a, c, depth - 1) &&
-                self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1)
+                o == p && self.identical(a, c, depth - 1)? && self.identical(b, d, depth - 1)?
+            (Loop(a, t, b, y), Loop(c, u, d, z)) => self.identical(a, c, depth - 1)? &&
+                self.identical(t, u, depth - 1)? && self.identical(b, d, depth - 1)? &&
+                self.identical(y, z, depth - 1)?
+            (Fold(a, b, y), Fold(c, d, z)) => self.identical(a, c, depth - 1)? &&
+                self.identical(b, d, depth - 1)? && self.identical(y, z, depth - 1)?
             (Ind(f, xs), Ind(g, ys)) => f == g && self.identical_all(
                 xs.as_slice(),
                 ys.as_slice(),
                 depth
-            )
+            )?
             (Con(f, k, xs), Con(g, l, ys)) =>
-                f == g && k == l && self.identical_all(xs.as_slice(), ys.as_slice(), depth)
-            (Case(f, p, xs, a), Case(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1) &&
-                self.identical_all(xs.as_slice(), ys.as_slice(), depth) && self.identical(
+                f == g && k == l && self.identical_all(xs.as_slice(), ys.as_slice(), depth)?
+            (Case(f, p, xs, a), Case(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1)? &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth)? && self.identical(
                 a,
                 b,
                 depth - 1
-            )
-            (Elim(f, p, xs, a), Elim(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1) &&
-                self.identical_all(xs.as_slice(), ys.as_slice(), depth) && self.identical(
+            )?
+            (Elim(f, p, xs, a), Elim(g, q, ys, b)) => f == g && self.identical(p, q, depth - 1)? &&
+                self.identical_all(xs.as_slice(), ys.as_slice(), depth)? && self.identical(
                 a,
                 b,
                 depth - 1
-            )
+            )?
             (IfLt(a, b, y, n), IfLt(c, d, z, m)) |
-                (IfEq(a, b, y, n), IfEq(c, d, z, m)) => self.identical(a, c, depth - 1) &&
-                self.identical(b, d, depth - 1) && self.identical(y, z, depth - 1) && self.identical(
+                (IfEq(a, b, y, n), IfEq(c, d, z, m)) => self.identical(a, c, depth - 1)? &&
+                self.identical(b, d, depth - 1)? && self.identical(y, z, depth - 1)? && self.identical(
                 n,
                 m,
                 depth - 1
-            )
-            (Elements(xs), Elements(ys)) => self.identical_all(xs.as_slice(), ys.as_slice(), depth)
+            )?
+            (Elements(xs), Elements(ys)) => self.identical_all(xs.as_slice(), ys.as_slice(), depth)?
             (x, y) => x == y
-        }
+        })
     }
 
-    fn identical_all(self, xs: [u32], ys: [u32], depth: u32) -> bool {
-        if xs.len != ys.len { return false }
-        for i in 0..xs.len { if !self.identical(xs[i], ys[i], depth - 1) { return false } }
-        true
+    fn identical_all(inout self, xs: [u32], ys: [u32], depth: u32) -> Result(bool, diag.Diag) {
+        if xs.len != ys.len { return Ok(false) }
+        for i in 0..xs.len { if !self.identical(xs[i], ys[i], depth - 1)? { return Ok(false) } }
+        Ok(true)
     }
 
     pub fn equal(inout self, a: u32, b: u32, depth: u32) -> Result(bool, diag.Diag) {
         let a = self.normal(a, depth)?
         let b = self.normal(b, depth)?
-        Ok(self.identical(a, b, depth))
+        Ok(self.identical(a, b, depth)?)
     }
 
     fn sort(inout self, ty: u32, depth: u32) -> Result(i64, diag.Diag) {
@@ -3271,7 +3283,7 @@ impl Core {
             let (at, y) = self.lent[i]
             if at > len { continue }
             let shifted = self.shift(y, len - at, 0, depth)?
-            if self.identical(shifted, x, depth) { return Ok(true) }
+            if self.identical(shifted, x, depth)? { return Ok(true) }
         }
         Ok(false)
     }
@@ -4119,16 +4131,16 @@ fn sum_order_ignores_exactly_the_evidence_conversion_ignores() {
     let give_p = c.add(Term.Give(true, a, b, p), sp).unwrap()
     let give_q = c.add(Term.Give(true, a, b, q), sp).unwrap()
     for (left, right) in [(sub_p, sub_q), (pack_p, pack_q), (give_p, give_q)] {
-        assert(c.identical(left, right, DEPTH), "the proof is irrelevant")
-        assert(c.compare(left, right, DEPTH) == 0, "equal terms sort together")
-        assert(c.compare(right, left, DEPTH) == 0, "comparison is symmetric at equality")
+        assert(c.identical(left, right, DEPTH).unwrap(), "the proof is irrelevant")
+        assert(c.compare(left, right, DEPTH).unwrap() == 0, "equal terms sort together")
+        assert(c.compare(right, left, DEPTH).unwrap() == 0, "comparison is symmetric at equality")
         let x = c.add(Term.App(left, a), sp).unwrap()
         let y = c.add(Term.App(right, b), sp).unwrap()
         let xx = c.add(Term.App(right, a), sp).unwrap()
         let yy = c.add(Term.App(left, b), sp).unwrap()
-        assert(!c.identical(x, y, DEPTH), "the relevant arguments differ")
-        assert(c.compare(x, y, DEPTH) < 0, "relevant arguments determine the order")
-        assert(c.compare(xx, yy, DEPTH) < 0, "proof replacement preserves that order")
+        assert(!c.identical(x, y, DEPTH).unwrap(), "the relevant arguments differ")
+        assert(c.compare(x, y, DEPTH).unwrap() < 0, "relevant arguments determine the order")
+        assert(c.compare(xx, yy, DEPTH).unwrap() < 0, "proof replacement preserves that order")
         let before = c.add(Term.UAdd(x, y), sp).unwrap()
         let after = c.add(Term.UAdd(xx, yy), sp).unwrap()
         assert(c.equal(before, after, DEPTH).unwrap(), "sum conversion is congruent")
@@ -4145,8 +4157,11 @@ fn sum_order_ignores_exactly_the_evidence_conversion_ignores() {
     }
     let result_p = c.add(Term.Give(false, a, b, p), sp).unwrap()
     let result_q = c.add(Term.Give(false, a, b, q), sp).unwrap()
-    assert(!c.identical(result_p, result_q, DEPTH), "a runtime result is relevant")
-    assert(c.compare(result_p, result_q, DEPTH) < 0, "runtime results participate in ordering")
+    assert(!c.identical(result_p, result_q, DEPTH).unwrap(), "a runtime result is relevant")
+    assert(
+        c.compare(result_p, result_q, DEPTH).unwrap() < 0,
+        "runtime results participate in ordering"
+    )
 }
 
 #[test]
@@ -4728,7 +4743,7 @@ fn sums_convert_in_any_order_but_run_in_theirs() {
     c.runtime = true
     let left = c.normal(ab, DEPTH).unwrap()
     let right = c.normal(ba, DEPTH).unwrap()
-    assert(!c.identical(left, right, DEPTH), "code to run keeps its operands' order")
+    assert(!c.identical(left, right, DEPTH).unwrap(), "code to run keeps its operands' order")
 }
 
 #[test]
@@ -5401,14 +5416,14 @@ fn wide_ghost_sums_are_canonical_without_wrapping() {
     let u = c.add(Term.U64, sp).unwrap()
     c.require(normal, u, [], true, DEPTH).unwrap()
     let again = c.normal(normal, DEPTH).unwrap()
-    assert(c.identical(normal, again, DEPTH), "wide canonical form is stable")
+    assert(c.identical(normal, again, DEPTH).unwrap(), "wide canonical form is stable")
     let x = c.add(Term.Var(0), sp).unwrap()
     let a = c.add(Term.UAdd(left, x), sp).unwrap()
     let b = c.add(Term.UAdd(x, right), sp).unwrap()
     assert(c.equal(a, b, DEPTH).unwrap(), "symbolic atoms retain canonical ordering")
     c.runtime = true
     let runtime = c.normal(left, DEPTH).unwrap()
-    assert(c.identical(runtime, left, DEPTH), "runtime overflow expression is unchanged")
+    assert(c.identical(runtime, left, DEPTH).unwrap(), "runtime overflow expression is unchanged")
 }
 
 #[test]
@@ -5423,4 +5438,59 @@ fn sum_collection_charges_repeated_graph_references() {
     let result = c.collect(root, &atoms, &constant, &pending, DEPTH)
     assert(result.is_err(), "shared exponential expansion must be rejected")
     assert(c.steps == STEPS + 1, "repeated references consume the step budget")
+}
+
+#[test]
+fn structural_comparison_charges_shared_graphs() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    var a = c.add(Term.Natural(1), sp).unwrap()
+    var b = c.add(Term.Natural(1), sp).unwrap()
+    for _ in 0..24 {
+        a = c.add(Term.UAdd(a, a), sp).unwrap()
+        b = c.add(Term.UAdd(b, b), sp).unwrap()
+    }
+    let same = c.identical(a, b, DEPTH)
+    assert(match same { Err(d) => d.msg == "core: checking step limit reached", _ => false },
+        "equality must reject exponential repeated references")
+    assert(c.steps == STEPS + 1, "equality charges every occurrence")
+    c.steps = 0
+    let order = c.compare(a, b, DEPTH)
+    assert(match order { Err(d) => d.msg == "core: checking step limit reached", _ => false },
+        "ordering must reject exponential repeated references")
+    assert(c.steps == STEPS + 1, "ordering charges every occurrence")
+}
+
+#[test]
+fn comparison_exhaustion_is_not_equality_or_inequality() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    let a = c.add(Term.Natural(1), sp).unwrap()
+    assert(c.identical(a, a, 0).is_err(), "depth exhaustion is not inequality")
+    assert(c.compare(a, a, 0).is_err(), "depth exhaustion is not equal ordering")
+    c.steps = STEPS - 2
+    assert(c.equal(a, a, DEPTH).is_err(), "conversion must propagate exhausted comparison")
+    c.steps = 0
+    assert(c.equal(a, a, DEPTH).unwrap(), "ordinary equal terms remain equal")
+    let b = c.add(Term.Natural(2), sp).unwrap()
+    assert(!c.equal(a, b, DEPTH).unwrap(), "ordinary unequal terms remain unequal")
+}
+
+#[test]
+fn sum_sorting_and_cancellation_charge_search_and_shifts() {
+    let sp = diag.Span.nowhere()
+    var c = Core.new()
+    var descending = Vec(u32).new()
+    for i in 0..2048 { descending.push(c.add(Term.Var((2048 - i) as u32), sp).unwrap()) }
+    let sorted = c.canonical(descending.as_slice(), 0, sp)
+    assert(sorted.is_err(), "reverse variable sorting cannot escape the work budget")
+    c.steps = 0
+    let a = c.add(Term.Natural(1), sp).unwrap()
+    var repeated = Vec(u32).new()
+    for _ in 0..2048 { repeated.push(a) }
+    let removed = c.without(repeated.as_slice(), repeated.as_slice(), DEPTH)
+    assert(removed.is_err(), "early matches still charge vector shifts")
+    c.steps = 0
+    assert(c.without([a, a], [a], DEPTH).unwrap().unwrap().len() == 1,
+        "cancellation removes only one occurrence")
 }

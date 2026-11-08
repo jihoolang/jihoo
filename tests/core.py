@@ -634,6 +634,8 @@ def main():
                        success=success, env=environment)
 
         source_frontend(compiler, root, temporary, environment)
+        from core_comparison_limits import validate_comparison_limits
+        validate_comparison_limits(compiler, root, temporary, environment, run)
         from core_modules import validate_modules
         validate_modules(compiler, root, temporary, environment, run)
         from core_pure_calls import validate_pure_calls
