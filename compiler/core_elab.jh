@@ -134,6 +134,8 @@ struct Elaborator {
     // The current function has inout parameters and no result: a block
     // without a value ends it.
     unit: bool
+    // Hygienic names for nested record patterns, never source identifiers.
+    record_serial: u64
 }
 
 impl Elaborator {
@@ -656,6 +658,28 @@ impl Elaborator {
         )
     }
 
+    // Check all leaves together before introducing any binder: nested
+    // fields cannot silently shadow another binding in the same pattern.
+    fn record_names(
+        self, pattern: ast.Pat, inout names: Vec(String), depth: u32
+    ) -> Result((), diag.Diag) {
+        if depth == 0 { return Err(error(pattern.span, "elaboration nesting limit reached")) }
+        match pattern.kind {
+            Name(n, false) => {
+                for name in names {
+                    if name == n { return Err(error(pattern.span, "duplicate struct binding name")) }
+                }
+                names.push(n.clone())
+            }
+            Wild => {}
+            Struct(_, fields, _) => {
+                for field in fields { self.record_names(field.pat, &names, depth - 1)? }
+            }
+            _ => return Err(error(pattern.span, "variant fields bind names or _"))
+        }
+        Ok(())
+    }
+
     // A record pattern is irrefutable. Reuse case analysis for its dependent
     // telescope, private fields and ownership; the initializer occurs once.
     fn record_binding(
@@ -674,27 +698,48 @@ impl Elaborator {
             binding.value.span,
             "bind an inout call's result to a name before struct destructuring"
         )) }
-        for i, field in fields {
+        var names = Vec(String).new()
+        self.record_names(binding.pat, &names, depth)?
+        let ast.PatKind.Struct(path, _, omitted) = binding.pat.kind else {
+            return Err(error(sp, "unreachable"))
+        }
+        var flat = Vec(ast.FieldPat).new()
+        var nested = Vec(ast.Stmt).new()
+        for field in fields {
             match field.pat.kind {
-                Name(n, false) => {
-                    for j in 0..i {
-                        match fields[j].pat.kind {
-                            Name(m, false) if m == n => return Err(error(
-                                field.pat.span,
-                                "duplicate struct binding name"
-                            ))
-                            _ => {}
+                Struct(_, _, _) => {
+                    let name = "<record:" + self.record_serial.to_string() + ">"
+                    self.record_serial += 1
+                    flat.push(ast.FieldPat {
+                        name: field.name.clone(),
+                        pat: ast.Pat {
+                            kind: ast.PatKind.Name(name.clone(), false),
+                            span: field.pat.span
                         }
-                    }
+                    })
+                    nested.push(ast.Stmt {
+                        kind: ast.StmtKind.Let(ast.LetStmt {
+                            kind: ast.LetKind.Let,
+                            pat: field.pat.clone(),
+                            ty: None,
+                            value: ast.Expr { kind: ast.ExprKind.Name(name), span: field.pat.span },
+                            els: None
+                        }),
+                        span: field.pat.span
+                    })
                 }
-                _ => {}
+                _ => flat.push(field.clone())
             }
+        }
+        let pattern = ast.Pat {
+            kind: ast.PatKind.Struct(path.clone(), flat, omitted),
+            span: binding.pat.span
         }
         let annotation = match binding.ty {
             Some(t) => Some(self.ty(t, core.DEPTH)?)
             None => None
         }
-        var rest = Vec(ast.Stmt).new()
+        var rest = nested
         for stmt in stmts { rest.push(stmt.clone()) }
         let body = ast.Expr {
             kind: ast.ExprKind.Block(ast.Block {
@@ -704,7 +749,7 @@ impl Elaborator {
             }),
             span: sp
         }
-        let arm = ast.Arm { pat: binding.pat.clone(), guard: None, body, span: sp }
+        let arm = ast.Arm { pat: pattern, guard: None, body, span: sp }
         self.case_analysis(binding.value, [arm], expected, sp, depth, annotation)
     }
 
@@ -3666,7 +3711,8 @@ pub fn compile(
         definitions: Vec((u32, bool)).new(),
         families: Vec((u32, bool)).new(),
         imports: Vec((String, u32)).new(),
-        unit: false
+        unit: false,
+        record_serial: 0
     }
     // Imported modules first: the loader's order is one where a module comes
     // before the modules that import it, the root last. Each module has its
