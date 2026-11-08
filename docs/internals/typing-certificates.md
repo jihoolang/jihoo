@@ -458,3 +458,34 @@ checks directly to `CheckArtifact --chain` before returning the result. Its
 independent Python `inspect` routine is used only for test observations, not as
 an additional parser on the production handoff path. No Lean acceptance rule,
 normalization profile, graph codec, resource limit or compiler behavior changes.
+
+### Open symbolic-sum profile
+
+`CheckLinearNormal.lean [--input] ARITY DEPTH FUEL` is a separate semantic
+validator for pure natural variables, word-sized literals and addition.
+`--input` reads one canonical snapshot. Validation reads three LF-separated
+artifacts: the retained input snapshot, actual output snapshot, and existing
+version-6 `Core.normal` operation record. Both snapshots must select `U64` at
+the same type root; the output must retain the complete input graph prefix.
+
+Unlike `CheckCoreNormal`, this profile accepts symbolic sums and wide ghost
+natural results. It derives restricted input/output typing from syntax and
+proves equal values in every natural environment of the supplied context;
+it neither consumes a general typing certificate nor proves a reduction step
+or normality. Subtraction, applications, arbitrary dependent-type conversion,
+effects and machine overflow semantics are excluded. The exact boundary and
+resource guards are described in [Lean proofs](lean-proofs.md#symbolic-natural-sum-result-validation).
+
+```sh
+python3 tests/core_linear_normalization.py --compiler jihoo
+```
+
+The suite rebuilds the actual-core exporter and normalization driver. It covers
+symbolic reorderings, repeated variables, wide constants, exact root/graph
+binding, malicious coefficients, scope, resource limits and failed subprocess
+or output gates. `LinearNormalizer.generate` retains immutable input bytes,
+admits them before Core, and invokes an optional consumer only after the exact
+returned output and record pass Lean validation. Acceptance guards use explicit
+runtime checks, so they remain active under Python optimization. IO and the
+selection of an open scalar body from a checked lambda are tested adapter
+boundaries, not source-to-model proofs.
