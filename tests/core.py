@@ -634,6 +634,8 @@ def main():
                        success=success, env=environment)
 
         source_frontend(compiler, root, temporary, environment)
+        from core_comparison_limits import validate_comparison_limits
+        validate_comparison_limits(compiler, root, temporary, environment, run)
         from core_modules import validate_modules
         validate_modules(compiler, root, temporary, environment, run)
         from core_pure_calls import validate_pure_calls
@@ -708,6 +710,8 @@ def main():
         validate_preservation(compiler, root, environment, run)
         from core_wide_sums import validate_wide_sums
         validate_wide_sums(compiler, root, temporary, environment, run)
+        from core_vec_extend import validate_vec_extend
+        validate_vec_extend(compiler, root, temporary, environment, run)
         from core_list_buffer import validate_list_buffer
         validate_list_buffer(compiler, root, temporary, environment, run)
         from core_collect import validate_collect
