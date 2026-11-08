@@ -35,6 +35,7 @@ same on GitHub.
 - [List proof library](language/list-proofs.md)
 - [Lists with exact lengths](language/sized-lists.md)
 - [Proof-bounded buffer ranges](language/buffer-ranges.md)
+- [Runtime-selected collections](language/bounded-collection.md)
 - [Reflection and derive](language/reflection.md)
 - [Closures](language/closures.md)
 - [Dynamic dispatch](language/dyn.md)
