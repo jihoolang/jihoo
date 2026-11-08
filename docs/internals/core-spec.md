@@ -432,7 +432,13 @@ Checking stops with an error, never acceptance, at any of these. Failing to comp
 
 - 200,000 terms (`LIMIT`), counting those the kernel makes as well as its input.
 - 1,000,000 steps (`STEPS`) of the kernel's recursive operations, reset for each definition with the
-  families before it. Lowering's normalization continues the last count.
+  families before it. Lowering's normalization continues the last count. Structural equality and
+  sum ordering charge each visited pair, including repeated DAG references; sorting variables,
+  cancellation candidate comparisons, pool copying and removal shifts also consume this budget.
+  Exhaustion propagates as a diagnostic rather than equality, inequality or an unsuccessful
+  cancellation. Depth exhaustion in comparison is likewise an error, including identical IDs.
+  These are operation charges, not a wall-clock or allocation-complexity theorem: other recursive
+  predicates and vector/node cloning are not individually metered by these comparison checks.
 - Recursion depth 128 (`DEPTH`), a budget for each operation rather than a bound on source nesting: for
   example, each field of a telescope starts anew.
 
