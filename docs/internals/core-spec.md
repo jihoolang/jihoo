@@ -515,3 +515,11 @@ extends that foundation with mode-aware scopes and capture-avoiding identificati
 of variable slots. Returned-owner aliases are counted together before branch
 agreement. Authenticating the modes and aliases from whole-core typing, and
 proving heap/borrow and runtime correspondence, remain separate obligations.
+
+
+[Binder-capability projection](lean-proofs.md#binder-capabilities-from-checked-domain-observations)
+now derives modes and lend permissions from normalized-domain summaries and
+checks them against actual checked Core telescopes. Its formal result is
+conditional on authentic summaries: formation/normalization provenance,
+first-order type instantiation, source-owner identity and borrow lifetimes are
+not established by this classification theorem.

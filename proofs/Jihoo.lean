@@ -101,3 +101,5 @@ import Jihoo.QuantityExamples
 
 import Jihoo.QuantityAliases
 import Jihoo.QuantityAliasExamples
+
+import Jihoo.QuantityBinderProjection

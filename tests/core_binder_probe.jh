@@ -1,0 +1,83 @@
+// Observe actual checked lambda domains. No caller-supplied mode or family flags.
+import std.os
+import core
+import core_parse
+
+fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn observe() -> Result(String, String) {
+    let source = stdin_once()?
+    var c = match core_parse.parse(source.as_str(), 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 {
+        return Err("expected exactly one definition".to_string())
+    }
+    match c.check() { Ok(_) => {}
+        Err(e) => return Err(e.msg.clone()) }
+    var at = c.definitions[0].value
+    var context = Vec(core.Binding).new()
+    var out = String.new()
+    loop {
+        let Lam(erased, domain, body) = c.term(at) else { break }
+        let sort = match c.infer(domain, context.as_slice(), true, core.DEPTH) {
+            Ok(s) => s
+            Err(e) => return Err(e.msg.clone())
+        }
+        let sort = match c.normal(sort, core.DEPTH) {
+            Ok(s) => s
+            Err(e) => return Err(e.msg.clone())
+        }
+        let normal = match c.normal(domain, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        let proof = match c.term(sort) { Prop => true, _ => false }
+        let tag = if proof { 0 as u32 } else { match c.term(normal) {
+            U64 => 1
+            I64 | Array(_) | Refine(_) => 2
+            Ind(f, _) => {
+                if !c.is_data(f) { return Err("inconsistent checked family sort".to_string()) }
+                if c.is_boxed(f) { 4 } else { 3 }
+            }
+            Buffer(_) => 5
+            Back(_, _, _) => 6
+            Ref(_) => 7
+            _ => 8
+        } }
+        let owned = match c.owned(domain, core.DEPTH) {
+            Ok(o) => o
+            Err(e) => return Err(e.msg.clone())
+        }
+        out += (if erased { 1 as u32 } else { 0 }).to_string()
+        out += " " + tag.to_string() + " " + (if owned { 1 as u32 } else { 0 }).to_string() + "\n"
+        context.push(core.Binding { ty: domain, erased })
+        at = body
+    }
+    if context.len() == 0 { return Err("expected a lambda telescope".to_string()) }
+    Ok(out)
+}
+
+fn main() -> i32 {
+    match observe() {
+        Ok(rows) => { print(rows); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}

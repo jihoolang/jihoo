@@ -204,6 +204,7 @@
                 ./proofs/Audit.lean
                 ./proofs/EmitCore.lean
                 ./proofs/EmitPrimitiveSafety.lean
+                ./proofs/EmitBinderClassification.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -214,6 +215,7 @@
             mkdir -p tests/core_preserves
             cp ${./tests/core_preserves/lean-core-translation.jhc} tests/core_preserves/lean-core-translation.jhc
             cp ${./tests/core_preserves/lean-primitive-safety.jhc} tests/core_preserves/lean-primitive-safety.jhc
+            cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
             bash proofs/check.sh
             touch $out
           '';
@@ -286,6 +288,7 @@
               jihoo run tests/runner.jh
               python3 tests/core_primitive_safety.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);
