@@ -80,6 +80,10 @@ the runner. Its suites:
   `tests/core_functions.py` also rejects empty higher-order calls and chained
   scalar/owned/proof applications, with valid local/imported nullary factories,
   exact reference MIR, erased certificates and native ownership controls.
+  `tests/core_lambdas.py` compares repeated wildcard parameters with named
+  binders in callbacks, proof families and extended induction motives. It checks
+  inaccessible values/evidence, owned argument drops, captured effects/traps and
+  duplicate real names without changing runtime MIR.
   `tests/core_equality.py` adds equality/transport cases to this suite:
   paired source/core execution, user lemmas, proof-only elimination,
   shadowing, false equalities and incorrect rewriting.
