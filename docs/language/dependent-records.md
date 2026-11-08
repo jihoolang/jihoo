@@ -55,10 +55,27 @@ This is a single-case elimination, like the corresponding `match`. An owned
 record is consumed; destructuring a `ref` parameter borrows its owned fields.
 Owned fields extracted this way can be passed to `inout` operations, just as
 owned match-arm fields can. Omitted owned fields are cleaned up by the existing
-case ownership rules. Nested records can be unpacked with successive lets.
+case ownership rules. Nested records can be unpacked in one pattern, or with successive lets:
 
-This form supports struct patterns with name or wildcard fields only. `var`
-destructuring, nested patterns, refutable enum patterns and `let ... else` are
+```jihoo
+struct Outer(n: u64) { inner: Sized(n), extra: buffer(n) }
+
+fn release(n: erased(u64), value: Outer(n)) -> i64 {
+    let Outer { inner: Sized { data }, extra: _ } = value
+    free(data, 0)
+}
+```
+
+A nested record pattern is checked at the field's actual type. Erased indices,
+evidence and borrowed fields retain the same meaning as successive record
+lets. Every named binding in the complete pattern must be distinct; `_` may
+appear more than once. Each record's fields enter scope in declaration order,
+then its nested patterns are unpacked in the order written. The initializer
+runs once, even when every nested field is discarded. Omitted owned fields
+are freed, and private fields remain inaccessible at every level.
+
+This form supports struct patterns with names, wildcards and nested struct
+patterns. `var` destructuring, refutable enum patterns and `let ... else` are
 not supported in this subset. Bind an inout call's result to a name before
 unpacking it. Borrowed fields cannot escape their borrow or be consumed as
 owners, and field-dependent results retain the existing match restrictions.

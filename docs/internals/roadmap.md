@@ -979,6 +979,15 @@ compares their MIR to contextual construction and checks both targets, native
 execution and invalid proofs. This changes source ergonomics, not the core rules
 or the scope of the mechanized soundness results.
 
+Nested irrefutable record lets now elaborate through hygienic intermediate
+bindings and existing case elimination. Whole-pattern duplicate names are
+rejected before any binding enters scope; each nested level retains dependent
+indices, evidence, privacy and ownership checks. The regression suite compares
+nested patterns with explicit matches, including borrowed and inout values,
+checks deep/reordered patterns and allocation balance, and preserves initializer
+traps. Refutable patterns, nested match-arm patterns and general pattern
+inference remain outside this change. No kernel rule or Lean claim changes.
+
 The final source stabilization pass infers constant match results and conditional
 results without a local annotation, validates conditional result annotations,
 and reconciles historical design notes with the normative core specification.

@@ -136,8 +136,8 @@ def validate_structs(compiler, root, temporary, environment, run):
             assert ctypes.c_long.in_dll(native,'allocations').value==before
             assert ctypes.c_long.in_dll(native,'allocations').value==ctypes.c_long.in_dll(native,'frees').value
     snippets=re.findall(r'```jihoo\n(.*?)```', (root/'docs/language/dependent-records.md').read_text(), re.S)
-    assert len(snippets)==1
-    documented=temporary/'structs-documented.jh'; documented.write_text(snippets[0])
+    assert len(snippets)==2
+    documented=temporary/'structs-documented.jh'; documented.write_text('\n'.join(snippets))
     for path in (documented, root/'examples/core_sized_record.jh'):
         for level in ('-O0','-O2'): assert command('run',path,level,success=False).returncode==17
     flags=('--lib','--release','--no-verify','--error-format=json')

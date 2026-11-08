@@ -65,8 +65,7 @@ BODIES={
     match p { Packet { data, .. } => { free(data, 9) } }
 }'''),
 'nested': ('''export fn nested(n: u64, x: i64) -> i64 {
-    let Nest { packet: p, extra }: Nest(n) = Nest { packet: packet(n, x), extra: alloc(n, x) };
-    let Packet { data, .. } = p;
+    let Nest { packet: Packet { data, .. }, extra }: Nest(n) = Nest { packet: packet(n, x), extra: alloc(n, x) };
     free(data, free(extra, 11))
 }''', '''export fn nested(n: u64, x: i64) -> i64 {
     let outer: Nest(n) = Nest { packet: packet(n, x), extra: alloc(n, x) }
@@ -83,6 +82,58 @@ BODIES={
 }'''),
 'discard': ('''export fn discard(n: u64, x: i64) -> i64 { let Packet { .. } = packet(n, x); 13 }''', '''export fn discard(n: u64, x: i64) -> i64 { match packet(n, x) { Packet { .. } => { 13 } } }'''),
 }
+BODIES['nested_borrow'] = ('''fn nested_peek(p: ref Nest(1)) -> i64 {
+    let Nest { packet: Packet { len, data, same }, .. } = p;
+    index(data, 0, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1)))
+}
+export fn nested_borrow(x: i64) -> i64 {
+    let p: Nest(1) = Nest { packet: packet(1, x), extra: alloc(1, x) }
+    nested_peek(p) + nested_peek(p)
+}''', '''fn nested_peek(p: ref Nest(1)) -> i64 {
+    match p { Nest { packet: inner, .. } => {
+        match inner { Packet { len, data, same } => {
+            index(data, 0, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1)))
+        } }
+    } }
+}
+export fn nested_borrow(x: i64) -> i64 {
+    let p: Nest(1) = Nest { packet: packet(1, x), extra: alloc(1, x) }
+    nested_peek(p) + nested_peek(p)
+}''')
+BODIES['deep'] = ('''struct Deep { left: Pair, right: Pair }
+struct Deeper { inner: Deep }
+export fn deep(x: i64) -> i64 {
+    let p = Deeper { inner: Deep { left: Pair { a: x, b: 1 }, right: Pair { a: 2, b: 3 } } }
+    let Deeper { inner: Deep { right: Pair { b: z, a: y }, left: Pair { b: _, a: x } } } = p;
+    x + y + z
+}''', '''struct Deep { left: Pair, right: Pair }
+struct Deeper { inner: Deep }
+export fn deep(x: i64) -> i64 {
+    let p = Deeper { inner: Deep { left: Pair { a: x, b: 1 }, right: Pair { a: 2, b: 3 } } }
+    match p { Deeper { inner } => { match inner { Deep { right, left } => {
+        match right { Pair { b: z, a: y } => { match left { Pair { b: _, a: x } => { x + y + z } } } }
+    } } } }
+}''')
+BODIES['nested_update'] = ('''fn nested_update(inout p: Nest(1), x: i64) {
+    let Nest { packet: Packet { len, data, same }, extra } = p;
+    store(&data, 0, x, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1)))
+    p = Nest { packet: Packet { len, data, same }, extra }
+}
+export fn nested_mutate(x: i64) -> i64 {
+    var p: Nest(1) = Nest { packet: packet(1, x), extra: alloc(1, x) }
+    nested_update(&p, x + 1)
+    nested_peek(p)
+}''', '''fn nested_update(inout p: Nest(1), x: i64) {
+    match p { Nest { packet: inner, extra } => { match inner { Packet { len, data, same } => {
+        store(&data, 0, x, transport(fn(k) { Lt(0, k) }, nat.eq_sym(len, 1, same), decide_lt(0, 1)))
+        p = Nest { packet: Packet { len, data, same }, extra }
+    } } } }
+}
+export fn nested_mutate(x: i64) -> i64 {
+    var p: Nest(1) = Nest { packet: packet(1, x), extra: alloc(1, x) }
+    nested_update(&p, x + 1)
+    nested_peek(p)
+}''')
 PROGRAM=PREFIX+'\n'.join(a for a,b in BODIES.values())
 REFERENCE=PREFIX+'\n'.join(b for a,b in BODIES.values())
 INVALID={
@@ -101,7 +152,13 @@ INVALID={
     'consume-borrow': ('fn bad(p: ref Packet(1)) -> i64 { let Packet { data, .. } = p; free(data, 0) }','expected a buffer'),
     'double-use': ('fn bad(p: Packet(1)) -> i64 { let Packet { data, .. } = p; let Packet { data: other, .. } = p; free(data, free(other, 0)) }','an owned value is used more than once'),
     'field-double-use': ('fn bad(p: Packet(1)) -> i64 { let Packet { data, .. } = p; free(data, free(data, 0)) }','an owned value is used more than once'),
-    'nested-pattern': ('fn bad(p: Nest(1)) -> i64 { let Nest { packet: Packet { data, .. }, .. } = p; free(data, 0) }','variant fields bind names or _'),
+    'nested-duplicate': ('fn bad(p: Nest(1)) -> i64 { let Nest { packet: Packet { data: x, .. }, extra: x } = p; 0 }','duplicate struct binding name'),
+    'nested-borrow': ('fn bad(p: ref Nest(1)) -> i64 { let Nest { packet: Packet { data, .. }, .. } = p; free(data, 0) }','expected a buffer'),
+    'nested-reuse': ('fn bad(p: Nest(1)) -> i64 { let Nest { packet: Packet { data, .. }, .. } = p; free(data, free(data, 0)) }','an owned value is used more than once'),
+    'nested-wrong-family': ('fn bad(p: Nest(1)) -> i64 { let Nest { packet: Pair { a, b }, .. } = p; a }','match has no arm for Packet'),
+    'nested-missing': ('fn bad(p: Nest(1)) -> i64 { let Nest { packet: Packet { data }, .. } = p; 0 }','missing field: len'),
+    'nested-private': ('struct Wrapped { inner: binding_helper.Secret(1) } fn bad(p: Wrapped) -> i64 { let Wrapped { inner: binding_helper.Secret { data, .. } } = p; 0 }','private struct field: data'),
+    'nested-refutable': ('struct Wrapped { inner: Pair } fn bad(p: Wrapped) -> i64 { let Wrapped { inner: Pair { a: 1, b } } = p; b }','variant fields bind names or _'),
     'refutable': ('enum Maybe { None; Some(i64) } fn bad(x: Maybe) -> i64 { let Maybe.Some(y) = x; y }','a let binds a name'),
     'scalar': ('fn bad() -> i64 { let Pair { a, b } = 1; a }','match requires a value of a data type'),
 }
@@ -142,7 +199,7 @@ def validate_bindings(compiler,root,temporary,environment,run):
                 native=ctypes.CDLL(str(library))
                 for name in ('owned','partial','context','nested','discard'):
                     f=getattr(native,name);f.argtypes,f.restype=[ctypes.c_uint64,ctypes.c_int64],ctypes.c_int64
-                for name in ('borrowed','shadow'):
+                for name in ('borrowed','shadow','nested_borrow','deep','nested_mutate'):
                     f=getattr(native,name);f.argtypes,f.restype=[ctypes.c_int64],ctypes.c_int64
                 for n in (0,1,9):
                     for x in (-7,0,13):
@@ -152,8 +209,10 @@ def validate_bindings(compiler,root,temporary,environment,run):
                         assert native.partial(n,x)==x and native.context(n,x)==9
                         assert native.nested(n,x)==11 and native.discard(n,x)==13
                         assert native.borrowed(x)==2*x+1 and native.shadow(x)==2*x+3
+                        assert native.nested_borrow(x)==2*x and native.deep(x)==x+5
+                        assert native.nested_mutate(x)==x+1
                 assert ctypes.c_long.in_dll(native,'allocations').value==ctypes.c_long.in_dll(native,'frees').value
-    trap=temporary/'binding-trap.jh';trap.write_text(PREFIX+'fn main() -> i64 { let Pair { .. } = Pair { a: 9223372036854775807 + 1, b: 0 }; 0 }')
+    trap=temporary/'binding-trap.jh';trap.write_text(PREFIX+'struct Wrapped { inner: Pair } fn main() -> i64 { let Wrapped { inner: Pair { .. } } = Wrapped { inner: Pair { a: 9223372036854775807 + 1, b: 0 } }; 0 }')
     for level in ('-O0','-O2'):assert command('run',trap,level,success=False).returncode==132
     for level in ('-O0','-O2'):
         assert command('run',root/'examples/core_record_bindings.jh',level,success=False).returncode==17
