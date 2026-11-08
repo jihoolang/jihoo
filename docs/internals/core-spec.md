@@ -493,3 +493,11 @@ and closed literal consistency, without assuming evidence normalization. Literal
 operands are required, or explicit finite beta/add evaluations to those operands.
 This does not discharge the whole-calculus, quantity/borrow or lowering obligations
 above; actual kernel and native behavior are checked by finite regression tests.
+
+
+A [quantity control foundation](lean-proofs.md#quantity-control-and-partial-executions)
+proves exact resource counts for successful abstract control executions and upper
+bounds for finite prefixes, including traps. Local binders, branches, repetition,
+known once-called continuations and erased code have separate rules. The missing
+whole-core projection, operational simulation and heap/borrow lifetime obligations
+are explicit; these results do not yet establish item 3 above.

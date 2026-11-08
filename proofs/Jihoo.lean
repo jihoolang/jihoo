@@ -95,3 +95,6 @@ import Jihoo.PropositionalEvidenceExamples
 
 import Jihoo.CorePrimitiveSafety
 import Jihoo.CorePrimitiveExamples
+
+import Jihoo.QuantityControl
+import Jihoo.QuantityExamples

@@ -1,0 +1,58 @@
+// Test-only probe of the real runtime_uses query. Does not replace Core.check.
+import std.env
+import std.os
+import core
+import core_parse
+
+fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn probe(checked: bool) -> Result(String, String) {
+    let source = stdin_once()?
+    var c = match core_parse.parse(source.as_str(), 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 || c.families.len() != 0 {
+        return Err("expected one definition without families".to_string())
+    }
+    let Lam(false, domain, body) = c.term(c.definitions[0].value) else {
+        return Err("expected one runtime lambda".to_string())
+    }
+    let context = [core.Binding { ty: domain, erased: false }]
+    let n = match c.runtime_uses(body, 0, context, []) {
+        Ok(n) => n
+        Err(e) => return Err(e.msg.clone())
+    }
+    if checked {
+        match c.check() {
+            Ok(_) => {}
+            Err(e) => return Err(e.msg.clone())
+        }
+    }
+    Ok(n.to_string())
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() != 2 || (args[1] != "count" && args[1] != "check") { return 2 }
+    match probe(args[1] == "check") {
+        Ok(n) => { println(n); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}
