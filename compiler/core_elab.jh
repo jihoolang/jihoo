@@ -2666,7 +2666,11 @@ impl Elaborator {
             }
             // `S { field: value, ... }`, every field once.
             StructLit(path, inits) => {
-                let Some(name) = self.path_name(path.deref()) else { return Err(error(
+                let base = match path.kind {
+                    Call(f, _) => f.deref()
+                    _ => path.deref()
+                }
+                let Some(name) = self.path_name(base) else { return Err(error(
                     sp,
                     "unsupported expression in dependent_core"
                 )) }
@@ -2678,6 +2682,17 @@ impl Elaborator {
                     sp,
                     "unknown struct"
                 )) }
+                self.exposed(f, sp)?
+                for i, init in inits {
+                    var found = false
+                    for n in names { if init.name == n { found = true } }
+                    if !found { return Err(error(init.span, "unknown struct initializer field")) }
+                    for j in 0..i {
+                        if inits[j].name == init.name { return Err(error(
+                            init.span, "duplicate struct initializer field"
+                        )) }
+                    }
+                }
                 if inits.len() != names.len() { return Err(error(
                     sp,
                     "a struct value gives every field"
@@ -2693,7 +2708,23 @@ impl Elaborator {
                     }
                     if !found { return Err(error(sp, ("missing field: " + n).as_str())) }
                 }
-                self.construct(f, 0, args.as_slice(), expected, sp, depth)
+                match path.kind {
+                    Call(_, _) => {
+                        let annotation = self.type_expr(path.deref(), depth - 1)?
+                        let _ = self.c.infer(annotation, self.ctx.as_slice(), true, core.DEPTH)?
+                        let value = self.construct(
+                            f,
+                            0,
+                            args.as_slice(),
+                            Some(annotation),
+                            sp,
+                            depth
+                        )?
+                        self.c.require(value, annotation, self.ctx.as_slice(), true, core.DEPTH)?
+                        Ok(value)
+                    }
+                    _ => self.construct(f, 0, args.as_slice(), expected, sp, depth)
+                }
             }
             Match(scrutinee, arms) => self.case_analysis(
                 scrutinee.deref(),

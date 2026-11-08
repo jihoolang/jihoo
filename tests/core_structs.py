@@ -69,8 +69,50 @@ fn empty(n: erased(u64)) -> u64 {
 export fn erased_index() -> u64 { empty(18446744073709551615 + 1) }
 export fn shadow(n: u64) -> u64 { let n = n + 1; let s: Empty(n) = Empty {}; match s { Empty {} => n } }
 '''
+# Keep the context-only spelling as an independent runtime/erasure reference.
+REFERENCE = PROGRAM
+PROGRAM = PROGRAM.replace('Pair { same:', 'Pair(n, m) { same:').replace(
+    'let s: Outer(n) = Outer { inner: struct_helper.Sized {',
+    'let s = Outer(n) { inner: struct_helper.Sized(n) {'
+).replace('let s: Empty(n) = Empty {}', 'let s = Empty(n) {}')
+EXPLICIT = """
+export fn explicit_ghost() -> u64 {
+    let s = Empty(18446744073709551615 + 1) {}
+    match s { Empty {} => 19 }
+}
+export fn explicit_discard(n: u64, x: i64) -> i64 {
+    let _ = Outer(n) { inner: struct_helper.Sized(n) { data: alloc(n, x) } }
+    23
+}
+fn explicit_read(n: u64, s: ref struct_helper.Sized(n)) -> i64 {
+    if_lt(0, n, fn(p) { struct_helper.read(n, s, p) }, 0)
+}
+export fn explicit_borrow(n: u64, x: i64) -> i64 {
+    let s = struct_helper.Sized(n) { data: alloc(n, x) }
+    let a = explicit_read(n, s)
+    a + struct_helper.consume(n, s)
+}
+"""
+PROGRAM += EXPLICIT
+REFERENCE += EXPLICIT.replace('let s = Empty(18446744073709551615 + 1) {}',
+    'let s: Empty(18446744073709551615 + 1) = Empty {}').replace(
+    'let _ = Outer(n) { inner: struct_helper.Sized(n) {',
+    'let _: Outer(n) = Outer { inner: struct_helper.Sized {').replace(
+    'let s = struct_helper.Sized(n) {', 'let s: struct_helper.Sized(n) = struct_helper.Sized {')
 ANCHOR = '\nexport fn positive_anchor() -> i64 { 0 }\n'
 INVALID = {
+    'explicit-missing-index': ('fn bad() -> i64 { let _ = struct_helper.Sized() { data: alloc(1, 0) }; 0 }', 'wrong number of family indices'),
+    'explicit-extra-index': ('fn bad() -> i64 { let _ = struct_helper.Sized(1, 2) { data: alloc(1, 0) }; 0 }', 'wrong number of family indices'),
+    'explicit-index-type': ('fn bad(n: i64) -> i64 { let _ = struct_helper.Sized(n) { data: alloc(1, 0) }; 0 }', 'type mismatch'),
+    'explicit-bad-evidence': ('struct Empty(n: u64) {} fn bad() -> i64 { let _ = Empty(sub(2, 1, decide_lt(0, 1))) {}; 0 }', 'type mismatch'),
+    'explicit-field-index': ('fn bad() -> i64 { let _ = struct_helper.Sized(2) { data: alloc(1, 0) }; 0 }', 'type mismatch'),
+    'explicit-context-index': ('fn bad() -> struct_helper.Sized(1) { struct_helper.Sized(2) { data: alloc(2, 0) } }', 'type mismatch'),
+    'explicit-context-family': ('struct Other(n: u64) { data: buffer(n) } fn bad() -> Other(1) { struct_helper.Sized(1) { data: alloc(1, 0) } }', 'type mismatch'),
+    'explicit-private-field': ('fn bad() -> i64 { let _ = struct_helper.Secret(1) { tag: 0, data: alloc(1, 0) }; 0 }', 'private struct field: data'),
+    'explicit-unknown-field': ('fn bad() -> i64 { let _ = struct_helper.Sized(1) { wrong: alloc(1, 0) }; 0 }', 'unknown struct initializer field'),
+    'explicit-duplicate-field': ('fn bad() -> i64 { let _ = struct_helper.Sized(1) { data: alloc(1, 0), data: alloc(1, 0) }; 0 }', 'duplicate struct initializer field'),
+    'context-unknown-field': ('fn bad() -> struct_helper.Sized(1) { struct_helper.Sized { wrong: alloc(1, 0) } }', 'unknown struct initializer field'),
+    'context-duplicate-field': ('fn bad() -> struct_helper.Sized(1) { struct_helper.Sized { data: alloc(1, 0), data: alloc(1, 0) } }', 'duplicate struct initializer field'),
     'missing-index': ('fn bad(s: struct_helper.Sized) -> i64 { 0 }', 'wrong number of family indices'),
     'extra-index': ('fn bad(s: struct_helper.Sized(1, 2)) -> i64 { 0 }', 'wrong number of family indices'),
     'index-type': ('fn bad(x: i64, s: struct_helper.Sized(x)) -> i64 { 0 }', 'type mismatch'),
@@ -105,6 +147,8 @@ def validate_structs(compiler, root, temporary, environment, run):
     source = temporary/'parameterized-structs.jh'; source.write_text(PROGRAM)
     command('check',source,'--lib',env={**environment,'JIHOO_LLVM':'/unavailable','JIHOO_CC':'/unavailable'})
     mir=command('emit-mir',source,'--lib').stdout
+    reference=temporary/'structs-reference.jh'; reference.write_text(REFERENCE)
+    assert mir==command('emit-mir',reference,'--lib').stdout, 'explicit/contextual struct MIR differs'
     formatted=temporary/'structs-formatted.jh'; formatted.write_text(command('fmt',source).stdout)
     assert command('fmt',formatted).stdout==formatted.read_text()
     assert command('emit-mir',formatted,'--lib').stdout==mir
@@ -121,16 +165,19 @@ def validate_structs(compiler, root, temporary, environment, run):
             native=ctypes.CDLL(str(library))
             native.dependent.argtypes,native.dependent.restype=[ctypes.c_uint64,ctypes.c_uint64,ctypes.c_int64],ctypes.c_int64
             native.updated.argtypes,native.updated.restype=[ctypes.c_int64],ctypes.c_int64
-            for name in ('nested','partial'):
+            for name in ('nested','partial','explicit_discard','explicit_borrow'):
                 f=getattr(native,name); f.argtypes,f.restype=[ctypes.c_uint64,ctypes.c_int64],ctypes.c_int64
             for n in (0,1,5):
                 for m in (0,1,7):
                     for x in (-4,0,13): assert native.dependent(n,m,x)==(x if m else 0)
                 for x in (-4,0,13):
                     assert native.nested(n,x)==7 and native.partial(n,x)==2*x
+                    assert native.explicit_discard(n,x)==23 and native.explicit_borrow(n,x)==(x if n else 0)+7
             for x in (-4,0,13): assert native.updated(x)==2*x+9
             before=ctypes.c_long.in_dll(native,'allocations').value
             native.erased_index.restype=ctypes.c_uint64
+            native.explicit_ghost.restype=ctypes.c_uint64
+            assert native.explicit_ghost()==19
             native.shadow.argtypes,native.shadow.restype=[ctypes.c_uint64],ctypes.c_uint64
             assert native.erased_index()==11 and native.shadow(41)==42
             assert ctypes.c_long.in_dll(native,'allocations').value==before
@@ -140,6 +187,13 @@ def validate_structs(compiler, root, temporary, environment, run):
     documented=temporary/'structs-documented.jh'; documented.write_text('\n'.join(snippets))
     for path in (documented, root/'examples/core_sized_record.jh'):
         for level in ('-O0','-O2'): assert command('run',path,level,success=False).returncode==17
+    for name,body in {
+        'field-overflow': 'fn main() -> i64 { let _ = struct_helper.Sized(1) { data: alloc(1, 9223372036854775807 + 1) }; 0 }',
+        'runtime-index': 'fn main() -> i64 { let _ = struct_helper.Sized(18446744073709551615 + 1) { data: alloc(18446744073709551615 + 1, 0) }; 0 }',
+    }.items():
+        path=temporary/f'structs-trap-{name}.jh'; path.write_text(PREFIX+body)
+        for level in ('-O0','-O2'):
+            assert command('run',path,level,success=False).returncode==132,(name,level)
     flags=('--lib','--release','--no-verify','--error-format=json')
     env={**environment,'JIHOO_NO_ELAB':'1'}
     control=temporary/'structs-control.jh'; control.write_text(PREFIX+'fn good() -> struct_helper.Sized(1) { struct_helper.Sized { data: alloc(1, 0) } }'+ANCHOR)
@@ -154,4 +208,4 @@ def validate_structs(compiler, root, temporary, environment, run):
             assert r.returncode==1 and len(errors)==1,(name,action,r.stderr)
             assert errors[0]['kind']=='source' and errors[0]['message']==(('' if name in ('parameter-mode','parameter-sink','variadic') else 'core: ')+diagnostic),(name,action,r.stderr)
         assert not obj.exists(),name
-    print(f'parameterized structs: dependent fields, borrowed/owned matches, updates, privacy, both targets and {len(INVALID)} intended rejections passed')
+    print(f'parameterized structs: explicit/contextual MIR, checked erased indices, traps, dependent fields, borrowed/owned matches, updates, privacy, both targets and {len(INVALID)} intended rejections passed')

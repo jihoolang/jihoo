@@ -673,6 +673,10 @@ mechanize its soundness, starting from that specification:
    sums fail to convert. Source, textual-core and raw-kernel tests check this
    congruence boundary while retaining rejection of different runtime operands
    and malformed proof graphs.
+   Explicit indexed record literals now supply their own checked context,
+   including imported and nested records. Contextual and explicit constructions
+   lower identically; malformed indices and duplicate/unknown fields are rejected.
+   This changes source elaboration, not the kernel or its soundness coverage.
    Continue auditing conversion, substitution, erased indices, indexed
    elimination and ownership boundaries against accepted and rejected programs.
    Record remaining source-subset restrictions and settle the kernel rules

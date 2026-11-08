@@ -30,7 +30,7 @@ SOURCE_INVALID = {
     "false-room": ("fn bad() -> vec.Vec { vec.Vec { len: 5, cap: 1, data: alloc(1, 0), room: decide_lt(5, 2) } }", "true closed inequality"),
     "wrong-buffer": ("fn bad(cap: u64) -> vec.Vec { vec.Vec { len: 0, cap, data: alloc(cap + 1, 0), room: zero_le(cap) } }", "type mismatch"),
     "missing-field": ("fn bad(cap: u64) -> vec.Vec { vec.Vec { len: 0, cap, data: alloc(cap, 0) } }", "gives every field"),
-    "extra-field": ("fn bad(cap: u64) -> vec.Vec { vec.Vec { len: 0, cap, data: alloc(cap, 0), room: zero_le(cap), more: 1 } }", "gives every field"),
+    "extra-field": ("fn bad(cap: u64) -> vec.Vec { vec.Vec { len: 0, cap, data: alloc(cap, 0), room: zero_le(cap), more: 1 } }", "unknown struct initializer field"),
     "field-twice": ("fn bad(v: vec.Vec) -> i64 {\n match v {\n vec.Vec { len, cap, data, room } => {\n free(data, free(data, 0))\n }\n }\n}", "more than once"),
     "borrowed-free": ("fn bad(v: ref vec.Vec) -> i64 {\n match v {\n vec.Vec { len, cap, data, room } => free(data, 0)\n }\n}", "expected a buffer"),
     "borrowed-store": ("fn bad(v: ref vec.Vec) -> i64 {\n match v {\n vec.Vec { len, cap, data, room } => free(store(data, 0, 1, decide_lt(0, 1)), 0)\n }\n}", "expected a buffer"),
