@@ -437,7 +437,14 @@ whether its total fits, reordering operands keeps trap behavior.
 Conversion compares sums in a canonical form: the variables in order,
 then other terms, then the constant, with literals added and zero
 dropped. So `(i + 1) + 1` and `2 + i` are the same term. A constant part
-that does not fit a U64 leaves the sum as written. `Strict`, which only
+that does not fit a U64 is represented in ghost mode by a balanced tree
+of U64 literals. Thus `MAX + 1` and `1 + MAX` convert, while neither
+converts to zero. Runtime normalization retains the original overflow
+boundary. Sum collection charges every occurrence, including shared graph
+references, to the checker work budget; exhaustion rejects the check.
+This implementation extension is not a general arithmetic normalization
+completeness theorem or an extension of the Lean bounded-add certificates.
+`Strict`, which only
 orders the evaluation of traps, does not change a term's meaning and is
 ignored by conversion.
 
