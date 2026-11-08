@@ -698,6 +698,8 @@ def main():
         validate_spec(root)
         validate_guide(compiler, root, temporary, environment, run)
         validate_preservation(compiler, root, environment, run)
+        from core_sized_concat import validate_sized_concat
+        validate_sized_concat(compiler, root, temporary, environment, run)
         from core_sized_list import validate_sized_list
         validate_sized_list(compiler, root, temporary, environment, run)
         from core_list_map import validate_list_map

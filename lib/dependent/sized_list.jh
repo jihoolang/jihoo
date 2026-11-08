@@ -55,3 +55,26 @@ pub fn map(n: erased(u64), xs: ref Sized(n), f: fn(i64) -> i64) -> Sized(n) {
         }
     }
 }
+
+// Copy the prefix, consume the suffix and retain their exact combined length.
+pub fn append_into(n: erased(u64), m: erased(u64), xs: ref Sized(n), ys: Sized(m)) -> Sized(n + m) {
+    match xs {
+        Sized { data: left, exact: left_exact } => match ys {
+            Sized { data: right, exact: right_exact } => Sized {
+                data: list.append_into(left, right),
+                exact: transport(
+                    fn(k) { Eq(list.length(list.append_into(left, right)), n + k) },
+                    right_exact,
+                    transport(
+                        fn(k) { Eq(
+                            list.length(list.append_into(left, right)),
+                            k + list.length(right)
+                        ) },
+                        left_exact,
+                        list.append_into_length(left, right)
+                    )
+                )
+            }
+        }
+    }
+}

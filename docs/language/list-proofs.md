@@ -24,6 +24,10 @@ including `Nil`, is allocated on the heap. A scope frees an unused owned list.
 - `clone(xs)` borrows its input and returns a new owned copy.
 - `append(xs, ys)` borrows **both** inputs and copies both into a new list.
   It does not consume the second list or share its nodes.
+- `append_into(xs, ys)` borrows and copies only the prefix `xs`, consuming
+  the owned suffix `ys` and transferring its nodes without copying. The result
+  owns the entire concatenation; `ys` cannot be used afterward. The prefix and
+  suffix cannot be the same owner.
 - `into_length(xs)` consumes a list while counting, freeing every node. It can
   measure a newly produced list without introducing a temporary borrow.
 
@@ -79,6 +83,19 @@ Eq(length(map(xs, f)), length(xs))
 This direct structural proof is used by [lists with exact lengths](sized-lists.md)
 to retain the mapped owner in an indexed record. The consuming form remains
 available with its original signature.
+
+`append_into_length(xs, ys)` proves:
+
+```jihoo
+Eq(length(append_into(xs, ys)), length(xs) + length(ys))
+```
+
+Its proof is structural induction over the prefix. The runtime recursion takes
+its owned suffix as an explicit argument, passing it once down the recursive
+call chain; it does not capture an outer owned value in a repeated case. An
+empty prefix returns the suffix without allocating a list node. A prefix of
+length `n` adds exactly `n` new `Cons` nodes, regardless of the suffix length.
+This differs from `append`, which keeps both inputs and copies both.
 
 When applying `map_length` to a locally owned list, use its evidence inside a
 helper taking `ref List`, as the map example does. A proof type that retains a
