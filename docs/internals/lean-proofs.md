@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 539 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 549 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1041,3 +1041,43 @@ result is convertible. The application-spine profile separately validates explic
 normalization observations for its supported scalar calls. Export provenance,
 compilation, runtime/ownership behavior and full checker refinement remain
 unverified. The source compiler and its acceptance rules are unchanged.
+
+
+## Closed local-array and subtraction safety
+
+`CorePrimitiveSafety.lean` connects higher-order closed typing to two primitive
+safety consequences. A closed array producer reaches an `Elements` constructor
+by the existing head-beta normalization theorem. For a typed `Index` with a
+natural literal index, closed less-than consistency derives its actual bounds,
+a selected entry exists, and that entry has the original, possibly converted,
+result type. For `USub` with literal operands, typing derives non-underflow,
+a representable result and result typing. Neither theorem assumes normalization
+of evidence or a true bound from its caller.
+
+This batch extends `Raw.Beta.HasType` with the executable core's `ZeroLe` rule.
+Renaming, substitution, beta and bounded-add preservation, simple erasure, closed
+head normalization and literal consistency all cover this added rule.
+Church–Rosser proves that an arbitrary raw successor `a + 1` cannot convert to
+zero; no semantic interpretation of arbitrary higher-order arguments is assumed.
+The subtraction proof handles the maximum word separately using operand bounds,
+so it does not truncate or assume representability of the ghost bound `MAX + 1`.
+
+`ArrayRead` specifies selection after head-beta preparation; it is not a new
+`Core.normal` reduction rule. The evaluated-operand corollaries require explicit
+finite contextual beta/add evaluations. These results do not prove universal
+arithmetic normalization, heap/borrow safety, quantity soundness, contextual
+preservation for new read/subtraction reductions, or erasure/lowering adequacy.
+They cover the stated `Raw.Beta` fragment, not the whole specified calculus.
+Existing certificate formats and their admitted rules are unchanged.
+
+`CorePrimitiveExamples.lean` packages closed typing derivations with examples
+containing a higher-order proof application, a computed array producer and index,
+subtraction and a maximum-word erased bound. `EmitPrimitiveSafety.lean` serializes
+their exact terms; `check.sh` compares the output with the committed core fixture.
+The serializer and textual parser are tested boundaries, not verified translations.
+`tests/core_primitive_safety.py` checks the fixture with the actual kernel and
+preservation checker, compiles both object targets at O0/O2, executes host results,
+and checks paired invalid programs against working controls and intended type
+diagnostics. It also distinguishes an erased overflowing bound from a runtime
+addition that traps. These finite tests support correspondence with the trusted
+implementation; they do not establish compiler refinement.

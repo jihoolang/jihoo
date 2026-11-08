@@ -165,6 +165,7 @@ theorem typed_erasure (h : HasType Γ t A) (hm : ContextMatch Γ Δ) :
   case uadd => exact ⟨.base, Shape.u64.arity, .atom⟩
   case usub => exact ⟨.base, Shape.u64.arity, .atom⟩
   case elements => exact ⟨.base, Shape.array.arity, .atom⟩
+  case zeroLe => exact ⟨.base, Shape.lt.arity, .atom⟩
   case decide => exact ⟨.base, Shape.lt.arity, .atom⟩
   case refl => exact ⟨.base, Shape.eq.arity, .atom⟩
   case index => exact ⟨.base, Shape.i64.arity, .atom⟩

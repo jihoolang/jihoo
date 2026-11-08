@@ -203,6 +203,7 @@
                 ./proofs/Jihoo.lean
                 ./proofs/Audit.lean
                 ./proofs/EmitCore.lean
+                ./proofs/EmitPrimitiveSafety.lean
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
                 ./proofs/lake-manifest.json
@@ -212,6 +213,7 @@
             chmod -R u+w proofs
             mkdir -p tests/core_preserves
             cp ${./tests/core_preserves/lean-core-translation.jhc} tests/core_preserves/lean-core-translation.jhc
+            cp ${./tests/core_preserves/lean-primitive-safety.jhc} tests/core_preserves/lean-primitive-safety.jhc
             bash proofs/check.sh
             touch $out
           '';
@@ -282,6 +284,7 @@
             buildPhase = ''
               export JIHOO_PATH=$PWD/lib JIHOO_COMPILER=${jihoo}/bin/jihoo
               jihoo run tests/runner.jh
+              python3 tests/core_primitive_safety.py --compiler ${jihoo}/bin/jihoo
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);
