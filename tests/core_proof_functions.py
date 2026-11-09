@@ -52,8 +52,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--compiler', required=True)
     args = parser.parse_args()
+    fixture = (Path(__file__).resolve().parent / 'core_preserves/lean-mixed-proof-translation.jhc').read_text()
+    declarations = [line for line in fixture.splitlines() if line.startswith('(def ')]
+    if len(declarations) != 6:
+        raise RuntimeError('expected six proved generated declarations')
+    valid_cases = dict(VALID)
+    invalid_cases = dict(INVALID)
+    for i, source in enumerate(declarations):
+        valid_cases[f'generated-{i}'] = source
+    mutations = {
+        'translated-scalar-capture': (0, '(lam x2 U64 x1)', '(lam x2 U64 (refl x2))'),
+        'translated-function-result': (1, '(app x1 x2)', 'x1'),
+        'translated-universal-capture': (2, '(app x0 x1)', '(app x0 7)'),
+        'translated-wrong-proof': (3, '(refl 7)', '(refl 8)'),
+        'translated-false-bound': (4, '(zero-le x0)', '(decide-lt 0 0)'),
+        'translated-erasure': (0, '(lam0 x1 (Eq x0 x0)', '(lam x1 (Eq x0 x0)'),
+    }
+    for name, (i, old, new) in mutations.items():
+        if declarations[i].count(old) != 1:
+            raise RuntimeError(f'{name}: mutation must target one occurrence')
+        invalid_cases[name] = declarations[i].replace(old, new)
+    DIAGNOSTICS['translated-false-bound'] = b'core: decide-lt needs a true closed inequality'
+    DIAGNOSTICS['translated-erasure'] = b'core: proof binders must be erased'
     with tempfile.TemporaryDirectory(prefix='jihoo-proof-functions-') as tmp:
-        for accepted, cases in ((True, VALID), (False, INVALID)):
+        for accepted, cases in ((True, valid_cases), (False, invalid_cases)):
             for name, source in cases.items():
                 path = Path(tmp) / (name + '.jhc')
                 path.write_text(source)
@@ -64,7 +86,7 @@ def main():
                         raise RuntimeError(f'{name}/{operation}: {r.returncode}: {r.stderr!r}')
                     if not accepted and DIAGNOSTICS.get(name, b'core: type mismatch') not in r.stderr:
                         raise RuntimeError(f'{name}: wrong diagnostic: {r.stderr!r}')
-    print('mixed proof functions: 8 check/preserves controls, 7 exact-diagnostic rejections; no input executed')
+    print('mixed proof functions: 14 check/preserves controls, 13 exact-diagnostic rejections; no input executed')
 
 
 if __name__ == '__main__':

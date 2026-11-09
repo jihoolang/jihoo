@@ -20,7 +20,7 @@ report = sys.argv[1]
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 720, report
+assert len(entries) + len(closed) == 741, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
@@ -39,3 +39,5 @@ lake env lean -DwarningAsError=true --run EmitMixedTelescope.lean > "$generated"
 diff -u ../tests/core_preserves/lean-mixed-telescope.jhc "$generated"
 lake env lean -DwarningAsError=true --run EmitMixedInference.lean > "$generated"
 diff -u ../tests/core_mixed_inference.tsv "$generated"
+lake env lean -DwarningAsError=true --run EmitMixedProofTranslation.lean > "$generated"
+diff -u ../tests/core_preserves/lean-mixed-proof-translation.jhc "$generated"
