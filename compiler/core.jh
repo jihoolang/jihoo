@@ -2806,11 +2806,19 @@ impl Core {
                 // variable is used without linearity and may be returned
                 // from a lend, so it cannot stand for an owned type, a
                 // borrow or a function.
-                if !ghost && self.kind_of(domain, depth - 1)? && !self.first_order(a, depth - 1)? {
-                    return Err(self.error(
+                if !ghost && self.kind_of(domain, depth - 1)? {
+                    // A family over types can expose an owned type after
+                    // substitution even when its own normal body is plain:
+                    // fn(A: Type) { A } applied to Buffer(n) is the counterexample.
+                    // Check the expected kind too, including for variable arguments.
+                    if !self.first_order_kind(domain, depth - 1)? { return Err(self.error(
+                        a,
+                        "a runtime type family takes only u64 indices"
+                    )) }
+                    if !self.first_order(a, depth - 1)? { return Err(self.error(
                         a,
                         "a type argument holds no buffer, heap data, borrow or function"
-                    ))
+                    )) }
                 }
                 let result = self.substitute(result, a, depth - 1)?
                 // The top of a spine whose value is still a function is a
@@ -2913,6 +2921,24 @@ impl Core {
         }
     }
 
+    // Conservatively admit runtime type families only over u64 indices.
+    // This checks the expected kind, not just lambda syntax: forwarding a
+    // variable of higher kind must not bypass the same restriction.
+    // Ghost type computations are unaffected; monomorphic Type arguments
+    // still pass this gate and are checked by first_order below.
+    fn first_order_kind(inout self, kind: u32, depth: u32) -> Result(bool, diag.Diag) {
+        let kind = self.normal(kind, depth)?
+        match self.term(kind) {
+            Universe(_) => Ok(true)
+            Pi(_, domain, result) => {
+                let domain = self.normal(domain, depth - 1)?
+                if self.term(domain) != Term.U64 { return Ok(false) }
+                self.first_order_kind(result, depth - 1)
+            }
+            _ => Ok(false)
+        }
+    }
+
     // Whether a type (or type family) is first order: it mentions no
     // buffer, heap data, borrow or function type anywhere.
     fn first_order(inout self, t: u32, depth: u32) -> Result(bool, diag.Diag) {
@@ -2925,7 +2951,8 @@ impl Core {
         match self.term(t) {
             Buffer(_) | Ref(_) | Pi(_, _, _) | Back(_, _, _) => return Ok(false)
             Ind(g, _) if self.is_boxed(g) => return Ok(false)
-            // A type family's binders are its indices, not its values.
+            // first_order_kind has restricted runtime family binders to u64.
+            // Their annotations describe indices, not the resulting values.
             Lam(_, _, body) => return self.plain(body, depth - 1)
             _ => {}
         }

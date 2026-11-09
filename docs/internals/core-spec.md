@@ -73,10 +73,26 @@ or not at all:
   one exception under [`Case`](#elim-case). An elimination into `Prop` may give a function
   proposition: evidence does not run.
 
-A type argument at run time is **first order** (`first_order`): its normal form mentions
-no buffer, boxed data, borrow, `Pi` or `Back`, since a type variable is used without
-linearity and could stand for one. The binder annotations of a type family's lambdas are
-not inspected: they are its indices, not its values.
+A type argument at run time must satisfy both **first-order kind**
+(`first_order_kind`) and **first-order value** (`first_order`) checks. Its expected
+kind normalizes to a universe, optionally preceded by a telescope whose domains
+all normalize to U64. Runtime and erased U64 index binders are both allowed.
+This expected-kind check also applies when the argument is a variable rather
+than a lambda. The value's normal form must mention no buffer, boxed data,
+borrow, `Pi` or `Back`, since a type variable is used without linearity and could
+stand for one. Its lambda annotations are omitted by the value scan only after
+the expected kind has restricted family inputs to U64 indices.
+
+Checking the value alone is insufficient: `fn(A: Type) { A }` has a plain body,
+but substituting it for `F` can expose Buffer(n) behind a formerly neutral
+`F(Buffer(n))` domain. The conservative runtime rule therefore rejects families
+over types, type families, signed indices and other non-U64 domains, even if a
+particular family's result would be harmless. Ordinary monomorphic type arguments
+and U64-indexed families remain supported. Ghost computations in types/evidence
+are unaffected; for example an identity type function can still appear directly
+in a binder annotation that normalizes to Buffer(n). This restriction closes the
+higher-kinded ownership-instantiation counterexample; it is not a new theorem
+of whole-Core typing or mode preservation.
 
 ## Families
 
