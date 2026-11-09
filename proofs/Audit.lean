@@ -737,3 +737,29 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Checked.Admission.separate_tree_budget
 
 #print axioms Jihoo.CoreBridge.Checked.Admission.Accepted.type_formed
+
+#print axioms Jihoo.MixedProofFunctions.Formula.scoped_subst
+#print axioms Jihoo.MixedProofFunctions.Formula.subst_id
+#print axioms Jihoo.MixedProofFunctions.Formula.subst_comp
+#print axioms Jihoo.MixedProofFunctions.Formula.shift_lift
+#print axioms Jihoo.MixedProofFunctions.Formula.instantiate_subst
+#print axioms Jihoo.MixedProofFunctions.Derives.scoped
+#print axioms Jihoo.MixedProofFunctions.Derives.scalar_substitution
+#print axioms Jihoo.MixedProofFunctions.Derives.renaming
+#print axioms Jihoo.MixedProofFunctions.Derives.proof_substitution
+#print axioms Jihoo.MixedProofFunctions.Formula.shift_single
+#print axioms Jihoo.MixedProofFunctions.natural_beta
+#print axioms Jihoo.MixedProofFunctions.proof_beta
+#print axioms Jihoo.MixedProofFunctions.Formula.holds_subst
+#print axioms Jihoo.MixedProofFunctions.Derives.sound
+#print axioms Jihoo.MixedProofFunctions.no_false_bound
+#print axioms Jihoo.MixedProofFunctions.no_false_equality
+#print axioms Jihoo.MixedProofFunctions.Examples.retain_typed
+#print axioms Jihoo.MixedProofFunctions.Examples.higher_typed
+#print axioms Jihoo.MixedProofFunctions.Examples.proof_beta_capture_safe
+#print axioms Jihoo.MixedProofFunctions.Examples.scalar_beta_capture_safe
+#print axioms Jihoo.MixedProofFunctions.Examples.nested_proof_capture_safe
+#print axioms Jihoo.MixedProofFunctions.Examples.universal_argument
+#print axioms Jihoo.MixedProofFunctions.Examples.retain_true
+#print axioms Jihoo.MixedProofFunctions.Examples.no_missing_hypothesis
+#print axioms Jihoo.MixedProofFunctions.Examples.no_forward_scalar
