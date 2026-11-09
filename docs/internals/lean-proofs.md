@@ -2221,9 +2221,44 @@ this same probe, so a malformed frame cannot silently pass its structural gate.
 
 This is a trusted, tested compiler guard, not a new Lean refinement theorem.
 It enforces structural prerequisites of `CallEntry`; it does not establish
-positional operand-value correspondence, argument operand typing, source-slot
+positional operand-value correspondence, source-slot
 provenance, initialization along control-flow paths, heap ownership, or LLVM
 semantics. In particular, swapping two same-typed operands still requires the
 independent execution regressions and the remaining implementation refinement
 obligation. The validator is specific to dependent Core's direct, nonvariadic
 MIR subset, not the legacy compiler's general MIR or closure ABI.
+
+
+### Typed Core MIR body validation
+
+The same production gate now checks every body in the emitted Core subset,
+including unreachable blocks, before returning the program to downstream code.
+A linear pass over the interned type table marks well-formed runtime types;
+composite types must refer to already validated children. This handles repeated
+references without expansion; any referenced forward/cyclic type is rejected.
+Canonical bool,
+unit, signed-i64 and unsigned-u64 entries are checked explicitly. Signatures and
+all local declarations must use valid runtime types.
+
+Place checking follows tuple fields, array indices and pointer dereferences,
+checking local/field bounds and requiring a U64 index local. Operand checking
+validates integer constant kinds/ranges and local references. Assignment results,
+integer operations, numeric casts, pointer offsets, arrays and tuple aggregates
+must have consistent types and arities. Every direct call's operand types must
+match its signature. Unsupported MIR forms fail closed: this is an intentionally
+explicit account of what `core_lower` emits, not the legacy language's full MIR.
+
+Control-flow checks cover entry-block existence, goto/switch/assert targets,
+switch scrutinee/case kinds and ranges, duplicate switch cases, boolean assertions,
+and unfinished terminators. They complement the existing call-frame checks.
+Fresh-current-module mutation tests preserve the original graph except for the
+selected fault and require a specific diagnostic; unmodified generated programs
+remain positive controls. Native regressions exercise both targets, optimization
+levels, arrays, recursive nodes and owned buffers.
+
+**Boundary:** these checks establish tested static shape/type invariants, not a
+Lean theorem about this implementation. They do not prove definite initialization,
+array index bounds, valid/live heap pointers, move discipline, source-to-MIR value
+preservation, or backend semantics. A same-typed argument permutation still passes
+static checking. Neither successful validation nor the existing restricted models
+close the original whole-specified-core preservation/consistency and borrow gates.
