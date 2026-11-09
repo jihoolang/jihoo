@@ -641,3 +641,24 @@ import Jihoo
 #print axioms Jihoo.Quantity.LendProjection.project_sound
 #print axioms Jihoo.Quantity.LendProjection.project_budget_decreases
 #print axioms Jihoo.Quantity.LendProjection.rooted_project_sound
+
+#print axioms Jihoo.Quantity.Substitution.discharge_filterMap
+#print axioms Jihoo.Quantity.Finishes.relabel
+#print axioms Jihoo.Quantity.Prefix.relabel
+#print axioms Jihoo.Quantity.Substitution.relabel_demand
+#print axioms Jihoo.Quantity.Substitution.rename_relabel
+#print axioms Jihoo.Quantity.Substitution.relabel_rename
+#print axioms Jihoo.Quantity.Substitution.drop_borrow_demand
+#print axioms Jihoo.Quantity.Substitution.drop_borrow_trace
+#print axioms Jihoo.Quantity.Substitution.projects_represents
+#print axioms Jihoo.Quantity.Substitution.substitution_projection
+#print axioms Jihoo.Quantity.Substitution.relabel_some
+#print axioms Jihoo.Quantity.Substitution.reader_projection
+#print axioms Jihoo.Quantity.Substitution.continuation_projection
+#print axioms Jihoo.Quantity.Substitution.reader_demand
+#print axioms Jihoo.Quantity.Substitution.reader_finishes
+#print axioms Jihoo.Quantity.Substitution.reader_prefix
+#print axioms Jihoo.Quantity.Substitution.lend_demand_correspondence
+#print axioms Jihoo.Quantity.Substitution.lend_substituted_finished
+#print axioms Jihoo.Quantity.Substitution.lend_substituted_prefix
+#print axioms Jihoo.Quantity.Substitution.rooted_substitution_source

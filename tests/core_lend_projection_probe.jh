@@ -3,6 +3,7 @@ import std.env
 import std.os
 import core
 import core_parse
+import diag
 
 fn stdin_once() -> Result(String, String) {
     var input = os.stdin()
@@ -58,7 +59,9 @@ impl Projector {
                 if k as i64 >= ctx.len || ctx[ctx.len - 1 - k as i64].erased {
                     return Err("unavailable borrow slot".to_string())
                 }
-                Ok("p".to_string())
+                // Retain borrow-owner identity in the test-only source view;
+                // its ownership-event projection is still pure.
+                Ok("(q ".to_string() + k.to_string() + ")")
             }
             Free(a, b) | Alloc(a, b) | Arith(_, a, b) | UAdd(a, b) | Index(a, b, _) | Strict(a, b) => {
                 let first = self.term(a, ctx, depth - 1)?
@@ -97,6 +100,42 @@ impl Projector {
     }
 }
 
+// Exercise the same two Core.substitute calls as Core.dependent_lend. Retain
+// the original body nodes and compare their projections only after whole typing.
+fn substitutions(inout p: Projector, root: u32, ctx: [core.Binding]) -> Result(String, String) {
+    let Lend(x, f, g) = p.c.term(root) else { return Err("substitution requires a lend".to_string()) }
+    let Var(owner) = p.c.term(x) else { return Err("substitution requires a variable owner".to_string()) }
+    let Lam(false, ref_ty, read) = p.c.term(f) else { return Err("substitution requires a reader lambda".to_string()) }
+    let Lam(false, result_ty, inner) = p.c.term(g) else { return Err("substitution requires a result lambda".to_string()) }
+    let Lam(false, owner_ty, rest) = p.c.term(inner) else { return Err("substitution requires a returned lambda".to_string()) }
+    let borrowed = match p.c.add(core.Term.Borrow(x), diag.Span.nowhere()) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+    let read_after = match p.c.substitute(read, borrowed, core.DEPTH) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+    let shifted = match p.c.shift(x, 1, 0, core.DEPTH) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+    let rest_after = match p.c.substitute(rest, shifted, core.DEPTH) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+    let read_ctx = extend(ctx, ref_ty)
+    let result_ctx = extend(ctx, result_ty)
+    let rest_ctx = extend(result_ctx.as_slice(), owner_ty)
+    // Validate the transformed bodies through actual contextual inference too.
+    match p.c.infer_reading(read_after, x, ctx) { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    match p.c.infer(rest_after, result_ctx.as_slice(), false, core.DEPTH) { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    var out = owner.to_string() + "\n"
+    out += p.term(read, read_ctx.as_slice(), 128)? + "\n"
+    out += p.term(read_after, ctx, 128)? + "\n"
+    out += p.term(rest, rest_ctx.as_slice(), 128)? + "\n"
+    out += p.term(rest_after, result_ctx.as_slice(), 128)? + "\n"
+    for k in 0..ctx.len {
+        let count = match p.c.runtime_uses(read_after, k as u32, ctx, []) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+        out += count.to_string() + " "
+    }
+    out += "\n"
+    for k in 0..result_ctx.len() {
+        let count = match p.c.runtime_uses(rest_after, k as u32, result_ctx.as_slice(), []) { Ok(v) => v, Err(e) => return Err(e.msg.clone()) }
+        out += count.to_string() + " "
+    }
+    out += "\n"
+    Ok(out)
+}
+
 fn main() -> i32 {
     match run() { Ok(out) => { print(out); 0 }, Err(e) => { eprintln(e); 1 } }
 }
@@ -104,7 +143,7 @@ fn main() -> i32 {
 fn run() -> Result(String, String) {
     let args = env.args()
     if args.len() != 2 { return Err("expected work budget".to_string()) }
-    let Some(budget) = if args[1] == "check" { Some(4096) } else { args[1].parse_int() } else { return Err("invalid work budget".to_string()) }
+    let Some(budget) = if args[1] == "check" || args[1] == "substitute" { Some(4096) } else { args[1].parse_int() } else { return Err("invalid work budget".to_string()) }
     if budget < 1 || budget > 4096 { return Err("invalid work budget".to_string()) }
     let source = stdin_once()?
     var c = match core_parse.parse(source.as_str(), 0) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
@@ -119,6 +158,7 @@ fn run() -> Result(String, String) {
         root = body
     }
     var projector = Projector { c, remaining: budget }
+    if args[1] == "substitute" { return substitutions(&projector, root, ctx.as_slice()) }
     let control = projector.term(root, ctx.as_slice(), 128)?
     var out = control + "\n"
     for k in 0..ctx.len() {

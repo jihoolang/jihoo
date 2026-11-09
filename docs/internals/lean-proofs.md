@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 605 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 625 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1390,3 +1390,71 @@ semantics has not been simulated by the runtime; heap identity, lease/lifetime
 safety, first-order substitution stability and erasure/lowering correctness
 remain open. This is progress on scoped quantity correspondence, not whole-core
 ownership or borrow soundness.
+
+
+## Lend substitution and ownership projection
+
+`QuantitySubstitution.lean` proves the substitution/projection algebra that the
+scoped Lend model previously left conditional. A quantity-annotated source
+`Expr` retains variable and borrow-owner identities, ordered operands, invoked
+scopes and nested Lends. Its binder modes are retained annotations, whose typing
+justification and stability are still required. `Represents` connects these
+expressions to original graph nodes and contextual preparation;
+`projects_represents` derives one from every successful existing graph projection.
+`rooted_substitution_source` additionally retains the original lambda path and
+authentic observer context, so this bridge does not take an unrelated control or
+source expression from the caller.
+
+Substitution replaces a variable by either another variable or a borrow of a
+variable, lifting under every binder. Borrow/Lend owner positions must remain
+variables; unsupported replacements fail rather than inventing an owner.
+`substitution_projection` proves that successful substitution commutes with
+ownership-event projection, including nested Lends. A borrow replacement removes
+an ownership-use event, while a variable replacement renames it. This is not a
+law for substituting arbitrary effectful expressions. In particular allocating,
+freeing or duplicating a computation is outside the substitution algebra.
+
+Partial event relabeling preserves completed and prefix traces by `filterMap`.
+The unique-preimage demand theorem preserves the full checker result, including
+failure from local linear/erased obligations, capture checks and branch agreement.
+For reader substitution `r := Borrow(x)`, that relabeling is precisely discharge
+of slot 0: every outer resource has the same demand as the original borrowed
+scope. For continuation substitution `returned := shift(x, 1)`, it is precisely
+`alias(owner + 1)`, leaving the fresh result distinct. The combined
+`lend_demand_correspondence` theorem proves equality of quantity-check results
+for every outer resource before/after both source substitutions. The substituted
+completion/prefix endpoints retain exact-once/at-most-once owner accounting from
+a checked scoped Lend. They range over all abstract transformed traces, not just
+one test execution.
+
+The native probe now calls the actual `Core.substitute` twice and `Core.shift`
+exactly as `dependent_lend` does, after complete Core.check. It also runs
+`infer_reading` and contextual `infer` on the transformed bodies. Nine checked
+programs compare original and transformed quantity-annotated source trees,
+projected controls and all contextual `Core.runtime_uses` counts. Cases include
+explicit/repeated borrow reads, an owned result, nested Lend using both returned
+and original outer names, equal-typed distinct owners, and dependent Buffer(n)
+annotations with an erased proof slot. The test encoding retains borrow-owner
+indices before event erasure: two different borrowed pointers have the same
+quantity projection, so counts alone cannot authenticate replacement identity.
+Invalid input and explicit source exclusions produce no partial output in both
+observation modes. All four body projections share the existing visit budget;
+native substitution and inference retain the kernel's own limits.
+
+The comparison uses the total annotated source projection, not the conservative
+guarded graph admission check. A valid nested continuation using an original
+outer owner name may require its enclosing alias substitution before a local
+nested-owner check can succeed. This change proves the substitution algebra and
+tests that case; it does not claim that the earlier guarded graph projector is
+complete or change compiler admission.
+
+**Precise remaining boundary:** source-algebra commutation is proved, but a
+mechanized refinement of native `Core.transform/substitute`, the native view
+exporter and domain observer is not. Literal values and type/proof operands are
+abstracted by the quantity source view; the theorem is not semantic equality of
+arbitrary Core values or typing preservation. Mode stability and typed annotation
+conversion under substitution remain obligations. Branches, loops and closures
+are covered by the general control relabeling lemmas, but are not newly admitted
+by the annotated source/graph projector. This work does not establish heap object
+identity, borrow validity/lifetimes, machine execution simulation or lowering
+correctness, and creates no certificate or production admission profile.

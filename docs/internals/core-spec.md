@@ -538,3 +538,10 @@ derives reader/continuation controls in a bounded structural fragment and keeps
 the fresh result distinct from the returned owner. Its use-accounting theorems
 are relative to faithful typed observations and abstract control execution;
 whole-kernel substitution, runtime and heap/borrow correspondence remain open.
+
+
+[Lend substitution correspondence](lean-proofs.md#lend-substitution-and-ownership-projection)
+proves that variable/borrow substitution commutes with quantity-annotated source
+projection, including nested scopes/Lends, and compares it with actual kernel
+substitution. Native transformation refinement and typed mode stability, as well
+as runtime and heap/borrow soundness, remain separate obligations.
