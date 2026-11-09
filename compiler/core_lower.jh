@@ -3,6 +3,7 @@
 // away. Exports take and return scalars, and arrays cannot cross the C ABI. No
 // independent source/model translation is used.
 import core
+import core_mir
 import diag
 import lex
 import mir
@@ -1433,8 +1434,10 @@ pub fn compile(sink c: core.Core, tgt: target.Target) -> Result(mir.Program, dia
         }
         while generated.len() > 0 { out.push(generated.remove(0)) }
     }
-    Ok(mir.Program { fns: out, types: runtime_types, entry: None, panic_handler: None,
+    let program = mir.Program { fns: out, types: runtime_types, entry: None, panic_handler: None,
         profile: target.Profile.Native, checked: true, statics: Vec(mir.StaticDef).new(),
         drop_impls: Map(u32, u32).new(), invariants: Map(u32, Vec(mir.Clause)).new(),
-        target: tgt, codegen: target.Codegen.default() })
+        target: tgt, codegen: target.Codegen.default() }
+    core_mir.validate(program)?
+    Ok(program)
 }

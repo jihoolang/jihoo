@@ -25,6 +25,30 @@ def test(compiler, probe, out):
             require(functions >= 8 and calls >= functions and parameters > functions,
                     f'vacuous generated function inspection: {report!r}')
             reports.append((functions, calls, parameters))
+    mutations = {
+        'negative-count': 'invalid argument count',
+        'count': 'invalid argument count',
+        'return-kind': 'invalid return local',
+        'return-type': 'invalid return local',
+        'parameter-kind': 'invalid parameter local',
+        'parameter-type': 'invalid parameter local',
+        'late-argument': 'unexpected frame local',
+        'pass': 'invalid parameter signature',
+        'variadic': 'invalid parameter signature',
+        'callee': 'invalid callee',
+        'missing-operand': 'call argument count mismatch',
+        'extra-operand': 'call argument count mismatch',
+        'destination': 'invalid call destination',
+        'indirect': 'expected direct call',
+        'projection': 'invalid call destination',
+        'result-type': 'call result type mismatch',
+        'continuation': 'invalid call continuation',
+    }
+    for mutation, diagnostic in mutations.items():
+        rejected = command([probe, path, 'x86_64', mutation])
+        require(rejected.returncode != 0 and not rejected.stdout and
+                ('core MIR: ' + diagnostic).encode() in rejected.stderr,
+                f'{mutation}: wrong rejection: {rejected.stderr!r}')
     require(all(report == reports[0] for report in reports),
             f'ghosts or target changed call-entry layout: {reports!r}')
     # A type-invalid input must not produce any successful partial report.
@@ -43,7 +67,7 @@ def test(compiler, probe, out):
             b'no generated recursion observed' in rejected.stderr,
             'nonrecursive control did not reject')
     print(f'call entry: 4 current-lowerer inspections {reports[0]}; '
-          'contiguous typed parameters and call arities passed; 2 negative controls')
+          f'contiguous typed parameters and call arities passed; {len(mutations)} MIR mutations; 2 negative controls')
 
 
 def main():

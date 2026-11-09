@@ -2199,5 +2199,31 @@ regression evidence for those obligations, not proof certificates. Native u32
 local-index bounds, descriptor authenticity, typed source/control projection,
 heap/borrow interpretation and whole-specified-core coverage remain open. The
 reserved prefix belongs to the callee-local model, not shared caller heap state;
-no stack separation or lifetime theorem follows. Production compiler rules and
-runtime behavior are unchanged.
+no stack separation or lifetime theorem follows.
+
+### Production call-frame validation
+
+`core_lower.compile` now runs `core_mir.validate` before publishing its MIR.
+The validator checks all generated and exported bodies, not only the recursion
+fixtures: signature/pass arity, nonvariadic signatures, nonnegative argument
+counts, a correctly typed return local at zero, a contiguous and correctly
+typed parameter prefix, and absence of later argument/return locals. Every call
+must be direct with an in-range function ID and exact argument count; its
+unprojected destination must exist and have the callee result type, and its
+continuation block must exist. Foreign declarations also have their signature
+shape checked. These are internal lowering diagnostics; they do not extend the
+accepted Core language or replace Core checking before normalization/erasure.
+
+The fresh-module probe mutates actual generated MIR one invariant at a time and
+requires the corresponding production diagnostic, with no successful output.
+Unmodified plain/ghost, both-target programs remain positive controls. CI runs
+this same probe, so a malformed frame cannot silently pass its structural gate.
+
+This is a trusted, tested compiler guard, not a new Lean refinement theorem.
+It enforces structural prerequisites of `CallEntry`; it does not establish
+positional operand-value correspondence, argument operand typing, source-slot
+provenance, initialization along control-flow paths, heap ownership, or LLVM
+semantics. In particular, swapping two same-typed operands still requires the
+independent execution regressions and the remaining implementation refinement
+obligation. The validator is specific to dependent Core's direct, nonvariadic
+MIR subset, not the legacy compiler's general MIR or closure ABI.

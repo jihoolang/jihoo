@@ -1,0 +1,51 @@
+// Validate the call-frame contract of dependent Core lowering before publication.
+// This is structural validation, not MIR typing or operational equivalence.
+import diag
+import mir
+
+pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
+    for f in p.fns {
+        if f.pass.len() != f.sig.params.len() || f.variadic || f.sig.variadic {
+            return Err(diag.Diag.new(f.span, "core MIR: invalid parameter signature"))
+        }
+        let Some(body) = f.body else { continue }
+        if body.arg_count < 0 || body.arg_count != f.sig.params.len() || body.locals.len() <= body.arg_count {
+            return Err(diag.Diag.new(f.span, "core MIR: invalid argument count"))
+        }
+        if body.locals[0].kind != mir.LocalKind.Ret || body.locals[0].ty != f.sig.ret {
+            return Err(diag.Diag.new(f.span, "core MIR: invalid return local"))
+        }
+        for i, local in body.locals {
+            if i > 0 && i <= body.arg_count {
+                if local.kind != mir.LocalKind.Arg || local.ty != f.sig.params[i - 1] {
+                    return Err(diag.Diag.new(f.span, "core MIR: invalid parameter local"))
+                }
+            } else if i > 0 && (local.kind == mir.LocalKind.Arg || local.kind == mir.LocalKind.Ret) {
+                return Err(diag.Diag.new(f.span, "core MIR: unexpected frame local"))
+            }
+        }
+        for block in body.blocks {
+            let mir.Term.Call(callee, args, dest, next, sp) = block.term else { continue }
+            let mir.Callee.Fn(id) = callee else {
+                return Err(diag.Diag.new(sp, "core MIR: expected direct call"))
+            }
+            if id as i64 >= p.fns.len() {
+                return Err(diag.Diag.new(sp, "core MIR: invalid callee"))
+            }
+            let called = p.fns[id as i64]
+            if args.len() != called.sig.params.len() {
+                return Err(diag.Diag.new(sp, "core MIR: call argument count mismatch"))
+            }
+            if dest.proj.len() != 0 || dest.local as i64 >= body.locals.len() {
+                return Err(diag.Diag.new(sp, "core MIR: invalid call destination"))
+            }
+            if body.locals[dest.local as i64].ty != called.sig.ret {
+                return Err(diag.Diag.new(sp, "core MIR: call result type mismatch"))
+            }
+            if next as i64 >= body.blocks.len() {
+                return Err(diag.Diag.new(sp, "core MIR: invalid call continuation"))
+            }
+        }
+    }
+    Ok(())
+}

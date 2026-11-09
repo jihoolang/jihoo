@@ -1,12 +1,15 @@
 // Test-only inspection of current Core lowering before LLVM code generation.
 import std.env
+import core_mir
+import std.mem
+import types
 import core_elab
 import diag
 import load
 import mir
 import target
 
-fn inspect(path: str, tgt: target.Target) -> Result(String, String) {
+fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, String) {
     var sources = diag.Sources.new()
     let ast = match load.load(
         path,
@@ -18,9 +21,70 @@ fn inspect(path: str, tgt: target.Target) -> Result(String, String) {
         Ok(a) => a
         Err(e) => return Err(e.msg.clone())
     }
-    let p = match core_elab.compile(ast, tgt, true, target.Codegen.default()) {
+    var p = match core_elab.compile(ast, tgt, true, target.Codegen.default()) {
         Ok(p) => p
         Err(e) => return Err(e.msg.clone())
+    }
+    if mutation != "none" {
+        var changed = false
+        for i in 0..p.fns.len() {
+            if !p.fns[i].name.as_str().starts_with("recursion.") { continue }
+            let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
+            var body = b
+            if mutation == "negative-count" { body.arg_count = -1; changed = true }
+            if mutation == "count" { body.arg_count += 1; changed = true }
+            if mutation == "return-kind" { body.locals[0].kind = mir.LocalKind.Temp; changed = true }
+            if mutation == "return-type" { body.locals[0].ty = types.BOOL; changed = true }
+            if mutation == "parameter-kind" { body.locals[1].kind = mir.LocalKind.Temp; changed = true }
+            if mutation == "parameter-type" { body.locals[1].ty = types.BOOL; changed = true }
+            if mutation == "late-argument" {
+                body.locals.push(body.locals[1].clone()); changed = true
+            }
+            if mutation == "pass" { p.fns[i].pass.push(mir.ParamPass.Value); changed = true }
+            if mutation == "variadic" { p.fns[i].variadic = true; changed = true }
+            for j in 0..body.blocks.len() {
+                if changed { break }
+                let old = mem.replace(&body.blocks[j].term, mir.Term.Pending)
+                match move old {
+                    mir.Term.Call(callee, operands, place, continuation, sp) => {
+                        var callee = callee
+                        var operands = operands
+                        var place = place
+                        var continuation = continuation
+                        if mutation == "callee" { callee = mir.Callee.Fn(p.fns.len() as u32); changed = true }
+                        if mutation == "missing-operand" && operands.len() > 0 {
+                            operands.remove(0); changed = true
+                        }
+                        if mutation == "extra-operand" {
+                            operands.push(mir.Operand.Const(mir.Const.Int(0, types.I64))); changed = true
+                        }
+                        if mutation == "destination" { place.local = body.locals.len() as u32; changed = true }
+                        if mutation == "indirect" { callee = mir.Callee.Ptr(mir.Operand.Const(mir.Const.Int(
+                            0,
+                            types.I64
+                        ))); changed = true }
+                        if mutation == "projection" { place.proj.push(mir.Proj.Deref); changed = true }
+                        if mutation == "result-type" { body.locals[place.local as i64].ty = types.BOOL; changed = true }
+                        if mutation == "continuation" { continuation = body.blocks.len() as u32; changed = true }
+                        body.blocks[j].term = mir.Term.Call(
+                            callee,
+                            operands,
+                            place,
+                            continuation,
+                            sp
+                        )
+                    }
+                    term => body.blocks[j].term = term
+                }
+            }
+            p.fns[i].body = Some(body)
+            if changed { break }
+        }
+        if !changed { return Err("mutation was not applied".to_string()) }
+        match core_mir.validate(p) {
+            Err(e) => return Err(e.msg.clone())
+            Ok(()) => return Err("mutation was accepted".to_string())
+        }
     }
     var functions: i64 = 0
     var calls: i64 = 0
@@ -67,9 +131,10 @@ fn inspect(path: str, tgt: target.Target) -> Result(String, String) {
 
 fn main() -> i32 {
     let args = env.args()
-    if args.len() != 3 { return 2 }
+    if args.len() != 3 && args.len() != 4 { return 2 }
     let Some(tgt) = target.Target.parse(args[2]) else { return 2 }
-    match inspect(args[1], tgt) {
+    let mutation = if args.len() == 4 { args[3] } else { "none" }
+    match inspect(args[1], tgt, mutation) {
         Ok(output) => { println(output); 0 }
         Err(message) => { eprintln(message); 1 }
     }
