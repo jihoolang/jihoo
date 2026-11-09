@@ -23,6 +23,7 @@
 // No source text or independent execution model is generated here.
 import ast
 import core
+import core_auto
 import core_lower
 import diag
 import load
@@ -135,6 +136,7 @@ struct Elaborator {
     // without a value ends it.
     unit: bool
     // Hygienic names for nested record patterns, never source identifiers.
+    auto_declared: bool
     record_serial: u64
 }
 
@@ -2479,6 +2481,72 @@ impl Elaborator {
         Ok(value)
     }
 
+    // Only an unresolved spelling selects automation; existing declarations
+    // and local bindings named auto retain their normal call behavior.
+    fn auto_visible(self) -> bool {
+        if self.auto_declared || self.taken("auto") { return true }
+        for name in self.names { if name == "auto" { return true } }
+        false
+    }
+
+    fn automate(
+        inout self,
+        args: [ast.Expr],
+        expected: Option(u32),
+        sp: diag.Span,
+        depth: u32
+    ) -> Result(u32, diag.Diag) {
+        let Some(goal) = expected else { return Err(error(
+            sp,
+            "auto needs an expected Eq or Lt proposition"
+        )) }
+        if args.len > 8 { return Err(error(sp, "auto accepts at most 8 explicit hints")) }
+        var facts = Vec(core_auto.Fact).new()
+        // A hint is checked before normalization, even if the goal is trivial.
+        for arg in args {
+            let proof = self.evidence(arg, None, depth - 1)?
+            let ty = self.c.infer(proof, self.ctx.as_slice(), true, core.DEPTH)?
+            let ty = self.c.normal(ty, core.DEPTH)?
+            match self.c.term(ty) {
+                Eq(_, _) | Lt(_, _) => facts.push(core_auto.Fact { ty, proof })
+                _ => return Err(error(arg.span, "auto hints must prove Eq or Lt"))
+            }
+        }
+        var i = self.ctx.len()
+        while i > 0 {
+            i -= 1
+            let name = self.names[i]
+            if name.as_str().starts_with("<") || name.as_str().starts_with("&") { continue }
+            var shadowed = false
+            for j in i + 1..self.names.len() { if self.names[j] == name { shadowed = true } }
+            if shadowed { continue }
+            let ty = self.type_at(i)?
+            let ty = self.c.normal(ty, core.DEPTH)?
+            match self.c.term(ty) {
+                Eq(_, _) | Lt(_, _) => {
+                    let proof = self.c.add(core.Term.Var((self.ctx.len() - 1 - i) as u32), sp)?
+                    facts.push(core_auto.Fact { ty, proof })
+                }
+                _ => {}
+            }
+        }
+        core_auto.prove(&self.c, goal, self.ctx.as_slice(), facts.as_slice(), sp)
+    }
+
+    fn bound_goal(inout self, value: u32, index: u32, sp: diag.Span) -> Result(u32, diag.Diag) {
+        let ty = self.c.infer(value, self.ctx.as_slice(), true, core.DEPTH)?
+        var ty = self.c.normal(ty, core.DEPTH)?
+        match self.c.term(ty) {
+            Ref(inner) => ty = self.c.normal(inner, core.DEPTH)?,
+            _ => {}
+        }
+        let length = match self.c.term(ty) {
+            Array(n) | Buffer(n) => n
+            _ => return Err(error(sp, "index evidence needs an array or buffer"))
+        }
+        self.c.add(core.Term.Lt(index, length), sp)
+    }
+
     // An expression of a proposition is evidence, which never runs.
     fn expr(inout self, e: ast.Expr, expected: Option(u32), depth: u32) -> Result(u32, diag.Diag) {
         match self.giving(e, expected)? {
@@ -2814,6 +2882,9 @@ impl Elaborator {
                     let function = self.expr(f.deref(), None, depth - 1)?
                     return self.apply(function, args.as_slice(), sp, depth, false)
                 }
+                if n == "auto" && !self.auto_visible() {
+                    return self.automate(args.as_slice(), expected, sp, depth)
+                }
                 if n == "old" {
                     if args.len() != 1 { return Err(error(sp, "old requires a variable")) }
                     if self.ghost == 0 { return Err(error(sp, "old is evidence only")) }
@@ -2943,7 +3014,8 @@ impl Elaborator {
                     }
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.evidence(args[2], None, depth - 1)?
+                    let goal = self.bound_goal(a, i, sp)?
+                    let p = self.evidence(args[2], Some(goal), depth - 1)?
                     return self.c.add(core.Term.Index(a, i, p), sp)
                 }
                 if n == "sub" {
@@ -2954,7 +3026,10 @@ impl Elaborator {
                     let u = self.u64(sp)?
                     let a = self.expr(args[0], Some(u), depth - 1)?
                     let b = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.evidence(args[2], None, depth - 1)?
+                    let one = self.c.add(core.Term.Natural(1), sp)?
+                    let upper = self.c.add(core.Term.UAdd(a, one), sp)?
+                    let goal = self.c.add(core.Term.Lt(b, upper), sp)?
+                    let p = self.evidence(args[2], Some(goal), depth - 1)?
                     return self.c.add(core.Term.USub(a, b, p), sp)
                 }
                 if n == "pack" {
@@ -2973,7 +3048,8 @@ impl Elaborator {
                     }
                     let u = self.u64(sp)?
                     let a = self.expr(args[0], Some(u), depth - 1)?
-                    let q = self.evidence(args[1], None, depth - 1)?
+                    let goal = self.c.add(core.Term.App(p, a), sp)?
+                    let q = self.evidence(args[1], Some(goal), depth - 1)?
                     return self.c.add(core.Term.Pack(p, a, q), sp)
                 }
                 if n == "alloc" {
@@ -2998,7 +3074,8 @@ impl Elaborator {
                     let i = self.expr(args[1], Some(u), depth - 1)?
                     let t = self.c.add(core.Term.I64, sp)?
                     let v = self.expr(args[2], Some(t), depth - 1)?
-                    let p = self.evidence(args[3], None, depth - 1)?
+                    let goal = self.bound_goal(b, i, sp)?
+                    let p = self.evidence(args[3], Some(goal), depth - 1)?
                     return self.c.add(core.Term.Store(b, i, v, p), sp)
                 }
                 if n == "free" {
@@ -3036,7 +3113,8 @@ impl Elaborator {
                     }
                     let u = self.u64(sp)?
                     let i = self.expr(args[1], Some(u), depth - 1)?
-                    let p = self.evidence(args[2], None, depth - 1)?
+                    let goal = self.c.add(core.Term.Lt(i, length), sp)?
+                    let p = self.evidence(args[2], Some(goal), depth - 1)?
                     // fn(x: i64, b: buffer(n)) -> T
                     let i64 = self.c.add(core.Term.I64, sp)?
                     let length = self.c.shift(length, 1, 0, core.DEPTH)?
@@ -3795,6 +3873,7 @@ pub fn compile(
         families: Vec((u32, bool)).new(),
         imports: Vec((String, u32)).new(),
         unit: false,
+        auto_declared: false,
         record_serial: 0
     }
     // Imported modules first: the loader's order is one where a module comes
@@ -3813,6 +3892,27 @@ pub fn compile(
             "a dependent_core module imports only dependent_core modules"
         )) }
         e.module = i as u32
+        e.auto_declared = false
+        for item in m.items {
+            let declared = match item.kind {
+                Fn(f) => f.name == "auto"
+                Struct(s) => s.name == "auto"
+                Enum(e) => e.name == "auto"
+                Trait(t) => {
+                    var found = t.name == "auto"
+                    for member in t.items {
+                        match member.kind {
+                            Fn(c) if c.name == "auto" => found = true,
+                            _ => {}
+                        }
+                    }
+                    found
+                }
+                TypeAlias(name, _, _) => name == "auto"
+                _ => false
+            }
+            if declared { e.auto_declared = true }
+        }
         e.imports = Vec((String, u32)).new()
         for imp in a.modules[i].imports {
             if reserved(imp.alias.as_str()) || e.imported(imp.alias.as_str()) {

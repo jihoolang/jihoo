@@ -36,6 +36,7 @@
           ./docs/language/dependent-functions.md
           ./docs/language/dependent-aliases.md
           ./docs/language/dependent-records.md
+          ./docs/language/proof-automation.md
           ./docs/language/buffer-ranges.md
           ./docs/language/bounded-collection.md
           ./docs/language/list-buffer-transfer.md

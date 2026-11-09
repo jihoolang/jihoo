@@ -1,0 +1,284 @@
+// Bounded proof construction, never a new checking rule. Every successful
+// result is checked against the original goal by Core.require.
+import core
+import diag
+
+pub struct Fact { pub ty: u32, pub proof: u32 }
+const FACTS: i64 = 32
+const VISITS: u32 = 256
+const NODES: i64 = 4096
+const DEPTH: u32 = 6
+const ATOMS: i64 = 32
+
+fn failure(sp: diag.Span, message: str) -> diag.Diag {
+    diag.Diag.new(sp, ("core: " + message).as_str())
+}
+
+// A finite sum multiset, not an arithmetic decision procedure. Subtraction
+// here only discovers an offset; LtAdd/LtCancel must certify its use.
+fn atoms(c: core.Core, t: u32, inout out: Vec(u32), depth: u32, inout fuel: u32) -> bool {
+    if depth == 0 || out.len() >= ATOMS || fuel == 0 { return false }
+    fuel -= 1
+    match c.term(t) {
+        UAdd(a, b) => atoms(c, a, &out, depth - 1, &fuel) && atoms(c, b, &out, depth - 1, &fuel)
+        Natural(0) => true
+        _ => { out.push(t); true }
+    }
+}
+
+fn difference(
+    inout c: core.Core,
+    large: u32,
+    small: u32,
+    sp: diag.Span
+) -> Result(Option(u32), diag.Diag) {
+    var left = Vec(u32).new()
+    var right = Vec(u32).new()
+    var fuel: u32 = 256
+    if !atoms(c, large, &left, 64, &fuel) || !atoms(c, small, &right, 64, &fuel) { return Ok(None) }
+    for part in right {
+        var found = false
+        match c.term(part) {
+            Natural(n) => {
+                var remaining = n
+                for i in 0..left.len() {
+                    let Natural(m) = c.term(left[i]) else { continue }
+                    let take = min(remaining, m)
+                    remaining -= take
+                    left[i] = c.add(core.Term.Natural(m - take), sp)?
+                }
+                if remaining != 0 { return Ok(None) }
+                found = true
+            }
+            _ => {
+                for i in 0..left.len() {
+                    if c.equal(left[i], part, core.DEPTH)? {
+                        left[i] = c.add(core.Term.Natural(0), sp)?
+                        found = true
+                        break
+                    }
+                }
+            }
+        }
+        if !found { return Ok(None) }
+    }
+    var result = c.add(core.Term.Natural(0), sp)?
+    for part in left { result = c.add(core.Term.UAdd(result, part), sp)? }
+    Ok(Some(c.normal(result, core.DEPTH)?))
+}
+
+fn predecessor(inout c: core.Core, value: u32, sp: diag.Span) -> Result(Option(u32), diag.Diag) {
+    var parts = Vec(u32).new()
+    var fuel: u32 = 128
+    if !atoms(c, value, &parts, 64, &fuel) { return Ok(None) }
+    var found = false
+    var result = c.add(core.Term.Natural(0), sp)?
+    for part in parts {
+        var part = part
+        if !found {
+            match c.term(part) {
+                Natural(n) if n > 0 => { part = c.add(core.Term.Natural(n - 1), sp)?; found = true }
+                _ => {}
+            }
+        }
+        result = c.add(core.Term.UAdd(result, part), sp)?
+    }
+    if !found { return Ok(None) }
+    Ok(Some(c.normal(result, core.DEPTH)?))
+}
+
+struct Search { visits: u32, start: i64, span: diag.Span, limited: bool }
+impl Search {
+    fn goal(
+        inout self,
+        inout c: core.Core,
+        target: u32,
+        facts: [Fact],
+        depth: u32
+    ) -> Result(Option(u32), diag.Diag) {
+        if self.visits >= VISITS || c.nodes.len() - self.start > NODES {
+            return Err(failure(self.span, "auto search limit reached"))
+        }
+        self.visits += 1
+        let sp = self.span
+        let goal = c.normal(target, core.DEPTH)?
+        for fact in facts { if c.equal(fact.ty, goal, core.DEPTH)? { return Ok(Some(fact.proof)) } }
+        let (equality, a, b) = match c.term(goal) {
+            Eq(a, b) => (true, a, b)
+            Lt(a, b) => (false, a, b)
+            _ => return Ok(None)
+        }
+        let a = c.normal(a, core.DEPTH)?
+        let b = c.normal(b, core.DEPTH)?
+        if equality {
+            if c.equal(a, b, core.DEPTH)? { return Ok(Some(c.add(core.Term.Refl(a), sp)?)) }
+        } else {
+            match (c.term(a), c.term(b)) {
+                (Natural(x), Natural(y)) if x < y => return Ok(Some(c.add(
+                    core.Term.Decide(a, b),
+                    sp
+                )?))
+                _ => {}
+            }
+            match difference(&c, b, a, sp)? {
+                Some(delta) => match predecessor(&c, delta, sp)? {
+                    Some(before) => {
+                        let zero = c.add(core.Term.Natural(0), sp)?
+                        let p = c.add(core.Term.ZeroLe(before), sp)?
+                        return Ok(Some(c.add(core.Term.LtAdd(zero, delta, a, p), sp)?))
+                    }
+                    None => {}
+                }
+                None => {}
+            }
+            for fact in facts {
+                let Lt(x, y) = c.term(fact.ty) else { continue }
+                for cancel in [false, true] {
+                    let da = if cancel { difference(&c, x, a, sp)? } else { difference(
+                        &c,
+                        a,
+                        x,
+                        sp
+                    )? }
+                    let db = if cancel { difference(&c, y, b, sp)? } else { difference(
+                        &c,
+                        b,
+                        y,
+                        sp
+                    )? }
+                    let Some(offset) = da else { continue }
+                    let Some(other) = db else { continue }
+                    if c.equal(offset, other, core.DEPTH)? {
+                        let term = if cancel { core.Term.LtCancel(a, b, offset, fact.proof) }
+                        else { core.Term.LtAdd(x, y, offset, fact.proof) }
+                        return Ok(Some(c.add(term, sp)?))
+                    }
+                }
+            }
+        }
+        if depth == 0 { self.limited = true; return Ok(None) }
+        // Rewrite complete endpoints with equality facts, in either direction.
+        for fact in facts {
+            let Eq(x, y) = c.term(fact.ty) else { continue }
+            for reverse in [false, true] {
+                let from = if reverse { y } else { x }
+                let to = if reverse { x } else { y }
+                if c.equal(from, to, core.DEPTH)? { continue }
+                for lower in [false, true] {
+                    let endpoint = if lower { a } else { b }
+                    if !c.equal(endpoint, to, core.DEPTH)? { continue }
+                    let left = if lower { from } else { a }
+                    let right = if lower { b } else { from }
+                    let sub = c.add(
+                        if equality { core.Term.Eq(left, right) } else { core.Term.Lt(left, right) },
+                        sp
+                    )?
+                    let Some(p) = self.goal(&c, sub, facts, depth - 1)? else { continue }
+                    let u = c.add(core.Term.U64, sp)?
+                    let variable = c.add(core.Term.Var(0), sp)?
+                    var evidence = fact.proof
+                    if reverse {
+                        let shifted = c.shift(x, 1, 0, core.DEPTH)?
+                        let body = c.add(core.Term.Eq(variable, shifted), sp)?
+                        let family = c.add(core.Term.Lam(false, u, body), sp)?
+                        let refl = c.add(core.Term.Refl(x), sp)?
+                        evidence = c.add(core.Term.Transport(family, evidence, refl), sp)?
+                    }
+                    let left = if lower { variable } else { c.shift(a, 1, 0, core.DEPTH)? }
+                    let right = if lower { c.shift(b, 1, 0, core.DEPTH)? } else { variable }
+                    let body = c.add(
+                        if equality { core.Term.Eq(left, right) } else { core.Term.Lt(left, right) },
+                        sp
+                    )?
+                    let family = c.add(core.Term.Lam(false, u, body), sp)?
+                    return Ok(Some(c.add(core.Term.Transport(family, evidence, p), sp)?))
+                }
+            }
+        }
+        if !equality {
+            let one = c.add(core.Term.Natural(1), sp)?
+            let upper = c.add(core.Term.UAdd(b, one), sp)?
+            for fact in facts {
+                let Lt(x, middle) = c.term(fact.ty) else { continue }
+                if !c.equal(a, x, core.DEPTH)? || c.equal(middle, upper, core.DEPTH)? { continue }
+                let sub = c.add(core.Term.Lt(middle, upper), sp)?
+                let Some(q) = self.goal(&c, sub, facts, depth - 1)? else { continue }
+                return Ok(Some(c.add(core.Term.LtLe(a, middle, b, fact.proof, q), sp)?))
+            }
+        }
+        Ok(None)
+    }
+}
+
+pub fn prove(
+    inout c: core.Core,
+    goal: u32,
+    ctx: [core.Binding],
+    facts: [Fact],
+    sp: diag.Span
+) -> Result(u32, diag.Diag) {
+    if facts.len > FACTS { return Err(failure(sp, "auto accepts at most 32 facts")) }
+    let _ = c.infer(goal, ctx, true, core.DEPTH)?
+    let normalized = c.normal(goal, core.DEPTH)?
+    match c.term(normalized) {
+        Eq(_, _) | Lt(_, _) => {}
+        _ => return Err(failure(sp, "auto needs an expected Eq or Lt proposition"))
+    }
+    var search = Search { visits: 0, start: c.nodes.len(), span: sp, limited: false }
+    let Some(proof) = search.goal(&c, normalized, facts, DEPTH)? else {
+        return Err(failure(sp, if search.limited || c.nodes.len() - search.start > NODES {
+            "auto search limit reached"
+        } else { "auto could not synthesize the expected proof" }))
+    }
+    if c.nodes.len() - search.start > NODES { return Err(failure(sp, "auto search limit reached")) }
+    c.require(proof, goal, ctx, true, core.DEPTH)?
+    Ok(proof)
+}
+
+#[test]
+fn forged_facts_do_not_bypass_the_checker() {
+    let sp = diag.Span.nowhere()
+    var c = core.Core.new()
+    let zero = c.add(core.Term.Natural(0), sp).unwrap()
+    let one = c.add(core.Term.Natural(1), sp).unwrap()
+    let bad = c.add(core.Term.Lt(zero, zero), sp).unwrap()
+    let good = c.add(core.Term.Lt(zero, one), sp).unwrap()
+    let evidence = c.add(core.Term.Decide(zero, one), sp).unwrap()
+    assert(
+        prove(&c, bad, [], [Fact { ty: bad, proof: evidence }], sp).is_err(),
+        "fact labels are not trusted"
+    )
+    let proof = prove(&c, good, [], [], sp).unwrap()
+    assert(
+        c.require(proof, bad, [], true, core.DEPTH).is_err(),
+        "a generated proof cannot be relabeled"
+    )
+    let equal = c.add(core.Term.Eq(zero, one), sp).unwrap()
+    let refl = c.add(core.Term.Refl(zero), sp).unwrap()
+    assert(
+        prove(&c, equal, [], [Fact { ty: equal, proof: refl }], sp).is_err(),
+        "forged equality rejected"
+    )
+}
+
+#[test]
+fn search_limits_are_fail_closed() {
+    let sp = diag.Span.nowhere()
+    var c = core.Core.new()
+    let zero = c.add(core.Term.Natural(0), sp).unwrap()
+    let goal = c.add(core.Term.Eq(zero, zero), sp).unwrap()
+    var search = Search { visits: VISITS, start: 0, span: sp, limited: false }
+    assert(search.goal(&c, goal, [], DEPTH).is_err(), "visit exhaustion rejects")
+    var sum = c.add(core.Term.Var(0), sp).unwrap()
+    for _ in 0..20 { sum = c.add(core.Term.UAdd(sum, sum), sp).unwrap() }
+    var flattened = Vec(u32).new()
+    var fuel: u32 = 128
+    assert(!atoms(c, sum, &flattened, 64, &fuel), "shared sums cannot expand without bound")
+    assert(flattened.len() <= ATOMS, "sum atom cap is enforced")
+    var zeros = zero
+    for _ in 0..20 { zeros = c.add(core.Term.UAdd(zeros, zeros), sp).unwrap() }
+    var empty = Vec(u32).new()
+    fuel = 128
+    assert(!atoms(c, zeros, &empty, 64, &fuel), "zero-only shared graphs consume fuel")
+    assert(fuel == 0 && empty.len() == 0, "interior and zero nodes count as work")
+}

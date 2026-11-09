@@ -32,6 +32,7 @@ same on GitHub.
 - [Type aliases in dependent code](language/dependent-aliases.md)
 - [Parameterized dependent records](language/dependent-records.md)
 - [Natural-index proof library](language/natural-proofs.md)
+- [Bounded proof automation](language/proof-automation.md)
 - [List proof library](language/list-proofs.md)
 - [Lists with exact lengths](language/sized-lists.md)
 - [Proof-bounded buffer ranges](language/buffer-ranges.md)

@@ -113,6 +113,9 @@ the runner. Its suites:
   binding MIR for effectful flat fields. Both-target O0/O2 objects and native
   execution check exact allocation counts, declaration-order effects, nesting,
   enum fields, scalar branches, erased indices, traps and ownership rejections.
+  `tests/core_auto.py` covers bounded proof construction, explicit imported hints,
+  Eq/Lt composition, goal propagation to memory primitives, exact erasure, native
+  execution, name compatibility, forged facts and deterministic search limits.
   `tests/core_structs.py` compares explicit indexed record literals against
   contextual construction MIR, including imported/nested records, borrowed and
   discarded owners, erased overflowing indices and runtime traps. Exact negatives

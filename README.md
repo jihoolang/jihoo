@@ -113,6 +113,10 @@ freestanding (no libc, static) programs for x86_64 and aarch64 Linux, and
 [UEFI applications](docs/language/profiles.md#uefi) (PE32+ images) for
 both machines.
 
+[Bounded proof automation](docs/language/proof-automation.md) constructs checked
+natural equality/order proofs from local evidence and explicit lemma hints.
+It has fixed search limits and erases to the same runtime code as explicit proofs.
+
 Work toward 0.6 starts with dependent-type stabilization, before mechanized
 soundness. Pure normalization now retains dependent motives on symbolic
 branches, so the core preservation regressions have no expected failures.
