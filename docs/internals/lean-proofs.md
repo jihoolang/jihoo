@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 668 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 684 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1597,3 +1597,58 @@ derivation. The serializer/parser correspondence is tested, not proved. These
 are forward typing and semantic results for witnessed source programs, not
 whole-language consistency, executable-checker soundness or runtime/ownership
 soundness.
+
+### Executable inference for the restricted bridge language
+
+`MixedInference.lean` implements `Checked.infer`, a structurally recursive,
+proof-producing Lean checker over the existing annotated `CoreBridge.Term`
+syntax. A successful result contains an inferred type and a `SourceTyping`
+derivation. The caller does not provide that derivation. Variable lookup checks
+the selected context entry's scope; natural expressions and annotations are
+scope-checked; application requires a natural Pi; indexing checks exact proof
+endpoints; lets check their annotation against the inferred value type. Lambda
+inference shifts existing context types across the newly bound natural.
+
+`infer_complete` proves that every `SourceTyping` derivation is accepted with
+its exact type. `inferType_iff` combines this with soundness. `rejected_iff`
+characterizes inference failure as the absence of any derivable type, and
+`source_type_unique` proves type uniqueness in this judgment. `check_iff`
+characterizes exact checking against a supplied annotation; annotation rejection
+can also mean the term has a different type, rather than inference failure.
+These results are about `SourceTyping`, not the full jihoo type checker.
+
+`accepted_raw` and `accepted_closed` connect computed acceptance to the unified
+Raw context and closed typing theorem from the previous section. `accepted_true`
+connects acceptance to proposition truth given a well-formed mixed telescope,
+proposition formation, and validity of the telescope's assumptions. The checker
+does not itself certify arbitrary telescope well-formedness, and unused context
+entries are not globally validated. `accepted_closed_bound` and
+`accepted_closed_equality` need no supplied environment or derivation: a closed
+accepted literal strict-bound/equality proposition is true. False literal
+propositions therefore cannot be accepted by this checker.
+
+`MixedInferenceExamples.lean` computes verdicts on sixteen cases without storing
+source typing witnesses. It covers all admitted term constructors and exercises
+mixed variable lookup, proof lets, scalar application, exact endpoint checking,
+and intentional exclusions. `model_verdicts` is checked by Lean's kernel with
+`decide`, not an assumed test result. Four additional Lean tests cover missing
+variables, out-of-scope indices, a malformed accessed context entry and applying
+a nonfunction. The emitter serializes model and expected actual-Core verdicts
+separately into `tests/core_mixed_inference.tsv`. The full proof check regenerates
+that file byte for byte. Actual Core tests require the stated verdict and
+specific diagnostic, and run preservation checks on accepted cases. The two
+intentional differences are `zeroLe` and a converted let annotation: jihoo accepts
+both, while this model correctly rejects them. The harness checks that no other
+scope difference is introduced. The combined mixed suite has twenty-two
+accepted controls and fourteen rejected cases and also runs under `python -O`.
+
+This is an executable decision procedure for the existing restricted bridge
+judgment. It is not a decoder of arbitrary Core graphs or source files and does
+not establish acceptance reflection for `Core.infer`. Numeric certificates in
+`Index` and `Term` constructors are part of the admitted input syntax, including
+representable literals and closed subtraction/comparison premises. No general
+conversion or `zeroLe` rule has been added. Recursion is structurally terminating,
+but no complexity bound or untrusted-input service is claimed: substitutions
+can expand syntax, and this checker does not reproduce Core's fuel limits.
+Semantic indices remain mathematical naturals; none of the new theorems claims
+runtime, ownership, borrow, lowering or whole-language soundness.

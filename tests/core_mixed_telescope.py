@@ -70,6 +70,28 @@ def main():
         if source.count(old) != 1:
             raise RuntimeError(f'{name}: mutation no longer identifies exactly one location')
         invalid_cases[name] = source.replace(old, new)
+    inference = (Path(__file__).resolve().parent / 'core_mixed_inference.tsv').read_text()
+    rows = [line.split('\t') for line in inference.splitlines() if not line.startswith('#')]
+    if len(rows) != 16 or any(len(row) != 5 for row in rows):
+        raise RuntimeError('malformed inference fixture')
+    names = set()
+    differences = set()
+    for name, model, core, diagnostic, source in rows:
+        if name in names or model not in ('true', 'false') or core not in ('true', 'false'):
+            raise RuntimeError('duplicate inference case or invalid verdict')
+        names.add(name)
+        if model != core:
+            differences.add(name)
+        key = 'inference-' + name
+        if core == 'true':
+            valid_cases[key] = source
+        else:
+            if not diagnostic:
+                raise RuntimeError('rejection must have an expected diagnostic')
+            invalid_cases[key] = source
+            DIAGNOSTICS[key] = diagnostic.encode()
+    if differences != {'excluded-zero-le', 'excluded-conversion'}:
+        raise RuntimeError('unreviewed model/Core scope difference')
     with tempfile.TemporaryDirectory(prefix='jihoo-mixed-') as tmp:
         for valid, cases in ((True, valid_cases), (False, invalid_cases)):
             for name, source in cases.items():
