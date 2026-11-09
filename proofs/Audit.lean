@@ -662,3 +662,24 @@ import Jihoo
 #print axioms Jihoo.Quantity.Substitution.lend_substituted_finished
 #print axioms Jihoo.Quantity.Substitution.lend_substituted_prefix
 #print axioms Jihoo.Quantity.Substitution.rooted_substitution_source
+
+#print axioms Jihoo.Indexed.Mixed.Proposition.subst
+#print axioms Jihoo.Indexed.Mixed.WellFormed.scoped
+#print axioms Jihoo.Indexed.Mixed.Valid.valuation
+#print axioms Jihoo.Indexed.Mixed.Derives.sound
+#print axioms Jihoo.Indexed.Mixed.finite_value_substitution
+#print axioms Jihoo.Indexed.Mixed.Derives.substitution
+#print axioms Jihoo.Indexed.Mixed.Derives.substitution_sound
+#print axioms Jihoo.Indexed.Mixed.natural_instantiation
+#print axioms Jihoo.Indexed.Mixed.proof_instantiation
+#print axioms Jihoo.Indexed.Mixed.no_closed_false_bound
+#print axioms Jihoo.Indexed.Mixed.no_closed_false_equality
+#print axioms Jihoo.Indexed.Mixed.Examples.ctx_wellFormed
+#print axioms Jihoo.Indexed.Mixed.Examples.earlier_proof
+#print axioms Jihoo.Indexed.Mixed.Examples.valid_ctx
+#print axioms Jihoo.Indexed.Mixed.Examples.no_missing_proof
+#print axioms Jihoo.Indexed.Mixed.Examples.no_forward_index
+#print axioms Jihoo.Indexed.Mixed.Examples.proof_capture_avoiding
+#print axioms Jihoo.Indexed.Mixed.Examples.scalar_capture_avoiding
+#print axioms Jihoo.Indexed.Mixed.Examples.discharge_between_indices
+#print axioms Jihoo.Indexed.Mixed.Examples.discharge_both

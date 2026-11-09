@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 625 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 645 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1493,3 +1493,57 @@ Lean mode-preservation theorem. The previous observer, typed-mode stability and
 normalization/substitution correspondence obligations remain explicit. Proving
 that first-order kind/value admission is stable under all permitted typed
 substitutions is still required for the full ownership argument.
+
+
+## Mixed natural and proof telescopes
+
+`MixedTelescope.lean` extends the finite `Indexed` calculus with an explicit
+mixed telescope. `Telescope.natural` introduces a natural index;
+`Telescope.proof` introduces a proof of an equality, strict inequality, or
+universal quantification over naturals. Constructors add binders after the
+existing telescope. A proof type must be scoped over the natural indices
+already present. Proofs cannot occur in indices, and proof binders do not
+increment the natural namespace. A new natural binder shifts every earlier
+proof type. Proof and scalar variables have separate de Bruijn namespaces;
+this is not the executable Core's unified variable representation.
+
+`WellFormed.scoped` establishes the finite scope of all projected assumptions.
+`Valid` builds environments in binder order: a natural extends the valuation,
+while a proof requires a realization of its assumption at that valuation.
+`Valid.valuation` derives the environment premise required by the existing
+`HasType.realize` theorem. `Derives.sound` therefore establishes truth of a
+derivable proposition in every valid environment, without assuming truth of
+the conclusion. An inconsistent assumption context need not have a valid
+environment; the theorem does not claim otherwise.
+
+`Derives.substitution` combines capture-avoiding scalar and proof substitution.
+Its `Substitutes` premise requires a scoped scalar mapping and a syntactically
+typed replacement for each actual source proof, at the scalar-substituted type.
+The target telescope must be well formed. There is no premise requiring the
+substituted conclusion to be true or typed. `finite_value_substitution` removes
+the earlier total-context substitution obligation: entries beyond the finite
+source context use a harmless natural default, inaccessible to scoped terms.
+`natural_instantiation` and `proof_instantiation` discharge the newest binder
+of each kind. The underlying substitution shifts inserted proofs beneath
+natural lambdas and value binders. Closed false strict bounds and unequal
+literal equalities have no derivation in the empty telescope.
+
+`MixedTelescopeExamples.lean` checks interleaved natural/proof/natural/proof
+contexts, rejects forward references and missing proof variables, and composes
+proof discharge with scalar discharge beneath a retained natural lambda.
+`tests/core_mixed_telescope.py` independently exercises the actual checker on
+seven accepted controls (both `check` and `preserves`) and seven rejected
+variants with specific expected diagnostics. These include incorrect capture,
+incorrect proof endpoints, unbound references and false propositions. The test
+runs no input program and emits no runtime artifact. CI runs it against the
+built compiler. These tests are correspondence evidence, not a parser, checker,
+or normalization refinement theorem.
+
+The theorem concerns the existing `Indexed` typing and conversion relations.
+Natural indices are mathematical `Nat`, not bounded machine words. Universal
+proofs quantify over naturals; arbitrary type domains and proof-dependent types
+are excluded. This milestone does not add proof-domain lambdas to `Indexed`,
+model arbitrary higher-order Core conversion, or prove whole-language
+consistency. It makes no runtime, ownership, borrowing, erasure or lowering
+claim. The pre-existing realization theorem uses Lean's standard classical
+choice; the axiom audit continues to reject admitted or additional axioms.

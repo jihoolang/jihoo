@@ -293,6 +293,7 @@
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_mixed_telescope.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_type_family_safety.py --compiler ${jihoo}/bin/jihoo
             '';
             installPhase = "touch $out";
