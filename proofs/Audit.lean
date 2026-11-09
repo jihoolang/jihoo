@@ -707,3 +707,20 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.MixedBridge.universal_typed
 #print axioms Jihoo.CoreBridge.MixedBridge.CheckedExample.typed_closed
 #print axioms Jihoo.CoreBridge.MixedBridge.CheckedExample.true_in_valid_environment
+
+#print axioms Jihoo.CoreBridge.Checked.infer_complete
+#print axioms Jihoo.CoreBridge.Checked.inferType_sound
+#print axioms Jihoo.CoreBridge.Checked.inferType_iff
+#print axioms Jihoo.CoreBridge.Checked.check_iff
+#print axioms Jihoo.CoreBridge.Checked.rejected_iff
+#print axioms Jihoo.CoreBridge.Checked.source_type_unique
+#print axioms Jihoo.CoreBridge.Checked.accepted_raw
+#print axioms Jihoo.CoreBridge.Checked.accepted_closed
+#print axioms Jihoo.CoreBridge.Checked.accepted_true
+#print axioms Jihoo.CoreBridge.Checked.accepted_closed_bound
+#print axioms Jihoo.CoreBridge.Checked.accepted_closed_equality
+#print axioms Jihoo.CoreBridge.Checked.model_verdicts
+#print axioms Jihoo.CoreBridge.Checked.missing_variable
+#print axioms Jihoo.CoreBridge.Checked.out_of_scope_index
+#print axioms Jihoo.CoreBridge.Checked.malformed_context_entry
+#print axioms Jihoo.CoreBridge.Checked.nonfunction_application
