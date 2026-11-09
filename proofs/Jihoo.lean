@@ -135,3 +135,5 @@ import Jihoo.QuantityErasureReflectionExamples
 import Jihoo.LoweringEnvironmentExamples
 
 import Jihoo.OwnershipLoweringExamples
+
+import Jihoo.CallEntryExamples

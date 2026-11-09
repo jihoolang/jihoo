@@ -898,3 +898,22 @@ import Jihoo
 #print axioms Jihoo.OwnershipLowering.Examples.ghost_owner_counterexample
 #print axioms Jihoo.OwnershipLowering.Examples.trap_prefix_survives
 #print axioms Jihoo.OwnershipLowering.Examples.trap_does_not_finish
+
+-- Constructed sequential parameter allocation and call entry.
+#print axioms Jihoo.CallEntry.number_layout
+#print axioms Jihoo.CallEntry.number_pack
+#print axioms Jihoo.CallEntry.number_append
+#print axioms Jihoo.CallEntry.number_decode
+#print axioms Jihoo.CallEntry.reference_initialized
+#print axioms Jihoo.CallEntry.references_distinct
+#print axioms Jihoo.CallEntry.references_fresh
+#print axioms Jihoo.CallEntry.reserved_unchanged
+#print axioms Jihoo.CallEntry.entry_assignment
+#print axioms Jihoo.CallEntry.constructed_owner_pipeline
+#print axioms Jihoo.CallEntry.Examples.numbered_slots
+#print axioms Jihoo.CallEntry.Examples.contiguous_references
+#print axioms Jihoo.CallEntry.Examples.two_phase_allocation
+#print axioms Jihoo.CallEntry.Examples.initialized_with_reserved_and_node
+#print axioms Jihoo.CallEntry.Examples.reserved_and_node_not_parameters
+#print axioms Jihoo.CallEntry.Examples.constructed_owner
+#print axioms Jihoo.CallEntry.Examples.wrong_base_counterexample

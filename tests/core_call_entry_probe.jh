@@ -1,0 +1,76 @@
+// Test-only inspection of current Core lowering before LLVM code generation.
+import std.env
+import core_elab
+import diag
+import load
+import mir
+import target
+
+fn inspect(path: str, tgt: target.Target) -> Result(String, String) {
+    var sources = diag.Sources.new()
+    let ast = match load.load(
+        path,
+        load.default_search(Vec(String).new()),
+        tgt.name(),
+        &sources,
+        false
+    ) {
+        Ok(a) => a
+        Err(e) => return Err(e.msg.clone())
+    }
+    let p = match core_elab.compile(ast, tgt, true, target.Codegen.default()) {
+        Ok(p) => p
+        Err(e) => return Err(e.msg.clone())
+    }
+    var functions: i64 = 0
+    var calls: i64 = 0
+    var parameters: i64 = 0
+    for f in p.fns {
+        let Some(body) = f.body else { continue }
+        if f.name.as_str().starts_with("recursion.") {
+            functions += 1
+            if body.arg_count != f.sig.params.len() || f.pass.len() != f.sig.params.len() {
+                return Err("signature and argument count differ".to_string())
+            }
+            if body.arg_count < 1 || body.locals.len() <= body.arg_count {
+                return Err("missing return or node parameter".to_string())
+            }
+            if body.locals[0].kind != mir.LocalKind.Ret { return Err(
+                "local zero is not return".to_string()
+            ) }
+            for i, local in body.locals {
+                if i > 0 && i <= body.arg_count {
+                    if local.kind != mir.LocalKind.Arg || local.ty != f.sig.params[i - 1] {
+                        return Err("parameter local ordering or type mismatch".to_string())
+                    }
+                } else if local.kind == mir.LocalKind.Arg {
+                    return Err("noncontiguous parameter locals".to_string())
+                }
+            }
+            parameters += body.arg_count
+        }
+        for block in body.blocks {
+            let mir.Term.Call(mir.Callee.Fn(id), args, _, _, _) = block.term else { continue }
+            if id as i64 >= p.fns.len() { return Err("invalid callee".to_string()) }
+            let callee = p.fns[id as i64]
+            if callee.name.as_str().starts_with("recursion.") {
+                if args.len() != callee.sig.params.len() {
+                    return Err("call operand count differs from callee".to_string())
+                }
+                calls += 1
+            }
+        }
+    }
+    if functions == 0 || calls == 0 { return Err("no generated recursion observed".to_string()) }
+    Ok("entry-layout\t" + functions.to_string().as_str() + "\t" + calls.to_string().as_str() + "\t" + parameters.to_string().as_str())
+}
+
+fn main() -> i32 {
+    let args = env.args()
+    if args.len() != 3 { return 2 }
+    let Some(tgt) = target.Target.parse(args[2]) else { return 2 }
+    match inspect(args[1], tgt) {
+        Ok(output) => { println(output); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}

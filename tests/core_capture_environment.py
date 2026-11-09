@@ -56,6 +56,14 @@ export fn capture_owned(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
     let result = threaded(xs, alloc(1, b + c), a{exported})
     load(result, 0, decide_lt(0, 1), fn(v, result) {{ v }})
 }}
+fn paired(xs: ref List, a: i64, b: i64, c: i64{parameter}) -> i64 {{
+    induct(fn(t, m: i64{domain}, z: i64) {{ i64 }}, fn(m{binder}, z) {{ a * m - z }},
+        fn(x, rest, ih, m{binder}, z) {{ ih(m + x{evidence}, z - 1) }}, xs)(b{initial}, c)
+}}
+export fn capture_pair(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
+    let xs = ascending(n, x)
+    paired(xs, a, b, c{exported})
+}}
 export fn capture(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
     let xs = ascending(n, x)
     captured(xs, a, b, c{exported})
@@ -101,10 +109,14 @@ def expected_owned(n, x, a, b, c):
     return a * (x + 1) if n else b + c
 
 
+def expected_pair(n, x, a, b, c):
+    return a * (b + n * x + n * (n + 1) // 2) - (c - n)
+
+
 def native_worker(path):
     native = ctypes.CDLL(str(path))
     functions = [(native.capture, expected), (native.capture_three, expected_three),
-                 (native.capture_owned, expected_owned)]
+                 (native.capture_owned, expected_owned), (native.capture_pair, expected_pair)]
     for function, _ in functions:
         function.argtypes = [ctypes.c_uint64, *([ctypes.c_int64] * 4)]
         function.restype = ctypes.c_int64
@@ -164,8 +176,8 @@ def test(compiler, out):
                                      '-Wl,--wrap=malloc', '-Wl,--wrap=free']))
                     output = success(command([sys.executable, *(['-O'] if sys.flags.optimize else []),
                                               __file__, '--native-library', library]))
-                    require(b'135 native capture cases' in output, f'worker did not finish: {output!r}')
-                    runs += 135
+                    require(b'180 native capture cases' in output, f'worker did not finish: {output!r}')
+                    runs += 180
     # The valid exported counterpart above makes this an ownership rejection,
     # not a no-export or unsupported-lowering failure. Never execute it.
     invalid = out / 'capture-owned-duplicate.jh'

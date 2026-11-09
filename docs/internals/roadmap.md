@@ -743,6 +743,10 @@ mechanize its soundness, starting from that specification:
    guarantees cover all transformed control traces and reconstructed callee
    values, conditional on authentic projection and positional argument assignment.
    The missing native trace/heap interpretation still prevents a full release claim.
+   Sequential parameter numbering and a concrete positional entry store now
+   discharge the decoder/assignment assumptions inside that model. Current-module
+   MIR probes test contiguous typed parameter locals and recursive call arities;
+   native execution fidelity to the modeled entry rule remains unproved.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
