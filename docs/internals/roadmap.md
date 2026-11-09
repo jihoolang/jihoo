@@ -738,6 +738,11 @@ mechanize its soundness, starting from that specification:
    recursive-hypothesis environments and conditional caller/callee lookup
    agreement. Native frame construction and MIR call semantics remain trusted
    and tested, not formally refined by that result.
+   A composed ownership endpoint now connects those layouts to ghost erasure
+   and checked usage through an injective source-slot-to-operand map. Its
+   guarantees cover all transformed control traces and reconstructed callee
+   values, conditional on authentic projection and positional argument assignment.
+   The missing native trace/heap interpretation still prevents a full release claim.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

@@ -879,3 +879,22 @@ import Jihoo
 #print axioms Jihoo.LoweringEnvironment.Examples.pack_alone_not_injective
 #print axioms Jihoo.LoweringEnvironment.Examples.swapped_operands_change_environment
 #print axioms Jihoo.LoweringEnvironment.Examples.parameter_interpretation
+
+-- Integrated checked ownership through erasure and capture lowering.
+#print axioms Jihoo.OwnershipLowering.scalar_injective
+#print axioms Jihoo.OwnershipLowering.resource_injective
+#print axioms Jihoo.OwnershipLowering.scalar_payload
+#print axioms Jihoo.OwnershipLowering.resource_payload
+#print axioms Jihoo.OwnershipLowering.demand_preserved
+#print axioms Jihoo.OwnershipLowering.finishes_iff
+#print axioms Jihoo.OwnershipLowering.prefix_iff
+#print axioms Jihoo.OwnershipLowering.checked_owner_pipeline
+#print axioms Jihoo.OwnershipLowering.Examples.packed_owner_positions
+#print axioms Jihoo.OwnershipLowering.Examples.no_scalar_hypothesis_or_ghost
+#print axioms Jihoo.OwnershipLowering.Examples.decoded_frame
+#print axioms Jihoo.OwnershipLowering.Examples.assigned_frame
+#print axioms Jihoo.OwnershipLowering.Examples.integrated_owner
+#print axioms Jihoo.OwnershipLowering.Examples.nonvacuous_runtime_trace
+#print axioms Jihoo.OwnershipLowering.Examples.ghost_owner_counterexample
+#print axioms Jihoo.OwnershipLowering.Examples.trap_prefix_survives
+#print axioms Jihoo.OwnershipLowering.Examples.trap_does_not_finish
