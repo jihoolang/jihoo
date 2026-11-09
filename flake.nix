@@ -204,6 +204,7 @@
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/Audit.lean
+                ./proofs/EmitMixedTelescope.lean
                 ./proofs/EmitCore.lean
                 ./proofs/EmitPrimitiveSafety.lean
                 ./proofs/EmitBinderClassification.lean
@@ -217,6 +218,7 @@
             mkdir -p tests/core_preserves
             cp ${./tests/core_preserves/lean-core-translation.jhc} tests/core_preserves/lean-core-translation.jhc
             cp ${./tests/core_preserves/lean-primitive-safety.jhc} tests/core_preserves/lean-primitive-safety.jhc
+            cp ${./tests/core_preserves/lean-mixed-telescope.jhc} tests/core_preserves/lean-mixed-telescope.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
             bash proofs/check.sh
             touch $out
