@@ -829,3 +829,23 @@ import Jihoo
 #print axioms Jihoo.Quantity.Erasure.Examples.target_check_not_source_check
 #print axioms Jihoo.Quantity.Erasure.Examples.duplication_survives
 #print axioms Jihoo.Quantity.Erasure.Examples.capture_still_rejected
+
+-- Erasure trace reflection and runtime slot identity.
+#print axioms Jihoo.Quantity.Erasure.finishes_relabel_reflect
+#print axioms Jihoo.Quantity.Erasure.prefix_relabel_reflect
+#print axioms Jihoo.Quantity.Erasure.finishes_reflect
+#print axioms Jihoo.Quantity.Erasure.prefix_reflect
+#print axioms Jihoo.Quantity.Erasure.finishes_iff
+#print axioms Jihoo.Quantity.Erasure.prefix_iff
+#print axioms Jihoo.Quantity.Erasure.may_terminate_iff
+#print axioms Jihoo.Quantity.Erasure.Slots.lookup
+#print axioms Jihoo.Quantity.Erasure.Slots.position_injective
+#print axioms Jihoo.Quantity.Erasure.Slots.missing
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.ghost_trap_completes
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.live_trap_no_completion
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.nested_reflection
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.trapped_prefix_reflection
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.equal_payload_distinct_slots
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.compact_lookup_example
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.missing_slot_example
+#print axioms Jihoo.Quantity.Erasure.ReflectionExamples.erased_histories_not_injective

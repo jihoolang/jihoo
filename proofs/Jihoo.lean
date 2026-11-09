@@ -129,3 +129,5 @@ import Jihoo.MixedProofTranslationExamples
 import Jihoo.MixedProofAdmissionExamples
 
 import Jihoo.QuantityErasureExamples
+
+import Jihoo.QuantityErasureReflectionExamples

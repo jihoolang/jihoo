@@ -731,7 +731,7 @@ mechanize its soundness, starting from that specification:
    exporter/source association and all-program checker refinement remain open.
    The ownership control model additionally proves checked usage preservation
    through ghost computation removal and erased-binder slot compaction, with
-   forward trace simulation and exact-once/at-most-once guarantees for all
+   bidirectional finite-trace correspondence and exact-once/at-most-once guarantees for all
    transformed control executions. This is not native Core erasure or value
    correspondence; those release obligations remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
