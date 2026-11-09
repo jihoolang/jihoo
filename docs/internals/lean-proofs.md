@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 695 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 720 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1708,3 +1708,61 @@ no input program. Lean examples independently check exact-type rejection,
 erasure mismatch, namespace recovery and defensive limits. No theorem here
 asserts that arbitrary successful `Core.infer` calls are sound, or adds a runtime,
 ownership, borrow, lowering or whole-language result.
+
+### Natural and proof-domain functions in one judgment
+
+`MixedProofFunctions.lean` supplies a separate, restricted evidence calculus
+where natural-index universal quantification and proof implication can nest in
+either order. Earlier Indexed syntax had natural lambdas and proof-valued lets,
+while the closed propositional-evidence profile had proof functions over closed
+propositions. Here an implication's domain and codomain can refer to surrounding
+natural indices, and a universally quantified body can itself contain proof
+functions. This is a foundational logical judgment, not an extension of the
+snapshot admission checker described above.
+
+`Formula` consists of natural equality, strict bounds, universal quantification
+over naturals, and implication. `Term` explicitly distinguishes natural lambda/
+application from proof lambda/application. Natural and proof variables occupy
+separate namespaces. The finite `Derives` judgment checks hypothesis lookup and
+natural scope, with rules for reflexivity, true literal bounds and `zeroLe`.
+There is no general conversion rule. Proofs never occur in index expressions or
+in types, so proof implication is nondependent in its proof argument while its
+propositions may depend on natural indices.
+
+`Derives.scalar_substitution` preserves typing while shifting scalar replacements
+under natural binders and substituting proof annotations. `Derives.renaming`
+and `Derives.proof_substitution` preserve typing for finite proof contexts.
+Proof substitution shifts inserted proofs' natural indices under natural lambdas
+and renames their proof variables under proof lambdas. Replacement premises
+require syntactically typed proofs at the source assumption types, not validity
+of the result. `natural_beta` and `proof_beta` derive typing for the two explicit
+beta substitutions. The latter additionally requires all remaining context
+entries to be naturally scoped; this is stated rather than inferred from unused
+hypotheses. These are typed beta rules, not a theorem about the entire Core
+reduction relation or a claim of normalization.
+
+`Formula.Holds` interprets implication as logical implication and natural
+quantification as universal quantification over mathematical naturals.
+`Formula.holds_subst` proves capture-safe scalar substitution preserves this
+meaning. `Derives.sound` shows that a derivation's conclusion holds whenever
+all its hypotheses hold in the same natural valuation. Validity of assumptions
+is explicit and does not assume the conclusion. Closed false strict bounds and
+unequal literal equalities therefore have no derivations, even with nested
+proof functions and natural applications.
+
+The Lean examples include a proof retained across a later natural binder,
+higher-order proof-function application, a universally quantified proof used
+under a natural binder, composed proof/scalar beta substitution, and proof
+capture avoidance beneath another proof lambda. Missing hypotheses and forward
+scalar references are excluded. `tests/core_proof_functions.py` independently
+checks eight corresponding actual-Core programs with both `check` and
+`preserves`, and seven negative controls with specific diagnostics. It also runs
+under `python -O` and executes no input program.
+
+This milestone does not prove an encoder from the new judgment into Raw typing,
+reflect arbitrary successful Core checks, or broaden any existing admission
+endpoint. The Core tests are representative correspondence evidence, not that
+missing translation theorem. Arithmetic expressions retain mathematical natural
+addition and truncated subtraction; machine word bounds/overflow are not modeled.
+Arbitrary type domains, proof-dependent indices, universes, general conversion,
+recursion, runtime, ownership, borrowing and lowering are outside the judgment.
