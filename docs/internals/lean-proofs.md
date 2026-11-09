@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 845 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 862 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -2053,7 +2053,7 @@ case captures two enclosing function-valued hypotheses together with distinct
 scalar values and ghost arguments. Plain and ghost-annotated variants must
 produce identical complete MIR with at least five generated recursive functions.
 Both variants emit x86_64 and aarch64 objects at O0 and O2 (eight objects). On the
-host, bounded subprocesses compare 540 function results against independent
+host, bounded subprocesses compare 720 function results against independent
 Python recurrences and check allocation/free balance per call. Distinct and
 equal scalar payloads exercise ordering and equal-typed slots; separate controls
 ensure the reference models detect a scalar permutation. Normal and optimized
@@ -2111,7 +2111,7 @@ The native capture regression now also threads an owned buffer as an explicit
 argument through recursive hypotheses while computing updates in a nested
 borrowed recursion. Its final buffer value is checked against an independent
 model; each native call must balance allocations and frees. Together with the
-existing two-/three-level scalar captures this gives 540 native comparisons per
+existing two-/three-level scalar captures this gives 720 native comparisons per
 Python mode, eight O0/O2 target objects and exact plain/ghost MIR equality. A
 mutation that both frees and passes the same owner must receive the intended
 `an owned value is used more than once` diagnostic and produce no object. The
@@ -2125,7 +2125,7 @@ The original 0.6 obligations can now be separated without conflating the models:
 | Selected Raw logical consistency and preservation | Closed literal consistency, contextual beta/bounded-add preservation | All specified constructors, reductions and runtime modes are not represented by this Raw fragment |
 | Source ownership accounting | Quantity checking bounds all completed/prefix traces | Authentic typed-Core projection, alias resolution and mode stability |
 | Ghost erasure and operand naming | Finite trace correspondence and the computed injective resource map | Native Core/MIR traces must implement these controls |
-| Call-frame values | Exact capture reconstruction and conditional callee lookup | Native descriptor widths, local allocation and MIR positional call assignment |
+| Call-frame values | Capture reconstruction, sequential numbering and constructed positional entry | Native descriptor fidelity, machine bounds and execution of the stated entry rule |
 | Heap and borrow safety | No full theorem | Heap identity, lease/lifetime semantics and their simulation remain open |
 
 The resource slot premise classifies a scalar slot, not its native linear type or
@@ -2137,3 +2137,67 @@ proved to describe every same accepted native Core program. Thus this composed
 result is a coherent partial release argument, not a whole-language soundness
 or Core-to-MIR theorem. No production rule, new certificate endpoint, or native
 runtime behavior changes in this increment.
+
+### Constructed parameter allocation and call entry
+
+`CallEntry.lean` removes two caller-supplied premises from the integrated model:
+the callee decoding witness and positional value-assignment equality.
+`numberSlot`/`number` implement sequential fresh parameter allocation from a
+starting local index: ghosts allocate nothing, scalar slots allocate one local,
+and a hypothesis allocates its node followed by each extra operand. `number_layout`
+and `number_pack` prove preservation of layout and an exact contiguous reference
+range. `number_append` proves that separate capture/applied-argument allocation
+phases agree with allocation over the combined layout. `number_decode` therefore
+constructs the successful frame decoding rather than assuming it.
+
+`entry` specifies a callee-local store containing an existing reserved prefix
+(such as the return slot), its own recursion node, then the positional caller
+operands. `references_distinct` and `references_fresh` prove generated parameters
+are distinct and overlap neither reserved locals nor the node.
+`reference_initialized` proves every generated reference has a value, and
+`reserved_unchanged` proves the existing prefix is preserved. `entry_assignment`
+derives the operand-value equality from this store construction. Its total
+lookup uses a fallback only for definitional convenience: the equality holds
+for every fallback and every generated reference is separately proved in range.
+The model does not treat a missing actual argument as silently initialized.
+
+`constructed_owner_pipeline` instantiates the preceding integrated theorem with
+this generated callee and store. No decoded-frame or value-assignment witness is
+an input. Source resource-slot designation and demand one remain its safety
+premises; the conclusions retain the original value and exact-once/at-most-once
+accounting for all transformed control executions. Examples instantiate that
+result directly, cover hypothesis expansion and two-phase allocation, and show
+that an incorrect base index could otherwise read a reserved value.
+
+The connection to native construction is now checked before LLVM as well as by
+execution. `tests/core_call_entry_probe.jh` builds the current loader, elaborator,
+Core and lowerer modules, then inspects their actual `mir.Program`. For generated
+recursion functions it verifies return-local placement, a nonempty node-bearing
+parameter prefix, agreement of signature/pass/argument counts, contiguous `Arg`
+locals at indices `1..arg_count`, each local's signature type, absence of later
+`Arg` locals, and direct recursive call arities. It does not infer operand-value
+agreement from arity. For the current regression corpus, four inspections
+(plain/ghost variants and two targets) each observe eight generated recursive
+functions, nineteen recursive calls and 139 parameter locals. Invalid erased
+runtime use and a valid nonrecursive input must both reject without partial
+success output, ruling out vacuous observation.
+
+The native corpus additionally uses two explicitly applied scalar parameters
+with a ghost argument between them. A noncommutative result and an independent
+reference recurrence detect argument swaps or accidental ghost-slot offsets.
+Together with nested hypotheses and owned-buffer threading this yields 720
+native value/allocation comparisons per Python mode and eight O0/O2 target
+objects. The new MIR inspection is wired into CI; its helper is rebuilt from
+current compiler modules. Native worker processes remain bounded and the
+invalid ownership mutation is never executed.
+
+**Precise boundary:** this proves a concrete list/Nat entry algorithm and its
+composition with the existing control semantics. It does not prove the native
+imperative implementation refines that algorithm, or that every MIR/LLVM call
+implements the stipulated positional entry store. The probe and executions are
+regression evidence for those obligations, not proof certificates. Native u32
+local-index bounds, descriptor authenticity, typed source/control projection,
+heap/borrow interpretation and whole-specified-core coverage remain open. The
+reserved prefix belongs to the callee-local model, not shared caller heap state;
+no stack separation or lifetime theorem follows. Production compiler rules and
+runtime behavior are unchanged.
