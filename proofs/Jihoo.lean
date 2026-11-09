@@ -125,3 +125,5 @@ import Jihoo.MixedRawAdmissionExamples
 import Jihoo.MixedProofFunctionsExamples
 
 import Jihoo.MixedProofTranslationExamples
+
+import Jihoo.MixedProofAdmissionExamples

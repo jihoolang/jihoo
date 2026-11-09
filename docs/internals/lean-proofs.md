@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 741 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 760 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1830,3 +1830,68 @@ conversion, or reflect arbitrary `Core.infer` acceptance. The source semantic
 soundness theorem is proved independently; the bridge does not assume semantic
 soundness of the whole Raw judgment. Whole-language, runtime, ownership,
 borrowing, erasure and lowering results remain outside its claim.
+
+### Independent semantic admission of mixed proof snapshots
+
+`MixedProofInference.lean` implements executable, proof-producing inference for
+the mixed natural/proof function judgment. It handles both lambda/application
+pairs, exact proposition matching, finite hypothesis lookup, natural scope,
+reflexivity, literal decisions and `zeroLe`. `inferType_iff` proves soundness and
+completeness for this restricted judgment, including higher-order proof
+arguments. `rejected_iff` characterizes absence of any source derivation. These
+are statements about the independent Lean checker, not about `Core.infer`.
+
+`MixedProofAdmission.lean` connects this inference to supplied actual-Core
+snapshots. It reconstructs both the term and its expected proposition from
+unified Raw syntax, using the binder layout to distinguish natural indices and
+proof variables. It checks the inferred proposition against that parsed input
+proposition, verifies representability, and requires exact re-encoding of both
+input trees. A successful `Accepted` result contains all this evidence; the
+caller supplies neither a source derivation nor a semantic truth premise.
+Standalone proof lambdas, proof applications, interleaved natural binders and
+`zeroLe` are supported here, unlike the older restricted mixed admission path.
+The older endpoint remains unchanged.
+
+`Accepted.raw_typed` and `Accepted.type_formed` establish the independent ghost
+Raw judgments for the exact inputs. `Accepted.parsed_truth` establishes truth
+of whichever proposition is returned by the input type parser, using uniqueness
+of its deterministic result and the independently proved source semantics.
+`GraphAccepted.input_truth` connects that result to the selected type root of
+the supplied graph. Thus the theorem is about the actual retained type tree,
+not a producer's claimed type or merely a convertible alternative. The whole
+graph and both roots are parameters of the admitted evidence. Every node,
+including unreachable nodes, is checked by the existing graph decoder.
+`false_bound_excluded` and `false_equality_excluded` rule out admission of any
+term paired with a representable closed false literal proposition.
+
+`CheckMixedProof.lean` is a standalone verifier over the canonical, bounded,
+read-once snapshot input path. It reuses the prior graph/expanded-tree limits,
+512-node term/type guards and candidate recursion fuel 32. Natural application
+arguments are restricted to atomic variables/literals, preventing index-tree
+expansion during substitution; proof application does not substitute proofs
+into index expressions. No end-to-end complexity bound is proved. Subtraction,
+general conversion, erased natural binders, proof-dependent indices and arbitrary
+non-proposition function domains remain excluded. Non-atomic natural application
+is deliberately incomplete even when both source and actual Core accept it.
+
+`tests/core_mixed_proof_admission.py` builds the current checkout's actual-Core
+snapshot exporter and checks fifteen source programs in both `infer` and
+`require` modes, including all six proof-backed generated translations. Thirty
+snapshots plus an independently valid input pass. Fifteen cases are rejected:
+three actually Core-accepted scope exclusions, and twelve root/type/erasure,
+malformed-input and resource variants. False literal formulas are also tested
+as graph-valid payloads. Graph-changing tests use earlier valid references where
+appropriate; depth/shared-expansion tests carry matching type shapes. Rejection
+must have nonzero status, a rejection diagnostic and no success output. The
+suite also runs under `python -O`, and executes no input program. Lean examples
+check proof-lambda admission, namespace separation, forward-reference rejection,
+wrong erasure, inference computation and false-formula exclusion.
+
+This is a semantic guarantee for snapshots that pass the independent admission
+checker. Actual `Core.infer` or `Core.require` success alone is not a theorem
+premise sufficient for truth; the production compiler does not automatically
+invoke this verifier. The association between exported snapshots and actual
+compiler calls, canonical parser/IO behavior and serialization fidelity remain
+trusted and tested boundaries. The theorem neither assumes nor proves semantic
+soundness of arbitrary Raw beta conversion. It makes no whole-language,
+normalization, runtime arithmetic, ownership, borrow, erasure or lowering claim.

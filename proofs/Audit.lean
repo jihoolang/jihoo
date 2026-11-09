@@ -785,3 +785,23 @@ import Jihoo
 #print axioms Jihoo.MixedProofFunctions.Bridge.CheckedExample.source_true
 #print axioms Jihoo.MixedProofFunctions.Bridge.subtraction_excluded
 #print axioms Jihoo.MixedProofFunctions.Bridge.oversized_literal_excluded
+
+#print axioms Jihoo.MixedProofFunctions.Checked.infer_complete
+#print axioms Jihoo.MixedProofFunctions.Checked.inferType_iff
+#print axioms Jihoo.MixedProofFunctions.Checked.accepted_sound
+#print axioms Jihoo.MixedProofFunctions.Checked.rejected_iff
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.Accepted.raw_typed
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.Accepted.type_formed
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.Accepted.truth
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.Accepted.parsed_truth
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.GraphAccepted.sound
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.GraphAccepted.input_truth
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.false_bound_excluded
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.false_equality_excluded
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.proof_lambda_admitted
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.mixed_inference_computes
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.wrong_erasure_rejected
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.proof_not_an_index
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.forward_index_rejected
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.false_snapshot_rejected
+#print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.literal_false_type_impossible
