@@ -74,6 +74,8 @@ def dependent_source(kind, size):
 
 def git_revision(directory, paths=()):
     """The commit of `directory`, with `-dirty` if tracked files (in paths) changed."""
+    if shutil.which("git") is None:
+        return None
     def git(*args):
         p = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True)
         return p.stdout.strip() if p.returncode == 0 else None

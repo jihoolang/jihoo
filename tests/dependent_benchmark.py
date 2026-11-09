@@ -5,6 +5,7 @@ import importlib.util
 import os
 import json
 import sys
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import tempfile
@@ -26,6 +27,8 @@ def main():
     args = parser.parse_args()
     compiler = str(Path(args.compiler).resolve())
     env = {**os.environ, "JIHOO_PATH": str(ROOT / "lib")}
+    with patch.dict(os.environ, {"PATH": ""}):
+        require(benchmark.git_revision(ROOT) is None, "missing Git must yield unknown revision")
     with tempfile.TemporaryDirectory(prefix="dependent-bench-test-") as directory:
         temp = Path(directory)
         for kind in benchmark.DEPENDENT:
@@ -58,7 +61,9 @@ def main():
         command = [sys.executable, str(ROOT / "scripts/benchmark_compile.py"), "--compiler", compiler,
                    "--workload", "dependent-buffer", "--dependent-size", "1", "--dependent-size", "4",
                    "--check-only", "--json", str(report_path)]
-        subprocess.run(command, env=env, check=True, capture_output=True, timeout=120)
+        measured = subprocess.run(command, env=env, capture_output=True, timeout=120)
+        require(measured.returncode == 0,
+                f"benchmark failed: {measured.stdout!r}\n{measured.stderr!r}")
         report = json.loads(report_path.read_text())
         require(len(report["cases"]) == 4, "missing check/full or scaling case")
         require(len(report["compiler_invocation_sha256"]) == 64, "missing compiler identity")
