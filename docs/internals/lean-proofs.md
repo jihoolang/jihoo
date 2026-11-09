@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 800 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 828 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1973,9 +1973,9 @@ original value. `position_injective` proves that two distinct source slots canno
 be conflated even if their payloads happen to be equal. `missing` proves that
 neither erased nor out-of-range slots become readable. The formal lists are
 newest-binder first; native `core_lower.jh` uses the opposite list orientation and
-looks up `env[env.len - 1 - k]`. The correspondence of native arrays, that reversal,
-and actual lowering environments to these lists remains an implementation
-obligation. This is not a proof about native pointer or heap identity.
+looks up `env[env.len - 1 - k]`. The capture-layout development below proves the guarded Nat/list reversal
+rule. Correspondence of native arrays and actual lowering environments to
+these lists remains an implementation obligation. This is not a proof about native pointer or heap identity.
 
 The implementation regression `tests/core_erasure_traces.py` compares complete
 MIR from seven runtime-only/ghost-annotated Core pairs: identity, a branch, nested
@@ -1997,3 +1997,72 @@ finite-trace theorem is not yet a native Core-to-MIR erasure theorem. Mode
 justification, native source projection, value semantics, borrow lifetimes and
 the remaining whole-specified-core release obligations remain open. No new
 certificate or production acceptance rule is introduced.
+
+### Generated-recursion capture environments
+
+`LoweringEnvironment.lean` models the capture-layout portion of
+`core_lower.jh`'s generated recursion functions. Native lowering retains an
+oldest-binder-first environment with ghost holes. A normal value contributes one
+call operand, but an enclosing recursion's hypothesis contributes its node and
+all of its extra captured operands. The callee rebuilds the hypothesis using
+fresh parameter references. Treating that hypothesis as one scalar slot, or
+compacting all holes without retaining source binder positions, would lose this
+structure.
+
+The formal `Slot` therefore distinguishes `ghost`, `value`, and a nonempty
+`hypothesis node extra` block. `layout` records the block boundaries and widths;
+`pack` emits the operands in native environment order. `rebuild_pack` proves
+exact reconstruction while retaining an arbitrary suffix, so explicitly applied
+arguments are not consumed as captures. `rebuild_sound` proves that every
+successful reconstruction consumes exactly its reported payload and preserves
+the supplied layout. `decode_iff` characterizes complete-frame decoding, rejecting
+truncated and trailing operands. `operand_count` and `decode_count` establish the
+frame arity, including each hypothesis node. `call_frame` separates the new
+recursion's own leading node from its captured environment and applied suffix.
+This decoder is a mathematical specification component, not a newly deployed
+native guard or certificate interface.
+
+`callee_environment` supplies the value-level conditional bridge: if fresh
+parameter references decode with the original layout, and positional parameter
+assignment evaluates their operand list to the caller's packed operands, then
+interpreting the reconstructed callee slots recovers the **entire** caller
+environment. `callee_lookup` consequently preserves every original binder
+lookup. The premises concern the layout and operand assignment, not a caller
+supplied assertion that both environments are already equal. Actual MIR call
+semantics and fresh-local allocation must still establish these premises.
+
+`native_lookup_reverse` proves the guarded `length - 1 - k` list lookup agrees
+with newest-first de Bruijn lookup. Appending a new native slot yields the new
+binder at zero and shifts every outer binder by one. The guard matters: a
+checked example shows that saturating subtraction without a range check could
+read the oldest slot for an out-of-range index. These are unbounded Nat/list
+results; native array bounds, signed conversions and integer limits remain
+implementation obligations.
+
+The layout is essential. Equal packed operand lists can describe different
+environments (two values versus one hypothesis block), and a same-arity operand
+permutation can decode successfully to the wrong values. Kernel-checked
+counterexamples prevent interpreting roundtrip as authenticity. Other examples
+cover multiple hypothesis blocks, ghost holes, duplicate scalar payloads,
+zero-extra hypotheses, missing nodes, truncated blocks, trailing operands and
+retention of applied arguments.
+
+`tests/core_capture_environment.py` exercises the actual elaborator, Core
+checker and lowerer with two- and three-level recursive programs. The deepest
+case captures two enclosing function-valued hypotheses together with distinct
+scalar values and ghost arguments. Plain and ghost-annotated variants must
+produce identical complete MIR with at least five generated recursive functions.
+Both variants emit x86_64 and aarch64 objects at O0 and O2 (eight objects). On the
+host, bounded subprocesses compare 360 function results against independent
+Python recurrences and check allocation/free balance per call. Distinct and
+equal scalar payloads exercise ordering and equal-typed slots; separate controls
+ensure the reference models detect a scalar permutation. Normal and optimized
+Python modes, including native worker subprocesses, run in CI.
+
+This is a correctness theorem for the stated capture-layout algorithm plus
+native regression evidence. It does not prove that native `Hypothesis.types`,
+`node`, `extra`, function IDs, erased masks or return types always satisfy the
+layout invariant, or that native recursion terminates. Heap identity, borrow
+validity, ownership preservation across MIR calls, value semantics of the full
+runtime fragment and whole-specified-core consistency/preservation remain open.
+No production compiler acceptance rule or lowering behavior changes here.

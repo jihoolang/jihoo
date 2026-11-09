@@ -305,6 +305,8 @@
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_capture_environment.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_capture_environment.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_proof_functions.py --compiler ${jihoo}/bin/jihoo

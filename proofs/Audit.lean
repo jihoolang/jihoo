@@ -849,3 +849,33 @@ import Jihoo
 #print axioms Jihoo.Quantity.Erasure.ReflectionExamples.compact_lookup_example
 #print axioms Jihoo.Quantity.Erasure.ReflectionExamples.missing_slot_example
 #print axioms Jihoo.Quantity.Erasure.ReflectionExamples.erased_histories_not_injective
+
+-- Generated-recursion capture layout and environment reconstruction.
+#print axioms Jihoo.LoweringEnvironment.readBlock_append
+#print axioms Jihoo.LoweringEnvironment.readBlock_sound
+#print axioms Jihoo.LoweringEnvironment.rebuild_pack
+#print axioms Jihoo.LoweringEnvironment.rebuild_sound
+#print axioms Jihoo.LoweringEnvironment.pack_injective
+#print axioms Jihoo.LoweringEnvironment.call_frame
+#print axioms Jihoo.LoweringEnvironment.decode_iff
+#print axioms Jihoo.LoweringEnvironment.operand_count
+#print axioms Jihoo.LoweringEnvironment.decode_count
+#print axioms Jihoo.LoweringEnvironment.native_lookup_reverse
+#print axioms Jihoo.LoweringEnvironment.native_lookup_newest
+#print axioms Jihoo.LoweringEnvironment.native_lookup_outer
+#print axioms Jihoo.LoweringEnvironment.decoded_lookup
+#print axioms Jihoo.LoweringEnvironment.layout_map
+#print axioms Jihoo.LoweringEnvironment.pack_map
+#print axioms Jihoo.LoweringEnvironment.callee_environment
+#print axioms Jihoo.LoweringEnvironment.callee_lookup
+#print axioms Jihoo.LoweringEnvironment.Examples.capture_order
+#print axioms Jihoo.LoweringEnvironment.Examples.complete_roundtrip
+#print axioms Jihoo.LoweringEnvironment.Examples.applied_suffix_retained
+#print axioms Jihoo.LoweringEnvironment.Examples.truncated_hypothesis_rejected
+#print axioms Jihoo.LoweringEnvironment.Examples.trailing_operand_rejected
+#print axioms Jihoo.LoweringEnvironment.Examples.missing_node_rejected
+#print axioms Jihoo.LoweringEnvironment.Examples.newest_and_ghost
+#print axioms Jihoo.LoweringEnvironment.Examples.unguarded_lookup_is_wrong
+#print axioms Jihoo.LoweringEnvironment.Examples.pack_alone_not_injective
+#print axioms Jihoo.LoweringEnvironment.Examples.swapped_operands_change_environment
+#print axioms Jihoo.LoweringEnvironment.Examples.parameter_interpretation
