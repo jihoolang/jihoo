@@ -523,3 +523,11 @@ checks them against actual checked Core telescopes. Its formal result is
 conditional on authentic summaries: formation/normalization provenance,
 first-order type instantiation, source-owner identity and borrow lifetimes are
 not established by this classification theorem.
+
+
+[Rooted context provenance](lean-proofs.md#rooted-context-and-lend-owner-provenance)
+now derives descriptors along original lambda edges and resolves a Lend's
+variable owner with Core's reverse context indexing. Its structural theorem is
+relative to a faithful syntax view and contextual domain observer; the actual
+kernel interfaces are regression-tested, not proved. Whole-Lend continuation
+projection and heap/borrow soundness remain outstanding.

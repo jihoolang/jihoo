@@ -1,5 +1,6 @@
 // Observe actual checked lambda domains. No caller-supplied mode or family flags.
 import std.os
+import std.env
 import core
 import core_parse
 
@@ -21,7 +22,7 @@ fn stdin_once() -> Result(String, String) {
     Ok(text)
 }
 
-fn observe() -> Result(String, String) {
+fn observe(provenance: bool) -> Result(String, String) {
     let source = stdin_once()?
     var c = match core_parse.parse(source.as_str(), 0) {
         Ok(c) => c
@@ -37,6 +38,7 @@ fn observe() -> Result(String, String) {
     var out = String.new()
     loop {
         let Lam(erased, domain, body) = c.term(at) else { break }
+        if context.len() >= 128 { return Err("binder path limit reached".to_string()) }
         let sort = match c.infer(domain, context.as_slice(), true, core.DEPTH) {
             Ok(s) => s
             Err(e) => return Err(e.msg.clone())
@@ -66,17 +68,42 @@ fn observe() -> Result(String, String) {
             Ok(o) => o
             Err(e) => return Err(e.msg.clone())
         }
+        if provenance {
+            out += "binder " + at.to_string() + " " + domain.to_string() + " " + body.to_string() + " " + context.len().to_string() + " "
+        }
         out += (if erased { 1 as u32 } else { 0 }).to_string()
         out += " " + tag.to_string() + " " + (if owned { 1 as u32 } else { 0 }).to_string() + "\n"
         context.push(core.Binding { ty: domain, erased })
         at = body
     }
     if context.len() == 0 { return Err("expected a lambda telescope".to_string()) }
+    if provenance {
+        let Lend(owner, _, _) = c.term(at) else {
+            return Err("expected lend after original lambda telescope".to_string())
+        }
+        let Var(k) = c.term(owner) else {
+            return Err("expected variable lend owner".to_string())
+        }
+        if k as i64 >= context.len() { return Err("owner outside original context".to_string()) }
+        let position = context.len() - 1 - k as i64
+        let selected = context[position]
+        if selected.erased { return Err("erased lend owner".to_string()) }
+        // Read the exact source binding; never infer a new alias index from type equality.
+        let owned = match c.owned(selected.ty, core.DEPTH) {
+            Ok(value) => value
+            Err(e) => return Err(e.msg.clone())
+        }
+        if !owned { return Err("selected binding is not owned".to_string()) }
+        out += "owner " + at.to_string() + " " + owner.to_string() + " " + k.to_string()
+        out += " " + position.to_string() + " " + selected.ty.to_string() + "\n"
+    }
     Ok(out)
 }
 
 fn main() -> i32 {
-    match observe() {
+    let args = env.args()
+    if args.len() > 2 || (args.len() == 2 && args[1] != "context") { return 2 }
+    match observe(args.len() == 2) {
         Ok(rows) => { print(rows); 0 }
         Err(message) => { eprintln(message); 1 }
     }
