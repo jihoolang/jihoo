@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 782 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 800 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1923,8 +1923,9 @@ of native inferred binder modes.
 Checking must precede erasure. `target_check_not_source_check` exhibits an erased
 scope that uses its ghost slot: the source query rejects it, while the transformed
 query succeeds after that event is removed. Consequently this pass is neither a
-replacement for source checking nor a backwards admission theorem. Only forward
-execution simulation is proved; full operational equivalence is not claimed.
+replacement for source checking nor a backwards admission theorem. This initial result proves forward execution simulation. The following
+reflection development establishes the finite-trace converse, but not a
+backwards admission theorem or whole-program operational equivalence.
 
 Kernel-checked examples cover two erased slots around a fresh linear owner,
 retained borrowed/unrestricted slots, repeated fresh owners, traps, duplication
@@ -1943,3 +1944,56 @@ Borrowed slots retain their identity but no lifetime, lease or heap-alias safety
 follows. The whole-specified-core consistency/preservation and native erasure
 release gates remain open. No certificate interface or compiler acceptance rule
 is added or weakened.
+
+### Erasure reflects finite observations and preserves slot identity
+
+`QuantityErasureReflection.lean` closes the converse finite-trace obligation left
+by the first control-erasure milestone. `finishes_relabel_reflect` and
+`prefix_relabel_reflect` recover an original completed execution or finite prefix
+from any execution after partial relabeling; the original trace filters to the
+observed trace. Reconstruction is existential. Deleting resource events can map
+distinct histories to the same observation, as an explicit checked counterexample
+shows. No injectivity of erased histories is assumed.
+
+`finishes_reflect` and `prefix_reflect` lift those results through ghost scope
+removal, branches, repetitions, immediately invoked bodies and latent closures.
+Combined with the forward theorems, `finishes_iff` and `prefix_iff` establish exact
+equality of the sets of completed and finite-prefix **outer ownership-use traces**
+before and after erasure. No source typing or quantity-check premise is needed
+for this semantic statement. `may_terminate_iff` additionally preserves and
+reflects existence of a completed execution. These results do not equate infinite
+runs, fairness, divergence productivity, values, heaps, or machine executions.
+Unchecked controls are allowed by these operational judgments; the previous
+source-check-before-erasure requirement still applies to ownership safety.
+
+`QuantityRuntimeSlots.lean` supplies a separate value-parametric environment
+lemma matching the lowering representation of ghost slots as `None`.
+`Slots.lookup` proves that a surviving compacted position resolves to the exact
+original value. `position_injective` proves that two distinct source slots cannot
+be conflated even if their payloads happen to be equal. `missing` proves that
+neither erased nor out-of-range slots become readable. The formal lists are
+newest-binder first; native `core_lower.jh` uses the opposite list orientation and
+looks up `env[env.len - 1 - k]`. The correspondence of native arrays, that reversal,
+and actual lowering environments to these lists remains an implementation
+obligation. This is not a proof about native pointer or heap identity.
+
+The implementation regression `tests/core_erasure_traces.py` compares complete
+MIR from seven runtime-only/ghost-annotated Core pairs: identity, a branch, nested
+local ownership, trapping arithmetic before or after free, a loop, and a discarded
+erased scalar overflow expression. Both x86_64 and aarch64 are covered with O0/O2
+flags (28 MIR comparisons), and each twin is emitted as an object with its ELF
+architecture checked (56 objects). Four negative controls require the intended
+diagnostic and no partial MIR: foreign erased-proof parameters, erased runtime
+use, owner duplication and owner discard. A changed runtime expression must
+produce different MIR, guarding against vacuous equality. The subprocess guards
+also run under Python optimization. No generated input program is executed.
+
+These tests exercise actual checking, runtime normalization and lowering together;
+they do not authenticate a projection into the formal control model or identify
+which pass performs each simplification. Native lowering retains `None` slots in
+its environment while excluding erased arguments from runtime operand lists;
+the abstract control transformation compacts resource names. Consequently the
+finite-trace theorem is not yet a native Core-to-MIR erasure theorem. Mode
+justification, native source projection, value semantics, borrow lifetimes and
+the remaining whole-specified-core release obligations remain open. No new
+certificate or production acceptance rule is introduced.
