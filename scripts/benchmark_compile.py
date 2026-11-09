@@ -51,10 +51,12 @@ WORKLOADS = {
 DEPENDENT = ("dependent-buffer", "dependent-list")
 
 
-def dependent_source(kind, size):
+def dependent_source(kind, size, entry="exports"):
     """Independent exported consumers; size scales checked code, not loop trips."""
     if kind not in DEPENDENT or not 1 <= size <= 256:
         raise ValueError("dependent workload size must be between 1 and 256")
+    if entry not in ("exports", "fanout"):
+        raise ValueError("dependent entry must be exports or fanout")
     lines = ["#![dependent_core]"]
     if kind == "dependent-list":
         lines += ["import dependent.sized_list", "fn increment(x: i64) -> i64 { x + 1 }"]
@@ -68,7 +70,7 @@ def dependent_source(kind, size):
     if_lt(i, n, fn(p) { load(b, i, p, fn(v, b) { free(b, v) }) }, free(b, -1))"""
         lines.append(f"export fn consumer_{i}(n: u64, i: u64, x: i64) -> i64 {{\n    {body}\n}}")
     lines.append("fn main() -> i64 { " + " + ".join(
-        f"consumer_{i}(3, 1, 16)" for i in range(size)) + " }")
+        f"consumer_{i}(3, 1, 16)" for i in range(size if entry == "fanout" else 1)) + " }")
     return "\n\n".join(lines) + "\n"
 
 
@@ -216,6 +218,8 @@ def main():
                         help="optimization for full compilation")
     parser.add_argument("--workload", action="append", choices=sorted((*WORKLOADS, *DEPENDENT)),
                         help="built-in workload (repeatable; default all)")
+    parser.add_argument("--dependent-entry", choices=["exports", "fanout"], default="exports",
+                        help="exports: main calls one export; fanout: main calls every export")
     parser.add_argument("--dependent-size", type=int, action="append", metavar="N",
                         help="independent consumers per dependent workload, 1..256 (repeatable; default 1,2,4)")
     parser.add_argument("--external", action="append", type=parse_external, default=[],
@@ -289,14 +293,14 @@ def main():
             if kind not in DEPENDENT:
                 continue
             for size in sorted(set(args.dependent_size or [1, 2, 4])):
-                name = f"{kind}-{size}"
+                name = f"{kind}-{args.dependent_entry}-{size}"
                 if name in workloads:
                     parser.error(f"workload {name} is defined twice")
-                source = dependent_source(kind, size)
+                source = dependent_source(kind, size, args.dependent_entry)
                 path = temp / f"{name}.jh"
                 path.write_text(source)
                 workloads[name] = (temp, path.name, [])
-                generated[name] = {"kind": kind, "consumers": size, "source": source}
+                generated[name] = {"kind": kind, "consumers": size, "entry": args.dependent_entry, "source": source}
         report["generated"] = generated
         cases = []
         for name, (directory, entry, flags) in workloads.items():
