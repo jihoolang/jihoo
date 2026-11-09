@@ -113,3 +113,5 @@ import Jihoo.QuantitySubstitution
 import Jihoo.QuantitySubstitutionExamples
 
 import Jihoo.MixedTelescopeExamples
+
+import Jihoo.MixedTelescopeBridgeExamples

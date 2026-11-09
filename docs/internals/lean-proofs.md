@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 645 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 668 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1547,3 +1547,53 @@ model arbitrary higher-order Core conversion, or prove whole-language
 consistency. It makes no runtime, ownership, borrowing, erasure or lowering
 claim. The pre-existing realization theorem uses Lean's standard classical
 choice; the axiom audit continues to reject admitted or additional axioms.
+
+### Constructing the unified Core context
+
+`MixedTelescopeBridge.lean` connects representable mixed telescopes to the
+existing `CoreBridge.SourceTyping` judgment. Its telescope uses the bridge's
+bounded-literal `Index` and annotated `Ty` syntax. Erasure maps it into the
+semantic telescope above. `erase_proofs` proves that weakening each previous
+proof type across natural binders commutes with this erasure.
+
+The unified `Raw.Context` is constructed recursively, using `Context.extend`
+for both binder sorts. `context_match` proves all required lookup facts; callers
+no longer have to posit a matching target context. The index and proof maps are
+proved equal to the existing mixed-layout `slot` functions, and in-scope
+variables from different namespaces cannot alias. `translate` then obtains
+`Raw.HasType` from the source derivation. Independently, `erase_derivation`
+obtains the semantic mixed-telescope judgment, and `semantic_sound` establishes
+its conclusion in every valid environment. No premise assumes target typing or
+truth of the conclusion.
+
+`close_typed` wraps a typed body in lambdas for the whole telescope. Each
+annotation is encoded in its original prefix scope, rather than the final
+scope after later binders. `closed_translation` consequently produces a closed
+Raw typing derivation from the same source witness. This construction handles
+interleaved natural and proof binders, including proof assumptions universally
+quantified over naturals, without adding proof-domain lambda syntax to Indexed.
+
+`MixedTelescopeBridgeExamples.lean` packages every generated example with its
+well-formed telescope, proposition formation and source typing derivation.
+`EmitMixedTelescope.lean` serializes three such declarations: selecting an earlier
+equality proof across later binders, selecting the newest strict-bound proof,
+and instantiating a universally quantified proof across a later natural binder.
+The Lean check regenerates `tests/core_preserves/lean-mixed-telescope.jhc` and
+compares it byte for byte. Nix includes both the emitter and fixture explicitly.
+The actual checker tests the generated declarations and closed instantiations,
+as well as four single-location mutations for scalar capture, proof swapping,
+reversed bound annotations and universal-proof capture. Mutation locations are
+checked for uniqueness. Together with the earlier tests this gives nine
+accepted check/preservation controls and eleven diagnostic-specific rejections.
+
+This bridge is deliberately narrower than arbitrary `Indexed.Derives`:
+`SourceTyping` has exact type matching, no general conversion rule and no
+`zeroLe` rule. Literals must be representable; subtraction is only the existing
+closed, certified bridge form. The semantic interpretation still uses
+mathematical naturals and makes no claim about runtime word overflow. The target
+is the existing universe-free, ghost declarative `Raw.HasType`, not
+`Core.infer`, and no arbitrary successful checker run is reflected into a source
+derivation. The serializer/parser correspondence is tested, not proved. These
+are forward typing and semantic results for witnessed source programs, not
+whole-language consistency, executable-checker soundness or runtime/ownership
+soundness.

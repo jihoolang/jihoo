@@ -683,3 +683,27 @@ import Jihoo
 #print axioms Jihoo.Indexed.Mixed.Examples.scalar_capture_avoiding
 #print axioms Jihoo.Indexed.Mixed.Examples.discharge_between_indices
 #print axioms Jihoo.Indexed.Mixed.Examples.discharge_both
+
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.context_match
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.indices_slot
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.values_slot
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.count_indices
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.count_values
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.namespaces_disjoint
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.erase_naturals
+#print axioms Jihoo.CoreBridge.MixedBridge.Telescope.erase_proofs
+#print axioms Jihoo.CoreBridge.MixedBridge.WellFormed.erase
+#print axioms Jihoo.CoreBridge.MixedBridge.translate
+#print axioms Jihoo.CoreBridge.MixedBridge.erase_derivation
+#print axioms Jihoo.CoreBridge.MixedBridge.semantic_sound
+#print axioms Jihoo.CoreBridge.MixedBridge.close_typed
+#print axioms Jihoo.CoreBridge.MixedBridge.closed_translation
+#print axioms Jihoo.CoreBridge.MixedBridge.interleaved_wf
+#print axioms Jihoo.CoreBridge.MixedBridge.earlier_typed
+#print axioms Jihoo.CoreBridge.MixedBridge.recent_typed
+#print axioms Jihoo.CoreBridge.MixedBridge.interleaved_positions
+#print axioms Jihoo.CoreBridge.MixedBridge.earlier_true
+#print axioms Jihoo.CoreBridge.MixedBridge.universal_wf
+#print axioms Jihoo.CoreBridge.MixedBridge.universal_typed
+#print axioms Jihoo.CoreBridge.MixedBridge.CheckedExample.typed_closed
+#print axioms Jihoo.CoreBridge.MixedBridge.CheckedExample.true_in_valid_environment

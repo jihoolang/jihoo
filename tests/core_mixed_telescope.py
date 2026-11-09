@@ -51,8 +51,27 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--compiler', required=True)
     args = parser.parse_args()
+    fixture = (Path(__file__).resolve().parent / 'core_preserves/lean-mixed-telescope.jhc').read_text()
+    declarations = [line for line in fixture.splitlines() if line.startswith('(def ')]
+    if len(declarations) != 3:
+        raise RuntimeError('expected exactly three Lean-generated mixed declarations')
+    earlier, recent, universal = declarations
+    valid_cases = dict(VALID)
+    valid_cases['generated-mixed'] = fixture
+    valid_cases['generated-instantiation'] = fixture + '\n(def instantiated (Eq 4 4) (app mixed_earlier 4 (refl 4) 2 (decide-lt 2 4)))\n(def bound_instantiated (Lt 2 4) (app mixed_recent 4 (refl 4) 2 (decide-lt 2 4)))\n'
+    invalid_cases = dict(INVALID)
+    mutations = {
+        'generated-scalar-capture': (earlier, ' x1)))))', ' x2)))))'),
+        'generated-proof-swap': (recent, ' x3)))))', ' x1)))))'),
+        'generated-reversed-annotation': (recent, '(lam0 x3 (Lt x2 x0)', '(lam0 x3 (Lt x0 x2)'),
+        'generated-universal-capture': (universal, '(app x1 7)', '(refl x2)'),
+    }
+    for name, (source, old, new) in mutations.items():
+        if source.count(old) != 1:
+            raise RuntimeError(f'{name}: mutation no longer identifies exactly one location')
+        invalid_cases[name] = source.replace(old, new)
     with tempfile.TemporaryDirectory(prefix='jihoo-mixed-') as tmp:
-        for valid, cases in ((True, VALID), (False, INVALID)):
+        for valid, cases in ((True, valid_cases), (False, invalid_cases)):
             for name, source in cases.items():
                 path = Path(tmp) / (name + '.jhc')
                 path.write_text(source)
@@ -64,7 +83,7 @@ def main():
                         raise RuntimeError(f'{name}/{operation}: {result.returncode}: {result.stderr!r}')
                     if not valid and DIAGNOSTICS.get(name, b'core: type mismatch') not in result.stderr:
                         raise RuntimeError(f'{name}: missing core diagnostic: {result.stderr!r}')
-    print(f'mixed telescope: {len(VALID)} check/preservation controls, {len(INVALID)} rejections; no input executed')
+    print(f'mixed telescope: {len(valid_cases)} check/preservation controls, {len(invalid_cases)} rejections; no input executed')
 
 
 if __name__ == '__main__':
