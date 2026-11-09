@@ -726,6 +726,8 @@ def main():
         validate_collect(compiler, root, temporary, environment, run)
         from core_tabulate import validate_tabulate
         validate_tabulate(compiler, root, temporary, environment, run)
+        from core_range_transfer import validate_range_transfer
+        validate_range_transfer(compiler, root, temporary, environment, run)
         from core_range import validate_range
         validate_range(compiler, root, temporary, environment, run)
         from core_sized_concat import validate_sized_concat
