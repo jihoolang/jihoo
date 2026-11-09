@@ -108,3 +108,6 @@ import Jihoo.QuantityContextProjection
 
 import Jihoo.QuantityLendProjection
 import Jihoo.QuantityLendExamples
+
+import Jihoo.QuantitySubstitution
+import Jihoo.QuantitySubstitutionExamples
