@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 828 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 845 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -2053,7 +2053,7 @@ case captures two enclosing function-valued hypotheses together with distinct
 scalar values and ghost arguments. Plain and ghost-annotated variants must
 produce identical complete MIR with at least five generated recursive functions.
 Both variants emit x86_64 and aarch64 objects at O0 and O2 (eight objects). On the
-host, bounded subprocesses compare 360 function results against independent
+host, bounded subprocesses compare 540 function results against independent
 Python recurrences and check allocation/free balance per call. Distinct and
 equal scalar payloads exercise ordering and equal-typed slots; separate controls
 ensure the reference models detect a scalar permutation. Normal and optimized
@@ -2066,3 +2066,74 @@ layout invariant, or that native recursion terminates. Heap identity, borrow
 validity, ownership preservation across MIR calls, value semantics of the full
 runtime fragment and whole-specified-core consistency/preservation remain open.
 No production compiler acceptance rule or lowering behavior changes here.
+
+### Integrated ownership, erasure and call-frame argument
+
+`OwnershipLowering.lean` connects the existing quantity checker, ghost erasure,
+finite-trace correspondence and capture reconstruction into one conditional
+endpoint, `checked_owner_pipeline`. The connecting map is computed from the
+capture layout, not supplied as an arbitrary correspondence. `scalarPosition`
+counts the full node-plus-extra width of every hypothesis block; `resourceMap`
+converts guarded newest-first source indices into oldest-first packed operand
+positions. Ghost and hypothesis slots do not designate scalar resources.
+
+`scalar_injective` and `resource_injective` prove that two surviving resource
+slots cannot map to the same operand position. `resource_payload` additionally
+proves that every designated scalar slot survives and retains its original
+value. Equal payload values do not identify their resource positions. These
+facts discharge the unique-preimage premise of the existing quantity relabeling
+theorem; simply reusing source indices would not work after hypothesis expansion.
+
+`lowerControl` composes ghost erasure and that computed resource relabeling.
+`demand_preserved` transports the complete successful demand result.
+`finishes_iff` and `prefix_iff` recover the original completed/prefix trace from
+any transformed trace and characterize the latter as the filtered original.
+They compose the existing erasure reflection and relabeling results rather than
+introducing another independent operational semantics.
+
+Given a designated scalar slot, original demand one, a callee frame decoded with
+the caller layout, and positional parameter assignment, `checked_owner_pipeline`
+derives one runtime operand position with all of these guarantees together:
+
+- the operand evaluates to the original value;
+- the interpreted callee environment resolves the original binder to that value;
+- every completed transformed-control trace uses the operand exactly once;
+- every finite transformed-control prefix uses it at most once.
+
+The completion/prefix conclusions quantify over all transformed-control runs;
+there is no selected runtime execution premise. Examples instantiate the whole
+endpoint with two erased positions/contexts, a three-operand hypothesis and two
+scalar resources, and provide an actual completed trace. A separate counterexample
+shows why source checking alone is insufficient if the purported owner slot is
+really ghost. Traps retain prefix observations but do not gain completion.
+
+The native capture regression now also threads an owned buffer as an explicit
+argument through recursive hypotheses while computing updates in a nested
+borrowed recursion. Its final buffer value is checked against an independent
+model; each native call must balance allocations and frees. Together with the
+existing two-/three-level scalar captures this gives 540 native comparisons per
+Python mode, eight O0/O2 target objects and exact plain/ghost MIR equality. A
+mutation that both frees and passes the same owner must receive the intended
+`an owned value is used more than once` diagnostic and produce no object. The
+invalid program is never executed. These are implementation regressions, not
+proofs that native executions instantiate the formal trace relation.
+
+The original 0.6 obligations can now be separated without conflating the models:
+
+| Obligation | Mechanized result available | Remaining release premise |
+| --- | --- | --- |
+| Selected Raw logical consistency and preservation | Closed literal consistency, contextual beta/bounded-add preservation | All specified constructors, reductions and runtime modes are not represented by this Raw fragment |
+| Source ownership accounting | Quantity checking bounds all completed/prefix traces | Authentic typed-Core projection, alias resolution and mode stability |
+| Ghost erasure and operand naming | Finite trace correspondence and the computed injective resource map | Native Core/MIR traces must implement these controls |
+| Call-frame values | Exact capture reconstruction and conditional callee lookup | Native descriptor widths, local allocation and MIR positional call assignment |
+| Heap and borrow safety | No full theorem | Heap identity, lease/lifetime semantics and their simulation remain open |
+
+The resource slot premise classifies a scalar slot, not its native linear type or
+heap object. Interpreting it as an owned value requires the typed projection and
+alias invariants in the table. In particular, equal scalar payloads do not prove
+distinct heap ownership, nor does parameter-value equality prove safe borrowing.
+The two formal branches (Raw logical typing and ownership control) are not yet
+proved to describe every same accepted native Core program. Thus this composed
+result is a coherent partial release argument, not a whole-language soundness
+or Core-to-MIR theorem. No production rule, new certificate endpoint, or native
+runtime behavior changes in this increment.

@@ -44,6 +44,18 @@ export fn capture_three(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
     let xs = ascending(n, x)
     captured_three(xs, a, b, c{exported})
 }}
+fn threaded(xs: ref List, b: buffer(1), a: i64{parameter}) -> buffer(1) {{
+    induct(fn(t, buf: buffer(1){domain}) {{ buffer(1) }}, fn(buf{binder}) {{ buf }},
+        fn(x, rest, ih, buf{binder}) {{
+            let v = induct(fn(u) {{ i64 }}, a * x, fn(y, more, total) {{ total + y }}, rest)
+            ih(store(buf, 0, v, decide_lt(0, 1)){evidence})
+        }}, xs)(b{initial})
+}}
+export fn capture_owned(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
+    let xs = ascending(n, x)
+    let result = threaded(xs, alloc(1, b + c), a{exported})
+    load(result, 0, decide_lt(0, 1), fn(v, result) {{ v }})
+}}
 export fn capture(n: u64, x: i64, a: i64, b: i64, c: i64) -> i64 {{
     let xs = ascending(n, x)
     captured(xs, a, b, c{exported})
@@ -85,9 +97,14 @@ def expected_three(n, x, a, b, c):
     return outer(values, 0)
 
 
+def expected_owned(n, x, a, b, c):
+    return a * (x + 1) if n else b + c
+
+
 def native_worker(path):
     native = ctypes.CDLL(str(path))
-    functions = [(native.capture, expected), (native.capture_three, expected_three)]
+    functions = [(native.capture, expected), (native.capture_three, expected_three),
+                 (native.capture_owned, expected_owned)]
     for function, _ in functions:
         function.argtypes = [ctypes.c_uint64, *([ctypes.c_int64] * 4)]
         function.restype = ctypes.c_int64
@@ -147,10 +164,23 @@ def test(compiler, out):
                                      '-Wl,--wrap=malloc', '-Wl,--wrap=free']))
                     output = success(command([sys.executable, *(['-O'] if sys.flags.optimize else []),
                                               __file__, '--native-library', library]))
-                    require(b'90 native capture cases' in output, f'worker did not finish: {output!r}')
-                    runs += 90
+                    require(b'135 native capture cases' in output, f'worker did not finish: {output!r}')
+                    runs += 135
+    # The valid exported counterpart above makes this an ownership rejection,
+    # not a no-export or unsupported-lowering failure. Never execute it.
+    invalid = out / 'capture-owned-duplicate.jh'
+    original = 'ih(store(buf, 0, v, decide_lt(0, 1)), q)'
+    bad = program(True)
+    require(original in bad, 'ownership mutation did not target a real call')
+    invalid.write_text(bad.replace(original, 'free(buf, ih(buf, q))'))
+    rejected = command([*compiler, 'check', invalid, '--lib'])
+    require(rejected.returncode != 0 and b'an owned value is used more than once' in rejected.stderr,
+            f'wrong duplicate-owner diagnostic: {rejected.stderr!r}')
+    obj = out / 'invalid.o'
+    rejected = command([*compiler, 'emit-obj', invalid, '--lib', '-o', obj])
+    require(rejected.returncode != 0 and not obj.exists(), 'duplicate owner reached an object')
     print(f'capture environments: exact plain/ghost MIR; {objects} target objects; '
-          f'{runs} native differential cases with balanced allocations')
+          f'{runs} native differential cases with balanced allocations; duplicate-owner rejection')
 
 
 def main():
