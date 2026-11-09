@@ -899,6 +899,15 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+Bounded `auto()` now constructs ordinary Eq/Lt evidence from visible local facts
+and explicit hints, including imported induction lemmas. Generated terms are
+checked against their original goal before use; no kernel inference rule changes.
+The acceptance example composes a proof-producing loop and imported structural
+lemma for a bounded read. Search has explicit fact/depth/work/node limits and
+remains incomplete; this starts automation, not general `ensures` or automatic
+induction. Exact erasure, forged producer inputs and resource exhaustion are tested.
+
+
 `dependent.vec_bulk.extend` appends a borrowed buffer with an old-to-new length
 postcondition. It reuses available capacity or copies the prefix into exact-fit
 storage, and callers compose its evidence across mutations. An acceptance

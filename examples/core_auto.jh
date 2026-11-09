@@ -1,0 +1,17 @@
+// Imported induction and a proof-producing loop supply arithmetic automation.
+// No search rule or certificate bypass is added to the kernel.
+#![dependent_core]
+import dependent.nat
+
+fn read_after_steps(
+    a: u64, b: u64, n: erased(u64), data: ref buffer(n),
+    steps: erased(nat.Steps(a, b)), end: erased(Lt(b, n))
+) -> i64 {
+    index(data, a, auto(nat.steps_bound(a, b, steps)))
+}
+
+fn main() -> i64 {
+    let data = alloc(4, 17)
+    let trace = nat.advance(0, 3)
+    read_after_steps(0, 3, 4, data, trace, auto())
+}

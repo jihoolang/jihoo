@@ -2,7 +2,9 @@
 
 Marked modules can `import dependent.nat`. Its functions construct proof terms
 from the existing dependent core's equality, order, subtraction, induction and
-loop rules. There are no new intrinsics, axioms, proof search or checker bypasses.
+loop rules. The library adds no intrinsics, axioms or checker bypasses. Optional
+[bounded proof automation](proof-automation.md) can compose explicitly supplied
+lemma results; it does not search or instantiate the library automatically.
 The source is [lib/dependent/nat.jh](../../lib/dependent/nat.jh).
 
 ## Equality and bounds
