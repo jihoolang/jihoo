@@ -1,0 +1,130 @@
+// Test-only structural adapter. Core.check precedes all projection/output.
+import std.env
+import std.os
+import core
+import core_parse
+
+fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn extend(ctx: [core.Binding], ty: u32) -> Vec(core.Binding) {
+    var out = Vec(core.Binding).new()
+    for b in ctx { out.push(b) }
+    out.push(core.Binding { ty, erased: false })
+    out
+}
+
+struct Projector {
+    c: core.Core
+    remaining: i64
+}
+
+impl Projector {
+    fn tick(inout self) -> Result((), String) {
+        if self.remaining == 0 { return Err("projection work limit reached".to_string()) }
+        self.remaining -= 1
+        Ok(())
+    }
+
+    fn term(inout self, id: u32, ctx: [core.Binding], depth: u32) -> Result(String, String) {
+        if depth == 0 { return Err("projection depth limit reached".to_string()) }
+        self.tick()?
+        match self.c.term(id) {
+            Natural(_) | Integer(_) => Ok("p".to_string())
+            Var(k) => {
+                if k as i64 >= ctx.len || ctx[ctx.len - 1 - k as i64].erased {
+                    return Err("unavailable runtime slot".to_string())
+                }
+                Ok("(u ".to_string() + k.to_string() + ")")
+            }
+            Borrow(x) => {
+                self.tick()?
+                let Var(k) = self.c.term(x) else { return Err("non-variable borrow".to_string()) }
+                if k as i64 >= ctx.len || ctx[ctx.len - 1 - k as i64].erased {
+                    return Err("unavailable borrow slot".to_string())
+                }
+                Ok("p".to_string())
+            }
+            Free(a, b) | Alloc(a, b) | Arith(_, a, b) | UAdd(a, b) | Index(a, b, _) | Strict(a, b) => {
+                let first = self.term(a, ctx, depth - 1)?
+                let second = self.term(b, ctx, depth - 1)?
+                Ok("(s ".to_string() + first + " " + second + ")")
+            }
+            Lend(x, f, g) => {
+                // Debit the exact owner, reader, result and returned lambda views.
+                for _ in 0..4 { self.tick()? }
+                let Var(k) = self.c.term(x) else { return Err("non-variable lend owner".to_string()) }
+                if k as i64 >= ctx.len { return Err("owner outside context".to_string()) }
+                let binding = ctx[ctx.len - 1 - k as i64]
+                let owned = match self.c.owned(binding.ty, core.DEPTH) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
+                if binding.erased || !owned { return Err("owner not lendable".to_string()) }
+                let Lam(false, ref_ty, read) = self.c.term(f) else { return Err("reader lambda required".to_string()) }
+                let norm = match self.c.normal(ref_ty, core.DEPTH) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
+                let Ref(_) = self.c.term(norm) else { return Err("reader borrow required".to_string()) }
+                let Lam(false, result_ty, inner) = self.c.term(g) else { return Err("result lambda required".to_string()) }
+                let Lam(false, owner_ty, rest) = self.c.term(inner) else { return Err("returned lambda required".to_string()) }
+                let norm = match self.c.normal(result_ty, core.DEPTH) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
+                let mode = match self.c.term(norm) {
+                    U64 | I64 | Array(_) | Refine(_) => 2 as u32
+                    Buffer(_) | Back(_, _, _) => 1
+                    Ind(family, _) if self.c.is_data(family) => if self.c.is_boxed(family) { 1 } else { 2 }
+                    _ => return Err("unsupported reader result".to_string())
+                }
+                let reader_ctx = extend(ctx, ref_ty)
+                let result_ctx = extend(ctx, result_ty)
+                let rest_ctx = extend(result_ctx.as_slice(), owner_ty)
+                let reader = self.term(read, reader_ctx.as_slice(), depth - 1)?
+                let cont = self.term(rest, rest_ctx.as_slice(), depth - 1)?
+                Ok("(l ".to_string() + k.to_string() + " " + mode.to_string() + " " + reader + " " + cont + ")")
+            }
+            _ => Err("unsupported projection node".to_string())
+        }
+    }
+}
+
+fn main() -> i32 {
+    match run() { Ok(out) => { print(out); 0 }, Err(e) => { eprintln(e); 1 } }
+}
+
+fn run() -> Result(String, String) {
+    let args = env.args()
+    if args.len() != 2 { return Err("expected work budget".to_string()) }
+    let Some(budget) = if args[1] == "check" { Some(4096) } else { args[1].parse_int() } else { return Err("invalid work budget".to_string()) }
+    if budget < 1 || budget > 4096 { return Err("invalid work budget".to_string()) }
+    let source = stdin_once()?
+    var c = match core_parse.parse(source.as_str(), 0) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
+    if c.definitions.len() != 1 { return Err("one definition required".to_string()) }
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    if args[1] == "check" { return Ok("checked\n".to_string()) }
+    var root = c.definitions[0].value
+    var ctx = Vec(core.Binding).new()
+    loop {
+        let Lam(erased, ty, body) = c.term(root) else { break }
+        ctx.push(core.Binding { ty, erased })
+        root = body
+    }
+    var projector = Projector { c, remaining: budget }
+    let control = projector.term(root, ctx.as_slice(), 128)?
+    var out = control + "\n"
+    for k in 0..ctx.len() {
+        let n = match projector.c.runtime_uses(root, k as u32, ctx.as_slice(), []) { Ok(value) => value, Err(e) => return Err(e.msg.clone()) }
+        out += n.to_string() + " "
+    }
+    out += "\n" + projector.remaining.to_string() + "\n"
+    Ok(out)
+}

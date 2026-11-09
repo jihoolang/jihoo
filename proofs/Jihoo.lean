@@ -105,3 +105,6 @@ import Jihoo.QuantityAliasExamples
 import Jihoo.QuantityBinderProjection
 
 import Jihoo.QuantityContextProjection
+
+import Jihoo.QuantityLendProjection
+import Jihoo.QuantityLendExamples

@@ -531,3 +531,10 @@ variable owner with Core's reverse context indexing. Its structural theorem is
 relative to a faithful syntax view and contextual domain observer; the actual
 kernel interfaces are regression-tested, not proved. Whole-Lend continuation
 projection and heap/borrow soundness remain outstanding.
+
+
+[Scoped Lend projection](lean-proofs.md#scoped-lend-reader-and-continuation-projection)
+derives reader/continuation controls in a bounded structural fragment and keeps
+the fresh result distinct from the returned owner. Its use-accounting theorems
+are relative to faithful typed observations and abstract control execution;
+whole-kernel substitution, runtime and heap/borrow correspondence remain open.

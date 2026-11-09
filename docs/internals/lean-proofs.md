@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 595 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 605 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1318,3 +1318,75 @@ the ordinary checker observation mode but fail this projection mode with the
 intended diagnostic and no partial output. These are regression evidence for
 the trusted interfaces, not a mechanized implementation refinement or a new
 certificate admission profile.
+
+
+## Scoped Lend reader and continuation projection
+
+`QuantityLendProjection.lean` extends rooted context provenance to a structural
+execution fragment: integer/natural literals, variables, variable borrows,
+ordered primitive operand sequences, and nested dependent Lends with an original
+variable owner and explicit runtime lambdas. `rootedProject` derives the ambient
+context from the original leading lambda telescope. It then recursively derives
+reader and continuation controls from their original body nodes; callers no
+longer supply those controls. `project_sound` proves the resulting `Projects`
+source/control judgment, whose Lend case explicitly retains the checked
+contextual preparation operation. The immutable syntax view and contextual
+domain observer remain parameters.
+
+Preparation follows the actual owner, reader, result and returned-owner nodes.
+It observes the reader annotation in the ambient context, the result annotation
+in that same context, and the returned-owner annotation after adding the result.
+The reader must classify as borrowed, the result as a known non-borrow-holding
+class, and the returned owner as the original owner's lendable class. Exact
+conversion of those annotations to Ref(owner), the inferred reader result and
+the shifted owner type is still supplied by whole-Core typing, not inferred
+from equality of these coarse classifications.
+
+The derived control is `seq (scope borrowed reader)
+(scope resultMode (alias (owner + 1) continuation))`. The `+ 1` is essential:
+returned-owner slot 0 is opened while result slot 1 is still in scope. The result
+is a fresh value, with its own linear obligation when owned. It is never merged
+with the lent owner. Before accepting a Lend the projector checks zero owner
+consumption by the reader and exactly one by the continuation. Completion and
+prefix theorems give exact-once/at-most-once owner use in the abstract control
+semantics. The body-trace theorem accounts separately for reader outer slots,
+continuation outer slots, and returned-owner slot 0. These events count variable
+uses, not heap allocation/free operations.
+
+Projection has both a recursion-depth bound and a threaded total-visit budget.
+Sequential children share the remaining budget; repeated graph references are
+charged repeatedly. Lend preparation charges the owner and three lambda
+inspections in addition to the Lend node; borrow charges its owner inspection.
+`project_budget_decreases` proves successful calls strictly reduce the remaining
+budget. The leading telescope is separately depth-bounded. Context observation,
+normalization and permission traversal have their own interface costs; this
+budget is not a theorem about machine instructions or kernel normalization time.
+Failures return no partial control.
+
+The test-only native adapter first runs complete `Core.check`, retains the
+original graph, and derives the structural control encoding. The Python test
+checks its scopes/aliases and compares outer-owner counts with actual
+`Core.runtime_uses`. Seven accepted programs exercise original/returned names,
+explicit and repeated borrow reads, nested Lend, an owned reader result, and two
+distinct equal-typed owners. Six programs also check exact and one-short visit
+budgets. Seven invalid programs assert intended diagnostics and no output,
+including reader consumption, owner duplication/discard, discarded fresh result,
+and all three annotation mismatches. Valid branch and computed-owner programs
+are positive checker controls for explicit projection exclusions. Lean examples
+independently check source-shaped graphs, nested/result scopes, altered nodes,
+erasure, malformed domains, duplicate/missing owners, shared references, cycles
+and exhausted budgets. These comparisons are finite test evidence, not a proved
+native-adapter refinement.
+
+**Remaining obligations:** faithful syntax/domain observation, whole-Core typing
+and the conversion checks above, and semantic correspondence with the kernel's
+`dependent_lend` substitutions are assumptions/boundaries. The structural
+`Projects` judgment is not Core's typing judgment. General applications,
+first-class readers/continuations, non-variable owners, branches, loops,
+closures and inductive eliminators are not admitted by this projector. No new
+compiler source restriction is imposed: this is a proof/test component, not a
+production admission gate or certificate interface. The abstract execution
+semantics has not been simulated by the runtime; heap identity, lease/lifetime
+safety, first-order substitution stability and erasure/lowering correctness
+remain open. This is progress on scoped quantity correspondence, not whole-core
+ownership or borrow soundness.
