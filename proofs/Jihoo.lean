@@ -117,3 +117,7 @@ import Jihoo.MixedTelescopeExamples
 import Jihoo.MixedTelescopeBridgeExamples
 
 import Jihoo.MixedInferenceExamples
+
+import Jihoo.MixedRawAdmission
+
+import Jihoo.MixedRawAdmissionExamples
