@@ -1,0 +1,170 @@
+// Definite local initialization for the structurally/type-validated Core MIR
+// subset. This checks local storage, not heap contents or ownership/moves.
+import diag
+import mir
+import types
+
+const MAX_FACTS: i64 = 4000000
+const MAX_WORK: i64 = 64000000
+
+fn spend(inout left: i64, count: i64, sp: diag.Span) -> Result((), diag.Diag) {
+    if count > left { return Err(diag.Diag.new(sp, "core MIR: initialization work limit reached")) }
+    left -= count
+    Ok(())
+}
+
+fn read_local(state: Vec(bool), id: u32, sp: diag.Span) -> Result((), diag.Diag) {
+    if !state[id as i64] { return Err(diag.Diag.new(sp, "core MIR: read of uninitialized local")) }
+    Ok(())
+}
+
+fn read_place(
+    state: Vec(bool),
+    p: mir.Place,
+    inout left: i64,
+    sp: diag.Span
+) -> Result((), diag.Diag) {
+    spend(&left, 1, sp)?
+    read_local(state, p.local, sp)?
+    for projection in p.proj {
+        spend(&left, 1, sp)?
+        match projection { Index(i) => read_local(state, i, sp)?, _ => {} }
+    }
+    Ok(())
+}
+
+fn read_operand(
+    state: Vec(bool),
+    op: mir.Operand,
+    inout left: i64,
+    sp: diag.Span
+) -> Result((), diag.Diag) {
+    spend(&left, 1, sp)?
+    match op {
+        Copy(p) | Move(p) => read_place(state, p, &left, sp)?
+        Const(_) => {}
+    }
+    Ok(())
+}
+
+fn read_value(
+    state: Vec(bool),
+    rv: mir.Rvalue,
+    inout left: i64,
+    sp: diag.Span
+) -> Result((), diag.Diag) {
+    match rv {
+        Use(a) | Cast(a, _, _) => read_operand(state, a, &left, sp)?
+        Bin(_, a, b) | Offset(a, b) => {
+            read_operand(state, a, &left, sp)?
+            read_operand(state, b, &left, sp)?
+        }
+        Aggregate(_, ops) => for op in ops { read_operand(state, op, &left, sp)? }
+        _ => return Err(diag.Diag.new(sp, "core MIR: unsupported initialization rvalue"))
+    }
+    Ok(())
+}
+
+struct Flow {
+    inputs: Vec(Vec(bool))
+    reached: Vec(bool)
+    queued: Vec(bool)
+    pending: Vec(u32)
+    left: i64
+}
+
+impl Flow {
+    // First incoming edge initializes the facts; subsequent edges intersect.
+    // Facts only decrease after first reach, including backedges to entry.
+    fn edge(inout self, id: u32, state: Vec(bool), sp: diag.Span) -> Result((), diag.Diag) {
+        spend(&self.left, state.len() + 1, sp)?
+        let i = id as i64
+        var changed = false
+        if !self.reached[i] {
+            self.reached[i] = true
+            self.inputs[i] = state.clone()
+            changed = true
+        } else {
+            for j, value in state {
+                if self.inputs[i][j] && !value { self.inputs[i][j] = false; changed = true }
+            }
+        }
+        if changed && !self.queued[i] { self.queued[i] = true; self.pending.push(id) }
+        Ok(())
+    }
+}
+
+// Precondition: core_mir's complete structural/type pass has succeeded. All
+// indices and forms below are checked there before this function is invoked.
+pub fn validate(body: mir.Body, sp: diag.Span) -> Result((), diag.Diag) {
+    let blocks = body.blocks.len()
+    let locals = body.locals.len()
+    if blocks == 0 || locals == 0 || locals > MAX_FACTS / blocks {
+        return Err(diag.Diag.new(sp, "core MIR: initialization state limit reached"))
+    }
+    var flow = Flow {
+        inputs: Vec(Vec(bool)).new(),
+        reached: Vec(bool).new(),
+        queued: Vec(bool).new(),
+        pending: Vec(u32).new(),
+        left: MAX_WORK
+    }
+    for _ in body.blocks {
+        flow.inputs.push(Vec(bool).new())
+        flow.reached.push(false)
+        flow.queued.push(false)
+    }
+    var entry = Vec(bool).new()
+    for i, local in body.locals {
+        // Unit's return has no bytes; generated destructors return it without
+        // assigning local zero. No non-unit return gets this exemption.
+        entry.push((i > 0 && i <= body.arg_count) || (i == 0 && local.ty == types.UNIT))
+    }
+    flow.edge(0, entry, sp)?
+    while flow.pending.len() > 0 {
+        let id = flow.pending.pop().unwrap() as i64
+        flow.queued[id] = false
+        spend(&flow.left, locals + 1, sp)?
+        var state = flow.inputs[id].clone()
+        let block = body.blocks[id]
+        for stmt in block.stmts {
+            spend(&flow.left, 1, sp)?
+            let mir.Stmt.Assign(dest, rv, at) = stmt else { return Err(diag.Diag.new(
+                sp,
+                "core MIR: unsupported initialization statement"
+            )) }
+            read_value(state, rv, &flow.left, at)?
+            if dest.proj.len() == 0 {
+                state[dest.local as i64] = true
+            } else {
+                // A projected store reads its base/index. It does not prove
+                // that the entire aggregate or any pointed-to allocation is initialized.
+                read_place(state, dest, &flow.left, at)?
+            }
+        }
+        spend(&flow.left, 1, sp)?
+        match block.term {
+            Goto(next) => flow.edge(next, state, sp)?
+            Switch(op, cases, otherwise) => {
+                read_operand(state, op, &flow.left, sp)?
+                flow.edge(otherwise, state, sp)?
+                for c in cases { flow.edge(c.block, state, sp)? }
+            }
+            Assert(op, _, next, at) => {
+                read_operand(state, op, &flow.left, at)?
+                flow.edge(next, state, at)?
+            }
+            Call(_, args, dest, next, at) => {
+                // Arguments are read before the normal-return edge writes the
+                // result, even when an argument aliases the destination local.
+                for op in args { read_operand(state, op, &flow.left, at)? }
+                state[dest.local as i64] = true
+                flow.edge(next, state, at)?
+            }
+            Return => read_local(state, 0, sp)?
+            Unreachable => {}
+            _ => return Err(diag.Diag.new(sp, "core MIR: unsupported initialization terminator"))
+        }
+    }
+    Ok(())
+}

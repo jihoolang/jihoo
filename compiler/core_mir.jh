@@ -1,6 +1,7 @@
 // Validate the call-frame contract of dependent Core lowering before publication.
 // Check the emitted Core subset, not general MIR or operational equivalence.
 import diag
+import core_init
 import mir
 import types
 import lex
@@ -329,6 +330,7 @@ pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
     for f in p.fns {
         let Some(body) = f.body else { continue }
         body_types(p, valid, body, f.span)?
+        core_init.validate(body, f.span)?
     }
     Ok(())
 }
