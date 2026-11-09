@@ -26,6 +26,17 @@ def test(compiler, probe, out):
                     f'vacuous generated function inspection: {report!r}')
             reports.append((functions, calls, parameters))
     mutations = {
+        'init-return': 'read of uninitialized local',
+        'init-read': 'read of uninitialized local',
+        'init-self': 'read of uninitialized local',
+        'init-pointer': 'read of uninitialized local',
+        'init-index': 'read of uninitialized local',
+        'init-aggregate': 'read of uninitialized local',
+        'init-call': 'read of uninitialized local',
+        'init-join': 'read of uninitialized local',
+        'init-loop': 'read of uninitialized local',
+        'init-work-limit': 'initialization work limit reached',
+        'init-state-limit': 'initialization state limit reached',
         'local-type': 'invalid runtime type',
         'builtin-type': 'invalid builtin types',
         'cyclic-type': 'invalid runtime type',
@@ -71,6 +82,11 @@ def test(compiler, probe, out):
         require(rejected.returncode != 0 and not rejected.stdout and
                 ('core MIR: ' + diagnostic).encode() in rejected.stderr,
                 f'{mutation}: wrong rejection: {rejected.stderr!r}')
+    controls = ('straight', 'index', 'unreachable', 'call', 'join', 'loop', 'work')
+    for control in controls:
+        accepted = success(command([probe, path, 'x86_64', 'init-valid-' + control]))
+        require(accepted.strip() == b'initialization control accepted',
+                f'initialization positive control failed: {control}')
     require(all(report == reports[0] for report in reports),
             f'ghosts or target changed call-entry layout: {reports!r}')
     # A type-invalid input must not produce any successful partial report.
@@ -89,7 +105,7 @@ def test(compiler, probe, out):
             b'no generated recursion observed' in rejected.stderr,
             'nonrecursive control did not reject')
     print(f'call entry: 4 current-lowerer inspections {reports[0]}; '
-          f'contiguous typed parameters and call arities passed; {len(mutations)} MIR mutations; 2 negative controls')
+          f'contiguous typed parameters and call arities passed; {len(mutations)} MIR mutations; 7 initialization controls; 2 negative controls')
 
 
 def main():

@@ -2262,3 +2262,51 @@ array index bounds, valid/live heap pointers, move discipline, source-to-MIR val
 preservation, or backend semantics. A same-typed argument permutation still passes
 static checking. Neither successful validation nor the existing restricted models
 close the original whole-specified-core preservation/consistency and borrow gates.
+
+
+### Definite local initialization at the Core MIR boundary
+
+After structural and type validation, `core_init.validate` performs a bounded
+forward must-analysis from block zero. The entry facts contain parameter locals
+and the unit return local (which has no bytes). A block's first incoming edge
+establishes its input facts; later edges intersect them and requeue the block
+when a fact is lost. Backedges participate in the same fixed point. A later
+loop-body assignment cannot justify an earlier first-iteration read.
+
+Each reachable assignment reads its operands before marking an unprojected
+destination initialized. Projected stores instead require initialized base and
+index locals, without marking the whole aggregate or pointed-to memory initialized.
+Reads of aggregate operands, pointer bases, array-index locals, switch/assert
+conditions and call arguments are checked. Calls read arguments before setting
+the result initialized on their normal-return edge. Non-unit returns require
+initialized local zero. Structurally disconnected blocks are excluded from this
+analysis but still undergo the preceding type/shape checks; this accommodates
+the lowerer's disconnected code after `Absurd`/`Unreachable`.
+
+The implementation caps potential block/local facts at 4,000,000 per function
+before allocating analysis state, and charges state copies/intersections,
+statement/operand/projection visits and edge propagation against 64,000,000 work
+units. Exhaustion is an explicit diagnostic, never successful partial validation.
+The finite bitsets only lose facts after first reach; queued flags bound the
+worklist to at most one entry per block. No constant-condition pruning is assumed.
+
+The fresh-module tests retain a real generated function's signature/frame while
+replacing its body with well-typed diagnostic CFGs. Controls pair initialized and
+uninitialized straight-line reads, index reads, joins, loops and calls, and accept
+disconnected uninitialized reads. The missing-write join deliberately visits the
+apparently valid predecessor first, requiring a later predecessor to invalidate
+and revisit the join. A call regression uses its own result local as an argument,
+ensuring the result write cannot justify that argument read. Other failures cover
+self-assignment, return values, pointer bases, aggregates and analysis-state limits.
+A separate many-edge/small-state fixture exhausts the work budget, paired with
+an accepted smaller-edge control so the two resource guards are isolated.
+These fixtures validate MIR only; potentially invalid machine code is not executed.
+
+**Boundary:** this is a trusted, tested local-storage analysis, not a formal Lean
+proof or a heap/borrow theorem. Normal call returns are modeled as writing their
+result; external ABI behavior and backend implementation remain trusted. Copy and
+Move both read stored bytes here: move discipline and ownership are separate.
+Initialized pointers need not be live, allocated or point to initialized memory.
+Whole-aggregate initialization is conservative, and runtime array bounds remain
+outside this pass. This narrows a concrete lowering gap without establishing
+whole-specified-core consistency, preservation or value correspondence.

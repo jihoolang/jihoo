@@ -10,6 +10,186 @@ import mir
 import target
 import lex
 
+fn init_assignment(to: u32, sink rv: mir.Rvalue) -> mir.Stmt {
+    mir.Stmt.Assign(mir.Place.local(to), rv, diag.Span.nowhere())
+}
+
+fn init_number(to: u32, n: i128, ty: u32) -> mir.Stmt {
+    init_assignment(to, mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(n, ty))))
+}
+
+fn init_read(to: u32, from: u32) -> mir.Stmt {
+    init_assignment(to, mir.Rvalue.Use(mir.Operand.Copy(mir.Place.local(from))))
+}
+
+fn init_block(sink term: mir.Term) -> mir.Block {
+    mir.Block { stmts: Vec(mir.Stmt).new(), term }
+}
+
+fn init_local(inout body: mir.Body, ty: u32) -> u32 {
+    let id = body.locals.len() as u32
+    body.locals.push(mir.LocalDecl {
+        ty,
+        name: None,
+        span: diag.Span.nowhere(),
+        mutable: true,
+        kind: mir.LocalKind.Temp
+    })
+    id
+}
+
+// Replace one actual lowered recursion's body with small well-typed CFGs.
+// Other functions, its signature and parameter frame remain authentic.
+fn initialization_case(
+    inout body: mir.Body,
+    inout ts: types.Types,
+    function: u32,
+    mode: str
+) -> bool {
+    if !mode.starts_with("init-") { return false }
+    let sp = diag.Span.nowhere()
+    let temp = init_local(&body, types.I64)
+    body.blocks.clear()
+    body.blocks.push(init_block(mir.Term.Return))
+    if mode == "init-state-limit" {
+        for _ in 0..3000 { init_local(&body, types.I64); }
+        for _ in 0..2000 { body.blocks.push(init_block(mir.Term.Return)) }
+        return true
+    }
+    if mode == "init-work-limit" || mode == "init-valid-work" {
+        // Small state matrix, many edges: isolate the work guard from the
+        // independent state-allocation cap.
+        for _ in 0..4000 { init_local(&body, types.I64); }
+        body.blocks[0].stmts.push(init_number(0, 7, types.I64))
+        var cases = Vec(mir.SwitchTarget).new()
+        let count: i64 = if mode == "init-work-limit" { 17000 } else { 16 }
+        for value in 0..count { cases.push(mir.SwitchTarget { value: value as i128, block: 1 }) }
+        body.blocks[0].term = mir.Term.Switch(
+            mir.Operand.Const(mir.Const.Int(0, types.U64)),
+            cases,
+            1
+        )
+        body.blocks.push(init_block(mir.Term.Return))
+        return true
+    }
+    if mode == "init-return" { return true }
+    if mode == "init-read" || mode == "init-valid-straight" {
+        if mode == "init-valid-straight" { body.blocks[0].stmts.push(init_number(
+            temp,
+            7,
+            types.I64
+        )) }
+        body.blocks[0].stmts.push(init_read(0, temp))
+        return true
+    }
+    if mode == "init-self" {
+        body.blocks[0].stmts.push(init_read(temp, temp))
+        body.blocks[0].stmts.push(init_number(0, 7, types.I64))
+        return true
+    }
+    if mode == "init-pointer" {
+        let ptr = ts.ptr(types.I64)
+        let at = init_local(&body, ptr)
+        body.blocks[0].stmts.push(init_assignment(
+            0,
+            mir.Rvalue.Use(mir.Operand.Copy(mir.Place.deref(at)))
+        ))
+        return true
+    }
+    if mode == "init-index" || mode == "init-valid-index" {
+        let array = ts.intern(types.TyKind.Array(types.I64, 1))
+        let at = init_local(&body, array)
+        let index = init_local(&body, types.U64)
+        var ops = Vec(mir.Operand).new()
+        ops.push(mir.Operand.Const(mir.Const.Int(7, types.I64)))
+        body.blocks[0].stmts.push(init_assignment(
+            at,
+            mir.Rvalue.Aggregate(mir.Agg.Array(array), ops)
+        ))
+        if mode == "init-valid-index" { body.blocks[0].stmts.push(init_number(index, 0, types.U64)) }
+        body.blocks[0].stmts.push(init_assignment(
+            0,
+            mir.Rvalue.Use(mir.Operand.Copy(mir.Place.local(at).with(mir.Proj.Index(index))))
+        ))
+        return true
+    }
+    if mode == "init-aggregate" {
+        var parts = Vec(u32).new()
+        parts.push(types.I64)
+        let tuple = ts.tuple(parts)
+        let at = init_local(&body, tuple)
+        var ops = Vec(mir.Operand).new()
+        ops.push(mir.Operand.Copy(mir.Place.local(temp)))
+        body.blocks[0].stmts.push(init_assignment(
+            at,
+            mir.Rvalue.Aggregate(mir.Agg.Struct(tuple), ops)
+        ))
+        body.blocks[0].stmts.push(init_number(0, 7, types.I64))
+        return true
+    }
+    if mode == "init-valid-unreachable" {
+        body.blocks[0].stmts.push(init_number(0, 7, types.I64))
+        var dead = init_block(mir.Term.Return)
+        dead.stmts.push(init_read(0, temp))
+        body.blocks.push(dead)
+        return true
+    }
+    if mode == "init-call" || mode == "init-valid-call" {
+        var args = Vec(mir.Operand).new()
+        var replaced = false
+        for j in 1..body.arg_count + 1 {
+            if !replaced && body.locals[j].ty == types.I64 && mode == "init-call" {
+                args.push(mir.Operand.Copy(mir.Place.local(temp)))
+                replaced = true
+            } else { args.push(mir.Operand.Copy(mir.Place.local(j as u32))) }
+        }
+        if mode == "init-call" && !replaced { return false }
+        body.blocks[0].term = mir.Term.Call(
+            mir.Callee.Fn(function),
+            args,
+            mir.Place.local(temp),
+            1,
+            sp
+        )
+        var next = init_block(mir.Term.Return)
+        next.stmts.push(init_read(0, temp))
+        body.blocks.push(next)
+        return true
+    }
+    if mode == "init-join" || mode == "init-valid-join" {
+        // The work stack visits branch 1 and the join before branch 2. A
+        // missing write on branch 2 must invalidate and revisit the join.
+        var cases = Vec(mir.SwitchTarget).new()
+        cases.push(mir.SwitchTarget { value: 0, block: 1 })
+        body.blocks[0].term = mir.Term.Switch(mir.Operand.Const(mir.Const.Bool(false)), cases, 2)
+        var yes = init_block(mir.Term.Goto(3))
+        yes.stmts.push(init_number(temp, 7, types.I64))
+        body.blocks.push(yes)
+        var no = init_block(mir.Term.Goto(3))
+        if mode == "init-valid-join" { no.stmts.push(init_number(temp, 8, types.I64)) }
+        body.blocks.push(no)
+        var join = init_block(mir.Term.Return)
+        join.stmts.push(init_read(0, temp))
+        body.blocks.push(join)
+        return true
+    }
+    if mode == "init-loop" || mode == "init-valid-loop" {
+        if mode == "init-valid-loop" { body.blocks[0].stmts.push(init_number(temp, 7, types.I64)) }
+        body.blocks[0].term = mir.Term.Goto(1)
+        var cases = Vec(mir.SwitchTarget).new()
+        cases.push(mir.SwitchTarget { value: 0, block: 2 })
+        var head = init_block(mir.Term.Switch(mir.Operand.Const(mir.Const.Bool(false)), cases, 3))
+        head.stmts.push(init_read(0, temp))
+        body.blocks.push(head)
+        var step = init_block(mir.Term.Goto(1))
+        step.stmts.push(init_number(temp, 8, types.I64))
+        body.blocks.push(step)
+        body.blocks.push(init_block(mir.Term.Return))
+        return true
+    }
+    false
+}
+
 fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, String) {
     var sources = diag.Sources.new()
     let ast = match load.load(
@@ -32,6 +212,7 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
             if !p.fns[i].name.as_str().starts_with("recursion.") { continue }
             let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
             var body = b
+            if initialization_case(&body, &p.types, i as u32, mutation) { changed = true }
             if mutation == "negative-count" { body.arg_count = -1; changed = true }
             if mutation == "count" { body.arg_count += 1; changed = true }
             if mutation == "return-kind" { body.locals[0].kind = mir.LocalKind.Temp; changed = true }
@@ -179,7 +360,12 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
         if !changed { return Err("mutation was not applied".to_string()) }
         match core_mir.validate(p) {
             Err(e) => return Err(e.msg.clone())
-            Ok(()) => return Err("mutation was accepted".to_string())
+            Ok(()) => {
+                if mutation.starts_with("init-valid-") { return Ok(
+                    "initialization control accepted".to_string()
+                ) }
+                return Err("mutation was accepted".to_string())
+            }
         }
     }
     var functions: i64 = 0
