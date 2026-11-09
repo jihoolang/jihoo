@@ -86,6 +86,33 @@ CASES.update({
 })
 
 
+# Erasure/slot-compaction controls. These are implementation regressions, not a
+# verified projection into Quantity.Erasure. The unannotated single/once cases
+# above are positive controls for the same surviving owner demand.
+CASES.update({
+    'erase-two-proof-slots': (1, None, 'I64',
+        '(app (lam0 p (Eq 1 1) (lam0 q (Lt 0 1) (free b (int 7)))) '
+        '(refl 1) (decide-lt 0 1))'),
+    'erase-around-local-owner': (1, None, 'I64',
+        '(app (lam0 p (Eq 1 1) (app (lam local (Buffer 1) '
+        '(app (lam0 q (Lt 0 1) (free local (free b (int 7)))) (decide-lt 0 1))) '
+        '(alloc 1 (int 0)))) (refl 1))'),
+    'erase-under-branch': (1, None, 'I64',
+        '(app (lam0 p (Eq 1 1) (if-lt 0 1 q '
+        '(free b (int 7)) (free b (int 8)))) (refl 1))'),
+    'erase-trap-before': (1, None, 'U64',
+        '(app (lam0 p (Eq 1 1) (app (lam x U64 (free b x)) '
+        '(uadd 18446744073709551615 1))) (refl 1))'),
+    'erase-trap-after': (1, None, 'U64',
+        '(app (lam0 p (Eq 1 1) (free b (uadd 18446744073709551615 1))) (refl 1))'),
+    'erase-cannot-hide-duplication': (2, 'an owned value is used more than once', 'I64',
+        '(app (lam0 p (Eq 1 1) (free b (free b (int 7)))) (refl 1))'),
+    'erase-cannot-hide-local-discard': (1, 'an owned value must be used', 'I64',
+        '(app (lam0 p (Eq 1 1) (app (lam local (Buffer 1) (free b (int 7))) '
+        '(alloc 1 (int 0)))) (refl 1))'),
+})
+
+
 def source(result, body):
     return f'(def f (pi b (Buffer 1) {result}) (lam b (Buffer 1) {body}))\n'.encode()
 

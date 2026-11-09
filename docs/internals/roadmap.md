@@ -729,6 +729,11 @@ mechanize its soundness, starting from that specification:
    closed typing/formation derivations for exact exported graph roots, with
    explicit conversion evidence. The producer is untrusted for artifact typing;
    exporter/source association and all-program checker refinement remain open.
+   The ownership control model additionally proves checked usage preservation
+   through ghost computation removal and erased-binder slot compaction, with
+   forward trace simulation and exact-once/at-most-once guarantees for all
+   transformed control executions. This is not native Core erasure or value
+   correspondence; those release obligations remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

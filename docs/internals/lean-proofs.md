@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 760 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 782 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1895,3 +1895,51 @@ compiler calls, canonical parser/IO behavior and serialization fidelity remain
 trusted and tested boundaries. The theorem neither assumes nor proves semantic
 soundness of arbitrary Raw beta conversion. It makes no whole-language,
 normalization, runtime arithmetic, ownership, borrow, erasure or lowering claim.
+
+### Ownership accounting through ghost-slot erasure
+
+`QuantityErasure.lean` advances the quantity/erasure release obligation in the
+existing control semantics. `erase` deletes ghost computations and removes an
+erased scope's slot by capture-avoiding partial relabeling. It retains linear,
+unrestricted and borrowed scopes. It transforms branches, arbitrary finite
+repetitions, immediately invoked bodies and latent closures recursively; it does
+not select a convenient branch or assume termination.
+
+`demand_preserved` proves that every successful original resource query has the
+same result after erasure. `finishes_forward` and `prefix_forward` preserve the
+exact outer event trace, including prefixes ending in a trap and finite prefixes
+of divergence. More strongly, `finished_count` and `prefix_count` apply to **all**
+executions of the transformed control, without requiring a source execution as a
+premise. The simultaneous linear-resource endpoints therefore retain exact-once
+use on completion and at-most-once use on every finite prefix. A trap can still
+abandon an owner; the theorem deliberately does not require exact-once prefixes.
+
+`erase_relabel` proves commutation with capture-avoiding partial replacement of
+outer resource names. `substitution_erasure` composes this with the existing
+annotated-source substitution theorem, including variable-to-borrow replacement.
+It does not extend substitution to effectful computations or establish stability
+of native inferred binder modes.
+
+Checking must precede erasure. `target_check_not_source_check` exhibits an erased
+scope that uses its ghost slot: the source query rejects it, while the transformed
+query succeeds after that event is removed. Consequently this pass is neither a
+replacement for source checking nor a backwards admission theorem. Only forward
+execution simulation is proved; full operational equivalence is not claimed.
+
+Kernel-checked examples cover two erased slots around a fresh linear owner,
+retained borrowed/unrestricted slots, repeated fresh owners, traps, duplication
+and forbidden capture. Seven additional actual-Core quantity regressions cover
+nested erased proof applications, local ownership, branches and traps, with
+specific rejection diagnostics for duplication and local discard. They extend
+`tests/core_quantities.py`, which observes `Core.runtime_uses` and complete
+`Core.check`; it does not execute any input program. Their association with the
+control examples is manually selected regression evidence, not a proved parser
+or source projection.
+
+This remains a theorem about ownership-use traces, not values or heap events.
+The native Core-to-control projection, mode authenticity/stability, native ghost
+argument erasure and MIR lowering are **not** mechanized by this increment.
+Borrowed slots retain their identity but no lifetime, lease or heap-alias safety
+follows. The whole-specified-core consistency/preservation and native erasure
+release gates remain open. No certificate interface or compiler acceptance rule
+is added or weakened.
