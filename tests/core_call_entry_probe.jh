@@ -8,6 +8,7 @@ import diag
 import load
 import mir
 import target
+import lex
 
 fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, String) {
     var sources = diag.Sources.new()
@@ -42,6 +43,98 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
             }
             if mutation == "pass" { p.fns[i].pass.push(mir.ParamPass.Value); changed = true }
             if mutation == "variadic" { p.fns[i].variadic = true; changed = true }
+            let sp = p.fns[i].span
+            let bad_local = body.locals.len() as u32
+            if mutation == "local-type" { body.locals[body.locals.len() - 1].ty = p.types.kinds.len() as u32; changed = true }
+            if mutation == "builtin-type" { p.types.kinds[types.I64 as i64] = types.TyKind.Bool; changed = true }
+            if mutation == "cyclic-type" {
+                let t = p.types.kinds.len() as u32
+                p.types.kinds.push(types.TyKind.Ptr(t))
+                body.locals[body.locals.len() - 1].ty = t
+                changed = true
+            }
+            var replacement: Option(mir.Rvalue) = None
+            if mutation == "assignment-type" { replacement = Some(mir.Rvalue.Use(mir.Operand.Const(mir.Const.Bool(
+                true
+            )))) }
+            if mutation == "operand-local" { replacement = Some(mir.Rvalue.Use(mir.Operand.Copy(mir.Place.local(
+                bad_local
+            )))) }
+            if mutation == "dereference" { replacement = Some(mir.Rvalue.Use(mir.Operand.Copy(mir.Place.deref(
+                0
+            )))) }
+            if mutation == "field" { replacement = Some(mir.Rvalue.Use(mir.Operand.Copy(
+                mir.Place.local(0).with(mir.Proj.Field(0))
+            ))) }
+            if mutation == "index-local" { replacement = Some(mir.Rvalue.Use(mir.Operand.Copy(
+                mir.Place.local(0).with(mir.Proj.Index(bad_local))
+            ))) }
+            if mutation == "constant-type" { replacement = Some(mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(
+                1,
+                types.BOOL
+            )))) }
+            if mutation == "constant-range" { replacement = Some(mir.Rvalue.Use(mir.Operand.Const(mir.Const.Int(
+                -1,
+                types.U64
+            )))) }
+            if mutation == "binary-type" { replacement = Some(mir.Rvalue.Bin(
+                lex.Op.Add,
+                mir.Operand.Const(mir.Const.Int(1, types.I64)),
+                mir.Operand.Const(mir.Const.Int(1, types.U64))
+            )) }
+            if mutation == "cast-type" { replacement = Some(mir.Rvalue.Cast(
+                mir.Operand.Const(mir.Const.Bool(true)),
+                types.I64,
+                mir.CastKind.Numeric
+            )) }
+            if mutation == "offset-type" { replacement = Some(mir.Rvalue.Offset(
+                mir.Operand.Const(mir.Const.Int(1, types.I64)),
+                mir.Operand.Const(mir.Const.Int(1, types.U64))
+            )) }
+            if mutation == "aggregate-count" {
+                let t = p.types.tuple({ var parts = Vec(u32).new(); parts.push(types.I64); parts })
+                replacement = Some(mir.Rvalue.Aggregate(mir.Agg.Struct(t), Vec(mir.Operand).new()))
+            }
+            if mutation == "aggregate-type" {
+                let t = p.types.tuple({ var parts = Vec(u32).new(); parts.push(types.I64); parts })
+                var ops = Vec(mir.Operand).new()
+                ops.push(mir.Operand.Const(mir.Const.Bool(true)))
+                replacement = Some(mir.Rvalue.Aggregate(mir.Agg.Struct(t), ops))
+            }
+            match move replacement {
+                Some(rv) => {
+                    body.blocks[0].stmts.insert(0, mir.Stmt.Assign(mir.Place.local(0), rv, sp))
+                    changed = true
+                }
+                None => {}
+            }
+            if mutation == "goto" { body.blocks[0].term = mir.Term.Goto(body.blocks.len() as u32); changed = true }
+            if mutation == "pending" { body.blocks[0].term = mir.Term.Pending; changed = true }
+            if mutation == "assert-type" { body.blocks[0].term = mir.Term.Assert(
+                mir.Operand.Const(mir.Const.Int(1, types.I64)),
+                "test".to_string(),
+                0,
+                sp
+            ); changed = true }
+            if mutation == "switch-duplicate" || mutation == "switch-bool" || mutation == "switch-target" {
+                var cases = Vec(mir.SwitchTarget).new()
+                cases.push(mir.SwitchTarget { value: 0, block: 0 })
+                if mutation == "switch-duplicate" { cases.push(mir.SwitchTarget {
+                    value: 0,
+                    block: 0
+                }) }
+                if mutation == "switch-bool" { cases.push(mir.SwitchTarget { value: 2, block: 0 }) }
+                if mutation == "switch-target" { cases.push(mir.SwitchTarget {
+                    value: 1,
+                    block: body.blocks.len() as u32
+                }) }
+                body.blocks[0].term = mir.Term.Switch(
+                    mir.Operand.Const(mir.Const.Bool(true)),
+                    cases,
+                    0
+                )
+                changed = true
+            }
             for j in 0..body.blocks.len() {
                 if changed { break }
                 let old = mem.replace(&body.blocks[j].term, mir.Term.Pending)
@@ -51,6 +144,9 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
                         var operands = operands
                         var place = place
                         var continuation = continuation
+                        if mutation == "call-type" && operands.len() > 0 { operands[0] = mir.Operand.Const(mir.Const.Bool(
+                            true
+                        )); changed = true }
                         if mutation == "callee" { callee = mir.Callee.Fn(p.fns.len() as u32); changed = true }
                         if mutation == "missing-operand" && operands.len() > 0 {
                             operands.remove(0); changed = true

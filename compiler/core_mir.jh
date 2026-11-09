@@ -1,14 +1,293 @@
 // Validate the call-frame contract of dependent Core lowering before publication.
-// This is structural validation, not MIR typing or operational equivalence.
+// Check the emitted Core subset, not general MIR or operational equivalence.
 import diag
 import mir
+import types
+import lex
+
+// Every accepted composite type points backward to accepted children. This
+// rejects malformed/cyclic type graphs without recursive traversal or expansion.
+fn runtime_types(ts: types.Types) -> Vec(bool) {
+    var valid = Vec(bool).new()
+    for i, ty in ts.kinds {
+        let ok = match ty {
+            Bool => true
+            Int(n) => n.bits == 64
+            Ptr(t) | Array(t, _) => t as i64 < i && valid[t as i64]
+            Tuple(parts) => {
+                var ok = true
+                for t in parts { if t as i64 >= i || !valid[t as i64] { ok = false } }
+                ok
+            }
+            _ => false
+        }
+        valid.push(ok)
+    }
+    valid
+}
+
+fn known(valid: Vec(bool), t: u32, sp: diag.Span) -> Result((), diag.Diag) {
+    if t as i64 >= valid.len() || !valid[t as i64] {
+        return Err(diag.Diag.new(sp, "core MIR: invalid runtime type"))
+    }
+    Ok(())
+}
+
+fn numeric(ts: types.Types, t: u32) -> bool {
+    match ts.kind(t) { Int(n) => n.bits == 64, _ => false }
+}
+
+fn place_type(
+    ts: types.Types,
+    body: mir.Body,
+    p: mir.Place,
+    sp: diag.Span
+) -> Result(u32, diag.Diag) {
+    if p.local as i64 >= body.locals.len() {
+        return Err(diag.Diag.new(sp, "core MIR: invalid operand local"))
+    }
+    var ty = body.locals[p.local as i64].ty
+    for pr in p.proj {
+        ty = match pr {
+            Deref => match ts.kind(ty) {
+                Ptr(t) => t
+                _ => return Err(diag.Diag.new(sp, "core MIR: dereference of nonpointer"))
+            }
+            Field(i) => match ts.kind(ty) {
+                Tuple(parts) => {
+                    if i as i64 >= parts.len() { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: invalid tuple field"
+                    )) }
+                    parts[i as i64]
+                }
+                _ => return Err(diag.Diag.new(sp, "core MIR: field of nontuple"))
+            }
+            Index(i) => {
+                if i as i64 >= body.locals.len() || body.locals[i as i64].ty != types.U64 {
+                    return Err(diag.Diag.new(sp, "core MIR: invalid array index local"))
+                }
+                match ts.kind(ty) {
+                    Array(t, _) => t
+                    _ => return Err(diag.Diag.new(sp, "core MIR: index of nonarray"))
+                }
+            }
+            _ => return Err(diag.Diag.new(sp, "core MIR: unsupported projection"))
+        }
+    }
+    Ok(ty)
+}
+
+fn operand_type(
+    ts: types.Types,
+    valid: Vec(bool),
+    body: mir.Body,
+    op: mir.Operand,
+    sp: diag.Span
+) -> Result(u32, diag.Diag) {
+    match op {
+        Copy(p) | Move(p) => place_type(ts, body, p, sp)
+        Const(c) => match c {
+            Int(n, t) => {
+                known(valid, t, sp)?
+                let types.TyKind.Int(k) = ts.kind(t) else {
+                    return Err(diag.Diag.new(sp, "core MIR: integer constant type mismatch"))
+                }
+                if (k.signed && (n < -9223372036854775808 || n > 9223372036854775807)) ||
+                    (!k.signed && (n < 0 || n > 18446744073709551615)) {
+                    return Err(diag.Diag.new(sp, "core MIR: integer constant out of range"))
+                }
+                Ok(t)
+            }
+            Bool(_) => Ok(types.BOOL)
+            _ => Err(diag.Diag.new(sp, "core MIR: unsupported constant"))
+        }
+    }
+}
+
+fn rvalue_type(
+    ts: types.Types,
+    valid: Vec(bool),
+    body: mir.Body,
+    rv: mir.Rvalue,
+    sp: diag.Span
+) -> Result(u32, diag.Diag) {
+    match rv {
+        Use(op) => operand_type(ts, valid, body, op, sp)
+        Bin(op, a, b) => {
+            let ta = operand_type(ts, valid, body, a, sp)?
+            let tb = operand_type(ts, valid, body, b, sp)?
+            if ta != tb || !numeric(ts, ta) {
+                return Err(diag.Diag.new(sp, "core MIR: binary operand type mismatch"))
+            }
+            match op {
+                lex.Op.Add | lex.Op.Sub | lex.Op.Mul => Ok(ta)
+                lex.Op.Eq | lex.Op.Ne | lex.Op.Lt => Ok(types.BOOL)
+                _ => Err(diag.Diag.new(sp, "core MIR: unsupported binary operator"))
+            }
+        }
+        Cast(op, t, kind) => {
+            let from = operand_type(ts, valid, body, op, sp)?
+            known(valid, t, sp)?
+            let mir.CastKind.Numeric = kind else { return Err(diag.Diag.new(
+                sp,
+                "core MIR: unsupported cast"
+            )) }
+            let a = numeric(ts, from) || match ts.kind(from) { Ptr(_) => true, _ => false }
+            let b = numeric(ts, t) || match ts.kind(t) { Ptr(_) => true, _ => false }
+            if !a || !b { return Err(diag.Diag.new(sp, "core MIR: invalid numeric cast")) }
+            Ok(t)
+        }
+        Offset(a, b) => {
+            let ta = operand_type(ts, valid, body, a, sp)?
+            let tb = operand_type(ts, valid, body, b, sp)?
+            let types.TyKind.Ptr(_) = ts.kind(ta) else { return Err(diag.Diag.new(
+                sp,
+                "core MIR: offset of nonpointer"
+            )) }
+            if tb != types.U64 { return Err(diag.Diag.new(sp, "core MIR: invalid offset index")) }
+            Ok(ta)
+        }
+        Aggregate(agg, ops) => {
+            match agg {
+                Array(t) => {
+                    known(valid, t, sp)?
+                    let types.TyKind.Array(elem, count) = ts.kind(t) else { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: invalid array aggregate"
+                    )) }
+                    if count != ops.len() as u64 { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: aggregate arity mismatch"
+                    )) }
+                    for op in ops { if operand_type(ts, valid, body, op, sp)? != elem { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: aggregate operand type mismatch"
+                    )) } }
+                    Ok(t)
+                }
+                Struct(t) => {
+                    known(valid, t, sp)?
+                    let types.TyKind.Tuple(parts) = ts.kind(t) else { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: invalid tuple aggregate"
+                    )) }
+                    if parts.len() != ops.len() { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: aggregate arity mismatch"
+                    )) }
+                    for i, op in ops { if operand_type(ts, valid, body, op, sp)? != parts[i] { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: aggregate operand type mismatch"
+                    )) } }
+                    Ok(t)
+                }
+                _ => Err(diag.Diag.new(sp, "core MIR: unsupported aggregate"))
+            }
+        }
+        _ => Err(diag.Diag.new(sp, "core MIR: unsupported rvalue"))
+    }
+}
+
+fn target(body: mir.Body, id: u32, sp: diag.Span) -> Result((), diag.Diag) {
+    if id as i64 >= body.blocks.len() { return Err(diag.Diag.new(
+        sp,
+        "core MIR: invalid control-flow target"
+    )) }
+    Ok(())
+}
+
+fn body_types(
+    p: mir.Program,
+    valid: Vec(bool),
+    body: mir.Body,
+    sp: diag.Span
+) -> Result((), diag.Diag) {
+    if body.blocks.len() == 0 { return Err(diag.Diag.new(sp, "core MIR: missing entry block")) }
+    for block in body.blocks {
+        for stmt in block.stmts {
+            let mir.Stmt.Assign(dest, rv, at) = stmt else { return Err(diag.Diag.new(
+                sp,
+                "core MIR: unsupported statement"
+            )) }
+            let want = place_type(p.types, body, dest, at)?
+            let got = rvalue_type(p.types, valid, body, rv, at)?
+            if want != got { return Err(diag.Diag.new(at, "core MIR: assignment type mismatch")) }
+        }
+        match block.term {
+            Goto(next) => target(body, next, sp)?
+            Switch(op, cases, otherwise) => {
+                let t = operand_type(p.types, valid, body, op, sp)?
+                if t != types.BOOL && !numeric(p.types, t) { return Err(diag.Diag.new(
+                    sp,
+                    "core MIR: invalid switch type"
+                )) }
+                target(body, otherwise, sp)?
+                var seen = Map(i128, bool).new()
+                for c in cases {
+                    if seen.get(c.value).is_some() { return Err(diag.Diag.new(
+                        sp,
+                        "core MIR: duplicate switch case"
+                    )) }
+                    seen.insert(c.value, true)
+                    if t == types.BOOL {
+                        if c.value != 0 && c.value != 1 { return Err(diag.Diag.new(
+                            sp,
+                            "core MIR: invalid boolean case"
+                        )) }
+                    } else { operand_type(
+                        p.types,
+                        valid,
+                        body,
+                        mir.Operand.Const(mir.Const.Int(c.value, t)),
+                        sp
+                    )?; }
+                    target(body, c.block, sp)?
+                }
+            }
+            Assert(op, _, next, at) => {
+                if operand_type(p.types, valid, body, op, at)? != types.BOOL { return Err(diag.Diag.new(
+                    at,
+                    "core MIR: invalid assertion type"
+                )) }
+                target(body, next, at)?
+            }
+            Call(mir.Callee.Fn(id), args, _, _, at) => {
+                // Frame validation has already checked the target and arity.
+                for i, op in args {
+                    if operand_type(p.types, valid, body, op, at)? != p.fns[id as i64].sig.params[i] {
+                        return Err(diag.Diag.new(at, "core MIR: call operand type mismatch"))
+                    }
+                }
+            }
+            Return | Unreachable => {}
+            _ => return Err(diag.Diag.new(sp, "core MIR: unfinished or unsupported terminator"))
+        }
+    }
+    Ok(())
+}
 
 pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
+    if p.types.kinds.len() <= types.U64 as i64 {
+        return Err(diag.Diag.new(diag.Span.nowhere(), "core MIR: invalid builtin types"))
+    }
+    let boolean = match p.types.kind(types.BOOL) { Bool => true, _ => false }
+    let unit = match p.types.kind(types.UNIT) { Tuple(parts) => parts.len() == 0, _ => false }
+    let signed = match p.types.kind(types.I64) { Int(n) => n.bits == 64 && n.signed, _ => false }
+    let natural = match p.types.kind(types.U64) { Int(n) => n.bits == 64 && !n.signed, _ => false }
+    if !boolean || !unit || !signed || !natural { return Err(diag.Diag.new(
+        diag.Span.nowhere(),
+        "core MIR: invalid builtin types"
+    )) }
+    let valid = runtime_types(p.types)
     for f in p.fns {
         if f.pass.len() != f.sig.params.len() || f.variadic || f.sig.variadic {
             return Err(diag.Diag.new(f.span, "core MIR: invalid parameter signature"))
         }
+        known(valid, f.sig.ret, f.span)?
+        for t in f.sig.params { known(valid, t, f.span)? }
         let Some(body) = f.body else { continue }
+        for local in body.locals { known(valid, local.ty, local.span)? }
         if body.arg_count < 0 || body.arg_count != f.sig.params.len() || body.locals.len() <= body.arg_count {
             return Err(diag.Diag.new(f.span, "core MIR: invalid argument count"))
         }
@@ -46,6 +325,10 @@ pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
                 return Err(diag.Diag.new(sp, "core MIR: invalid call continuation"))
             }
         }
+    }
+    for f in p.fns {
+        let Some(body) = f.body else { continue }
+        body_types(p, valid, body, f.span)?
     }
     Ok(())
 }
