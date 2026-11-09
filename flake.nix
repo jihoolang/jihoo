@@ -289,6 +289,7 @@
               python3 tests/core_primitive_safety.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);

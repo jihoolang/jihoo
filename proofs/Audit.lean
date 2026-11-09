@@ -630,3 +630,14 @@ import Jihoo
 #print axioms Jihoo.Quantity.ContextProjection.rooted_alias_origin
 #print axioms Jihoo.Quantity.ContextProjection.rooted_alias_finished
 #print axioms Jihoo.Quantity.ContextProjection.rooted_alias_prefix
+
+#print axioms Jihoo.Quantity.LendProjection.checked_lend_origin
+#print axioms Jihoo.Quantity.LendProjection.checked_lend_demand
+#print axioms Jihoo.Quantity.LendProjection.checked_lend_finished
+#print axioms Jihoo.Quantity.LendProjection.checked_lend_prefix
+#print axioms Jihoo.Quantity.LendProjection.scoped_lend_finishes
+#print axioms Jihoo.Quantity.LendProjection.lend_trace_count
+#print axioms Jihoo.Quantity.LendProjection.checked_lend_body_traces
+#print axioms Jihoo.Quantity.LendProjection.project_sound
+#print axioms Jihoo.Quantity.LendProjection.project_budget_decreases
+#print axioms Jihoo.Quantity.LendProjection.rooted_project_sound
