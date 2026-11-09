@@ -77,3 +77,42 @@ These are checked native-core library proofs and finite regression tests, not
 Lean certification or a mechanized compiler-soundness theorem. The element type
 is i64. There is no borrowed slice record, mutable subrange view, generic element
 type or formal theorem equating every copied element to its source value.
+
+## Reusing storage and moving overlapping ranges
+
+`copy_into(n, source, m, destination, from, to, count, source_fits, destination_fits)`
+borrows `source: ref buffer(n)` and consumes `destination: buffer(m)`, returning
+that destination owner with the same length. Evidence states
+`from + count <= n` and `to + count <= m` using `Lt(endpoint, length + 1)`.
+The loop copies exactly the selected elements in increasing order, without
+allocating a snapshot or replacing the destination buffer. The source stays
+available; cells outside the destination range are unchanged. Source and
+destination must be distinct owners. Passing the same owner twice is rejected.
+
+`move_within(n, target, from, to, count, source_fits, destination_fits)` handles
+overlap within one buffer. It consumes and returns `buffer(n)`. When `from < to`,
+it reads and writes from the last selected element backwards; otherwise it walks
+forwards. Each step threads the single owner through `load` then `store`. This
+has memmove-style snapshot semantics without allocating a snapshot. Equal
+ranges and empty ranges are permitted, including empty ranges at the endpoint.
+There are no per-element bounds tests; the runtime direction comparison remains.
+
+`subrange_fits(n, offset, count, start, length, outer, inner)` composes evidence
+for a range within a range. Its conclusion is
+`Lt(offset + start + length, n + 1)`. All endpoint arithmetic in this theorem is
+erased mathematical arithmetic, so even an overflowing runtime equivalent does
+not execute. The transfer loops still retain checked runtime offset arithmetic.
+
+The [transfer example](../../examples/core_range_transfer.jh) uses this imported
+lemma to copy into existing storage, then moves an overlapping range. Its result
+is 28. The [transfer tests](../../tests/core_range_transfer.py) compare both
+operations with an independent snapshot model for every offset/count combination
+around six-element buffers, at O0/O2. They cover both object targets, empty
+buffers, signed extremes, source retention, exact O0 allocation counts and
+balanced frees, erased endpoint evidence, invalid ownership and malformed unused
+imported bounds. Counts are not a substitute for a memory-sanitizer proof.
+
+These APIs prove bounds and preserve the buffer's indexed length. Their
+pointwise content behavior and overlap order are regression-tested, not an
+additional formal content theorem. They do not add a borrowed slice type,
+mutable subrange view, generic elements, allocation guarantees or Lean proofs.

@@ -931,6 +931,13 @@ erasure, skipped callback effects, ownership, allocation costs and rejected
 invariants are tested. This is not a pointwise membership theorem or ordinary
 `ensures` syntax.
 
+`dependent.range.copy_into` now reuses an existing destination owner, and
+`move_within` supports overlapping ranges with directional copying through one
+owner. A compositional subrange lemma supplies bounds to the acceptance example.
+Exhaustive small snapshot models, exact erasure and allocation/ownership tests
+cover these slice-library operations; pointwise contents remain a tested boundary,
+not a formal content theorem or a new kernel rule.
+
 `dependent.range` supplies proof-bounded owned buffer snapshots and a reusable
 offset-bound theorem. Its runtime copy loop applies imported evidence to each
 read; the result retains its exact count in its buffer type. Tests compare exact

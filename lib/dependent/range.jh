@@ -1,5 +1,6 @@
 // Bounds for an offset/count range and independent owned buffer snapshots.
 #![dependent_core]
+import dependent.nat
 
 // Translate a relative index into its enclosing buffer. All arithmetic here
 // is ghost natural arithmetic; no endpoint is computed at runtime.
@@ -26,4 +27,57 @@ pub fn copy(
     fold(count, alloc(count, 0), fn(i, p, acc) {
         store(acc, i, index(source, offset + i, offset_lt(n, offset, count, i, fits, p)), p)
     })
+}
+
+// Compose a range inside an already bounded range, without runtime endpoints.
+pub fn subrange_fits(
+    n: u64, offset: u64, count: u64, start: u64, length: u64,
+    outer: erased(Lt(offset + count, n + 1)),
+    inner: erased(Lt(start + length, count + 1))
+) -> Lt(offset + start + length, n + 1) {
+    nat.le_trans(offset + start + length, offset + count, n,
+        lt_add(start + length, count + 1, offset, inner), outer)
+}
+
+// Copy between distinct owners, retaining the borrowed source and reusing
+// the destination allocation. Only the selected destination range changes.
+pub fn copy_into(
+    n: erased(u64), source: ref buffer(n), m: erased(u64), destination: buffer(m),
+    from: u64, to: u64, count: u64,
+    source_fits: erased(Lt(from + count, n + 1)),
+    destination_fits: erased(Lt(to + count, m + 1))
+) -> buffer(m) {
+    fold(count, destination, fn(i, p, acc) {
+        store(acc, to + i,
+            index(source, from + i, offset_lt(n, from, count, i, source_fits, p)),
+            offset_lt(m, to, count, i, destination_fits, p))
+    })
+}
+
+fn moved_at(
+    n: erased(u64), target: buffer(n), from: u64, to: u64, count: erased(u64), i: u64,
+    source_fits: erased(Lt(from + count, n + 1)),
+    destination_fits: erased(Lt(to + count, n + 1)), inside: erased(Lt(i, count))
+) -> buffer(n) {
+    load(target, from + i, offset_lt(n, from, count, i, source_fits, inside), fn(value, target) {
+        store(target, to + i, value, offset_lt(n, to, count, i, destination_fits, inside))
+    })
+}
+
+// Like memmove: overlap is allowed because one owner is threaded through
+// every read/write. Move right-to-left when the destination starts later.
+pub fn move_within(
+    n: erased(u64), target: buffer(n), from: u64, to: u64, count: u64,
+    source_fits: erased(Lt(from + count, n + 1)),
+    destination_fits: erased(Lt(to + count, n + 1))
+) -> buffer(n) {
+    if_lt(from, to, fn(direction) {
+        fold(count, target, fn(i, p, acc) {
+            moved_at(n, acc, from, to, count,
+                sub(count, i + 1, lt_add(i, count, 1, p)),
+                source_fits, destination_fits, nat.mirror_lt(i, count, p))
+        })
+    }, fold(count, target, fn(i, p, acc) {
+        moved_at(n, acc, from, to, count, i, source_fits, destination_fits, p)
+    }))
 }
