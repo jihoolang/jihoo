@@ -724,3 +724,16 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Checked.out_of_scope_index
 #print axioms Jihoo.CoreBridge.Checked.malformed_context_entry
 #print axioms Jihoo.CoreBridge.Checked.nonfunction_application
+
+#print axioms Jihoo.CoreBridge.Checked.Admission.Accepted.raw_typed
+#print axioms Jihoo.CoreBridge.Checked.Admission.Accepted.realizes
+#print axioms Jihoo.CoreBridge.Checked.Admission.GraphAccepted.sound
+#print axioms Jihoo.CoreBridge.Checked.Admission.literal_accepted
+#print axioms Jihoo.CoreBridge.Checked.Admission.false_type_rejected
+#print axioms Jihoo.CoreBridge.Checked.Admission.erased_natural_rejected
+#print axioms Jihoo.CoreBridge.Checked.Admission.proof_namespace_recovered
+#print axioms Jihoo.CoreBridge.Checked.Admission.non_atomic_application_rejected
+#print axioms Jihoo.CoreBridge.Checked.Admission.unreachable_invalid_rejected
+#print axioms Jihoo.CoreBridge.Checked.Admission.separate_tree_budget
+
+#print axioms Jihoo.CoreBridge.Checked.Admission.Accepted.type_formed

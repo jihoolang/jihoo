@@ -242,6 +242,7 @@
                 ./proofs/Jihoo.lean
                 ./proofs/CheckGraph.lean
                 ./proofs/CheckArtifact.lean
+                ./proofs/CheckMixedRaw.lean
                 ./proofs/CheckTyping.lean
                 ./proofs/CheckBetaReplay.lean
                 ./proofs/CheckEvidence.lean
@@ -266,6 +267,8 @@
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_mixed_raw.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_mixed_raw.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typing_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typed_beta_replay.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_literal_evidence.py --compiler ${jihoo}/bin/jihoo

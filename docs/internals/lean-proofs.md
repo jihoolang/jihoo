@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 684 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 695 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1652,3 +1652,59 @@ but no complexity bound or untrusted-input service is claimed: substitutions
 can expand syntax, and this checker does not reproduce Core's fuel limits.
 Semantic indices remain mathematical naturals; none of the new theorems claims
 runtime, ownership, borrow, lowering or whole-language soundness.
+
+### Admission from actual Core snapshots
+
+`MixedRawAdmission.lean` removes the need to supply bridge syntax to the
+restricted checker. It reconstructs candidate `Index`, `Ty` and `Term` values
+from unified `Raw` trees, recovering the two variable namespaces from the
+binder layout. Candidate reconstruction is not a trusted correctness assumption:
+`admit` runs proved inference and requires exact structural equality between the
+re-encoded term and the supplied term, and between its inferred type and the
+supplied type. Erasure flags and binder annotations participate in that equality.
+There is no conversion or normalization used to hide a representation mismatch.
+
+A successful `Accepted` value contains source typing and both equalities.
+`Accepted.raw_typed` establishes independent ghost `Raw.HasType` for the exact
+input trees, and `Accepted.type_formed` establishes formation of the exact input
+type. `Accepted.realizes` establishes realization of the inferred source
+type's mathematical interpretation. `GraphAccepted.sound` composes this with
+the existing graph decoder: the exact supplied graph and term/type roots
+represent those typed trees. Every graph node, including unreachable nodes,
+passes the graph validator. This endpoint checks the supplied snapshot itself;
+it neither accepts a separate certificate nor establishes provenance from a
+particular compiler invocation. A different valid snapshot can legitimately pass
+its own check.
+
+`CheckMixedRaw.lean` reads one bounded canonical snapshot using the existing
+read-once `TypingInput` path. The existing graph limits (4,096 nodes, depth 128,
+and bounded expanded-tree work including repeated references) apply before
+candidate reconstruction. A separate saturating tree-cost pass limits each
+term/type tree to 512 nodes, with candidate recursion fuel 32. Scalar function
+applications admit only variable or literal arguments, so their substitution
+does not expand index trees; non-atomic application is conservatively rejected.
+These are defensive implementation limits, not a proved end-to-end complexity
+or memory bound. The canonical byte parser, file IO and exporter remain trusted
+and tested infrastructure, outside the typing theorem.
+
+The decoder supports natural lambdas, atomic natural application, annotated
+value/proof lets encoded as immediate lambda applications, literal arrays,
+indexing with exact endpoints, equality reflexivity and true literal bounds.
+It excludes standalone proof-domain lambdas, arbitrary function domains,
+`zeroLe`, subtraction and general conversion. The immediate U64-lambda case
+is treated as natural application; there is no claim that all bridge terms have
+a successful round trip. Acceptance is sound for the admitted fragment, not a
+completeness theorem for this decoder or for jihoo's full checker.
+
+`tests/core_mixed_raw.py` builds the actual-Core snapshot exporter from this
+checkout and checks 26 retained snapshots from both `infer` and `require`:
+18 admitted snapshots and eight intentional unsupported cases. It also checks
+wrong roots, invalid unreachable nodes, payload overflow, trailing/truncated
+input, an independent valid snapshot, repeated-reference expansion, and separate
+depth/tree budgets. Resource negatives have matching type shapes, so an unrelated
+type mismatch does not explain rejection. The suite checks rejection exit status
+and absence of success output, uses runtime guards under `python -O`, and executes
+no input program. Lean examples independently check exact-type rejection,
+erasure mismatch, namespace recovery and defensive limits. No theorem here
+asserts that arbitrary successful `Core.infer` calls are sound, or adds a runtime,
+ownership, borrow, lowering or whole-language result.
