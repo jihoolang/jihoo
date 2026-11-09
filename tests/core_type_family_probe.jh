@@ -1,0 +1,40 @@
+// Type-check and inspect runtime normalization; never execute the input program.
+import std.os
+import core
+import core_parse
+fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+fn run() -> Result(String, String) {
+    let input = stdin_once()?
+    var c = match core_parse.parse(input.as_str(), 0) { Ok(c) => c, Err(e) => return Err(e.msg.clone()) }
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    let value = c.definitions[0].value
+    let Lam(false, ty, body) = c.term(value) else { return Err("expected lambda".to_string()) }
+    let ctx = [core.Binding { ty, erased: false }]
+    let before = match c.runtime_uses(body, 0, ctx, []) { Ok(n) => n, Err(e) => return Err(e.msg.clone()) }
+    c.runtime = true
+    let normal = match c.normal(value, core.DEPTH) { Ok(n) => n, Err(e) => return Err(e.msg.clone()) }
+    let Lam(false, _, nb) = c.term(normal) else { return Err("expected normalized lambda".to_string()) }
+    let after = match c.runtime_uses(nb, 0, ctx, []) { Ok(n) => n, Err(e) => return Err(e.msg.clone()) }
+    c.runtime = false
+    match c.infer(normal, [], false, core.DEPTH) { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    let out = before.to_string() + " " + after.to_string() + "\n"
+    Ok(out)
+}
+fn main() -> i32 { match run() { Ok(out) => { print(out); 0 }, Err(e) => { eprintln(e); 1 } } }

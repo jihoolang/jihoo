@@ -30,6 +30,7 @@
         root = ./.;
         fileset = lib.fileset.unions [
           sources
+          ./scripts/benchmark_compile.py
           ./docs/internals/core-spec.md
           ./docs/language/dependent-types.md
           ./docs/language/dependent-functions.md
@@ -282,15 +283,17 @@
             pname = "jihoo-tests";
             inherit version;
             src = testSrc;
-            nativeBuildInputs = [ jihoo llvm.clang llvm.lld pkgs.python3 ];
+            nativeBuildInputs = [ jihoo llvm.clang llvm.lld pkgs.python3 pkgs.time ];
             dontConfigure = true;
             buildPhase = ''
               export JIHOO_PATH=$PWD/lib JIHOO_COMPILER=${jihoo}/bin/jihoo
               jihoo run tests/runner.jh
+              python3 tests/dependent_benchmark.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_primitive_safety.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_type_family_safety.py --compiler ${jihoo}/bin/jihoo
             '';
             installPhase = "touch $out";
           } // uefiTestEnv pkgs);

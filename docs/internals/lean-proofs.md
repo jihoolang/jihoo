@@ -1458,3 +1458,38 @@ are covered by the general control relabeling lemmas, but are not newly admitted
 by the annotated source/graph projector. This work does not establish heap object
 identity, borrow validity/lifetimes, machine execution simulation or lowering
 correctness, and creates no certificate or production admission profile.
+
+
+## Runtime family kinds and the mode-stability obligation
+
+Investigating mode preservation exposed a concrete counterexample to the old
+native admission rule. An identity family `F : Type -> Type` passed the plain
+normal-form scan, while an abstract `F(Buffer 1)` domain was treated as
+unrestricted. Instantiating F revealed a Buffer. A checked program using a
+callback twice had original owner demand 1 but runtime-normalized demand 2;
+re-inference of that normalized program rejected duplicate ownership use. A
+single-callback control retained demand 1. No reproducer was executed.
+
+The executable checker now additionally restricts runtime type-family expected
+kinds to U64-index telescopes ending in a universe, including erased U64 indices.
+This applies to variable arguments too, so forwarding an opaque higher-kinded
+family cannot bypass a lambda-only inspection. The existing first-order value
+scan is still required and rejects Buffer/function-producing U64 families.
+Scanning lambda annotations alone would not fix the identity-family example:
+Type 0 and its variable body both pass the old plain scan.
+
+The restriction intentionally rejects some harmless families over non-U64
+indices and higher kinds. Ghost type calculations, monomorphic type arguments,
+normalized U64 index domains, multiple indices and variable forwarding of valid
+U64 families are regression-tested as preserved. The native safety suite checks
+whole-program acceptance, owner use 1 before and after runtime normalization,
+re-inference, and successful object emission for positive controls. Invalid
+programs must produce the intended diagnostic at both checking and O0/O2 object
+emission, with no object left behind. Neither accepted nor rejected test inputs
+are executed by this suite.
+
+This is a conservative executable/specification repair, not an unconditional
+Lean mode-preservation theorem. The previous observer, typed-mode stability and
+normalization/substitution correspondence obligations remain explicit. Proving
+that first-order kind/value admission is stable under all permitted typed
+substitutions is still required for the full ownership argument.

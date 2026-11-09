@@ -53,7 +53,7 @@ def validate_spec(root):
     # Each named kernel function exists, and the limits are as stated.
     functions = set(re.findall(r"\bfn ([a-z_]+)", source)) | set(re.findall(r"\bfn ([a-z_]+)", lower))
     for name in ("infer", "normal", "equal", "uses", "require", "check", "binder", "owned", "linear",
-                 "uses_function", "unsaturated", "not_function", "erased_function", "first_order",
+                 "uses_function", "unsaturated", "not_function", "erased_function", "first_order", "first_order_kind",
                  "signature", "declare", "case_type", "data_case_type", "recursion_case_type",
                  "view_case_type", "eliminate", "back_motive", "dependent_lend", "outlived", "lending",
                  "sum", "effectful", "may_trap", "reads", "identical", "runtime", "compile"):

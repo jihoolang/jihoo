@@ -326,3 +326,57 @@ totals, unchanged LLVM IR, and step/memory/depth and invalid-memory failures.
 The [jihoo-proofs](https://github.com/jihoolang/jihoo-proofs) repository
 uses these reports to measure its checked codec construction at 4 to 256
 variants.
+
+### Dependent compilation scaling
+
+The existing compilation harness can generate two dependent-programming
+workloads, without external repositories or proof automation:
+
+```sh
+python3 scripts/benchmark_compile.py --compiler out/jihoo \
+  --workload dependent-buffer --workload dependent-list \
+  --dependent-size 1 --dependent-size 2 --dependent-size 4 \
+  --repeats 5 --json out/dependent-compile.json
+python3 tests/dependent_benchmark.py --compiler out/jihoo
+```
+
+Run in `nix develop` for GNU time and LLVM. `dependent-buffer` repeats exported
+consumers of bounded buffer folds, stores and reads. `dependent-list` repeats
+consumers of imported `dependent.sized_list` construction, structural mapping
+and proof-bounded reads, as in `examples/core_sized_list.jh`. Each consumer has
+runtime length/index arguments and an erased branch bound. The executable
+calls every consumer with the same small runtime input; its exit status is
+`17 * size` modulo 256. The timed build does not run the executable.
+
+Size counts independent exported functions, not list length, theorem depth or
+runtime loop iterations. Defaults for a selected dependent workload are
+1, 2 and 4; repeat `--dependent-size N` to choose sizes between 1 and 256.
+The ordinary default workload set is unchanged. Each generated program is
+recorded verbatim in the JSON alongside its kind and size, and each size has
+a separate baseline key. Imported library loading contributes a fixed cost;
+exported functions retain code-generation work even if LLVM merges identical
+implementations. These workloads do not establish scaling for deeply nested
+proofs, huge numeric indices, arbitrary programs or proof search.
+
+Each fresh process measures elapsed time and GNU time's peak resident memory
+for `check` and full compilation. Native full compilation is `build`; an
+explicit non-host `--target` uses `emit-obj`, so it is not a link-time comparison.
+Reports include raw samples, medians, host/options, checkout revision and
+compiler invocation-file SHA-256. If the supplied path is a wrapper, this
+hashes the wrapper, not its underlying executable. The checkout revision describes sources, not the
+origin of an arbitrary supplied compiler: record that compiler's source commit
+separately when comparing revisions. Temporary generated source paths in
+commands are not persistent; the JSON source is sufficient to reconstruct them.
+
+Use `--baseline previous.json` only on a controlled comparable host and with
+the same sizes/targets/options; `--time-passes` can break down compiler phases.
+The structural test checks deterministic generation, invalid sizes, silent
+checking, report shape, peak-memory collection and native O0/O2 execution at
+sizes 1 and 4. CI has no timing thresholds. Kernel resource limits may reject
+large workloads; failed cases are reported as failures, not performance wins.
+
+On main `f7ed2b95`, 16 independent sized-list consumers exceed the core term
+limit during both checking and building. This is a measured resource boundary,
+not a benchmark pass; use `--dependent-size 16` to reproduce it. Failed samples
+retain status, elapsed time and peak memory without a successful median. The
+harness never raises compiler limits or disables checking to obtain timings.
