@@ -763,3 +763,25 @@ import Jihoo
 #print axioms Jihoo.MixedProofFunctions.Examples.retain_true
 #print axioms Jihoo.MixedProofFunctions.Examples.no_missing_hypothesis
 #print axioms Jihoo.MixedProofFunctions.Examples.no_forward_scalar
+
+#print axioms Jihoo.MixedProofFunctions.Bridge.index_rename
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_rename
+#print axioms Jihoo.MixedProofFunctions.Bridge.index_subst
+#print axioms Jihoo.MixedProofFunctions.Bridge.index_shift
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_subst
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_shift
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_instantiate
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_drop_proof
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_proposition
+#print axioms Jihoo.MixedProofFunctions.Bridge.ContextMatch.natural
+#print axioms Jihoo.MixedProofFunctions.Bridge.ContextMatch.proof
+#print axioms Jihoo.MixedProofFunctions.Bridge.index_typed
+#print axioms Jihoo.MixedProofFunctions.Bridge.formula_formed
+#print axioms Jihoo.MixedProofFunctions.Bridge.translate
+#print axioms Jihoo.MixedProofFunctions.Bridge.translate_closed
+#print axioms Jihoo.MixedProofFunctions.Bridge.applied_typed
+#print axioms Jihoo.MixedProofFunctions.Bridge.zero_typed
+#print axioms Jihoo.MixedProofFunctions.Bridge.CheckedExample.target_typed
+#print axioms Jihoo.MixedProofFunctions.Bridge.CheckedExample.source_true
+#print axioms Jihoo.MixedProofFunctions.Bridge.subtraction_excluded
+#print axioms Jihoo.MixedProofFunctions.Bridge.oversized_literal_excluded

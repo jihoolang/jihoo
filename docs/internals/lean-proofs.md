@@ -298,7 +298,7 @@ Lean package version provided by Nix must match `lean-toolchain`; a toolchain
 upgrade must update and recheck both rather than silently changing proof behavior.
 
 `check.sh` rejects build warnings, checks the toolchain, and inspects the elaborated
-axiom dependencies of 720 selected public guarantees in `Audit.lean`. Only Lean's
+axiom dependencies of 741 selected public guarantees in `Audit.lean`. Only Lean's
 standard logical axioms (`propext`, `Quot.sound`, `Classical.choice`) are permitted.
 The current proofs use `propext` and `Quot.sound`; the logical inhabitation
 and its consistency corollaries also use `Classical.choice`. No admitted proof or custom axiom is accepted as a dependency of these theorems. This still
@@ -1759,10 +1759,74 @@ checks eight corresponding actual-Core programs with both `check` and
 `preserves`, and seven negative controls with specific diagnostics. It also runs
 under `python -O` and executes no input program.
 
-This milestone does not prove an encoder from the new judgment into Raw typing,
-reflect arbitrary successful Core checks, or broaden any existing admission
-endpoint. The Core tests are representative correspondence evidence, not that
-missing translation theorem. Arithmetic expressions retain mathematical natural
-addition and truncated subtraction; machine word bounds/overflow are not modeled.
+The logical judgment itself does not reflect arbitrary successful Core checks or
+broaden existing admission endpoints. The following section supplies a forward
+Raw typing translation under explicit representability conditions. Arithmetic
+expressions in this source judgment retain mathematical natural addition and
+truncated subtraction; machine word bounds/overflow are not modeled here.
 Arbitrary type domains, proof-dependent indices, universes, general conversion,
 recursion, runtime, ownership, borrowing and lowering are outside the judgment.
+
+
+### Translating mixed proof functions into Raw typing
+
+`MixedProofTranslation.lean` proves the missing forward typing bridge for the
+mixed natural/proof function judgment. `translate` maps a source derivation to
+the existing, independently defined ghost `Raw.Beta.HasType` judgment. Its
+premises are the source derivation, syntactic representability of the term, and
+lookup correspondence for the two source namespaces in a single target context.
+No premise assumes target typing. `translate_closed` discharges context
+correspondence for a closed source derivation, using the empty target context.
+The open theorem does not claim that arbitrary assumed contexts are globally
+well formed; `formula_formed` separately proves formation for scoped,
+representable proposition annotations.
+
+Natural lambda/application encode as non-erased U64 Pi/Lam/application. Proof
+lambda/application encode as erased proposition Pi/Lam/application. Encoding a
+proof arrow shifts the codomain's natural-variable map even though the source
+proof binder introduces no natural variable. `formula_subst` proves agreement
+between capture-safe source scalar substitution and unified Raw substitution.
+`formula_instantiate` justifies natural application;
+`formula_drop_proof` proves that substituting an evidence argument into the
+shifted codomain recovers its original encoding. Both context-extension lemmas
+construct the lookup correspondence beneath their respective binder sorts.
+`formula_proposition` proves the erasure classification rather than assuming it.
+
+Admission requires every numeric literal carried in terms and proof annotations
+to be below `2^64`, and excludes subtraction expressions. Literal bound evidence
+also requires both endpoints to be representable; source typing already requires
+the strict inequality. Addition and `zeroLe` are supported by the target ghost
+judgment. This is not a runtime arithmetic safety assertion: variable values
+remain mathematical naturals in the source semantics, and addition may overflow
+if executed as a machine operation. The total encoding helper has a syntactic
+checked-subtraction branch for substitution algebra, but the admission predicate
+rejects every source subtraction; no typing or semantic guarantee is offered
+for that branch or any other unadmitted term. The admitted theorem does not
+manufacture a subtraction certificate.
+
+`MixedProofTranslationExamples.lean` stores each generated declaration together
+with its source typing and admission proofs. Six cases cover all term rules:
+retaining evidence across a natural binder, higher-order proof application,
+a universally quantified proof argument, nested natural/proof application,
+`zeroLe`, and true literal inequality. Every example has both a source truth
+theorem and a closed Raw typing theorem. Subtraction and oversized literals have
+explicit exclusion proofs. `EmitMixedProofTranslation.lean` emits the fixture
+that `proofs/check.sh` regenerates and compares byte for byte; Nix packages the
+emitter and fixture explicitly.
+
+Actual Core checks every generated declaration and its preservation behavior.
+Six unique-location mutations test scalar capture, returning a function instead
+of evidence, universal-index capture, the wrong proof argument, false bounds,
+and a non-erased proof binder. Together with the existing controls, the suite
+contains fourteen accepted and thirteen diagnostic-specific rejected cases and
+runs under `python -O`. These tests exercise the serializer/parser and executable
+checker boundary, whose general correctness is not established by the theorem.
+No input program is executed.
+
+This closes the forward Raw typing gap for the admitted mixed proof-function
+fragment. It does not extend the existing snapshot admission checker, prove a
+converse from arbitrary Raw derivations, establish soundness of all Raw beta
+conversion, or reflect arbitrary `Core.infer` acceptance. The source semantic
+soundness theorem is proved independently; the bridge does not assume semantic
+soundness of the whole Raw judgment. Whole-language, runtime, ownership,
+borrowing, erasure and lowering results remain outside its claim.

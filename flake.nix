@@ -204,6 +204,7 @@
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/Audit.lean
+                ./proofs/EmitMixedProofTranslation.lean
                 ./proofs/EmitMixedInference.lean
                 ./proofs/EmitMixedTelescope.lean
                 ./proofs/EmitCore.lean
@@ -221,6 +222,7 @@
             cp ${./tests/core_preserves/lean-primitive-safety.jhc} tests/core_preserves/lean-primitive-safety.jhc
             cp ${./tests/core_preserves/lean-mixed-telescope.jhc} tests/core_preserves/lean-mixed-telescope.jhc
             cp ${./tests/core_mixed_inference.tsv} tests/core_mixed_inference.tsv
+            cp ${./tests/core_preserves/lean-mixed-proof-translation.jhc} tests/core_preserves/lean-mixed-proof-translation.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
             bash proofs/check.sh
             touch $out
