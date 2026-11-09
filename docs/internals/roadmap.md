@@ -734,6 +734,10 @@ mechanize its soundness, starting from that specification:
    bidirectional finite-trace correspondence and exact-once/at-most-once guarantees for all
    transformed control executions. This is not native Core erasure or value
    correspondence; those release obligations remain open.
+   A capture-layout model now proves reconstruction of mixed ghost, value and
+   recursive-hypothesis environments and conditional caller/callee lookup
+   agreement. Native frame construction and MIR call semantics remain trusted
+   and tested, not formally refined by that result.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
