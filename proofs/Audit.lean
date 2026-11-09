@@ -805,3 +805,27 @@ import Jihoo
 #print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.forward_index_rejected
 #print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.false_snapshot_rejected
 #print axioms Jihoo.MixedProofFunctions.Checked.Snapshot.literal_false_type_impossible
+
+-- Ownership-preserving ghost erasure and binder compaction.
+#print axioms Jihoo.Quantity.Erasure.relabel_compose
+#print axioms Jihoo.Quantity.Erasure.erase_relabel
+#print axioms Jihoo.Quantity.Erasure.substitution_erasure
+#print axioms Jihoo.Quantity.Erasure.demand_preserved
+#print axioms Jihoo.Quantity.Erasure.finishes_forward
+#print axioms Jihoo.Quantity.Erasure.prefix_forward
+#print axioms Jihoo.Quantity.Erasure.finished_count
+#print axioms Jihoo.Quantity.Erasure.prefix_count
+#print axioms Jihoo.Quantity.Erasure.linear_finished
+#print axioms Jihoo.Quantity.Erasure.linear_prefix
+#print axioms Jihoo.Quantity.Erasure.Examples.mixed_compacts
+#print axioms Jihoo.Quantity.Erasure.Examples.mixed_demand
+#print axioms Jihoo.Quantity.Erasure.Examples.mixed_finishes
+#print axioms Jihoo.Quantity.Erasure.Examples.mixed_target_once
+#print axioms Jihoo.Quantity.Erasure.Examples.trap_prefix
+#print axioms Jihoo.Quantity.Erasure.Examples.trap_target_at_most_once
+#print axioms Jihoo.Quantity.Erasure.Examples.loop_compacts
+#print axioms Jihoo.Quantity.Erasure.Examples.loop_no_capture
+#print axioms Jihoo.Quantity.Erasure.Examples.retain_borrowed_unrestricted
+#print axioms Jihoo.Quantity.Erasure.Examples.target_check_not_source_check
+#print axioms Jihoo.Quantity.Erasure.Examples.duplication_survives
+#print axioms Jihoo.Quantity.Erasure.Examples.capture_still_rejected
