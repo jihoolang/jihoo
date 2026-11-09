@@ -345,15 +345,19 @@ consumers of bounded buffer folds, stores and reads. `dependent-list` repeats
 consumers of imported `dependent.sized_list` construction, structural mapping
 and proof-bounded reads, as in `examples/core_sized_list.jh`. Each consumer has
 runtime length/index arguments and an erased branch bound. The executable
-calls every consumer with the same small runtime input; its exit status is
-`17 * size` modulo 256. The timed build does not run the executable.
+calls only the first consumer in default `--dependent-entry exports` mode
+(exit status 17), while every exported function is still checked and emitted.
+`--dependent-entry fanout` instead sums calls to every consumer (exit status
+`17 * size` modulo 256), adding aggregate-entry inlining pressure to export
+count. The timed build does not run the executable.
 
 Size counts independent exported functions, not list length, theorem depth or
 runtime loop iterations. Defaults for a selected dependent workload are
 1, 2 and 4; repeat `--dependent-size N` to choose sizes between 1 and 256.
 The ordinary default workload set is unchanged. Each generated program is
-recorded verbatim in the JSON alongside its kind and size, and each size has
-a separate baseline key. Imported library loading contributes a fixed cost;
+recorded verbatim in the JSON alongside its kind, size and entry mode. Each
+size/mode has a separate baseline key; old reports without an entry mode are
+not directly matched. Imported library loading contributes a fixed cost;
 exported functions retain code-generation work even if LLVM merges identical
 implementations. These workloads do not establish scaling for deeply nested
 proofs, huge numeric indices, arbitrary programs or proof search.
@@ -372,11 +376,14 @@ Use `--baseline previous.json` only on a controlled comparable host and with
 the same sizes/targets/options; `--time-passes` can break down compiler phases.
 The structural test checks deterministic generation, invalid sizes, silent
 checking, report shape, peak-memory collection and native O0/O2 execution at
-sizes 1 and 4. CI has no timing thresholds. Kernel resource limits may reject
+sizes 1, 4 and 16 in export mode, plus fanout mode at size 4. CI has no timing thresholds. Kernel resource limits may reject
 large workloads; failed cases are reported as failures, not performance wins.
 
-On main `f7ed2b95`, 16 independent sized-list consumers exceed the core term
-limit during both checking and building. This is a measured resource boundary,
-not a benchmark pass; use `--dependent-size 16` to reproduce it. Failed samples
-retain status, elapsed time and peak memory without a successful median. The
-harness never raises compiler limits or disables checking to obtain timings.
+On main `3c466265`, 16 sized-list exports with a single-call entry pass. The
+previous size-16 failure conflated export count with a main expression calling
+all 16 consumers: that fanout case still exceeds the core term limit. Reproduce
+it with `--workload dependent-list --dependent-entry fanout --dependent-size 16`.
+Export mode itself reaches the term limit at size 32 on that revision, so this
+correction does not claim unbounded scaling or a compiler optimization. Failed
+samples retain status, elapsed time and peak memory without a successful
+median. The harness never raises compiler limits or disables checking.
