@@ -1093,6 +1093,29 @@ it returns null, and fills the elements; `load` and `store` are offsets;
 when a buffer is used. Exports cannot take or return buffers and arrays
 cannot contain them; [a data type can hold one](#a-vector-with-contracts-as-types).
 
+Runtime linkage is checked before backend publication. Core function IDs must
+have unique symbols, and external declarations must match the generated C ABI:
+`malloc(U64) -> Ptr(I64)` and `free(Ptr(I64)) -> Unit`. Exported symbols may not
+be `malloc`, `free`, or start with `__jihoo_`, `jihoo.`, or `llvm.`. These names
+belong to the allocator, generated functions, or backend runtime. The reservation
+also applies to heap-free translation units, so adding heap use does not change
+whether an export is permitted. A private source helper named `malloc` is still
+allowed; it does not publish that symbol. Existing frontend restrictions can
+reject reserved source identifiers earlier.
+
+This closes an implementation gap: a source export `malloc(n: u64) -> u64`
+could previously share its symbol with the generated pointer-returning allocator
+declaration. The backend suppresses an external declaration when an exported
+symbol defines it, relying on the ordinary frontend's ABI checks; Core previously
+did not establish that precondition. The check applies to both Core frontends,
+imported exports and generated helpers. The source frontend rechecks symbols
+after renaming its executable entry point. It does not prove external allocator
+behavior, linker interposition safety across arbitrary foreign objects, or full
+Core-to-LLVM semantic preservation. `tests/core_symbols.py` checks compile-only
+rejections and positive objects on both targets at O0/O2; the MIR mutation suite
+also tests duplicate symbols, linkage and external ABI descriptors.
+
+
 [`examples/core_buffer.jh`](../../examples/core_buffer.jh) and its
 [core equivalent](../../examples/core_buffer.jhc) compute running sums
 in place over a buffer of runtime length and read a three-element table

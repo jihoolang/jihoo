@@ -23,6 +23,7 @@
 // No source text or independent execution model is generated here.
 import ast
 import core
+import core_mir
 import core_auto
 import core_lower
 import diag
@@ -3937,6 +3938,8 @@ pub fn compile(
             "missing fn main() -> i64; use --lib for exports"
         )) }
     }
+    // Entry renaming happens after core_lower validates the original program.
+    core_mir.symbols(p)?;
     Ok(p)
 }
 

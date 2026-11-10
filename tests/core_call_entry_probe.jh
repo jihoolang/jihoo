@@ -263,6 +263,26 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
     if mutation == "init-certificate" { return initialization_certificate(p) }
     if mutation != "none" {
         var changed = false
+        if mutation.starts_with("symbol-") {
+            for i in 0..p.fns.len() {
+                if p.fns[i].symbol == "malloc" {
+                    if mutation == "symbol-external-name" { p.fns[i].symbol = "other_allocator".to_string(); changed = true }
+                    if mutation == "symbol-external-abi" { p.fns[i].sig.c_abi = false; changed = true }
+                    if mutation == "symbol-external-result" { p.fns[i].sig.ret = types.U64; changed = true }
+                    if mutation == "symbol-external-parameter" { p.fns[i].sig.params[0] = types.I64; changed = true }
+                }
+                if p.fns[i].symbol == "free" && mutation == "symbol-external-duplicate" {
+                    p.fns[i].symbol = "malloc".to_string(); changed = true
+                }
+                if p.fns[i].name.as_str().starts_with("recursion.") && !changed {
+                    if mutation == "symbol-duplicate" { p.fns[i].symbol = p.fns[0].symbol.clone(); changed = true }
+                    if mutation == "symbol-missing-body" { p.fns[i].body = None; changed = true }
+                }
+            }
+            if mutation == "symbol-export-abi" { p.fns[0].sig.c_abi = false; changed = true }
+            if mutation == "symbol-export-linkage" { p.fns[0].linkage = mir.Linkage.Extern; changed = true }
+            if mutation == "symbol-reserved" { p.fns[0].symbol = "__jihoo_reserved".to_string(); changed = true }
+        }
         for i in 0..p.fns.len() {
             if !p.fns[i].name.as_str().starts_with("recursion.") { continue }
             let Some(b) = mem.replace(&p.fns[i].body, None) else { continue }
