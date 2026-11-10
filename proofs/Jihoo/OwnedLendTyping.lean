@@ -128,9 +128,13 @@ theorem two_owners_released (typed : Typed g root type) (valid : Valid s)
     oldCount, newCount, oldDead, newDead⟩
 
 theorem lease_frame (run : Runs g root type s x value es t) :
-    t.lease = s.lease ∧ t.nextLease = s.nextLease + 1 := by
+    t.lease = s.lease ∧ s.nextLease < t.nextLease := by
   cases run with
-  | intro _ _ continuation => exact OwnedCoreContinuation.lease_frame continuation
+  | intro _ _ continuation =>
+      obtain ⟨frame, counter⟩ := OwnedCoreContinuation.lease_frame continuation
+      refine ⟨frame, ?_⟩
+      change s.nextLease + 1 ≤ t.nextLease at counter
+      omega
 
 /-- Full final heap emptiness requires that the original owner accounts for all
 initial live objects. Without this premise ambient objects are preserved, not
