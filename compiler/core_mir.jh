@@ -268,7 +268,63 @@ fn body_types(
     Ok(())
 }
 
+// Calls retain function IDs until LLVM resolves them by symbol. Distinct IDs
+// must therefore have distinct symbols. Core has no general extern interface:
+// its only foreign declarations are the allocator pair emitted by core_lower.
+pub fn symbols(p: mir.Program) -> Result((), diag.Diag) {
+    var names = Map(String, bool).new()
+    for f in p.fns {
+        if names.get(f.symbol.as_str()).is_some() {
+            return Err(diag.Diag.new(f.span, "core MIR: duplicate function symbol"))
+        }
+        names.insert(f.symbol.clone(), true)
+        match f.linkage {
+            Export => {
+                if f.symbol == "malloc" || f.symbol == "free" ||
+                    f.symbol.as_str().starts_with("__jihoo_") ||
+                    f.symbol.as_str().starts_with("jihoo.") ||
+                    f.symbol.as_str().starts_with("llvm.") {
+                    return Err(diag.Diag.new(f.span, "core MIR: reserved runtime export symbol"))
+                }
+                if f.body.is_none() || !f.sig.c_abi {
+                    return Err(diag.Diag.new(f.span, "core MIR: invalid export linkage"))
+                }
+            }
+            Internal => {
+                if f.body.is_none() {
+                    return Err(diag.Diag.new(f.span, "core MIR: missing internal body"))
+                }
+            }
+            Extern => {
+                if f.body.is_some() || !f.sig.c_abi || f.sig.params.len() != 1 {
+                    return Err(diag.Diag.new(f.span, "core MIR: invalid runtime external ABI"))
+                }
+                let ptr = if f.symbol == "malloc" {
+                    if f.sig.params[0] != types.U64 {
+                        return Err(diag.Diag.new(f.span, "core MIR: invalid runtime external ABI"))
+                    }
+                    f.sig.ret
+                } else if f.symbol == "free" {
+                    if f.sig.ret != types.UNIT {
+                        return Err(diag.Diag.new(f.span, "core MIR: invalid runtime external ABI"))
+                    }
+                    f.sig.params[0]
+                } else { return Err(diag.Diag.new(f.span, "core MIR: unsupported runtime external")) }
+                if ptr as i64 >= p.types.kinds.len() {
+                    return Err(diag.Diag.new(f.span, "core MIR: invalid runtime external ABI"))
+                }
+                let correct = match p.types.kind(ptr) { Ptr(t) => t == types.I64, _ => false }
+                if !correct {
+                    return Err(diag.Diag.new(f.span, "core MIR: invalid runtime external ABI"))
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
+    symbols(p)?;
     if p.types.kinds.len() <= types.U64 as i64 {
         return Err(diag.Diag.new(diag.Span.nowhere(), "core MIR: invalid builtin types"))
     }

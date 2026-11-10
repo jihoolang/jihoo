@@ -26,6 +26,16 @@ def test(compiler, probe, out):
                     f'vacuous generated function inspection: {report!r}')
             reports.append((functions, calls, parameters))
     mutations = {
+        'symbol-external-name': 'unsupported runtime external',
+        'symbol-external-abi': 'invalid runtime external ABI',
+        'symbol-external-result': 'invalid runtime external ABI',
+        'symbol-external-parameter': 'invalid runtime external ABI',
+        'symbol-external-duplicate': 'duplicate function symbol',
+        'symbol-duplicate': 'duplicate function symbol',
+        'symbol-missing-body': 'missing internal body',
+        'symbol-export-abi': 'invalid export linkage',
+        'symbol-export-linkage': 'invalid runtime external ABI',
+        'symbol-reserved': 'reserved runtime export symbol',
         'init-return': 'read of uninitialized local',
         'init-read': 'read of uninitialized local',
         'init-self': 'read of uninitialized local',
