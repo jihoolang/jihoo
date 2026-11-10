@@ -586,3 +586,13 @@ constructor semantics; every admitted execution satisfies the primitive heap
 endpoint. This does not yet formalize the whole Core operational semantics or
 prove the native exporter faithfully supplies the view; opaque constructors,
 general ownership contexts and broader heap features remain outside its scope.
+
+[Linear allocation/admitted-call programs](lean-proofs.md#linear-allocation-and-admitted-call-programs)
+now thread distinct live, lease-free allocation capabilities through finite
+calls to the admitted Lend graph fragment. They derive call-entry guards and
+prove concrete allocation/release conservation, exactly-once freeing of tracked
+resources and an empty final heap for closed complete executions. These are
+formal caller-program rules, not yet a translation of general native caller
+graphs. Successful-allocation, finite-control and scalar-fragment restrictions
+remain explicit; full capabilities, failures, recursion and MIR correspondence
+remain open.

@@ -2813,3 +2813,65 @@ General contexts, fields/descendant aliases, nested source Lends, owned reader
 results, recursion, erasure adequacy and MIR/native simulation remain outside
 this theorem. The exporter is a test adapter, not a new optional user-facing
 verification gate or an added implementation-refinement release requirement.
+
+### Linear allocation and admitted-call programs
+
+`LinearHeapPrograms.lean` supplies the capability environment missing from the
+preceding Lend entry theorem. `Owns` requires distinct allocation identities,
+liveness and absence of active leases for every owned capability. Distinctness
+is separate from being lease-free: two equal scalar payloads may be separate
+owned allocations, while two capabilities naming one identity are rejected.
+Fresh allocation excludes every existing capability using the heap's allocation
+bound, not by assuming payload inequality. Selecting a resource removes that
+exact identity and preserves the order and uniqueness of the remaining slots.
+
+The finite `Program` syntax allocates objects, calls an admitted original
+scalar-Lend constructor graph on a selected slot, and terminates. `Checked`
+threads the resource count: allocation adds a capability, a consuming call
+removes one, and termination requires an empty context. `check_sound` connects
+the executable finite checker to this judgment. This is an internal formal
+program language, not a new user-facing gate or a proof of native caller-graph
+translation. Calls themselves use the previously admitted graphs and `CoreRuns`,
+not arbitrary client-provided safe heap traces.
+
+`allocate_owns`, `consume_owns` and `call_owns` prove capability preservation and
+derive each callee's live/no-preexisting-lease guards. `total` constructs complete
+executions in the successful-allocation model; `execution_safe` covers every
+execution. `lease_frame` preserves the ambient lease map across all calls.
+`release_conservation` counts actual allocation identities: releases equal the
+initial capabilities plus internal allocations. Combined with permanent death
+and distinct free events, `no_tracked_leaks` proves that every initially owned
+or internally allocated object is freed exactly once and dead at completion.
+It deliberately makes no ownership claim about untracked ambient heap objects.
+
+For closed programs, `empty_owns` and fresh allocation eliminate external
+ownership/liveness/lease premises entirely. `live_origin` proves that any final
+live identity was already live initially or was allocated during this trace.
+`closed_heap_empty` combines that coverage with release conservation to prove
+that **no live object remains** after any complete checked execution from the
+empty heap. `closed_safety` also retains primitive execution, heap validity,
+lease-map restoration and exactly-once freeing of every allocation. Thus the
+closed no-leak result is not inferred merely from an empty capability list.
+
+Examples include equal-payload distinct owners, consuming an older/middle slot
+while retaining newer owners, fresh allocation between consuming calls, and an
+unrelated ambient borrow that remains live while the tracked owner is freed.
+They reject duplicate capability identities, leaked or reused resources,
+out-of-range slots and invalid callee graphs. Native tests in
+`tests/core_linear_heap.py` exercise three allocations and consuming calls in
+an interleaved order. Each Python mode checks 128 O0/O2 scalar results, both-target
+object generation, exact diagnostics for leak/reuse mutations, and allocation
+instrumentation that tracks active addresses as well as counts. O0 performs
+three balanced allocations/frees; O2 may eliminate matched pairs. Invalid
+callers are rejected before object generation and are never executed.
+
+**Boundary:** successful allocation is modeled with fresh abstract identities
+and unbounded scalar payloads; allocation failure, machine bounds and native
+address-reuse simulation remain outside this totality theorem. The caller
+language has no loops, recursive heap fields, owned return values or nested
+source Lends. General native caller parsing/elaboration and capability/context
+correspondence remain unproved; the native regressions are evidence, not that
+translation theorem. The ambient theorem preserves leases, not a complete
+live/payload frame for all untracked objects. The original roadmap still permits
+trusting/testing the implementation checker and still requires broader specified
+Core soundness, erasure adequacy and Core-to-MIR correspondence.
