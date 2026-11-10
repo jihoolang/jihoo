@@ -208,6 +208,7 @@
                 ./proofs/EmitMixedInference.lean
                 ./proofs/EmitMixedTelescope.lean
                 ./proofs/EmitMirFixture.lean
+                ./proofs/EmitComposedGraph.lean
                 ./proofs/EmitCore.lean
                 ./proofs/EmitPrimitiveSafety.lean
                 ./proofs/EmitBinderClassification.lean
@@ -226,6 +227,7 @@
             cp ${./tests/core_preserves/lean-mixed-proof-translation.jhc} tests/core_preserves/lean-mixed-proof-translation.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
             cp ${./tests/core_mir_single.json} tests/core_mir_single.json
+            cp ${./tests/core_composed_graph.json} tests/core_composed_graph.json
             bash proofs/check.sh
             touch $out
           '';
@@ -343,6 +345,8 @@
               python3 -O tests/core_owned_call.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_framed_call.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_framed_call.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_composed_call.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_composed_call.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo

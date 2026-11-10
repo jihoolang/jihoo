@@ -3514,10 +3514,11 @@ all initially live objects to be in the supplied owner inventory; without that
 premise it does not claim that an external heap frame disappears. Lease framing
 and expiry preserve the existing lifetime boundary through recursive calls.
 
-The extension does not recursively add applications inside every old constructor:
-old `Types`/`Exec` derivations are leaves, and the new recursive rule is the
-application boundary itself. General captured-body application and substitution
-remain part of the release gap. The pure Raw typing language is unchanged.
+The initial application extension kept old `Types`/`Exec` derivations as
+leaves. The constructor-closure integration below now makes the supported
+continuations recursive in that same framed judgment. General dependent
+application and substitution remain part of the release gap. The pure Raw
+typing language is unchanged.
 
 Native `core_owned_call.py` covers 24 closed/captured variants and 240 executions
 per Python mode across O0/O2, with five exact-diagnostic rejections. O0 compares
@@ -3567,3 +3568,53 @@ allocation IDs, release order and the simultaneous live-object peak; equal
 payload cases distinguish ownership identity from observed contents. Signed
 native values and compiler normalization are implementation evidence rather than
 a proof of inferred partition correctness.
+
+## Composing calls under existing Core constructors
+
+`FramedOwnedApplications.Plan`, `Typing` and `Evaluation` now include the
+existing Free, allocation, owned/scalar Lend, scalar-let and owner-binding
+continuation rules directly. Their premises and primitive effects are the same
+as the older `OwnedCoreContinuation.Types`/`Exec` rules. The difference is that
+the continuation can contain a framed owned-producing App, including another
+such call beneath a later allocation or Lend. This is one recursively composed
+judgment, not a third parallel model of individual accepted examples.
+
+The same fixed-plan determinism, conservation, totality, all-execution safety,
+write-freedom and lifetime theorems cover every added continuation case. Resource
+partitions are interpreted at the call's current owner inventory after earlier
+allocations/transfers/frees. Thus an allocation before a call is not silently
+left outside the proof's accounting. A call in a Lend continuation runs only
+after its reader's lease has closed. This does not permit a call inside the
+existing restricted active reader grammar.
+
+Structural expansion exposes the old constructors instead of hiding the whole
+previous derivation inside `Plan.core`. Original typing has an expanded plan;
+expanded execution reflects into the original `Exec`. Conversely, under the
+usual initial validity, ownership and environment-length premises, original
+execution has the identical result, events and state in the expanded plan.
+`Plan.core` remains a compatibility leaf, not the only way to embed old programs.
+The expanded-plan condition restricts such leaves to actual terminal roots.
+
+This closes a composition gap for the supported graph grammar. General
+recursive data, dependent Buffer lengths/result substitution, `Back`, active
+reader nesting, inferred partition coherence and native lowering remain open.
+The source runtime and allocator assumptions are unchanged.
+
+The central closed example uses the exact constructor view exported from
+`tests/core_composed_call.jhc`, including its original root and type-root IDs.
+It starts with an empty heap and crosses scalar binding, two allocations,
+a framed call with retained owner/scalar captures, a scalar Lend, Free, a nested
+call, another scalar binding and an owner transfer. The selected scalar result
+is distinct from the buffers' equal payloads. A Lean emitter and the native
+exporter compare the complete snapshot against `core_composed_graph.json`, not
+only node counts or final results. Unsupported constructors remain opaque in
+this existing test exporter; they cannot authorize a reachable proof rule.
+The exporter/source association is tested and trusted, not formally refined.
+
+Native `core_composed_call.py` checks that complete graph association and 33
+closed programs, repeatedly executing each through O0 and O2 (198 lifecycles per
+Python mode). Its generated scalar/owned Lend variants cross the new recursive
+continuation boundaries and compare concrete allocation identities and release
+order, not just balanced counters. Four malformed programs must produce the
+expected checker diagnostic and must not emit an object file. These checks are
+implementation evidence alongside the specified execution proof.
