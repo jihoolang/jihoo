@@ -151,3 +151,4 @@ import Jihoo.ScopedLendGraphExamples
 import Jihoo.LinearHeapExamples
 import Jihoo.LinearCoreCallerExamples
 import Jihoo.LeaseErasureExamples
+import Jihoo.ScalarCoreCallerExamples

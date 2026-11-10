@@ -612,3 +612,10 @@ heap with no lease state. Callee scalar results, observable effect order and
 erased final heaps correspond; target determinism plus source totality covers
 all complete target runs, including exact release/no-leak guarantees. This is an
 abstract erasure stage, not native MIR CFG or final caller-result adequacy.
+
+The [result-bearing caller extension](lean-proofs.md#scalar-results-through-owned-caller-bindings)
+distinguishes scalar bindings from live owner slots and consumed-owner tombstones.
+Its finite return fragment can select a literal or an earlier/later callee result;
+owner insertion and consumption preserve the meaning of existing scalar names.
+This addresses caller results for that restricted constructor subset, not general
+Core arithmetic/control flow or native MIR/machine result adequacy.

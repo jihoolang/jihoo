@@ -794,6 +794,11 @@ mechanize its soundness, starting from that specification:
    run safety. Native MIR checks are regressions; full MIR CFG semantics, caller
    return-value adequacy, failure and machine-address behavior remain open.
 
+   A result-bearing caller extension separates scalar slots from owner/dead
+   bindings and supports earlier/later callee-result returns. Its restricted
+   source/lease-free-target correspondence includes the returned scalar; general
+   arithmetic/control flow and actual MIR/machine result adequacy remain open.
+
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
    kernel's implementation, lowering where not proved, MIR to LLVM, LLVM
