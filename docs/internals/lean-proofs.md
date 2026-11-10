@@ -3377,7 +3377,7 @@ function, but pure typed scalar lookup cannot reach that placeholder.
 This does not introduce arbitrary higher-order evaluation into a total
 interpreter without proving termination. Nor does it add U64 arithmetic,
 arithmetic-trap cleanup, negative-I64 representation, runtime erased bindings,
-owned function application or dependent Buffer/Ref/Borrow substitution. The
+general owned function application or dependent Buffer/Ref/Borrow substitution. The
 generic pure substitution theorem must not be mistaken for a complete runtime
 relevance theorem over all Raw syntax. The executable grammar separately
 rejects erased lambda binders and ownership-bearing scalar positions. Full
@@ -3389,3 +3389,50 @@ Normal and Python `-O` each cover 40 variants, 320 O0/O2 lifecycles and five
 precise rejection diagnostics. Native signed values and erased-U64 rejection
 are additional implementation evidence beyond the nonnegative-I64 formal
 subset; these tests are not a compiler refinement proof.
+
+## Linear owned-argument binding
+
+`OwnedArgumentBinding` models the immediate Core application of a non-erased
+Buffer1 lambda to an existing owned variable. This uses the same original graph,
+common `OwnedCoreContinuation.Typed` judgment and independent `Runs` relation.
+No new heap is allocated and no synthetic heap event is introduced by binding.
+
+Unlike Lend's original/returned-owner names, an ordinary linear lambda parameter
+must be used exactly once. The native `Core.infer` lambda rule enforces this, and
+its application quantity rule counts argument evaluation separately from captured
+uses of the original owner. Accordingly, the transfer context prepends the
+formal parameter's selected capability slot and replaces **all** older aliases
+of that slot with dead entries. Other capability slots and scalar bindings are
+unchanged; the concrete owner and scalar lists are unchanged as well. The formal
+parameter denotes the actual selected object, not a fresh copy or a second
+capability. Later Free still invalidates all aliases created by a legal Lend.
+
+This is a resource-sensitive interpretation of argument binding. A general
+non-injective substitution is not automatically safe for linear resources.
+The result does not claim full dependent beta-substitution, native checker
+refinement, or that erasing a bound name suffices for arbitrary higher-order
+functions. Only direct Buffer1 lambdas with variable arguments and the existing
+scalar-producing continuation grammar are included. General owned arguments,
+owned returns, dynamic lengths, dependent result types and partial applications
+remain outside this rule.
+
+The existing common totality, all-execution safety, exactly-once release,
+lease lifetime, deterministic result and scalar-bound results extend through
+owned argument binding. Argument resolution and environment transfer are source
+premises; primitive heap safety is still derived, not assumed as a trace premise.
+
+The context lemmas recover the concrete selected identity, show it is initially
+available only at the new formal slot, and preserve unrelated bindings and scalar
+readiness. `closing_shift` is an equation for arbitrary existing Raw syntax:
+renaming a scalar term past the new owner binder and closing it under the
+transferred environment equals its original closing. Thus the older pure
+substitution interpretation remains coherent with this resource transfer,
+without inserting an owned pointer into the pure calculus.
+
+Native `core_owned_binding.py` covers repeated transfers, captured other owners
+and earlier scalar values, scalar/owned Lend result transfers and both release
+orders. Normal and Python `-O` each exercise 24 variants, 192 O0/O2 lifecycles
+and eight exact-diagnostic rejections. O0 checks three disjoint allocations and
+releases; O2 may eliminate them but must keep the active-address accounting
+balanced. Signed inputs and full native normalization are implementation evidence
+beyond the specified nonnegative scalar subset, not a compiler-refinement proof.

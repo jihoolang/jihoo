@@ -43,6 +43,7 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
       | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
+      | ownedLet p _ _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
 
   | free shape resolved bound typed ih =>
       cases run with
@@ -58,6 +59,7 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
             (step_valid valid step) (free_owns owned selected) (freed_payloads payloads)
             scalarBounds restRun
       | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
+      | ownedLet p _ _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
 
   | allocate a bound typed ih =>
       cases run with
@@ -77,6 +79,7 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
             (step_valid valid (Step.alloc (value := _))) (allocate_owns valid owned)
             (allocated_payloads payloads bound) scalarBounds restRun
       | scalarLet p _ _ => exact False.elim (a.not_pure p)
+      | ownedLet p resolved _ _ => exact False.elim (a.not_owned_binding p resolved)
 
   | lend shape resolved bound reading typed ih =>
       cases run with
@@ -99,6 +102,10 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
             (OwnedLendTransfer.transfer_owns valid owned)
             (allocated_payloads (restored_payloads payloads) copiedBound) scalarBounds suffix
       | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+      | ownedLet p _ _ _ =>
           obtain ⟨f, x, h⟩ := shape.head
           obtain ⟨k, other⟩ := p.head
           have := h.symm.trans other; contradiction
@@ -127,6 +134,10 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           obtain ⟨f, x, h⟩ := shape.head
           obtain ⟨k, other⟩ := p.head
           have := h.symm.trans other; contradiction
+      | ownedLet p _ _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
 
   | scalarLet shape represented typed ih =>
       cases run with
@@ -146,6 +157,26 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           have computedBound := PureOwnedScalar.Eval.bounded graphValid scalarBounds evaluated
           exact ih length (by simp [scalarLength]) valid owned payloads
             (by simpa [ValuesBounded] using And.intro computedBound scalarBounds) suffix
+      | ownedLet p _ _ _ => exact False.elim (p.not_pure shape)
+
+  | ownedLet shape resolved bound typed ih =>
+      cases run with
+      | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+      | free h _ _ _ => obtain ⟨f, other⟩ := shape.head; have := other.symm.trans h; contradiction
+      | allocate a _ => exact False.elim (a.not_owned_binding shape resolved)
+      | lend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLet p _ _ => exact False.elim (shape.not_pure p)
+      | ownedLet shape' resolved' selected suffix =>
+          obtain ⟨rfl, rfl⟩ := shape.unique shape'
+          have eq := resolved.symm.trans resolved'; cases eq
+          exact ih length scalarLength valid owned payloads scalarBounds suffix
 
 /-- One theorem applies ownership and scalar safety to every operational run
 of the same judgment. No second reader or result certificate is required. -/
