@@ -2753,3 +2753,63 @@ larger model. Native checker implementation refinement remains optional under
 the original roadmap; whole specified-Core soundness, erasure adequacy and
 runtime/MIR correspondence are still required. No native graph/term serializer
 or native pointer/token refinement is claimed by these results.
+
+### Original constructor graphs for scalar Lend
+
+`ScopedLendGraph.lean` connects the preceding fragment to a bounded constructor
+view of original Core nodes, rather than accepting a caller-constructed reader
+AST. Nodes retain their original IDs. The rooted selector requires an ordinary
+lambda with `Buffer(1)` input, its exact declared `Buffer(1) -> I64` type, a Lend
+of owner slot 0, a `Ref(Buffer(1))` reader lambda, and scalar-result/returned-owner
+continuation lambdas. All mode bits and annotations are checked; convertible but
+nonmatching types are not normalized into this subset.
+
+Reader projection tracks newest-first lexical roles. Entering a scalar
+application binder or an erased true-branch proof binder shifts the original
+owner and reader reference without granting either role to the new binder.
+`Index` reads either the reader variable or `Borrow` of the original owner;
+its index must be literal zero with the exact `Decide(0,1)` bound. Scalar
+literals, sequencing, ignored-scalar lambda applications and constant-comparison
+`IfLt` branches are supported. Both branches project, including an unselected
+branch. A scalar variable cannot be reinterpreted as a borrow; unsupported
+forms fail closed. Continuations consume original slot 2 or returned slot 0,
+return scalar slot 1, and optionally store that same scalar first.
+
+`project_sound` constructs a rooted representation derivation and
+`Represents.scoped` establishes the previous scoping judgment. New restricted
+constructor semantics `CoreReads` and `CoreRuns` describe these precise original
+node forms. `Represents.execution` and `Represents.reflect` prove forward and
+reverse reader correspondence. `accepted_execution` constructs a safe complete
+execution; importantly, `accepted_reflect` and `accepted_all_runs` cover **every**
+constructor execution of an accepted graph, not merely one successful witness.
+They derive primitive heap steps, invariant preservation, exactly one free of
+the selected allocation and its dead endpoint. `accepted_token_expires` retains
+the no-stale-reader-token guarantee after any later primitive trace.
+
+`tests/core_scoped_graph_probe.jh` parses one native definition, retains its
+original value/requested-type roots, calls the current Core checker and exports
+a constructor view. Native `Decide` is the `decide-lt` constructor, not equality
+evidence. `CheckScopedLend.lean` parses this view and invokes the proof-producing
+recognizer. Integration tests use original/returned aliases, shifted owner
+borrows and reader references under scalar/ghost binders, both branch directions
+and stored scalar results. Mutations cover roots, annotations, erased flags,
+slots, cyclic/dangling children, false index evidence, invalid returned values,
+numeric bounds and malformed input. A shared DAG with 511 reader occurrences
+passes; 1,023 occurrences exceed the shared budget. The reader limit is depth
+32 and 512 visited reader nodes; graph size is 4,096, input is at most 8 MiB,
+and JSON preflight limits container depth and numeric token width.
+
+**Boundary:** `CoreReads`/`CoreRuns` are newly specified restricted constructor
+semantics, not the existing whole-Core runtime or a refinement of its checker.
+Native export and JSON/source association remain trusted and tested. Unsupported
+constructors (including negative integer literals) are represented as opaque;
+reachable opaque terms cannot project. This is therefore **not** a lossless
+whole-native-graph certificate, and opaque nodes' hidden children are not covered
+by the supported-edge validity check. All modeled constructor edges must point
+backwards, and supported numeric payloads are bounded even when unused. The
+heap payload is still abstract `Nat`, not machine-I64 representation. Initial
+live/no-preexisting-lease conditions do not establish unique owned capabilities.
+General contexts, fields/descendant aliases, nested source Lends, owned reader
+results, recursion, erasure adequacy and MIR/native simulation remain outside
+this theorem. The exporter is a test adapter, not a new optional user-facing
+verification gate or an added implementation-refinement release requirement.

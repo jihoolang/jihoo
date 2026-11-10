@@ -147,3 +147,4 @@ import Jihoo.InitializationCallsExamples
 import Jihoo.VerifiedCore
 import Jihoo.HeapLeaseExamples
 import Jihoo.ScopedLendExamples
+import Jihoo.ScopedLendGraphExamples

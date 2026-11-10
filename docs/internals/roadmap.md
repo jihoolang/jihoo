@@ -769,6 +769,11 @@ mechanize its soundness, starting from that specification:
    a complete execution frees that allocation once and expires its local token.
    Full-Core graph/context correspondence, owned reader results and nested-source
    ownership threading remain open; no full-language release claim is made.
+   A bounded original-constructor graph bridge now derives the scalar Lend
+   fragment from exact roots, annotations and lexical roles. Forward/reverse
+   correspondence makes its heap endpoint apply to every admitted constructor
+   execution. The constructor semantics remains restricted; native export fidelity,
+   general ownership contexts and the broader specified-Core rules remain open.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
