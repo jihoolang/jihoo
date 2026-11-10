@@ -1201,6 +1201,44 @@ result permits overflow traps and does not establish termination, whole-core
 consistency, memory safety or the 0.6 release gates as a whole.
 
 
+### Executing after annotation and proof-payload removal
+
+`CorePayloadErasure.lean` introduces an intermediate erasure pass for the strict
+semantics above. It preserves scalar literals, array entries, ordinary argument
+computations, binder modes, all binder slots and application structure. It removes
+type annotations/indices and the computed contents of reflexivity and `zeroLe`
+evidence, and replaces array/subtraction evidence with closed markers. Literal
+`decide` endpoints remain (and arbitrary malformed `decide` arguments are mapped
+structurally), so this is not complete proof storage or ghost-slot elimination.
+The output uses `Raw` as an **untyped carrier**, with dummy annotations; source
+checker acceptance or source-level typing of that output is not asserted.
+
+The pass is idempotent and commutes with renaming and capture-avoiding parallel
+substitution, including substitution through mixed runtime/proof binders. Each
+strict source step has a corresponding single strict erased step, including
+ordinary versus erased beta reduction. Runtime evaluation frames commute with
+erasure and preserve the ready prefixes of arrays. Values are preserved and
+reflected, scalar observations are unchanged, and propagated overflow traps
+remain traps. Thus no ordinary argument or unselected array entry is discarded
+by this pass. These algebra and simulation results require no typing premise.
+
+`execution_erasure` connects these results to a closed `Beta.HasType` derivation:
+every finite source execution has a step-for-step erased execution, whose final
+term has a value/step/trap outcome from the established progress theorem. This is
+**forward simulation**, not a proof reflecting every possible target execution,
+or a termination, native-code or whole-language adequacy theorem. Full erased
+argument/binder-slot deletion and a separate runtime representation remain open.
+
+A generated, independently typed simple-evidence program has exactly the same
+formal erased term as the previous program with overflowing computed proof
+indices. Both execute to seven at O0/O2, and after using the same export symbol
+the actual compiler produces identical MIR. Existing ignored-argument and
+unselected-array traps are also proved to survive this formal pass and remain
+native subprocess regression tests. Mixed-binder substitution has a concrete
+array-reader example. These checks link the intended elimination to real Core
+behavior but do not prove that native erasure or lowering implements this pass.
+
+
 ## Quantity control and partial executions
 
 `QuantityControl.lean` starts the runtime quantity obligation with a control-flow

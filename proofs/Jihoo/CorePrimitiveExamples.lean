@@ -1,4 +1,4 @@
-import Jihoo.CoreEvaluation
+import Jihoo.CorePayloadErasure
 import Jihoo.CoreBridgeExamples
 
 namespace Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples
@@ -306,6 +306,42 @@ theorem strict_closed_execution_safe (hs : Evaluation.Steps erasedOverflow u) :
     HasType (fun _ => none) u .i64 ∧ Evaluation.Outcome u :=
   Evaluation.execution_safety erased_overflow_typed hs
 
+def simpleEvidence : Raw := .app
+  (.lam true (.lt (.natural 0) (.uadd (.natural 0) (.natural 1))) (.integer 7))
+  (.zeroLe (.natural 0))
+
+theorem simple_evidence_typed : HasType (fun _ => none) simpleEvidence .i64 := by
+  have hD : IsType (fun _ => none) (.lt (.natural 0) (.uadd (.natural 0) (.natural 1))) :=
+    .lt (.natural (by decide)) (.uadd (.natural (by decide)) (.natural (by decide)))
+  simpa only [simpleEvidence, subst, proposition] using
+    HasType.app (HasType.lam hD rfl (.integer (n := 7) (by decide) (by decide)))
+      (HasType.zeroLe (HasType.natural (n := 0) (by decide)))
+
+theorem evidence_payloads_agree :
+    PayloadErasure.erase erasedOverflow = PayloadErasure.erase simpleEvidence := by
+  simp [PayloadErasure.erase, erasedOverflow, simpleEvidence]
+
+theorem erased_scalar_computes :
+    Evaluation.Steps (PayloadErasure.erase strictScalar) (.integer 7) := by
+  simpa only [PayloadErasure.erase] using PayloadErasure.steps_erasure strict_scalar_computes
+
+theorem erased_evidence_computes :
+    Evaluation.Step (PayloadErasure.erase erasedOverflow) (.integer 7) := by
+  simpa only [PayloadErasure.erase] using PayloadErasure.step_erasure erased_overflow_computes
+
+theorem erased_argument_still_traps : Evaluation.Trap (PayloadErasure.erase discardTrap) :=
+  PayloadErasure.trap_erasure discard_argument_traps
+
+theorem erased_array_still_traps : Evaluation.Trap (PayloadErasure.erase arrayTrap) :=
+  PayloadErasure.trap_erasure unselected_element_traps
+
+theorem mixed_binder_erased_substitution (a : Raw) :
+    PayloadErasure.erase ((Raw.lam true (.lt (.var 0) (.natural 3))
+      (.index (.elements values) (.var 1) (.var 0))).subst (single a)) =
+    (PayloadErasure.erase (.lam true (.lt (.var 0) (.natural 3))
+      (.index (.elements values) (.var 1) (.var 0)))).subst (single (PayloadErasure.erase a)) :=
+  PayloadErasure.erase_instantiate _ a
+
 /-- Each serialized fixture carries a checked closed typing derivation. The
 renderer/parser/compiler association is tested rather than formally assumed. -/
 structure Fixture where
@@ -330,6 +366,7 @@ def fixtures : List Fixture := [
   ⟨"primitive_erased_overflow", true, .i64, erasedOverflow, erased_overflow_typed⟩,
   ⟨"primitive_discard_trap", false, .i64, discardTrap, discard_trap_typed⟩,
   ⟨"primitive_array_trap", false, .i64, arrayTrap, array_trap_typed⟩,
+  ⟨"primitive_simple_evidence", true, .i64, simpleEvidence, simple_evidence_typed⟩,
   ⟨"primitive_max_proof", false, .lt (.natural 0) (.uadd (.natural maxWord) (.natural 1)),
     maxProof, max_proof_typed _⟩]
 

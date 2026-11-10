@@ -13,4 +13,5 @@
 (export primitive_erased_overflow I64 (app (lam0 x0 (Lt 0 (uadd (uadd 18446744073709551615 1) 1)) (int 7)) (zero-le (uadd 18446744073709551615 1))))
 (def primitive_discard_trap I64 (app (lam x0 U64 (int 7)) (uadd 18446744073709551615 1)))
 (def primitive_array_trap I64 (index (array (int 7) (app (lam x0 U64 (int 7)) (uadd 18446744073709551615 1))) 0 (decide-lt 0 2)))
+(export primitive_simple_evidence I64 (app (lam0 x0 (Lt 0 (uadd 0 1)) (int 7)) (zero-le 0)))
 (def primitive_max_proof (Lt 0 (uadd 18446744073709551615 1)) (zero-le 18446744073709551615))

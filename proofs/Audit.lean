@@ -1036,3 +1036,27 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.unselected_element_traps
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.abstract_read_skips_trap
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.strict_closed_execution_safe
+
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_idempotent
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_renaming
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_substitution
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_instantiate
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_natural_iff
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_integer_iff
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.value_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.value_reflection
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.value_iff
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.erase_fill
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.step_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.trap_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.steps_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.outcome_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.closed_erased_progress
+#print axioms Jihoo.CoreBridge.Raw.Beta.PayloadErasure.execution_erasure
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.simple_evidence_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.evidence_payloads_agree
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_scalar_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_evidence_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_argument_still_traps
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_array_still_traps
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.mixed_binder_erased_substitution
