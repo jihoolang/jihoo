@@ -999,3 +999,19 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.max_subtract_computes
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.underflow_not_saturated
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.oversized_sub_not_folded
+
+#print axioms Jihoo.CoreBridge.Raw.Beta.Step.computation
+#print axioms Jihoo.CoreBridge.Raw.Beta.Steps.computation
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_index_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.invalid_read_not_integer
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.integer_injective
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.read_integer_unique
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.read_subtracted_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.nested_read_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.nested_read_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.dynamic_read_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.dynamic_read_at
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.read_under_lambda_preserved
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.empty_read_not_integer
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.end_read_not_integer
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.literal_read_unique

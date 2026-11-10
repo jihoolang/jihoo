@@ -1,4 +1,4 @@
-import Jihoo.CoreSubtraction
+import Jihoo.CoreArrayReduction
 import Jihoo.CoreBridgeExamples
 
 namespace Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples
@@ -157,6 +157,80 @@ example : headNormal higherProof = false := by decide
 example : ¬ HasType (fun _ => none) (.zeroLe t) (.lt (.natural 1) (.natural 0)) :=
   no_closed_false_bound (by decide)
 
+theorem read_subtracted_computes :
+    ∃ v, Computation.Steps readSubtracted v ∧ HasType (fun _ => none) v .i64 :=
+  read_subtracted_typed.closed_index_computes nested_subtract_computes
+
+def nestedRead : Raw := .index (.elements [readFirst, readSubtracted])
+  (.natural 1) (.decide (.natural 1) (.natural 2))
+
+theorem nested_read_typed : HasType (fun _ => none) nestedRead .i64 := by
+  apply HasType.index (n := .natural 2)
+  · apply HasType.elements _ (by decide)
+    intro x hx
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hx
+    rcases hx with rfl | rfl
+    · exact read_first_typed
+    · exact read_subtracted_typed
+  · exact .natural (by decide)
+  · exact .decide (by decide) (by decide) (by decide)
+
+theorem nested_read_computes :
+    ∃ v, Computation.Steps nestedRead v ∧ HasType (fun _ => none) v .i64 := by
+  obtain ⟨v, hs, ht⟩ := read_subtracted_computes
+  exact ⟨v, .next (.read _ 1 _ _ rfl) hs, ht⟩
+
+def dynamicRead : Raw := .lam false .u64
+  (.lam true (.lt (.var 0) (.natural 3))
+    (.index (.elements values) (.var 1) (.var 0)))
+def dynamicReadType : Raw := .pi false .u64
+  (.pi true (.lt (.var 0) (.natural 3)) .i64)
+
+theorem dynamic_read_typed : HasType (fun _ => none) dynamicRead dynamicReadType := by
+  apply HasType.lam .u64 rfl
+  apply HasType.lam (.lt (.var (by simp [Context.extend, rename])) (.natural (by decide))) rfl
+  exact .index (array_typed _) (.var (by simp [Context.extend, rename]))
+    (.var (by simp [Context.extend, rename]))
+
+theorem dynamic_read_at {k : Nat} (selected : values[k]? = some v) :
+    Computation.Steps (.app (.app dynamicRead (.natural k)) p) v := by
+  have first : Computation.Step (.app dynamicRead (.natural k))
+      (.lam true (.lt (.natural k) (.natural 3))
+        (.index (.elements values) (.natural k) (.var 0))) := by
+    simpa [dynamicRead, subst, single, liftSub, rename, values] using
+      Computation.Step.beta false .u64
+        (.lam true (.lt (.var 0) (.natural 3))
+          (.index (.elements values) (.var 1) (.var 0))) (.natural k)
+  have second : Computation.Step
+      (.app (.lam true (.lt (.natural k) (.natural 3))
+        (.index (.elements values) (.natural k) (.var 0))) p)
+      (.index (.elements values) (.natural k) p) := by
+    simpa [subst, single, values] using
+      Computation.Step.beta true (.lt (.natural k) (.natural 3))
+        (.index (.elements values) (.natural k) (.var 0)) p
+  exact .next (.appFunction first) (.next second (.next (.read values k p v selected) .refl))
+
+theorem read_under_lambda_preserved :
+    HasType (fun _ => none) (.lam false .u64 (.integer 37)) (.pi false .u64 .i64) := by
+  have ht : HasType (fun _ => none)
+      (.lam false .u64 (.index (.elements values) (.natural 1)
+        (.decide (.natural 1) (.natural 3)))) (.pi false .u64 .i64) :=
+    .lam .u64 rfl (.index (array_typed _) (.natural (by decide))
+      (.decide (by decide) (by decide) (by decide)))
+  exact Computation.preservation ht (.lamBody (.read values 1 _ (.integer 37) rfl))
+
+theorem empty_read_not_integer :
+    ¬ Conv (.index (.elements []) (.natural k) p) (.integer z) :=
+  Conv.invalid_read_not_integer (by simp)
+
+theorem end_read_not_integer :
+    ¬ Conv (.index (.elements values) (.natural 3) p) (.integer z) :=
+  Conv.invalid_read_not_integer rfl
+
+theorem literal_read_unique
+    (h : Conv (.index (.elements values) (.natural 1) p) (.integer z)) : 37 = z :=
+  Conv.read_integer_unique rfl h
+
 /-- Each serialized fixture carries a checked closed typing derivation. The
 renderer/parser/compiler association is tested rather than formally assumed. -/
 structure Fixture where
@@ -175,6 +249,8 @@ def fixtures : List Fixture := [
   ⟨"primitive_nested_subtract", true, .u64, nestedSubtract, nested_subtract_typed⟩,
   ⟨"primitive_subtracted_index", true, .i64, readSubtracted, read_subtracted_typed⟩,
   ⟨"primitive_sub_annotation", true, .i64, subApplication, sub_application_typed⟩,
+  ⟨"primitive_nested_read", true, .i64, nestedRead, nested_read_typed⟩,
+  ⟨"primitive_dynamic_read", false, dynamicReadType, dynamicRead, dynamic_read_typed⟩,
   ⟨"primitive_max_proof", false, .lt (.natural 0) (.uadd (.natural maxWord) (.natural 1)),
     maxProof, max_proof_typed _⟩]
 

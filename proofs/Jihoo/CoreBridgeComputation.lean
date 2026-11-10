@@ -1,18 +1,20 @@
 import Jihoo.CoreBridgeBetaTyping
 
-/-! A separate contextual beta + bounded literal arithmetic relation.
+/-! A separate contextual beta, bounded literal arithmetic and local-array read relation.
 The historical beta-only Step and every existing certificate interface remain
 unchanged. Preservation uses Beta typing and its extended literal-arithmetic conversion. -/
 namespace Jihoo.CoreBridge.Raw.Computation
 open Beta
 
-/-- One beta or bounded literal-add/subtract contraction at any syntax position.
+/-- One beta, bounded literal-add/subtract or local-array read contraction at any syntax position.
 Symbolic arithmetic and runtime trap/effect semantics are absent. -/
 inductive Step : Raw → Raw → Prop where
   | add (a b : Nat) : a + b < wordBound →
       Step (.uadd (.natural a) (.natural b)) (.natural (a + b))
   | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
       Step (.usub (.natural a) (.natural b) p) (.natural (a - b))
+  | read (xs : List Raw) (k : Nat) (p v : Raw) : xs[k]? = some v →
+      Step (.index (.elements xs) (.natural k) p) v
   | beta (e A body a) : Step (.app (.lam e A body) a) (body.subst (single a))
   | array : Step a a' → Step (.array a) (.array a')
   | ltLeft : Step a a' → Step (.lt a b) (.lt a' b)
@@ -54,6 +56,7 @@ private theorem list_replace (pre post : List Raw) (h : Beta.Conv a b) :
 theorem Step.conversion (h : Step t u) : Beta.Conv t u := by
   induction h with
   | beta e A body a => exact .beta e A body a
+  | read xs k p v selected => exact .read xs k p v selected
   | add a b h => exact .add a b h
   | subLiteral a b p hb ha => exact .subLiteral a b p hb ha
   | array _ ih => exact .array ih
@@ -88,6 +91,12 @@ theorem formation_proposition_step (h : Beta.IsType Γ A) (hs : Step A A') :
   induction A using Raw.rec (motive_2 := fun _ => True) generalizing Γ A' <;>
     first | trivial | (cases h <;> cases hs <;> simp_all [proposition])
   case pi.pi.piCodomain => solve_by_elim
+
+private theorem elements_typed (h : Beta.HasType Γ t T) :
+    ∀ xs, t = .elements xs → ∀ v ∈ xs, Beta.HasType Γ v .i64 := by
+  induction h using Beta.HasType.rec (motive_1 := fun _ _ _ => True) <;>
+    first | trivial | (intro xs heq; cases heq)
+  case elements hs _ _ => exact hs
 
 private theorem preservation_mutual :
     (∀ Γ A, Beta.IsType Γ A → ∀ A', Step A A' → Beta.IsType Γ A') ∧
@@ -163,6 +172,7 @@ private theorem preservation_mutual :
           exact .convert (.refl (ih _ hs)) (.eq (.symm hs.conversion) (.symm hs.conversion))
     case index ha hi hp iha ihi ihp t' hs =>
       cases hs with
+      | read xs k p v selected => exact elements_typed ha xs rfl _ (List.mem_of_getElem? selected)
       | indexArray hs => exact .index (iha _ hs) hi hp
       | indexIndex hs => exact .index ha (ihi _ hs) (.convert hp (.lt hs.conversion (.refl _)))
       | indexProof hs => exact .index ha hi (ihp _ hs)
@@ -260,6 +270,7 @@ private theorem preservation_mutual :
     case index ha hi hp iha ihi ihp =>
       intro t' hs
       cases hs with
+      | read xs k p v selected => exact elements_typed ha xs rfl _ (List.mem_of_getElem? selected)
       | indexArray hs => exact .index (iha _ hs) hi hp
       | indexIndex hs => exact .index ha (ihi _ hs) (.convert hp (.lt hs.conversion (.refl _)))
       | indexProof hs => exact .index ha hi (ihp _ hs)
@@ -288,12 +299,12 @@ private theorem preservation_mutual :
 theorem formation_preservation (h : Beta.IsType Γ A) (hs : Step A A') : Beta.IsType Γ A' :=
   preservation_mutual.1 _ _ h _ hs
 
-/-- Fixed-type contextual beta/add/subtract preservation, now enabled by proved beta
+/-- Fixed-type contextual beta/add/subtract/read preservation, now enabled by proved beta
 conversion and context transport. The result type is the original raw syntax. -/
 theorem preservation (h : Beta.HasType Γ t A) (hs : Step t t') : Beta.HasType Γ t' A :=
   preservation_mutual.2 _ _ _ h _ hs
 
-/-- Finite contextual beta/add/subtract sequences. -/
+/-- Finite contextual beta/add/subtract/read sequences. -/
 inductive Steps : Raw → Raw → Prop where
   | refl : Steps t t
   | next : Step t u → Steps u v → Steps t v

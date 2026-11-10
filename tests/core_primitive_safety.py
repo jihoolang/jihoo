@@ -37,6 +37,9 @@ PAIRS = {
     'wrong-subtracted-equality': (
         '(def bad (Eq (usub 7 5 (decide-lt 5 8)) 3) (refl 2))',
         '(def bad (Eq (usub 7 5 (decide-lt 5 8)) 2) (refl 2))'),
+    'nested-read-boundary': (
+        '(def bad I64 (index (array (index (array (int 7)) 0 (decide-lt 0 1))) 1 (decide-lt 0 1)))',
+        '(def bad I64 (index (array (index (array (int 7)) 0 (decide-lt 0 1))) 0 (decide-lt 0 1)))'),
     'false-zero-le-type': (
         '(def bad (Lt 1 2) (zero-le 1))',
         '(def bad (Lt 0 2) (zero-le 1))'),
@@ -48,7 +51,15 @@ def test(compiler, out):
         return command([*compiler, 'core', *args])
     success(core('check', FIXTURE))
     success(core('preserves', FIXTURE))
-    mir = success(core('emit-mir', FIXTURE))
+    # Foreign exports cannot require erased evidence. This implementation-only
+    # wrapper checks the bound and supplies evidence to the Lean-derived helper.
+    runtime = out / 'guarded-reads.jhc'
+    runtime.write_text(FIXTURE.read_text() +
+        '(export primitive_guarded_read (pi i U64 I64) (lam i U64 '
+        '(if-lt i 3 p (app (app primitive_dynamic_read i) p) (int -1))))\n')
+    success(core('check', runtime))
+    success(core('preserves', runtime))
+    mir = success(core('emit-mir', runtime))
     require(b'primitive_max_proof' not in mir and b'zero-le' not in mir and b'decide-lt' not in mir,
             'evidence escaped erasure')
     require(b'assert' not in mir, 'closed safe primitives unexpectedly require runtime checks')
@@ -61,11 +72,12 @@ def test(compiler, out):
                 'primitive_max_subtract': (ctypes.c_uint64, (1 << 64)-1),
                 'primitive_nested_subtract': (ctypes.c_uint64, 2),
                 'primitive_subtracted_index': (ctypes.c_int64, (1 << 63)-1),
-                'primitive_sub_annotation': (ctypes.c_int64, 9)}
+                'primitive_sub_annotation': (ctypes.c_int64, 9),
+                'primitive_nested_read': (ctypes.c_int64, (1 << 63)-1)}
     for target, machine in [('x86_64', 62), ('aarch64', 183)]:
         for level in ['-O0', '-O2']:
             obj = out / f'{target}{level}.o'
-            success(core('emit-obj', FIXTURE, '--target', target, level, '-o', obj))
+            success(core('emit-obj', runtime, '--target', target, level, '-o', obj))
             binary = obj.read_bytes()
             require(binary[:4] == b'\x7fELF' and struct.unpack_from('<H', binary, 18)[0] == machine,
                     'wrong object target')
@@ -77,6 +89,13 @@ def test(compiler, out):
                     function = getattr(native, name)
                     function.argtypes, function.restype = [], result_type
                     require(function() == value, f'{name} {level}: wrong native result')
+                dynamic = native.primitive_guarded_read
+                dynamic.argtypes, dynamic.restype = [ctypes.c_uint64], ctypes.c_int64
+                # The wrapper performs the read only for proof-valid indices.
+                for index, value in enumerate([-(1 << 63), 37, (1 << 63)-1]):
+                    require(dynamic(index) == value, f'dynamic read {index} {level}: wrong result')
+                for index in [3, (1 << 64)-1]:
+                    require(dynamic(index) == -1, f'guarded read {index} {level}: wrong fallback')
     for name, (bad, fixed) in PAIRS.items():
         bad_path, good_path = out / f'{name}.jhc', out / f'{name}-control.jhc'
         bad_path.write_text(ANCHOR + bad)
@@ -106,8 +125,8 @@ def test(compiler, out):
                                 capture_output=True, timeout=10)
         require(result.returncode < 0 and result.stdout == b'entered\n',
                 f'{level}: expected arithmetic trap after successful load: {result}')
-    print('primitive safety: Lean fixture checked/preserved; 8 native results at O0/O2, '
-          'both object targets, 6 paired rejections, erasure and overflow boundaries')
+    print('primitive safety: Lean fixture checked/preserved; 9 closed, 3 guarded reads and 2 fallback results at O0/O2, '
+          'both object targets, 7 paired rejections, erasure and overflow boundaries')
 
 
 def main():
