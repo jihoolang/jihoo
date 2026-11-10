@@ -175,3 +175,7 @@ import Jihoo.FramedOwnedApplications
 import Jihoo.FramedApplicationExamples
 import Jihoo.FramedCoreEmbedding
 import Jihoo.ComposedCoreExamples
+import Jihoo.CoreLexicalContext
+import Jihoo.CoreLexicalExecution
+import Jihoo.CoreLexicalSimulation
+import Jihoo.CoreLexicalExamples

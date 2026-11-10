@@ -3618,3 +3618,59 @@ continuation boundaries and compare concrete allocation identities and release
 order, not just balanced counters. Four malformed programs must produce the
 expected checker diagnostic and must not emit an object file. These checks are
 implementation evidence alongside the specified execution proof.
+
+
+## Plan-free lexical execution of the composed Core fragment
+
+The static ownership judgment uses a resource partition plan, but a compiled
+Core program does not carry that plan. `CoreLexicalExecution` gives the supported
+graph fragment a separate operational interpretation with concrete lexical
+owner/scalar values. It has no ownership-slot inventory or partition-plan
+parameter. Direct lambda application evaluates its argument and then evaluates
+the body with that value prepended to the original captured environment. Free
+does not delete lexical bindings. Consumed aliases remain physically present;
+typing, rather than environment compaction, makes them inaccessible.
+
+`CoreLexicalContext` relates the static context and its separate owner/scalar
+inventories to this runtime environment. Live entries must resolve to the same
+concrete value. A static dead entry imposes no runtime-value requirement. This
+one-way agreement is essential: different proof partitions may mask different
+unused bindings without changing the actual captured environment.
+
+The simulation connects the existing continuation judgment and the entire
+composed framed judgment to this plan-free execution. Runtime determinism is
+proved independently of the partition plan. Consequently any two supported
+typed plans over the same initial interpretation agree on the returned value,
+complete event trace (including object and lease identities), and final heap.
+Existing typing totality supplies an execution; a matching successful native
+run is not a premise. The ownership safety/accounting results transfer to every
+plan-free execution of that typed fragment.
+
+This removes a proof-plan dependence of the operational statement, not the
+remaining language restrictions. The scope is still direct first-order
+application, one-cell buffers, the existing restricted readers and natural
+scalar abstraction. General dependent Buffer lengths/result substitution,
+higher-order closures, recursive data, active-reader nesting and production
+lowering refinement remain open. The lexical interpreter is specified Core
+semantics, not a proof that the native compiler implements that interpreter.
+The existing full checked-graph fixture and native lifecycle regressions remain
+tested evidence at that implementation boundary.
+
+The reader subrelation is an unchecked operational description: its individual
+read rule does not assume lease validity. For a typed whole program, the
+transferred `Steps` theorem supplies the primitive lease and liveness guards.
+It does not assert that arbitrary untyped reader executions are safe.
+
+`CoreLexicalExamples` applies the bridge to the existing full native-exported
+composition graph, including exact object identities and lease expiry, and to
+the owned-reader composition. A separate two-plan witness compares an opaque
+old `.core` derivation with an explicitly expanded `.free .core` derivation.
+The generic environment-coherence result also shows that changing inaccessible
+physical captures does not alter a typed program's execution.
+
+`core_lexical_execution.py` retains the full checked-graph comparison and adds
+36 lexical shadowing/capture variants, 360 O0/O2 lifecycles and six exact
+rejection checks per Python mode. O0 compares allocation identities and release
+order. Native leases are erased rather than instrumented, and no partition plan
+is passed to the compiler. These remain implementation regressions, not a proof
+of the native checker, exporter or lowerer.
