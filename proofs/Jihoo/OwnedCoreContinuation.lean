@@ -1,8 +1,9 @@
 import Jihoo.OwnedScalarContext
+import Jihoo.PureOwnedScalar
 
 /-! Declarative ownership and scalar-binding rules on original Core graph
-nodes. Literal/bound-scalar return, free, allocation and both scalar/owned-result
-Lends share one judgment and execution relation. Owner and scalar environments
+nodes. Literal/bound-scalar return, free, allocation, actual pure scalar lets
+and both scalar/owned-result Lends share one judgment and execution relation. Owner and scalar environments
 are distinct; no accepted-callee or safe-trace premise is assumed. Numeric reader
 bounds need a separate heap/literal invariant: this module alone does not claim
 full I64/dependent typing or whole-Core semantics. -/
@@ -30,6 +31,16 @@ theorem Allocation.unique (a : Allocation g root v b) (a' : Allocation g root v'
   have eq := hp.symm.trans hp'; cases eq
   exact ⟨rfl, rfl⟩
 
+theorem Allocation.not_pure (a : Allocation g root v body)
+    (p : PureOwnedScalar.Shape g root arg rest) : False := by
+  cases a with
+  | intro f x domain len payload app lam buf _ _ _ =>
+      cases p with
+      | intro f' domain' app' lam' i64 =>
+          have eq := app.symm.trans app'; cases eq
+          have eq := lam.symm.trans lam'; cases eq
+          simp [Graph.bufferOne, i64] at buf
+
 abbrev LiteralBound := OwnedScalarContext.LiteralBound
 
 inductive Typed (g : Graph.Graph) : Context → Nat → Nat → Nat → Prop where
@@ -46,6 +57,10 @@ inductive Typed (g : Graph.Graph) : Context → Nat → Nat → Nat → Prop whe
   | scalarLend : ScalarShape g root owner init body → ownerSlot g ctx owner = some slot → slot < n →
       Graph.Represents g (readerRoles ctx slot) init reader →
       Typed g (scalarReturned ctx slot) n (m + 1) body → Typed g ctx n m root
+
+  | scalarLet : PureOwnedScalar.Shape g root arg body →
+      PureOwnedScalar.Represents g ctx m arg raw →
+      Typed g (PureOwnedScalar.bindScalar ctx) n (m + 1) body → Typed g ctx n m root
 
 def freedState (s : State) (x : Nat) : State := { s with live := put s.live x false }
 
@@ -71,6 +86,11 @@ inductive Runs (g : Graph.Graph) : Context → Nat → List Nat → List Nat →
       Runs g (scalarReturned ctx slot) body owners (copied :: values)
         (restored s) value suffix t →
       Runs g ctx root owners values s value (scalarEvents s x reads ++ suffix) t
+
+  | scalarLet : PureOwnedScalar.Shape g root arg body →
+      PureOwnedScalar.Eval g ctx arg values computed →
+      Runs g (PureOwnedScalar.bindScalar ctx) body owners (computed :: values) s value events t →
+      Runs g ctx root owners values s value events t
 
 theorem free_owns (owned : Owns s owners) (selected : Select owners slot x rest) :
     Owns (freedState s x) rest := by
@@ -135,6 +155,11 @@ theorem total (typed : Typed g ctx n m root) (length : owners.length = n) (scala
         (restored_owns owned)
       exact ⟨v, _, t, .scalarLend shape resolved selected (reading.execution active run) suffix⟩
 
+  | scalarLet shape represented typed ih =>
+      obtain ⟨computed, evaluated⟩ := PureOwnedScalar.total represented scalarLength
+      obtain ⟨v, es, t, run⟩ := ih (values := computed :: values) length (by simp [scalarLength]) valid owned
+      exact ⟨v, es, t, .scalarLet shape evaluated run⟩
+
 theorem Allocation.application (a : Allocation g root v b) :
     ∃ f x, Graph.nodeAt g root = .app f x := by
   cases a with | intro f x _ _ _ h _ _ _ _ _ => exact ⟨f, x, h⟩
@@ -166,6 +191,8 @@ theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = 
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; exact False.elim (finish_not_app shape other)
       | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
+
   | free shape resolved bound typed ih =>
       cases run with
       | finish other _ => exact False.elim (finish_not_free other shape)
@@ -179,6 +206,8 @@ theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = 
           obtain ⟨steps, vt, ot⟩ := ih (by have := selected.length; omega) scalarLength
             (step_valid valid step) (free_owns owned selected) restRun
           exact ⟨.cons step steps, vt, ot⟩
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
+
   | allocate a bound typed ih =>
       cases run with
       | finish other _ => obtain ⟨f, x, shape⟩ := a.application; exact False.elim (finish_not_app other shape)
@@ -196,6 +225,7 @@ theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = 
           obtain ⟨steps, vt, ot⟩ := ih (by simp [length]) scalarLength
             (step_valid valid (Step.alloc (value := _))) (allocate_owns valid owned) restRun
           exact ⟨.cons .alloc steps, vt, ot⟩
+      | scalarLet p _ _ => exact False.elim (a.not_pure p)
 
   | lend shape resolved bound reading typed ih =>
       cases run with
@@ -214,6 +244,10 @@ theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = 
           obtain ⟨steps, vt, ot⟩ := ih (by simp [length]) scalarLength (steps_valid valid pre)
             (OwnedLendTransfer.transfer_owns valid owned) suffix
           exact ⟨steps_append pre steps, vt, ot⟩
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
 
   | scalarLend shape resolved bound reading typed ih =>
       cases run with
@@ -232,6 +266,27 @@ theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = 
           obtain ⟨steps, vt, ot⟩ := ih length (by simp [scalarLength]) (steps_valid valid pre)
             (restored_owns owned) suffix
           exact ⟨steps_append pre steps, vt, ot⟩
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
+  | scalarLet shape represented typed ih =>
+      cases run with
+      | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+      | free h _ _ _ => obtain ⟨f, other⟩ := shape.head; have := other.symm.trans h; contradiction
+      | allocate a _ => exact False.elim (a.not_pure shape)
+      | lend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLet shape' evaluated suffix =>
+          obtain ⟨rfl, rfl⟩ := shape.unique shape'
+          exact ih length (by simp [scalarLength]) valid owned suffix
 
 /-- Accounting follows the original graph execution, including allocations
 inside the continuation, rather than a separately supplied usage trace. -/
@@ -249,6 +304,8 @@ theorem release_conservation (typed : Typed g ctx n m root) (length : owners.len
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; exact False.elim (finish_not_app shape other)
       | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
+
   | free shape resolved bound typed ih =>
       cases run with
       | finish other _ => exact False.elim (finish_not_free other shape)
@@ -263,6 +320,8 @@ theorem release_conservation (typed : Typed g ctx n m root) (length : owners.len
           simp only [released, allocations, List.filterMap_cons, List.count_cons] at *
           simp only [beq_iff_eq] at *
           omega
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
+
   | allocate a bound typed ih =>
       cases run with
       | finish other _ => obtain ⟨f, x, shape⟩ := a.application; exact False.elim (finish_not_app other shape)
@@ -280,6 +339,7 @@ theorem release_conservation (typed : Typed g ctx n m root) (length : owners.len
           have hr := ih (by simp [length]) scalarLength restRun
           simp only [released, allocations, List.filterMap_cons, List.count_cons] at *
           omega
+      | scalarLet p _ _ => exact False.elim (a.not_pure p)
 
   | lend shape resolved bound reading typed ih =>
       cases run with
@@ -301,6 +361,11 @@ theorem release_conservation (typed : Typed g ctx n m root) (length : owners.len
           simp [OwnedLendTransfer.events, released, allocations, List.filterMap_append,
             ha, hf, List.count_cons] at *
           omega
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
   | scalarLend shape resolved bound reading typed ih =>
       cases run with
       | finish other _ => obtain ⟨f, x, h⟩ := shape.head; exact False.elim (finish_not_lend other h)
@@ -321,6 +386,27 @@ theorem release_conservation (typed : Typed g ctx n m root) (length : owners.len
           simp [scalarEvents, released, allocations, List.filterMap_append,
             ha, hf] at *
           omega
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
+  | scalarLet shape represented typed ih =>
+      cases run with
+      | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+      | free h _ _ _ => obtain ⟨f, other⟩ := shape.head; have := other.symm.trans h; contradiction
+      | allocate a _ => exact False.elim (a.not_pure shape)
+      | lend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLet shape' evaluated suffix =>
+          obtain ⟨rfl, rfl⟩ := shape.unique shape'
+          exact ih length (by simp [scalarLength]) suffix
 
 theorem no_tracked_leaks (typed : Typed g ctx n m root) (length : owners.length = n) (scalarLength : values.length = m)
     (valid : Valid s) (owned : Owns s owners) (run : Runs g ctx root owners values s v es t)
@@ -350,6 +436,7 @@ private theorem CoreReads.no_lease_starts (run : Graph.CoreReads g s token owner
 theorem lease_counter (run : Runs g ctx root owners values s v es t) :
     t.nextLease = s.nextLease + leaseStarts es := by
   induction run with
+  | scalarLet _ _ _ ih => exact ih
   | finish => simp [leaseStarts]
   | free _ _ _ _ ih => simpa [leaseStarts, freedState] using ih
   | allocate _ _ ih => simpa [leaseStarts, allocatedState] using ih
@@ -371,6 +458,7 @@ may advance, but never move backwards. -/
 theorem lease_frame (run : Runs g ctx root owners values s v es t) :
     t.lease = s.lease ∧ s.nextLease ≤ t.nextLease := by
   induction run with
+  | scalarLet _ _ _ ih => exact ih
   | finish => exact ⟨rfl, Nat.le_refl _⟩
   | free _ _ _ _ ih => exact ih
   | allocate _ _ ih => exact ih
@@ -427,6 +515,8 @@ theorem Typed.free_inversion (typed : Typed g ctx n m root)
   | allocate a _ _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
   | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
   | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
+  | scalarLet p _ _ => obtain ⟨f, other⟩ := p.head; have := shape.symm.trans other; contradiction
+
 
 theorem Typed.finish_inversion (typed : Typed g ctx n m root)
     (shape : Graph.nodeAt g root = .integer value) : n = 0 ∧ value < 2^63 := by
@@ -439,6 +529,8 @@ theorem Typed.finish_inversion (typed : Typed g ctx n m root)
   | allocate a _ _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
   | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
   | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
+  | scalarLet p _ _ => obtain ⟨f, other⟩ := p.head; have := shape.symm.trans other; contradiction
+
 
 theorem dead_owner_rejected (shape : Graph.nodeAt g root = .free owner body)
     (dead : ownerSlot g ctx owner = none) : ¬ Typed g ctx n m root := by
@@ -463,6 +555,11 @@ theorem Typed.lend_inversion (typed : Typed g ctx n m root)
       obtain ⟨rfl, rfl, rfl⟩ := shape.unique shape'
       exact ⟨_, _, resolved, bound, reading, rest⟩
   | scalarLend shape' _ _ _ _ => exact False.elim (shape'.not_owned shape)
+  | scalarLet p _ _ =>
+      obtain ⟨f, x, h⟩ := shape.head
+      obtain ⟨r, other⟩ := p.head
+      have := h.symm.trans other; contradiction
+
 
 theorem Typed.scalarLend_inversion (typed : Typed g ctx n m root)
     (shape : ScalarShape g root owner init body) :
@@ -480,6 +577,11 @@ theorem Typed.scalarLend_inversion (typed : Typed g ctx n m root)
   | scalarLend shape' resolved bound reading rest =>
       obtain ⟨rfl, rfl, rfl⟩ := shape.unique shape'
       exact ⟨_, _, resolved, bound, reading, rest⟩
+  | scalarLet p _ _ =>
+      obtain ⟨f, x, h⟩ := shape.head
+      obtain ⟨r, other⟩ := p.head
+      have := h.symm.trans other; contradiction
+
 
 private theorem core_reads_deterministic (a : Graph.CoreReads g s token owner ctx root v es)
     (b : Graph.CoreReads g s token owner ctx root w fs) : v = w ∧ es = fs := by
@@ -514,6 +616,8 @@ theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; exact False.elim (finish_not_app shape other)
       | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
+
   | free shape resolved selected restRun ih =>
       cases b with
       | finish other _ => exact False.elim (finish_not_free other shape)
@@ -526,6 +630,8 @@ theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
           obtain ⟨rfl, rfl⟩ := LeaseErasure.select_deterministic selected selected'
           obtain ⟨rfl, rfl, rfl⟩ := ih restRun'
           exact ⟨rfl, rfl, rfl⟩
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
+
   | allocate a restRun ih =>
       cases b with
       | finish other _ => obtain ⟨f, x, shape⟩ := a.application; exact False.elim (finish_not_app other shape)
@@ -542,6 +648,8 @@ theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
           obtain ⟨rfl, rfl⟩ := a.unique a'
           obtain ⟨rfl, rfl, rfl⟩ := ih restRun'
           exact ⟨rfl, rfl, rfl⟩
+      | scalarLet p _ _ => exact False.elim (a.not_pure p)
+
   | lend shape resolved selected read suffix ih =>
       cases b with
       | finish other _ => obtain ⟨f, x, h⟩ := shape.head; exact False.elim (finish_not_lend other h)
@@ -558,6 +666,11 @@ theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
           obtain ⟨rfl, rfl⟩ := core_reads_deterministic read read'
           obtain ⟨rfl, rfl, rfl⟩ := ih suffix'
           exact ⟨rfl, rfl, rfl⟩
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
   | scalarLend shape resolved selected read suffix ih =>
       cases b with
       | finish other _ => obtain ⟨f, x, h⟩ := shape.head; exact False.elim (finish_not_lend other h)
@@ -574,5 +687,70 @@ theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
           obtain ⟨rfl, rfl⟩ := core_reads_deterministic read read'
           obtain ⟨rfl, rfl, rfl⟩ := ih suffix'
           exact ⟨rfl, rfl, rfl⟩
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
+  | scalarLet shape evaluated suffix ih =>
+      cases b with
+      | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+      | free h _ _ _ => obtain ⟨f, other⟩ := shape.head; have := other.symm.trans h; contradiction
+      | allocate a _ => exact False.elim (a.not_pure shape)
+      | lend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLet shape' evaluated' suffix' =>
+          obtain ⟨rfl, rfl⟩ := shape.unique shape'
+          have eq := PureOwnedScalar.Eval.deterministic evaluated evaluated'
+          subst eq
+          exact ih suffix'
+
+theorem Typed.scalarLet_inversion (typed : Typed g ctx n m root)
+    (shape : PureOwnedScalar.Shape g root arg body) :
+    ∃ raw, PureOwnedScalar.Represents g ctx m arg raw ∧
+      Typed g (PureOwnedScalar.bindScalar ctx) n (m + 1) body := by
+  cases typed with
+  | finish h _ _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+  | free other _ _ _ => obtain ⟨f, h⟩ := shape.head; have := h.symm.trans other; contradiction
+  | allocate a _ _ => exact False.elim (a.not_pure shape)
+  | lend a _ _ _ _ =>
+      obtain ⟨f, h⟩ := shape.head
+      obtain ⟨r, k, other⟩ := a.head
+      have := h.symm.trans other; contradiction
+  | scalarLend a _ _ _ _ =>
+      obtain ⟨f, h⟩ := shape.head
+      obtain ⟨r, k, other⟩ := a.head
+      have := h.symm.trans other; contradiction
+  | scalarLet shape' represented rest =>
+      obtain ⟨rfl, rfl⟩ := shape.unique shape'
+      exact ⟨_, represented, rest⟩
+
+/-- A scalar binding's operational result is the value actually passed to
+its continuation, not a producer-supplied scalar observation. -/
+theorem Runs.scalarLet_inversion (run : Runs g ctx root owners values s v es t)
+    (shape : PureOwnedScalar.Shape g root arg body) :
+    ∃ computed, PureOwnedScalar.Eval g ctx arg values computed ∧
+      Runs g (PureOwnedScalar.bindScalar ctx) body owners (computed :: values) s v es t := by
+  cases run with
+  | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+  | free other _ _ _ => obtain ⟨f, h⟩ := shape.head; have := h.symm.trans other; contradiction
+  | allocate a _ => exact False.elim (a.not_pure shape)
+  | lend a _ _ _ _ =>
+      obtain ⟨f, h⟩ := shape.head
+      obtain ⟨r, k, other⟩ := a.head
+      have := h.symm.trans other; contradiction
+  | scalarLend a _ _ _ _ =>
+      obtain ⟨f, h⟩ := shape.head
+      obtain ⟨r, k, other⟩ := a.head
+      have := h.symm.trans other; contradiction
+  | scalarLet shape' evaluated rest =>
+      obtain ⟨rfl, rfl⟩ := shape.unique shape'
+      exact ⟨_, evaluated, rest⟩
 
 end Jihoo.OwnedCoreContinuation
