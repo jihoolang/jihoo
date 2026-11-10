@@ -2692,3 +2692,64 @@ termination are not claimed. The implementation checker may remain trusted and
 tested under the original roadmap; proving a refinement of that checker is not
 an additional release requirement. Erasure, complete runtime/MIR semantics and
 their correspondence remain separate required work.
+
+### Structured scalar Lend execution
+
+`ScopedLend.lean` discharges several heap/lease premises for a deliberately
+specified read-only/scalar Lend fragment. It does **not** translate arbitrary
+`compiler/core.jh` graphs. Reader syntax consists of scalar literals, reads from
+bound borrow slots, sequencing and a selected Boolean branch. Static scoping
+checks both branches. Continuations free the returned owner, free its original
+name, or store the scalar result into the returned owner and then free it.
+This follows the specified `g(f(Borrow(x)), x)` sequence without modeling runtime
+`Deref`: the read is an abstract payload observation, represented in native
+regressions by `Index` on `Ref(Buffer(1))`. The formal payload remains `Nat`, not
+a proof of signed-I64 representation or machine bounds.
+
+`reader_total` constructs an evaluation for every scoped reader and active
+borrow environment. `reader_steps`, `reader_authority` and `reader_releases`
+derive its primitive execution, absence of close operations and empty free
+observation from the syntax. A reader cannot construct a reference result:
+the only result type here is scalar. This is a restriction, not a proof that
+all of Core's broader `outlived` result classes exclude escaping references.
+
+`close_restores` establishes equality of the entire previous lease map, while
+advancing the fresh-token counter. `lend_total` constructs open/read/close and
+continuation steps, discharging read/close/write/free guards from scoping, a
+valid state, and a **live target with no preexisting lease**. The last premise
+is not unique ownership: the state still has no owned-capability environment.
+`execution_steps` covers every source-fragment derivation. Ambient leases remain
+unchanged, and `execution_token_expires` excludes the reader's token from every
+later primitive execution.
+
+The continuation's original owner is de Bruijn slot 2, under result and returned
+owner binders; its returned alias is slot 0. Both alternatives pass the existing
+`Quantity.LendProjection.checkedLend` rule. The constructed `sourceControl` and
+its finite trace are renamed through the fragment's single external-owner slot
+to the allocation identity. `execution_quantity` derives the exact free-event
+projection from this control and the source execution, rather than requiring
+an arbitrary projection witness. `lend_owner_dead` therefore proves that the
+selected allocation is freed exactly once and dead at the endpoint. This small
+explicit binder interpretation does not establish graph elaboration, general
+context aliasing or ownership-capability uniqueness for the full language.
+
+Examples retain an ambient lease on another allocation while executing repeated
+reads, a branch, close, store and free. They show agreement of original/returned
+owner names and reject bad borrow slots (including an unselected bad branch),
+wrong observed values, borrowed entry, double-alias use and omitted ownership
+consumption. `tests/core_scoped_lend.py` independently checks corresponding
+native programs with 120 scalar comparisons per Python mode at O0/O2, both-target
+object emission and exact diagnostics for reader-free, double-alias and escape
+mutations. O0 allocates/frees exactly once; O2 may eliminate the allocation/free
+pair, so the test requires balanced counts of zero or one, not preservation of
+allocation events. Native negative values test the implementation only.
+
+**Remaining boundary:** this fragment has no nested source Lends, owned/aggregate
+reader results, closures, recursion, field/descendant aliases, or allocation
+inside readers. The preceding heap model supports nested leases, but that does
+not supply missing nested source ownership threading. Full Core typing/scoping
+and its operational semantics must still be connected to this fragment or a
+larger model. Native checker implementation refinement remains optional under
+the original roadmap; whole specified-Core soundness, erasure adequacy and
+runtime/MIR correspondence are still required. No native graph/term serializer
+or native pointer/token refinement is claimed by these results.

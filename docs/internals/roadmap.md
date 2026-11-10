@@ -763,6 +763,12 @@ mechanize its soundness, starting from that specification:
    Whole-Core typing must still establish lease authority/non-escape and the
    transition preconditions; recursive heap fields and native simulation remain
    open. This does not add checker-implementation refinement as a release gate.
+   A structured scalar-reader Lend fragment now derives reader authority,
+   primitive heap steps and an exact free-event/control projection. Its
+   original/returned owner alternatives instantiate the existing quantity rule;
+   a complete execution frees that allocation once and expires its local token.
+   Full-Core graph/context correspondence, owned reader results and nested-source
+   ownership threading remain open; no full-language release claim is made.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,

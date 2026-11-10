@@ -569,3 +569,11 @@ identities to checked quantity traces yields actual deallocation, conditional
 on that trace projection. This is not a proof that whole-Core typing establishes
 the primitive preconditions or prevents escaping borrows; recursive heap fields,
 allocator address reuse and native execution correspondence remain open.
+
+The [structured scalar Lend fragment](lean-proofs.md#structured-scalar-lend-execution)
+now derives reader authority, scalar-only results, heap-transition preconditions,
+lease-map restoration and exact free-event projection from its own scoped
+syntax. It instantiates the existing original/returned-owner quantity rule.
+A live target with no preexisting lease is an entry premise, not a proof of
+unique ownership aliases. Full graph/context correspondence and the broader
+owned-result, nested-Lend and recursive-heap cases remain open.
