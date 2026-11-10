@@ -200,8 +200,9 @@ fn numbers(ids: Vec(u32)) -> String {
     out
 }
 
-fn initialization_certificate(p: mir.Program) -> Result(String, String) {
+fn initialization_certificate(p: mir.Program, calls: bool) -> Result(String, String) {
     var out = String.new()
+    var constant: u32 = 0
     for i, f in p.fns {
         let Some(body) = f.body else { continue }
         let analysis = match core_init.analyze(body, f.span) {
@@ -238,6 +239,35 @@ fn initialization_certificate(p: mir.Program) -> Result(String, String) {
             out.push_str(("successors\t" + j.to_string().as_str() + "\t" + numbers(
                 block.successors
             ).as_str() + "\n").as_str())
+            if calls {
+                match body.blocks[j].term {
+                    Call(mir.Callee.Fn(callee), args, dest, next, _) if p.fns[callee as i64].body.is_some() => {
+                        var encoded = String.new()
+                        for k, arg in args {
+                            if k > 0 { encoded.push_str(",") }
+                            match arg {
+                                Copy(place) | Move(place) => {
+                                    if place.proj.len() != 0 {
+                                        return Err("call observation requires whole-local arguments".to_string())
+                                    }
+                                    encoded.push_str(
+                                        ("v" + place.local.to_string().as_str()).as_str()
+                                    )
+                                }
+                                Const(_) => {
+                                    encoded.push_str(("c" + constant.to_string().as_str()).as_str())
+                                    constant += 1
+                                }
+                            }
+                        }
+                        out.push_str(("control\tcall\t" + callee.to_string().as_str() + "\t" +
+                            dest.local.to_string().as_str() + "\t" + next.to_string().as_str() + "\t" +
+                            encoded.as_str() + "\n").as_str())
+                    }
+                    Return => out.push_str("control\treturn\n"),
+                    _ => out.push_str("control\tatomic\n")
+                }
+            }
         }
         out.push_str("end\n")
     }
@@ -260,7 +290,8 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
         Ok(p) => p
         Err(e) => return Err(e.msg.clone())
     }
-    if mutation == "init-certificate" { return initialization_certificate(p) }
+    if mutation == "init-certificate" { return initialization_certificate(p, false) }
+    if mutation == "call-certificate" { return initialization_certificate(p, true) }
     if mutation != "none" {
         var changed = false
         if mutation.starts_with("symbol-") {

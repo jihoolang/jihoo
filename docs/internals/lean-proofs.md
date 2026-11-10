@@ -2419,3 +2419,62 @@ borrow, arithmetic or general value-validity theorem follows. The native ABI-mod
 guard is tested implementation evidence, not a proof of LLVM frame copying. Native
 MIR/event projection, native checker refinement and whole-core consistency remain
 unproved. The theorem does not assert that execution terminates or avoids traps.
+
+### Interprocedural initialization and suspended callers
+
+`InitializationCalls.lean` extends the concrete partial-store result with an
+explicit call stack. A call reads its whole-local and opaque-constant arguments
+in order, saves the caller's memory and continuation, and constructs the callee's
+fresh `enter` frame. Returning reads callee local zero, restores the saved caller,
+and writes only its destination. Callee locals cannot accidentally replace the
+caller's same-numbered locals. Pointer values may still alias heap storage; this
+is a local-frame property, not separation of allocations.
+
+Each instruction projects to the existing read/write graph. `validate` checks
+all function certificates plus internal call target existence and argument
+counts. `validated_call_ready` derives a call transition from accepted metadata
+and covered current storage: argument lookup and arity are not assumed safe.
+`call_continuation` derives coverage of the suspended continuation for **every**
+possible return value. `preservation` maintains both the active frame and all
+suspended callers. `no_uninitialized` excludes the uninitialized-local fault
+through every finite interprocedural trace from a constructed entry frame,
+including recursive calls and repeated invocations. It assumes neither a bound
+on stack depth nor that the callee returns. It does not prove termination or
+global progress. Traps and malformed operation results remain terminal outcomes.
+
+`tests/core_call_machine.py` observes the same real Core capture programs on both
+targets, with and without ghost binders. The observer now reports each internal
+call's native function ID, ordered whole-local/constant arguments, destination,
+and continuation; returns are distinguished too. The harness splits native
+blocks into instruction nodes, retaining the solver's incoming facts and deriving
+intermediate facts by writes. It requires call/return metadata to match the native
+read/write action and successor, and requires callee arity to agree. It then
+kernel-checks the complete function table and instantiates the recursive-stack
+safety theorem: 13 functions, 24 internal calls and 442 instruction nodes in the
+current fixture, including placeholders for external function IDs. Four handoff
+metadata mutations reject; Lean examples independently reject missing callees,
+wrong arities, uninitialized caller locals and absent return values. Concrete
+call/return examples distinguish saved caller values from callee-local values.
+Both Python modes run in `graph-certificates` CI with explicit failures, bounds
+on observed/expanded work and an axiom audit. Expansion additionally charges a
+global 500,000-cell budget before each incoming-fact copy or write concatenation.
+The budget counts repeated snapshots, including empty-write copies, across all
+functions; an instruction-count bound alone would permit quadratic retained facts.
+Serialization independently preflights the same cumulative cell limit before
+constructing Lean strings.
+Regression controls test the exact boundary, cross-function accumulation, repeated
+references and rejection before allocation.
+
+**Boundary:** this is an interprocedural safety theorem for the stated machine,
+not a native MIR simulation proof. The observer rejects projected call arguments;
+whole-local arguments and constants are the admitted observation interface.
+Constants are intentionally opaque (each observed occurrence receives its own
+token, interpreted by an arbitrary value map), so no claim of numeric value
+correspondence follows. External calls and ordinary
+instructions remain arbitrary operations with declared local reads/writes; heap
+and foreign-call effects are not formalized. Native projection, block splitting,
+constant abstraction and the association with the observed compiler run remain
+trusted. No type preservation, ownership/borrow theorem, LLVM poison/undef theorem,
+or whole-language 0.6 soundness claim follows. The native regression suite also
+executes the capture programs and checks results and balanced allocations; those
+are separate implementation tests, not premises discharged by the Lean model.
