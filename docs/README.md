@@ -69,6 +69,7 @@ same on GitHub.
 - [Design: native dependent core](internals/dependent-core.md)
 - [Core specification](internals/core-spec.md)
 - [Lean proof boundary](internals/lean-proofs.md)
+- [0.6 proof status](internals/0.6-proof-status.md)
 - [Graph artifact certificates](internals/graph-certificates.md)
 - [Checked typing artifacts](internals/typing-certificates.md)
 - [Core representation bridge](internals/core-bridge.md)
