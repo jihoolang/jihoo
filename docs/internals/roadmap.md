@@ -1365,3 +1365,8 @@ The mixed-result continuation rules additionally connect scalar value bindings
 and owned-result capabilities in the same recursive judgment. Their combined
 range/ownership theorem has explicit graph validity and initial payload/value
 bounds; it does not close the broader common-typing or lowering gates.
+
+The open scalar-let boundary now reuses the existing pure Raw typed substitution
+and strict reduction theorems inside the common ownership execution. This
+connects actual lexical scalar arguments and continuation values, but does not
+add dependent owned-function substitution or higher-order termination.

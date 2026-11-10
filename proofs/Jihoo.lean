@@ -160,3 +160,5 @@ import Jihoo.OwnedLendExamples
 import Jihoo.CompositionalLendExamples
 
 import Jihoo.MixedLendExamples
+
+import Jihoo.PureOwnedExamples

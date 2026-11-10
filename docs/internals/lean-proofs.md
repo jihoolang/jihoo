@@ -3336,3 +3336,56 @@ original/returned aliases and free/allocation shifts. Each normal and Python
 rejection diagnostics. O0 checks exact allocation counts and disjoint live
 identities; O2 may eliminate allocations. These native checks are additional
 implementation evidence, not a source-to-machine correspondence theorem.
+
+## Pure substitution at the ownership boundary
+
+The next integration is structural, not a claim that owner slot numbers are
+already dependent Core types. `PureOwnedScalar` interprets the mixed lexical
+context as the existing `CoreBridge.Raw.Beta` typing context: scalar entries
+have I64 type, while owner and dead entries are unavailable. Its closing
+substitution supplies the actual scalar environment values. A readiness
+premise checks that every available scalar entry has a bounded value. The
+`close_typed` theorem reuses the existing typed-substitution theorem and is
+generic in both the open Raw term and its dependent result type.
+
+The executable source grammar is intentionally smaller than arbitrary Raw:
+integer literals, actual scalar variables and nested applications of explicit
+non-erased I64 lambdas. It retains the original graph node/binder identities.
+The body uses the newly bound value, rather than ignoring a scalar binder as in
+the earlier restricted read-only reader projection. Its independent graph
+execution is realized by finite steps of the **existing** pure Raw evaluation
+relation, and its decoded terms have the existing Beta.HasType judgment.
+
+The same `OwnedCoreContinuation.Typed` and `Runs` now include a scalar-let rule
+whose argument is such an open computation and whose body is an ownership
+continuation. Binding a scalar shifts lexical names and scalar slots but does
+not allocate, free or shift owner capabilities. The argument evaluates with no
+heap events; its actual result is passed to the continuation. Existing
+ownership, exact-release, lifetime and bounded-value proofs extend through this
+rule. The finite grammar provides totality structurally: successful evaluation
+is not an extra premise of typing.
+
+`OwnedCoreValues.scalarLet_pure_execution` extracts the argument from the
+actual common typing and execution derivations, proves its closed Raw I64
+type and reduction to the computed value, and returns the very continuation
+execution with that value prepended. Readiness transport covers scalar bind,
+allocation, Free, owned-result Lend and scalar-result Lend; a scoped scalar
+context and bounded value list establish the initial readiness premise.
+Unavailable slots use an arbitrary open placeholder in the total substitution
+function, but pure typed scalar lookup cannot reach that placeholder.
+
+This does not introduce arbitrary higher-order evaluation into a total
+interpreter without proving termination. Nor does it add U64 arithmetic,
+arithmetic-trap cleanup, negative-I64 representation, runtime erased bindings,
+owned function application or dependent Buffer/Ref/Borrow substitution. The
+generic pure substitution theorem must not be mistaken for a complete runtime
+relevance theorem over all Raw syntax. The executable grammar separately
+rejects erased lambda binders and ownership-bearing scalar positions. Full
+common-Core typing and lowering remain open.
+
+Native `core_pure_owned.py` tests nested scalar lets, earlier/latest captures,
+shadowing across Lends and attempts to hide owner misuse inside pure arguments.
+Normal and Python `-O` each cover 40 variants, 320 O0/O2 lifecycles and five
+precise rejection diagnostics. Native signed values and erased-U64 rejection
+are additional implementation evidence beyond the nonnegative-I64 formal
+subset; these tests are not a compiler refinement proof.

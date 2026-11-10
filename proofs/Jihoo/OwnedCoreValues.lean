@@ -1,5 +1,6 @@
 import Jihoo.OwnedCoreContinuation
 import Jihoo.OwnedScalarReader
+import Jihoo.PureOwnedScalarBridge
 
 /-! Result-range and ownership safety for the same mixed direct Core judgment.
 The scalar model covers nonnegative I64 values only. Initial live payloads and
@@ -41,6 +42,8 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; exact False.elim (finish_not_app shape other)
       | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
       | scalarLend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; exact False.elim (finish_not_lend shape other)
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; exact False.elim (finish_not_app shape h)
+
   | free shape resolved bound typed ih =>
       cases run with
       | finish other _ => exact False.elim (finish_not_free other shape)
@@ -54,6 +57,8 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           exact ih (by have := selected.length; omega) scalarLength
             (step_valid valid step) (free_owns owned selected) (freed_payloads payloads)
             scalarBounds restRun
+      | scalarLet p _ _ => obtain ⟨f, h⟩ := p.head; have := shape.symm.trans h; contradiction
+
   | allocate a bound typed ih =>
       cases run with
       | finish other _ => obtain ⟨f, x, shape⟩ := a.application; exact False.elim (finish_not_app other shape)
@@ -71,6 +76,7 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           exact ih (by simp [length]) scalarLength
             (step_valid valid (Step.alloc (value := _))) (allocate_owns valid owned)
             (allocated_payloads payloads bound) scalarBounds restRun
+      | scalarLet p _ _ => exact False.elim (a.not_pure p)
 
   | lend shape resolved bound reading typed ih =>
       cases run with
@@ -92,6 +98,10 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           exact ih (by simp [length]) scalarLength (steps_valid valid pre)
             (OwnedLendTransfer.transfer_owns valid owned)
             (allocated_payloads (restored_payloads payloads) copiedBound) scalarBounds suffix
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
 
   | scalarLend shape resolved bound reading typed ih =>
       cases run with
@@ -113,6 +123,29 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
           exact ih length (by simp [scalarLength]) (steps_valid valid pre)
             (restored_owns owned) (restored_payloads payloads)
             (by simpa [ValuesBounded] using And.intro copiedBound scalarBounds) suffix
+      | scalarLet p _ _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨k, other⟩ := p.head
+          have := h.symm.trans other; contradiction
+
+  | scalarLet shape represented typed ih =>
+      cases run with
+      | finish h _ => obtain ⟨f, other⟩ := shape.head; exact False.elim (finish_not_app h other)
+      | free h _ _ _ => obtain ⟨f, other⟩ := shape.head; have := other.symm.trans h; contradiction
+      | allocate a _ => exact False.elim (a.not_pure shape)
+      | lend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLend a _ _ _ _ =>
+          obtain ⟨f, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.head
+          have := h.symm.trans other; contradiction
+      | scalarLet shape' evaluated suffix =>
+          obtain ⟨rfl, rfl⟩ := shape.unique shape'
+          have computedBound := PureOwnedScalar.Eval.bounded graphValid scalarBounds evaluated
+          exact ih length (by simp [scalarLength]) valid owned payloads
+            (by simpa [ValuesBounded] using And.intro computedBound scalarBounds) suffix
 
 /-- One theorem applies ownership and scalar safety to every operational run
 of the same judgment. No second reader or result certificate is required. -/
@@ -135,5 +168,28 @@ theorem total_safe_bounded (graphValid : Graph.valid g = true)
   obtain ⟨v, es, t, run⟩ := total typed length scalarLength valid owned
   exact ⟨v, es, t, run,
     execution_safe_bounded graphValid typed length scalarLength valid owned payloads scalarBounds run⟩
+
+/-- The very scalar argument executed by the common ownership judgment is
+well typed in the existing pure Core calculus after closing its lexical scalar
+environment, and reduces there to the exact value bound by the continuation.
+This is not a detached closed-expression fixture or a convergence premise. -/
+theorem scalarLet_pure_execution (graphValid : Graph.valid g = true)
+    (typed : Typed g ctx n m root) (shape : PureOwnedScalar.Shape g root arg body)
+    (ready : PureOwnedScalar.Ready ctx values)
+    (run : Runs g ctx root owners values s v es t) :
+    ∃ raw computed,
+      PureOwnedScalar.Represents g ctx m arg raw ∧
+      PureOwnedScalar.Eval g ctx arg values computed ∧
+      CoreBridge.Raw.Beta.HasType (fun _ => none)
+        (raw.subst (PureOwnedScalar.closing ctx values)) .i64 ∧
+      CoreBridge.Raw.Beta.Evaluation.Steps
+        (raw.subst (PureOwnedScalar.closing ctx values)) (.integer (Int.ofNat computed)) ∧
+      Runs g (PureOwnedScalar.bindScalar ctx) body owners (computed :: values) s v es t := by
+  obtain ⟨raw, represented, _⟩ := typed.scalarLet_inversion shape
+  obtain ⟨computed, evaluated, suffix⟩ := run.scalarLet_inversion shape
+  refine ⟨raw, computed, represented, evaluated, ?_,
+    PureOwnedScalar.execution represented evaluated, suffix⟩
+  simpa only [CoreBridge.Raw.subst] using
+    PureOwnedScalar.close_typed (PureOwnedScalar.represented_typed graphValid represented) ready
 
 end Jihoo.OwnedCoreValues
