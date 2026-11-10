@@ -1,16 +1,18 @@
 import Jihoo.CoreBridgeBetaTyping
 
-/-! A separate contextual beta + non-overflowing literal-addition relation.
+/-! A separate contextual beta + bounded literal arithmetic relation.
 The historical beta-only Step and every existing certificate interface remain
-unchanged. Preservation uses the unchanged Beta typing and conversion rules. -/
+unchanged. Preservation uses Beta typing and its extended literal-arithmetic conversion. -/
 namespace Jihoo.CoreBridge.Raw.Computation
 open Beta
 
-/-- One beta or bounded literal-add contraction at any syntax position.
-Symbolic arithmetic, subtraction and runtime trap/effect semantics are absent. -/
+/-- One beta or bounded literal-add/subtract contraction at any syntax position.
+Symbolic arithmetic and runtime trap/effect semantics are absent. -/
 inductive Step : Raw → Raw → Prop where
   | add (a b : Nat) : a + b < wordBound →
       Step (.uadd (.natural a) (.natural b)) (.natural (a + b))
+  | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
+      Step (.usub (.natural a) (.natural b) p) (.natural (a - b))
   | beta (e A body a) : Step (.app (.lam e A body) a) (body.subst (single a))
   | array : Step a a' → Step (.array a) (.array a')
   | ltLeft : Step a a' → Step (.lt a b) (.lt a' b)
@@ -53,6 +55,7 @@ theorem Step.conversion (h : Step t u) : Beta.Conv t u := by
   induction h with
   | beta e A body a => exact .beta e A body a
   | add a b h => exact .add a b h
+  | subLiteral a b p hb ha => exact .subLiteral a b p hb ha
   | array _ ih => exact .array ih
   | ltLeft _ ih => exact .lt ih (.refl _)
   | ltRight _ ih => exact .lt (.refl _) ih
@@ -126,6 +129,7 @@ private theorem preservation_mutual :
       | uaddRight hs => exact .uadd ha (ihb _ hs)
     case usub ha hb hp iha ihb ihp t' hs =>
       cases hs with
+      | subLiteral a b p _ bound => exact .natural (Nat.lt_of_le_of_lt (Nat.sub_le a b) bound)
       | usubLeft hs =>
           exact .usub (iha _ hs) hb
             (.convert hp (.lt (.refl _) (.uadd hs.conversion (.refl _))))
@@ -217,6 +221,7 @@ private theorem preservation_mutual :
     case usub ha hb hp iha ihb ihp =>
       intro t' hs
       cases hs with
+      | subLiteral a b p _ bound => exact .natural (Nat.lt_of_le_of_lt (Nat.sub_le a b) bound)
       | usubLeft hs =>
           exact .usub (iha _ hs) hb
             (.convert hp (.lt (.refl _) (.uadd hs.conversion (.refl _))))
@@ -283,15 +288,25 @@ private theorem preservation_mutual :
 theorem formation_preservation (h : Beta.IsType Γ A) (hs : Step A A') : Beta.IsType Γ A' :=
   preservation_mutual.1 _ _ h _ hs
 
-/-- Fixed-type contextual beta/add preservation, now enabled by proved beta
+/-- Fixed-type contextual beta/add/subtract preservation, now enabled by proved beta
 conversion and context transport. The result type is the original raw syntax. -/
 theorem preservation (h : Beta.HasType Γ t A) (hs : Step t t') : Beta.HasType Γ t' A :=
   preservation_mutual.2 _ _ _ h _ hs
 
-/-- Finite contextual beta/add sequences. -/
+/-- Finite contextual beta/add/subtract sequences. -/
 inductive Steps : Raw → Raw → Prop where
   | refl : Steps t t
   | next : Step t u → Steps u v → Steps t v
+
+theorem Steps.trans (h : Steps t u) (h' : Steps u v) : Steps t v := by
+  induction h with
+  | refl => exact h'
+  | next hs _ ih => exact .next hs (ih h')
+
+theorem Steps.conversion (h : Steps t u) : Beta.Conv t u := by
+  induction h with
+  | refl => exact .refl _
+  | next hs _ ih => exact hs.conversion.trans ih
 
 theorem preservation_steps (h : Beta.HasType Γ t A) (hs : Steps t t') : Beta.HasType Γ t' A := by
   induction hs with

@@ -1,4 +1,4 @@
-import Jihoo.CorePrimitiveSafety
+import Jihoo.CoreSubtraction
 import Jihoo.CoreBridgeExamples
 
 namespace Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples
@@ -94,6 +94,65 @@ theorem subtract_safe : 3 ≤ 10 ∧ 10 - 3 < wordBound ∧
     exact .next hs .refl
   · exact .next (.add 1 2 (by decide)) .refl
 
+theorem subtract_computes : Computation.Steps subtract (.natural 7) := by
+  apply (subtract_typed.evaluated_sub_computes (x := 10) (y := 3) ?_ ?_).1
+  · have hs : Computation.Step ten (.natural 10) := by
+      simpa only [ten, subst, single] using Computation.Step.beta false .u64 (.var 0) (.natural 10)
+    exact .next hs .refl
+  · exact .next (.add 1 2 (by decide)) .refl
+
+def nestedSubtract : Raw := .usub subtract (.natural 5) (.decide (.natural 5) (.natural 8))
+
+theorem nested_subtract_typed : HasType (fun _ => none) nestedSubtract .u64 :=
+  .usub subtract_typed (.natural (by decide))
+    (.convert (.decide (by decide) (by decide) (by decide))
+      (.lt (.refl _) ((Conv.add 7 1 (by decide)).symm.trans
+        (.uadd subtract_computes.conversion.symm (.refl _)))))
+
+theorem nested_subtract_computes : Computation.Steps nestedSubtract (.natural 2) :=
+  (nested_subtract_typed.evaluated_sub_computes subtract_computes .refl).1
+
+def readSubtracted : Raw := .index preparedArray nestedSubtract boundProof
+
+theorem read_subtracted_typed : HasType (fun _ => none) readSubtracted .i64 :=
+  .index (prepared_array_typed _) nested_subtract_typed
+    (.convert (bound_typed _) (.lt nested_subtract_computes.conversion.symm (.refl _)))
+
+theorem read_subtracted_safe : ∃ v, ArrayRead preparedArray 2 v ∧ HasType (fun _ => none) v .i64 :=
+  read_subtracted_typed.evaluated_index_safe nested_subtract_computes
+
+def subDomain : Raw := .eq nestedSubtract (.natural 2)
+def subLambda : Raw := .lam true subDomain (.integer 9)
+
+theorem sub_lambda_typed : HasType (fun _ => none) subLambda (.pi true subDomain .i64) :=
+  .lam (.eq nested_subtract_typed (.natural (by decide))) rfl (.integer (by decide) (by decide))
+
+theorem sub_annotation_preserved :
+    HasType (fun _ => none) (.lam true (.eq (.natural 2) (.natural 2)) (.integer 9))
+      (.pi true subDomain .i64) := by
+  exact Computation.preservation_steps sub_lambda_typed
+    (nested_subtract_computes.map (fun n => .lam true (.eq n (.natural 2)) (.integer 9))
+      (fun hs => .lamDomain (.eqLeft hs)))
+
+def subApplication : Raw := .app subLambda (.refl (.natural 2))
+
+theorem sub_application_typed : HasType (fun _ => none) subApplication .i64 := by
+  have proof : HasType (fun _ => none) (.refl (.natural 2)) subDomain :=
+    .convert (.refl (.natural (by decide)))
+      (.eq nested_subtract_computes.conversion.symm (.refl _))
+  simpa only [subst, subApplication] using HasType.app sub_lambda_typed proof
+
+theorem max_subtract_computes : Computation.Step maxSubtract (.natural maxWord) := by
+  simpa only [maxSubtract, Nat.sub_zero] using max_subtract_typed.closed_sub_computes.1
+
+theorem underflow_not_saturated :
+    ¬ Conv (.usub (.natural 0) (.natural 1) p) (.natural 0) :=
+  Conv.invalid_sub_not_literal (by decide)
+
+theorem oversized_sub_not_folded :
+    ¬ Conv (.usub (.natural wordBound) (.natural 1) p) (.natural (wordBound - 1)) :=
+  Conv.invalid_sub_not_literal (by decide)
+
 example : headNormal higherProof = false := by decide
 example : ¬ HasType (fun _ => none) (.zeroLe t) (.lt (.natural 1) (.natural 0)) :=
   no_closed_false_bound (by decide)
@@ -113,6 +172,9 @@ def fixtures : List Fixture := [
   ⟨"primitive_computed", true, .i64, readComputed, read_computed_typed⟩,
   ⟨"primitive_subtract", true, .u64, subtract, subtract_typed⟩,
   ⟨"primitive_max_subtract", true, .u64, maxSubtract, max_subtract_typed⟩,
+  ⟨"primitive_nested_subtract", true, .u64, nestedSubtract, nested_subtract_typed⟩,
+  ⟨"primitive_subtracted_index", true, .i64, readSubtracted, read_subtracted_typed⟩,
+  ⟨"primitive_sub_annotation", true, .i64, subApplication, sub_application_typed⟩,
   ⟨"primitive_max_proof", false, .lt (.natural 0) (.uadd (.natural maxWord) (.natural 1)),
     maxProof, max_proof_typed _⟩]
 

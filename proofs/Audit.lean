@@ -980,3 +980,22 @@ import Jihoo
 #print axioms Jihoo.Initialization.Calls.validated_call_ready
 #print axioms Jihoo.Initialization.Calls.Examples.call_pushes_caller
 #print axioms Jihoo.Initialization.Calls.Examples.return_restores_caller
+
+#print axioms Jihoo.CoreBridge.Raw.Computation.Steps.trans
+#print axioms Jihoo.CoreBridge.Raw.Computation.Steps.conversion
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.natural_bound
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.invalid_sub_not_literal
+#print axioms Jihoo.CoreBridge.Raw.Beta.Conv.literal_sub_unique
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.closed_sub_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.evaluated_sub_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.subtract_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.nested_subtract_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.nested_subtract_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.read_subtracted_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.read_subtracted_safe
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.sub_lambda_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.sub_annotation_preserved
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.sub_application_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.max_subtract_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.underflow_not_saturated
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.oversized_sub_not_folded

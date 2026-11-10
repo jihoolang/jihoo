@@ -1066,9 +1066,9 @@ so it does not truncate or assume representability of the ghost bound `MAX + 1`.
 
 `ArrayRead` specifies selection after head-beta preparation; it is not a new
 `Core.normal` reduction rule. The evaluated-operand corollaries require explicit
-finite contextual beta/add evaluations. These results do not prove universal
+finite contextual beta/add/subtract evaluations. These results do not prove universal
 arithmetic normalization, heap/borrow safety, quantity soundness, contextual
-preservation for new read/subtraction reductions, or erasure/lowering adequacy.
+preservation for array-read reductions, or erasure/lowering adequacy.
 They cover the stated `Raw.Beta` fragment, not the whole specified calculus.
 Existing certificate formats and their admitted rules are unchanged.
 
@@ -1083,6 +1083,43 @@ and checks paired invalid programs against working controls and intended type
 diagnostics. It also distinguishes an erased overflowing bound from a runtime
 addition that traps. These finite tests support correspondence with the trusted
 implementation; they do not establish compiler refinement.
+
+
+### Contextual literal subtraction and dependent conversion
+
+`CoreSubtraction.lean` strengthens the same primitive-safety development with
+actual subtraction traces. `Beta.Conv`, parallel reduction and `Computation.Step`
+now contract `usub a b p` to `a - b` for literal operands when `b ≤ a` and
+`a < 2^64`. The proof term is erased by this pure contraction. The untyped
+relation does not require its typing; the typed closed endpoint derives both
+guards from the existing typing derivation and closed bound consistency.
+
+The extended parallel reduction has complete developments and Church–Rosser,
+including the critical pair between reducing the proof operand and contracting
+subtraction. Renaming, capture-avoiding substitution, rigid-head injectivity,
+formation and fixed-type contextual preservation are rechecked for the extended
+conversion. Closed false-bound and false-equality exclusion therefore continue
+to hold with this stronger conversion, rather than being assumed for it.
+Underflowing and oversized literal subtractions cannot convert to any numeral;
+valid literal subtraction has a unique numeral result, even allowing arbitrary
+untyped beta expansion.
+
+`HasType.closed_sub_computes` derives a contraction and its original type;
+`HasType.evaluated_sub_computes` composes finite operand traces with that
+contraction. Lean-generated examples exercise nested subtraction, an array index,
+an equality proof domain and contextual reduction of a lambda annotation while
+preserving its original dependent function type. Native tests check eight results
+at O0/O2, both object targets and paired negative controls including a wrong
+subtracted equality. The maximum-word case retains its erased `MAX + 1` bound.
+
+This models pure bounded literal subtraction already performed by `Core.normal`;
+it does not change the production compiler. Symbolic cancellation, `Strict`,
+effects, borrowed pointers, heap semantics and native lowering remain outside
+this result. No universal normalization or whole-language soundness is claimed.
+The historical beta-only `Beta.Step` and executable certificate admission rules
+remain unchanged; their narrower evaluators need not find all conversions now
+admitted by the declarative relation. The generated fixture checks are finite
+implementation correspondence tests, not a verified parser or compiler refinement.
 
 
 ## Quantity control and partial executions
