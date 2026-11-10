@@ -2632,3 +2632,11 @@ trusted. No type preservation, ownership/borrow theorem, LLVM poison/undef theor
 or whole-language 0.6 soundness claim follows. The native regression suite also
 executes the capture programs and checks results and balanced allocations; those
 are separate implementation tests, not premises discharged by the Lean model.
+
+## Explicit verified-subset operation
+
+[Verified Core subset check](../reference/verified-core.md) makes native checking
+and independent mixed admission mandatory for its own success result. It binds
+one retained source and snapshot byte value to an exact verifier response and
+composes admission with strict execution safety and intermediate erasure. This
+is dual checking, not a refinement proof of the ordinary production checker.

@@ -58,6 +58,7 @@ same on GitHub.
 - [Grammar](reference/grammar.md)
 - [Builtins](reference/builtins.md)
 - [Command line](reference/command-line.md)
+- [Verified Core subset check](reference/verified-core.md)
 
 ## Internals
 

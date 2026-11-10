@@ -1,0 +1,188 @@
+// Shared bounded snapshot exporter for explicit dual checking and regression tests.
+// Native parser/exporter fidelity is trusted, not a Lean refinement theorem.
+import std.os
+import core
+import core_parse
+
+fn token(inout out: String, value: u64) {
+    var n = value
+    while n > 0 {
+        out.push(if n % 2 == 0 { '0' } else { '1' })
+        n /= 2
+    }
+    out.push(';')
+}
+
+fn fields(inout out: String, values: [u64]) {
+    for value in values { token(&out, value) }
+}
+
+fn write_node(inout out: String, term: core.Term) -> Result((), String) {
+    match term {
+        Var(k) => fields(&out, [0, k as u64])
+        Natural(n) => fields(&out, [1, n])
+        Integer(n) => fields(&out, [2, if n < 0 { 1 } else { 0 },
+            if n < 0 { (0 -% n) as u64 } else { n as u64 }])
+        U64 => token(&out, 3)
+        I64 => token(&out, 4)
+        Array(a) => fields(&out, [5, a as u64])
+        Lt(a, b) => fields(&out, [6, a as u64, b as u64])
+        Eq(a, b) => fields(&out, [7, a as u64, b as u64])
+        Pi(e, a, b) => fields(&out, [8, if e { 1 } else { 0 }, a as u64, b as u64])
+        Lam(e, a, b) => fields(&out, [9, if e { 1 } else { 0 }, a as u64, b as u64])
+        App(a, b) => fields(&out, [10, a as u64, b as u64])
+        Elements(xs) => {
+            fields(&out, [11, xs.len() as u64])
+            for x in xs { token(&out, x as u64) }
+        }
+        Index(a, b, p) => fields(&out, [12, a as u64, b as u64, p as u64])
+        Refl(a) => fields(&out, [13, a as u64])
+        ZeroLe(a) => fields(&out, [14, a as u64])
+        Decide(a, b) => fields(&out, [15, a as u64, b as u64])
+        UAdd(a, b) => fields(&out, [16, a as u64, b as u64])
+        USub(a, b, p) => fields(&out, [17, a as u64, b as u64, p as u64])
+        Prop => token(&out, 18)
+        Universe(level) => fields(&out, [19, level as u64])
+        _ => return Err("unsupported constructor in full typing snapshot".to_string())
+    }
+    Ok(())
+}
+
+pub fn stdin_once() -> Result(String, String) {
+    var input = os.stdin()
+    var bytes = Vec(u8).new()
+    let limit = 1024 * 1024
+    loop {
+        let n = match input.read(&bytes, min(65536, limit + 1 - bytes.len())) {
+            Ok(n) => n
+            Err(Interrupted) => continue
+            Err(_) => return Err("cannot read core source".to_string())
+        }
+        if bytes.len() > limit { return Err("core source exceeds 1 MiB".to_string()) }
+        if n == 0 { break }
+    }
+    var text = String.with_capacity(bytes.len())
+    for b in bytes { text.push(b) }
+    Ok(text)
+}
+
+struct TypingRoot { term: u32, ty: u32 }
+
+pub fn snapshot(source: str, mode: str) -> Result(String, String) {
+    if mode != "infer" && mode != "require" && mode != "both" && mode != "apply" && mode != "spine" { return Err(
+        "expected infer, require, both, apply or spine".to_string()
+    ) }
+    var c = match core_parse.parse(source, 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 || c.families.len() != 0 {
+        return Err("expected exactly one core definition and no families".to_string())
+    }
+    let value = c.definitions[0].value
+    let declared = c.definitions[0].ty
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    let inferred = match c.infer(value, [], true, core.DEPTH) {
+        Ok(t) => t
+        Err(e) => return Err(e.msg.clone())
+    }
+    let selected = if mode == "require" || mode == "both" || mode == "apply" || mode == "spine" {
+        match c.require(value, declared, [], true, core.DEPTH) {
+            Ok(_) => {}
+            Err(e) => return Err(e.msg.clone())
+        }
+        declared
+    } else { inferred }
+    if mode == "spine" {
+        var applications = Vec(u32).new()
+        var base = value
+        loop {
+            match c.term(base) {
+                App(function, _) => {
+                    if applications.len() == 16 { return Err(
+                        "application spine exceeds 16 links".to_string()
+                    ) }
+                    applications.push(base)
+                    base = function
+                }
+                _ => break
+            }
+        }
+        if applications.len() == 0 { return Err("expected an application spine".to_string()) }
+        var current_type = match c.infer(base, [], true, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        var current = base
+        var observations = Vec(TypingRoot).new()
+        observations.push(TypingRoot { term: current, ty: current_type })
+        var at = applications.len()
+        while at > 0 {
+            at -= 1
+            let normalized = match c.normal(current_type, core.DEPTH) {
+                Ok(t) => t
+                Err(e) => return Err(e.msg.clone())
+            }
+            observations.push(TypingRoot { term: current, ty: normalized })
+            current = applications[at]
+            current_type = match c.infer(current, [], true, core.DEPTH) {
+                Ok(t) => t
+                Err(e) => return Err(e.msg.clone())
+            }
+            observations.push(TypingRoot { term: current, ty: current_type })
+        }
+        observations.push(TypingRoot { term: value, ty: declared })
+        // Retain every actual result root. The next normalization consumes
+        // the saved preceding inferred root; no intermediate type is invented.
+        // Freeze one complete arena only after all Core calls have finished.
+        var trace = String.new()
+        for index in 0..observations.len() {
+            if index != 0 { trace.push('\n') }
+            fields(&trace, [3, observations[index].term as u64,
+                observations[index].ty as u64, c.nodes.len() as u64])
+            for node in c.nodes { write_node(&trace, node.term)? }
+        }
+        return Ok(trace)
+    }
+    if mode == "apply" {
+        let App(function, _) = c.term(value) else { return Err(
+            "expected a selected application".to_string()
+        ) }
+        let function_type = match c.infer(function, [], true, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        let normalized = match c.normal(function_type, core.DEPTH) {
+            Ok(t) => t
+            Err(e) => return Err(e.msg.clone())
+        }
+        // Freeze all observations after the last actual Core call. Keep the
+        // original inference roots; do not synthesize a substitute output type.
+        var trace = String.new()
+        fields(&trace, [3, function as u64, function_type as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, function as u64, normalized as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, value as u64, inferred as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        trace.push('\n')
+        fields(&trace, [3, value as u64, declared as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&trace, n.term)? }
+        return Ok(trace)
+    }
+    // Freeze the full arena immediately after the actual operation. Snapshot
+    // schema 3 is distinct from the theorem checker's certificate schema 2.
+    var out = String.new()
+    fields(&out, [3, value as u64, selected as u64, c.nodes.len() as u64])
+    for n in c.nodes { write_node(&out, n.term)? }
+    // Joint mode retains the exact inferred root as well as the requested
+    // root in the same post-require arena; serialization performs no Core calls.
+    if mode == "both" {
+        out.push('\n')
+        fields(&out, [3, value as u64, inferred as u64, c.nodes.len() as u64])
+        for n in c.nodes { write_node(&out, n.term)? }
+    }
+    Ok(out)
+}

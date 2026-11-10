@@ -1,0 +1,2 @@
+(def identity (pi n U64 (pi0 p (Eq n n) (Eq n n)))
+  (lam n U64 (lam0 p (Eq n n) p)))

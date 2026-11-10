@@ -610,3 +610,9 @@ an archive with `ar`, or build a shared library with `cc -shared`.
 `--keep-ll` preserves that IR alongside an executable. `JIHOO_BACKEND=clang`
 uses the previous IR-file/clang pipeline (`JIHOO_CC` defaults to `clang`
 in that mode); the compiler does not silently fall back when LLVM is missing.
+
+## Independently verified Core subset
+
+For explicit dual checking of a restricted closed proof declaration, see
+[Verified Core subset check](verified-core.md). This separate operation requires
+Lean and rejects unsupported syntax; ordinary check/build behavior is unchanged.
