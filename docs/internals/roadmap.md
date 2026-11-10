@@ -756,6 +756,13 @@ mechanize its soundness, starting from that specification:
    discharge the decoder/assignment assumptions inside that model. Current-module
    MIR probes test contiguous typed parameter locals and recursive call arities;
    native execution fidelity to the modeled entry rule remains unproved.
+   A primitive heap/lease semantics now supplies allocation identities, permanent
+   lease expiry, invariant preservation, no double free and a nested-reader
+   payload frame theorem. Exact free-event observations connect checked quantity
+   traces to actual deallocation, conditional on authentic trace projection.
+   Whole-Core typing must still establish lease authority/non-escape and the
+   transition preconditions; recursive heap fields and native simulation remain
+   open. This does not add checker-implementation refinement as a release gate.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
