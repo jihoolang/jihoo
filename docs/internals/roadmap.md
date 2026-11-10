@@ -725,6 +725,11 @@ mechanize its soundness, starting from that specification:
    dependent arguments and annotations, via confluence and context transport.
    This does not prove the executable checker implements that relation, or cover
    all core reductions, runtime effects, erasure or lowering.
+   A strict evaluation strategy for that same restricted target now proves
+   closed progress modulo explicit unsigned-addition overflow and fixed-type
+   preservation for every finite execution. Ordinary arguments and array entries
+   retain their evaluation; proof arguments are erased. This does not cover the
+   whole specified core or prove native evaluation/erasure correspondence.
    [Checked typing artifacts](typing-certificates.md) independently validate
    closed typing/formation derivations for exact exported graph roots, with
    explicit conversion evidence. The producer is untrusted for artifact typing;

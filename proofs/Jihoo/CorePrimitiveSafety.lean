@@ -37,6 +37,10 @@ theorem HasType.natural_bound (h : HasType Γ (.natural n) T) : n < wordBound :=
   (primitive_inversion h).1
 
 /-- Conversion at any point in the typing derivation is retained. -/
+theorem HasType.elements_inversion (h : HasType Γ (.elements xs) T) :
+    (∀ x ∈ xs, HasType Γ x .i64) ∧ xs.length < wordBound ∧
+      Conv (.array (.natural xs.length)) T := primitive_inversion h
+
 theorem HasType.index_inversion (h : HasType Γ (.index a i p) T) :
     ∃ n, HasType Γ a (.array n) ∧ HasType Γ i .u64 ∧
       HasType Γ p (.lt i n) ∧ Conv .i64 T := primitive_inversion h
