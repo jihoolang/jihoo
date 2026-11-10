@@ -605,3 +605,10 @@ executions inherit heap safety and a completely empty final live heap. This is
 a restricted heap-effect semantics, not scalar-result preservation or general
 native caller/lowering adequacy; the trusted exporter and finite successful-
 allocation restrictions remain explicit.
+
+[Lease-free heap erasure](lean-proofs.md#lease-free-heap-erasure-of-admitted-callers)
+now translates this admitted caller subset into an independent pointer-identity
+heap with no lease state. Callee scalar results, observable effect order and
+erased final heaps correspond; target determinism plus source totality covers
+all complete target runs, including exact release/no-leak guarantees. This is an
+abstract erasure stage, not native MIR CFG or final caller-result adequacy.
