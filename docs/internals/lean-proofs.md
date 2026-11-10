@@ -3281,3 +3281,58 @@ the existing scalar initializer and allocate one Buffer1. General reader
 effects, recursive fields/data, `Back`, larger buffer extents, full dependent
 typing and native lowering remain outside these statements. This expands the
 same typing-to-runtime connection but does not complete the principal blocker.
+
+## Mixed scalar and owned Lend results
+
+`OwnedCoreContinuation.Typed` and its independent `Runs` now share one lexical
+context with distinct owner, scalar and dead entries. This extends the existing
+recursive rules, rather than recognizing another detached caller language.
+Both scalar-result and Buffer1-result Lends select a live owner and close their
+reader lease before continuing. A scalar result adds a scalar value but no
+allocation; an owned result adds a fresh allocation but does not shift scalar
+value slots. The continuation receives the reader result followed by the
+returned original owner, as in `core_lower`'s Lend rule. `Free` clears all aliases
+to its selected owner without adding a result binder or removing scalar values.
+
+The source constructor rules check the reader's Ref Buffer1 annotation and the
+continuation's I64 versus Buffer1 result annotation. Scalar results can be
+returned through their actual lexical variables, including earlier results
+across subsequent allocation, free and either kind of Lend. Concrete binding
+lemmas relate these variables to separate scalar-value and owner-identity
+lists. Owner/dead entries cannot be used as scalar results, and scalar entries
+cannot be freed as owners. The existing totality, primitive safety, exact
+release, token expiry and no-leak inductions cover both rules.
+
+`Runs.deterministic` also proves equality of returned scalar, complete event
+trace and final state for any two executions of the same constructor graph and
+environment. It does not assume a typing derivation. This establishes that
+returning an older scalar binding is actual value semantics, not a replacement
+with an arbitrary constant or an unobserved result.
+
+`OwnedCoreValues.execution_safe_bounded` combines the **same** typing/execution
+judgments with primitive ownership safety and nonnegative-I64 range
+preservation. It requires `Graph.valid`, bounded initial live payloads and
+bounded initial scalar values, along with the owner/state invariants. Reader
+literal bounds follow from graph validity; read values follow from the live
+payload invariant. Allocation and both Lend rules preserve that invariant.
+The totality endpoint produces such a bounded safe execution. Bounds are not
+silently inferred from the model's use of `Nat`.
+
+This is still a specified subset, not full dependent `HasType`, checker
+implementation refinement or native lowering correctness. The numeric theorem
+covers nonnegative I64 values below 2^63, not negative I64 arithmetic. Readers
+still use the existing restricted scalar expression relation; they do not
+capture previous scalar results or add general reader effects. Lends in
+continuations remain sequential, not simultaneous nested borrows. Dynamic
+`IfLt` over these I64 values is deliberately not added: actual Core comparisons
+require U64, so doing so without a separate typed U64 expression semantics would
+model an invalid source program.
+
+`MixedLendExamples` exercises distinct scalar values across interleaved result
+kinds, alias identities, owner consumption and scalar/owner rejection. Native
+`core_mixed_lend.py` tests earlier/latest/middle scalar returns, older owners,
+original/returned aliases and free/allocation shifts. Each normal and Python
+`-O` run checks 32 variants and 256 native O0/O2 lifecycles, plus five precise
+rejection diagnostics. O0 checks exact allocation counts and disjoint live
+identities; O2 may eliminate allocations. These native checks are additional
+implementation evidence, not a source-to-machine correspondence theorem.

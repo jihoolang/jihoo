@@ -25,7 +25,7 @@ def spine (g : ScopedLend.Graph.Graph) (root type : Nat) : Option (Nat × Nat) :
   if !ScopedLend.Graph.bufferOne g resultTy || !ScopedLend.Graph.bufferOne g ownerTy then none else
   return (init, rest)
 
-def context : LinearCoreCallers.Context := [some 1, some 0, some 1]
+def context : OwnedScalarContext.Context := [.owner 1, .owner 0, .owner 1]
 
 structure Typed (g : ScopedLend.Graph.Graph) (root type : Nat) where
   init : Nat
@@ -34,7 +34,7 @@ structure Typed (g : ScopedLend.Graph.Graph) (root type : Nat) where
   valid : ScopedLend.Graph.valid g = true
   shape : spine g root type = some (init, rest)
   reading : ScopedLend.Graph.Represents g [.borrow, .owner] init reader
-  continuing : OwnedCoreContinuation.Typed g context 2 rest
+  continuing : OwnedCoreContinuation.Typed g context 2 0 rest
 
 /-- Operational rule retains real graph identities, reader evaluation and
 continuation evaluation; ownership safety is proved from Typed separately. -/
@@ -42,7 +42,7 @@ inductive Runs (g : ScopedLend.Graph.Graph) (root type : Nat) (s : State) (x : N
     Nat → List Event → State → Prop where
   | intro : spine g root type = some (init, rest) →
       ScopedLend.Graph.CoreReads g (opened s x) s.nextLease x [.borrow, .owner] init copied reads →
-      OwnedCoreContinuation.Runs g context rest [s.nextObject, x] (OwnedLendTransfer.final s copied) value suffix t →
+      OwnedCoreContinuation.Runs g context rest [s.nextObject, x] [] (OwnedLendTransfer.final s copied) value suffix t →
       Runs g root type s x value (OwnedLendTransfer.events s x copied reads ++ suffix) t
 
 theorem singleton_owns (live : s.live x = true) (free : Unborrowed s x) :
@@ -63,7 +63,7 @@ theorem total (typed : Typed g root type) (valid : Valid s)
     exact ⟨x, active⟩
   obtain ⟨copied, reads, reading⟩ := reader_total (env := [s.nextLease]) typed.reading.scoped env
   have owned := OwnedLendTransfer.transfer_owns (v := copied) valid (singleton_owns live free)
-  obtain ⟨value, suffix, t, continuation⟩ := OwnedCoreContinuation.total typed.continuing (by rfl)
+  obtain ⟨value, suffix, t, continuation⟩ := OwnedCoreContinuation.total (values := []) typed.continuing (by rfl) (by rfl)
     (OwnedLendTransfer.prefix_valid valid live reading) owned
   exact ⟨value, _, t, .intro typed.shape (typed.reading.execution active reading) continuation⟩
 
@@ -78,7 +78,7 @@ theorem execution_safe (typed : Typed g root type) (valid : Valid s)
       cases eq
       have reader := typed.reading.reflect reading
       have preSteps := OwnedLendTransfer.prefix_steps valid live reader
-      obtain ⟨suffix, finalValid, _⟩ := OwnedCoreContinuation.execution_safe typed.continuing rfl
+      obtain ⟨suffix, finalValid, _⟩ := OwnedCoreContinuation.execution_safe typed.continuing rfl rfl
         (steps_valid valid preSteps) (OwnedLendTransfer.transfer_owns valid (singleton_owns live free)) continuation
       exact ⟨steps_append preSteps suffix, finalValid⟩
 
@@ -93,7 +93,7 @@ theorem token_expires (typed : Typed g root type) (valid : Valid s)
       have eq := typed.shape.symm.trans shape
       cases eq
       have reader := typed.reading.reflect reading
-      have suffix := (OwnedCoreContinuation.execution_safe typed.continuing rfl
+      have suffix := (OwnedCoreContinuation.execution_safe typed.continuing rfl rfl
         (OwnedLendTransfer.prefix_valid valid live reader) (OwnedLendTransfer.transfer_owns valid (singleton_owns live free)) continuation).1
       exact OwnedLendTransfer.local_token_stays_expired valid suffix
 
@@ -106,7 +106,7 @@ theorem owner_released_once (typed : Typed g root type) (valid : Valid s)
       have eq := typed.shape.symm.trans shape
       cases eq
       have reader := typed.reading.reflect reading
-      obtain ⟨count, dead⟩ := OwnedCoreContinuation.no_tracked_leaks typed.continuing rfl
+      obtain ⟨count, dead⟩ := OwnedCoreContinuation.no_tracked_leaks typed.continuing rfl rfl
         (OwnedLendTransfer.prefix_valid valid live reader)
         (OwnedLendTransfer.transfer_owns valid (singleton_owns live free)) continuation
         (Or.inl member)
@@ -148,7 +148,7 @@ theorem heap_empty (typed : Typed g root type) (valid : Valid s)
       have eq := typed.shape.symm.trans shape
       cases eq
       have reader := typed.reading.reflect reading
-      apply OwnedCoreContinuation.heap_empty typed.continuing rfl
+      apply OwnedCoreContinuation.heap_empty typed.continuing rfl rfl
         (OwnedLendTransfer.prefix_valid valid live reader)
         (OwnedLendTransfer.transfer_owns valid (singleton_owns live free)) continuation
       intro y alive
