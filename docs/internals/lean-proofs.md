@@ -3411,10 +3411,10 @@ This is a resource-sensitive interpretation of argument binding. A general
 non-injective substitution is not automatically safe for linear resources.
 The result does not claim full dependent beta-substitution, native checker
 refinement, or that erasing a bound name suffices for arbitrary higher-order
-functions. Only direct Buffer1 lambdas with variable arguments and the existing
-scalar-producing continuation grammar are included. General owned arguments,
-owned returns, dynamic lengths, dependent result types and partial applications
-remain outside this rule.
+functions. Only direct Buffer1 lambdas with variable arguments are included in
+this binding rule. Its continuation now supports both result modes described
+below. General owned arguments, dynamic lengths, dependent result types and
+partial applications remain outside this rule.
 
 The existing common totality, all-execution safety, exactly-once release,
 lease lifetime, deterministic result and scalar-bound results extend through
@@ -3436,3 +3436,44 @@ and eight exact-diagnostic rejections. O0 checks three disjoint allocations and
 releases; O2 may eliminate them but must keep the active-address accounting
 balanced. Signed inputs and full native normalization are implementation evidence
 beyond the specified nonnegative scalar subset, not a compiler-refinement proof.
+
+## Returning owned results
+
+The common constructor judgment now has an explicit result kind. `Types` and
+`Exec` are the same ownership typing and execution relations for scalar and
+owned results; `Typed` and `Runs` retain the existing scalar specialization.
+All allocation, free, scalar-let, linear owner binding and scalar/owned Lend
+rules are shared. This is not a second accepted-program checker or a safe trace
+assumed as a typing premise.
+
+The distinction matters for Core's lambda rule: an owner may be **returned**,
+not only freed or passed to a scalar-producing body. An owned terminal resolves
+a variable to the sole remaining capability. Its execution returns that exact
+object identity, with no synthetic allocation, copy or free. Safety requires
+the result to remain live and unborrowed; treating that live result as a leak
+would be incorrect. Every other tracked object must be released, and the result
+must not have been released. Equal payloads do not equate object identities.
+
+The owned result can be handed to a fresh consuming continuation. The old
+lexical aliases are not carried across that boundary: only the single returned
+capability is made available. Following it with a scalar consumer recovers the
+closed-program release guarantee. This is semantic sequencing of producer and
+consumer derivations, not a new general syntactic App rule for arbitrary
+owned-producing arguments. This boundary is not general dependent
+result-type substitution, arbitrary higher-order application, or a proof of
+native lowering. The proof does not silently retain an external owned frame.
+
+The subset remains one-cell buffers, first-order scalar computations and the
+existing restricted readers. An arbitrary returned reference, `Back`, recursive
+owned data, dynamic buffer lengths and active-reader nesting are still outside
+this judgment. The pure Raw calculus does not acquire owned pointer values from
+this change.
+
+Native `core_owned_result.py` exercises original and freshly allocated results,
+two coexisting allocations with equal or unequal payloads, a scalar Lend before
+return, repeated identity-function return and a caller which reads and frees the
+result. O0 checks both concrete allocations and their final release; O2 may
+remove allocations but must preserve values and balanced address accounting.
+Negative native integers and nested general application are implementation
+regressions, not an enlargement of the formal nonnegative scalar subset or a
+compiler-refinement theorem.

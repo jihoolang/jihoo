@@ -3,8 +3,11 @@ import Jihoo.PureOwnedScalar
 import Jihoo.OwnedArgumentBinding
 
 /-! Declarative ownership and scalar-binding rules on original Core graph
-nodes. Literal/bound-scalar return, free, allocation, actual pure scalar lets, linear owned-argument bindings
-and both scalar/owned-result Lends share one judgment and execution relation. Owner and scalar environments
+nodes. Scalar and owned returns, free, allocation, actual pure scalar lets,
+linear owned-argument bindings and both scalar/owned-result Lends share one
+result-indexed judgment and execution relation. Typed/Runs retain the scalar
+specialization; OwnedTyped/OwnedRuns retain the single returned capability.
+Owner and scalar environments
 are distinct; no accepted-callee or safe-trace premise is assumed. Numeric reader
 bounds need a separate heap/literal invariant: this module alone does not claim
 full I64/dependent typing or whole-Core semantics. -/
@@ -65,63 +68,131 @@ theorem Allocation.not_variable_argument (a : Allocation g root v body)
 
 abbrev LiteralBound := OwnedScalarContext.LiteralBound
 
-inductive Typed (g : Graph.Graph) : Context → Nat → Nat → Nat → Prop where
-  | finish : resultAt g ctx root = some result → result.check m = true → LiteralBound result → Typed g ctx 0 m root
+inductive ResultKind where
+  | scalar
+  | owned
+  deriving DecidableEq, Repr
+
+inductive Types (g : Graph.Graph) : ResultKind → Context → Nat → Nat → Nat → Prop where
+  | finish : resultAt g ctx root = some result → result.check m = true → LiteralBound result → Types g .scalar ctx 0 m root
+  | returnOwner : ownerSlot g ctx root = some 0 → Types g .owned ctx 1 m root
   | free : Graph.nodeAt g root = .free owner body → ownerSlot g ctx owner = some slot →
-      slot < n → Typed g (consumed slot ctx) (n - 1) m body → Typed g ctx n m root
+      slot < n → Types g kind (consumed slot ctx) (n - 1) m body → Types g kind ctx n m root
   | allocate : Allocation g root value body → value < 2^63 →
-      Typed g (fresh ctx) (n + 1) m body → Typed g ctx n m root
+      Types g kind (fresh ctx) (n + 1) m body → Types g kind ctx n m root
 
   | lend : Shape g root owner init body → ownerSlot g ctx owner = some slot → slot < n →
       Graph.Represents g (readerRoles ctx slot) init reader →
-      Typed g (ownedReturned ctx slot) (n + 1) m body → Typed g ctx n m root
+      Types g kind (ownedReturned ctx slot) (n + 1) m body → Types g kind ctx n m root
 
   | scalarLend : ScalarShape g root owner init body → ownerSlot g ctx owner = some slot → slot < n →
       Graph.Represents g (readerRoles ctx slot) init reader →
-      Typed g (scalarReturned ctx slot) n (m + 1) body → Typed g ctx n m root
+      Types g kind (scalarReturned ctx slot) n (m + 1) body → Types g kind ctx n m root
 
   | scalarLet : PureOwnedScalar.Shape g root arg body →
       PureOwnedScalar.Represents g ctx m arg raw →
-      Typed g (PureOwnedScalar.bindScalar ctx) n (m + 1) body → Typed g ctx n m root
+      Types g kind (PureOwnedScalar.bindScalar ctx) n (m + 1) body → Types g kind ctx n m root
 
   | ownedLet : OwnedArgumentBinding.Shape g root argument body →
       ownerSlot g ctx argument = some slot → slot < n →
-      Typed g (OwnedArgumentBinding.transferred ctx slot) n m body → Typed g ctx n m root
+      Types g kind (OwnedArgumentBinding.transferred ctx slot) n m body → Types g kind ctx n m root
+
+abbrev Typed (g : Graph.Graph) := Types g .scalar
+abbrev OwnedTyped (g : Graph.Graph) := Types g .owned
 
 def freedState (s : State) (x : Nat) : State := { s with live := put s.live x false }
 
-inductive Runs (g : Graph.Graph) : Context → Nat → List Nat → List Nat → State → Nat → List Event → State → Prop where
-  | finish : resultAt g ctx root = some result → result.eval values = some value → Runs g ctx root owners values s value [] s
+inductive Exec (g : Graph.Graph) : ResultKind → Context → Nat → List Nat → List Nat → State → Nat → List Event → State → Prop where
+  | finish : resultAt g ctx root = some result → result.eval values = some value → Exec g .scalar ctx root owners values s value [] s
+  | returnOwner : ownerSlot g ctx root = some slot → Select owners slot x rest →
+      Exec g .owned ctx root owners values s x [] s
   | free : Graph.nodeAt g root = .free owner body → ownerSlot g ctx owner = some slot →
-      Select owners slot x rest → Runs g (consumed slot ctx) body rest values (freedState s x) value events t →
-      Runs g ctx root owners values s value (.free x :: events) t
+      Select owners slot x rest → Exec g kind (consumed slot ctx) body rest values (freedState s x) value events t →
+      Exec g kind ctx root owners values s value (.free x :: events) t
   | allocate : Allocation g root payload body →
-      Runs g (fresh ctx) body (s.nextObject :: owners) values (allocatedState s payload) value events t →
-      Runs g ctx root owners values s value (.alloc s.nextObject payload :: events) t
+      Exec g kind (fresh ctx) body (s.nextObject :: owners) values (allocatedState s payload) value events t →
+      Exec g kind ctx root owners values s value (.alloc s.nextObject payload :: events) t
 
   | lend : Shape g root owner init body → ownerSlot g ctx owner = some slot →
       Select owners slot x rest →
       Graph.CoreReads g (opened s x) s.nextLease x (readerRoles ctx slot) init copied reads →
-      Runs g (ownedReturned ctx slot) body (s.nextObject :: owners) values
+      Exec g kind (ownedReturned ctx slot) body (s.nextObject :: owners) values
         (OwnedLendTransfer.final s copied) value suffix t →
-      Runs g ctx root owners values s value (OwnedLendTransfer.events s x copied reads ++ suffix) t
+      Exec g kind ctx root owners values s value (OwnedLendTransfer.events s x copied reads ++ suffix) t
 
   | scalarLend : ScalarShape g root owner init body → ownerSlot g ctx owner = some slot →
       Select owners slot x rest →
       Graph.CoreReads g (opened s x) s.nextLease x (readerRoles ctx slot) init copied reads →
-      Runs g (scalarReturned ctx slot) body owners (copied :: values)
+      Exec g kind (scalarReturned ctx slot) body owners (copied :: values)
         (restored s) value suffix t →
-      Runs g ctx root owners values s value (scalarEvents s x reads ++ suffix) t
+      Exec g kind ctx root owners values s value (scalarEvents s x reads ++ suffix) t
 
   | scalarLet : PureOwnedScalar.Shape g root arg body →
       PureOwnedScalar.Eval g ctx arg values computed →
-      Runs g (PureOwnedScalar.bindScalar ctx) body owners (computed :: values) s value events t →
-      Runs g ctx root owners values s value events t
+      Exec g kind (PureOwnedScalar.bindScalar ctx) body owners (computed :: values) s value events t →
+      Exec g kind ctx root owners values s value events t
 
   | ownedLet : OwnedArgumentBinding.Shape g root argument body →
       ownerSlot g ctx argument = some slot → Select owners slot x rest →
-      Runs g (OwnedArgumentBinding.transferred ctx slot) body owners values s value events t →
-      Runs g ctx root owners values s value events t
+      Exec g kind (OwnedArgumentBinding.transferred ctx slot) body owners values s value events t →
+      Exec g kind ctx root owners values s value events t
+
+abbrev Runs (g : Graph.Graph) := Exec g .scalar
+abbrev OwnedRuns (g : Graph.Graph) := Exec g .owned
+
+namespace Typed
+export Types (finish free allocate lend scalarLend scalarLet ownedLet)
+end Typed
+namespace Runs
+export Exec (finish free allocate lend scalarLend scalarLet ownedLet)
+end Runs
+
+/-- Scalar-specialized induction excludes the owned terminal by its result index. -/
+@[elab_as_elim] theorem Typed.induct
+    {motive : ∀ ctx n m root, Typed g ctx n m root → Prop}
+    (finish : ∀ {ctx m root result} (a : resultAt g ctx root = some result) (b : result.check m = true) (c : LiteralBound result), motive ctx 0 m root (.finish a b c))
+    (free : ∀ {ctx n m root owner body slot} (a : Graph.nodeAt g root = .free owner body) (b : ownerSlot g ctx owner = some slot) (c : slot < n) (d : Typed g (consumed slot ctx) (n-1) m body), motive (consumed slot ctx) (n-1) m body d → motive ctx n m root (.free a b c d))
+    (allocate : ∀ {ctx n m root value body} (a : Allocation g root value body) (b : value < 2^63) (c : Typed g (fresh ctx) (n+1) m body), motive (fresh ctx) (n+1) m body c → motive ctx n m root (.allocate a b c))
+    (lend : ∀ {ctx n m root owner init body slot reader} (a : Shape g root owner init body) (b : ownerSlot g ctx owner = some slot) (c : slot < n) (d : Graph.Represents g (readerRoles ctx slot) init reader) (e : Typed g (ownedReturned ctx slot) (n+1) m body), motive (ownedReturned ctx slot) (n+1) m body e → motive ctx n m root (.lend a b c d e))
+    (scalarLend : ∀ {ctx n m root owner init body slot reader} (a : ScalarShape g root owner init body) (b : ownerSlot g ctx owner = some slot) (c : slot < n) (d : Graph.Represents g (readerRoles ctx slot) init reader) (e : Typed g (scalarReturned ctx slot) n (m+1) body), motive (scalarReturned ctx slot) n (m+1) body e → motive ctx n m root (.scalarLend a b c d e))
+    (scalarLet : ∀ {ctx n m root arg body raw} (a : PureOwnedScalar.Shape g root arg body) (b : PureOwnedScalar.Represents g ctx m arg raw) (c : Typed g (PureOwnedScalar.bindScalar ctx) n (m+1) body), motive (PureOwnedScalar.bindScalar ctx) n (m+1) body c → motive ctx n m root (.scalarLet a b c))
+    (ownedLet : ∀ {ctx n m root argument body slot} (a : OwnedArgumentBinding.Shape g root argument body) (b : ownerSlot g ctx argument = some slot) (c : slot < n) (d : Typed g (OwnedArgumentBinding.transferred ctx slot) n m body), motive (OwnedArgumentBinding.transferred ctx slot) n m body d → motive ctx n m root (.ownedLet a b c d))
+    (h : Typed g ctx n m root) : motive ctx n m root h := by
+  have go : ∀ k ctx n m root (h : Types g k ctx n m root) (eq : k = .scalar), motive ctx n m root (Eq.mp (congrArg (fun k => Types g k ctx n m root) eq) h) := by
+    intro k ctx n m root h
+    induction h with
+    | returnOwner _ => intro eq; cases eq
+    | finish a b c => intro eq; cases eq; exact finish a b c
+    | free a b c d ih => intro eq; cases eq; exact free a b c d (ih rfl)
+    | allocate a b c ih => intro eq; cases eq; exact allocate a b c (ih rfl)
+    | lend a b c d e ih => intro eq; cases eq; exact lend a b c d e (ih rfl)
+    | scalarLend a b c d e ih => intro eq; cases eq; exact scalarLend a b c d e (ih rfl)
+    | scalarLet a b c ih => intro eq; cases eq; exact scalarLet a b c (ih rfl)
+    | ownedLet a b c d ih => intro eq; cases eq; exact ownedLet a b c d (ih rfl)
+  exact go _ _ _ _ _ h rfl
+
+@[elab_as_elim] theorem Runs.induct
+    {motive : ∀ ctx root owners values s value events t, Runs g ctx root owners values s value events t → Prop}
+    (finish : ∀ {ctx root owners values s result value} (a : resultAt g ctx root = some result) (b : result.eval values = some value), motive ctx root owners values s value [] s (.finish a b))
+    (free : ∀ {ctx root owners values s value events t owner body slot x rest} (a : Graph.nodeAt g root = .free owner body) (b : ownerSlot g ctx owner = some slot) (c : Select owners slot x rest) (d : Runs g (consumed slot ctx) body rest values (freedState s x) value events t), motive (consumed slot ctx) body rest values (freedState s x) value events t d → motive ctx root owners values s value (.free x::events) t (.free a b c d))
+    (allocate : ∀ {ctx root owners values s value events t payload body} (a : Allocation g root payload body) (b : Runs g (fresh ctx) body (s.nextObject::owners) values (allocatedState s payload) value events t), motive (fresh ctx) body (s.nextObject::owners) values (allocatedState s payload) value events t b → motive ctx root owners values s value (.alloc s.nextObject payload::events) t (.allocate a b))
+    (lend : ∀ {ctx root owners values s value suffix t owner init body slot x rest copied reads} (a : Shape g root owner init body) (b : ownerSlot g ctx owner = some slot) (c : Select owners slot x rest) (d : Graph.CoreReads g (opened s x) s.nextLease x (readerRoles ctx slot) init copied reads) (e : Runs g (ownedReturned ctx slot) body (s.nextObject::owners) values (OwnedLendTransfer.final s copied) value suffix t), motive (ownedReturned ctx slot) body (s.nextObject::owners) values (OwnedLendTransfer.final s copied) value suffix t e → motive ctx root owners values s value (OwnedLendTransfer.events s x copied reads ++ suffix) t (.lend a b c d e))
+    (scalarLend : ∀ {ctx root owners values s value suffix t owner init body slot x rest copied reads} (a : ScalarShape g root owner init body) (b : ownerSlot g ctx owner = some slot) (c : Select owners slot x rest) (d : Graph.CoreReads g (opened s x) s.nextLease x (readerRoles ctx slot) init copied reads) (e : Runs g (scalarReturned ctx slot) body owners (copied::values) (restored s) value suffix t), motive (scalarReturned ctx slot) body owners (copied::values) (restored s) value suffix t e → motive ctx root owners values s value (scalarEvents s x reads ++ suffix) t (.scalarLend a b c d e))
+    (scalarLet : ∀ {ctx root owners values s value events t arg body computed} (a : PureOwnedScalar.Shape g root arg body) (b : PureOwnedScalar.Eval g ctx arg values computed) (c : Runs g (PureOwnedScalar.bindScalar ctx) body owners (computed::values) s value events t), motive (PureOwnedScalar.bindScalar ctx) body owners (computed::values) s value events t c → motive ctx root owners values s value events t (.scalarLet a b c))
+    (ownedLet : ∀ {ctx root owners values s value events t argument body slot x rest} (a : OwnedArgumentBinding.Shape g root argument body) (b : ownerSlot g ctx argument = some slot) (c : Select owners slot x rest) (d : Runs g (OwnedArgumentBinding.transferred ctx slot) body owners values s value events t), motive (OwnedArgumentBinding.transferred ctx slot) body owners values s value events t d → motive ctx root owners values s value events t (.ownedLet a b c d))
+    (h : Runs g ctx root owners values s value events t) : motive ctx root owners values s value events t h := by
+  have go : ∀ k ctx root owners values s value events t (h : Exec g k ctx root owners values s value events t) (eq : k = .scalar), motive ctx root owners values s value events t (Eq.mp (congrArg (fun k => Exec g k ctx root owners values s value events t) eq) h) := by
+    intro k ctx root owners values s value events t h
+    induction h with
+    | returnOwner _ _ => intro eq; cases eq
+    | finish a b => intro eq; cases eq; exact finish a b
+    | free a b c d ih => intro eq; cases eq; exact free a b c d (ih rfl)
+    | allocate a b ih => intro eq; cases eq; exact allocate a b (ih rfl)
+    | lend a b c d e ih => intro eq; cases eq; exact lend a b c d e (ih rfl)
+    | scalarLend a b c d e ih => intro eq; cases eq; exact scalarLend a b c d e (ih rfl)
+    | scalarLet a b c ih => intro eq; cases eq; exact scalarLet a b c (ih rfl)
+    | ownedLet a b c d ih => intro eq; cases eq; exact ownedLet a b c d (ih rfl)
+  exact go _ _ _ _ _ _ _ _ _ h rfl
 
 theorem free_owns (owned : Owns s owners) (selected : Select owners slot x rest) :
     Owns (freedState s x) rest := by
@@ -136,7 +207,7 @@ theorem free_owns (owned : Owns s owners) (selected : Select owners slot x rest)
 theorem total (typed : Typed g ctx n m root) (length : owners.length = n) (scalarLength : values.length = m)
     (valid : Valid s) (owned : Owns s owners) :
     ∃ value events t, Runs g ctx root owners values s value events t := by
-  induction typed generalizing owners values s with
+  induction typed using Typed.induct generalizing owners values s with
   | finish shape checked bound =>
       have : owners = [] := List.length_eq_zero_iff.mp length
       subst owners
@@ -221,7 +292,7 @@ theorem finish_not_lend (h : resultAt g ctx root = some result)
 theorem execution_safe (typed : Typed g ctx n m root) (length : owners.length = n) (scalarLength : values.length = m)
     (valid : Valid s) (owned : Owns s owners) (run : Runs g ctx root owners values s v es t) :
     Steps s es t ∧ Valid t ∧ Owns t [] := by
-  induction typed generalizing owners values s v es t with
+  induction typed using Typed.induct generalizing owners values s v es t with
   | finish shape checked bound =>
       cases run with
       | finish _ _ => exact ⟨.nil, valid, ⟨by simp, by simp, by simp⟩⟩
@@ -362,7 +433,7 @@ inside the continuation, rather than a separately supplied usage trace. -/
 theorem release_conservation (typed : Typed g ctx n m root) (length : owners.length = n) (scalarLength : values.length = m)
     (run : Runs g ctx root owners values s v es t) (x : Nat) :
     (released es).count x = owners.count x + (allocations es).count x := by
-  induction typed generalizing owners values s v es t with
+  induction typed using Typed.induct generalizing owners values s v es t with
   | finish shape checked bound =>
       cases run with
       | finish _ _ =>
@@ -535,7 +606,7 @@ private theorem CoreReads.no_lease_starts (run : Graph.CoreReads g s token owner
 
 theorem lease_counter (run : Runs g ctx root owners values s v es t) :
     t.nextLease = s.nextLease + leaseStarts es := by
-  induction run with
+  induction run using Runs.induct with
   | scalarLet _ _ _ ih => exact ih
   | ownedLet _ _ _ _ ih => exact ih
   | finish => simp [leaseStarts]
@@ -558,7 +629,7 @@ theorem lease_counter (run : Runs g ctx root owners values s v es t) :
 may advance, but never move backwards. -/
 theorem lease_frame (run : Runs g ctx root owners values s v es t) :
     t.lease = s.lease ∧ s.nextLease ≤ t.nextLease := by
-  induction run with
+  induction run using Runs.induct with
   | scalarLet _ _ _ ih => exact ih
   | ownedLet _ _ _ _ ih => exact ih
   | finish => exact ⟨rfl, Nat.le_refl _⟩
@@ -694,7 +765,7 @@ theorem Typed.scalarLend_inversion (typed : Typed g ctx n m root)
       obtain ⟨r, other⟩ := p.head
       have := h.symm.trans other; contradiction
 
-private theorem core_reads_deterministic (a : Graph.CoreReads g s token owner ctx root v es)
+theorem core_reads_deterministic (a : Graph.CoreReads g s token owner ctx root v es)
     (b : Graph.CoreReads g s token owner ctx root w fs) : v = w ∧ es = fs := by
   induction a generalizing w fs with
   | scalar shape => cases b <;> simp_all <;> first | exact ih (by assumption) | omega
@@ -716,7 +787,7 @@ private theorem core_reads_deterministic (a : Graph.CoreReads g s token owner ct
 trace and final heap, independently of any particular typing derivation. -/
 theorem Runs.deterministic (a : Runs g ctx root owners values s v es t)
     (b : Runs g ctx root owners values s w fs u) : v = w ∧ es = fs ∧ t = u := by
-  induction a generalizing w fs u with
+  induction a using Runs.induct generalizing w fs u with
   | finish shape value =>
       cases b with
       | finish shape' value' =>
