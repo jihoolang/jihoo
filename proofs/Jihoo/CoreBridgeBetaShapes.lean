@@ -114,7 +114,7 @@ theorem Conv.natural_injective (h : Conv (.natural m) (.natural n)) : m = n := b
   exact Raw.natural.inj ((hw.natural_shape rfl).symm.trans (hw'.natural_shape rfl))
 
 /-- A successor-shaped sum can only remain successor-shaped or become a
-positive numeral under parallel beta/add reduction. No typing or normalization
+positive numeral under parallel beta/add/subtract reduction. No typing or normalization
 assumption is needed, including for higher-order raw operands. -/
 private def SuccessorShape (t : Raw) : Prop :=
   (∃ a, t = .uadd a (.natural 1)) ∨ (∃ n, t = .natural (n + 1))

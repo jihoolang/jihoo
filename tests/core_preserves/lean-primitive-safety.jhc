@@ -4,4 +4,7 @@
 (export primitive_computed I64 (index (app (lam x0 (Array 3) x0) (array (int -9223372036854775808) (int 37) (int 9223372036854775807))) (uadd 1 1) (app (lam0 x0 (pi0 x0 (Lt 2 3) (Lt 2 3)) (app x0 (decide-lt 2 3))) (lam0 x0 (Lt 2 3) x0))))
 (export primitive_subtract U64 (usub (app (lam x0 U64 x0) 10) (uadd 1 2) (decide-lt 3 11)))
 (export primitive_max_subtract U64 (usub 18446744073709551615 0 (zero-le 18446744073709551615)))
+(export primitive_nested_subtract U64 (usub (usub (app (lam x0 U64 x0) 10) (uadd 1 2) (decide-lt 3 11)) 5 (decide-lt 5 8)))
+(export primitive_subtracted_index I64 (index (app (lam x0 (Array 3) x0) (array (int -9223372036854775808) (int 37) (int 9223372036854775807))) (usub (usub (app (lam x0 U64 x0) 10) (uadd 1 2) (decide-lt 3 11)) 5 (decide-lt 5 8)) (decide-lt 2 3)))
+(export primitive_sub_annotation I64 (app (lam0 x0 (Eq (usub (usub (app (lam x0 U64 x0) 10) (uadd 1 2) (decide-lt 3 11)) 5 (decide-lt 5 8)) 2) (int 9)) (refl 2)))
 (def primitive_max_proof (Lt 0 (uadd 18446744073709551615 1)) (zero-le 18446744073709551615))

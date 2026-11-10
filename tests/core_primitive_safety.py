@@ -34,6 +34,9 @@ PAIRS = {
     'wrong-subtraction-bound': (
         '(def bad U64 (usub 10 3 (decide-lt 2 11)))',
         '(def bad U64 (usub 10 3 (decide-lt 3 11)))'),
+    'wrong-subtracted-equality': (
+        '(def bad (Eq (usub 7 5 (decide-lt 5 8)) 3) (refl 2))',
+        '(def bad (Eq (usub 7 5 (decide-lt 5 8)) 2) (refl 2))'),
     'false-zero-le-type': (
         '(def bad (Lt 1 2) (zero-le 1))',
         '(def bad (Lt 0 2) (zero-le 1))'),
@@ -55,7 +58,10 @@ def test(compiler, out):
                 'primitive_last': (ctypes.c_int64, (1 << 63)-1),
                 'primitive_computed': (ctypes.c_int64, (1 << 63)-1),
                 'primitive_subtract': (ctypes.c_uint64, 7),
-                'primitive_max_subtract': (ctypes.c_uint64, (1 << 64)-1)}
+                'primitive_max_subtract': (ctypes.c_uint64, (1 << 64)-1),
+                'primitive_nested_subtract': (ctypes.c_uint64, 2),
+                'primitive_subtracted_index': (ctypes.c_int64, (1 << 63)-1),
+                'primitive_sub_annotation': (ctypes.c_int64, 9)}
     for target, machine in [('x86_64', 62), ('aarch64', 183)]:
         for level in ['-O0', '-O2']:
             obj = out / f'{target}{level}.o'
@@ -100,8 +106,8 @@ def test(compiler, out):
                                 capture_output=True, timeout=10)
         require(result.returncode < 0 and result.stdout == b'entered\n',
                 f'{level}: expected arithmetic trap after successful load: {result}')
-    print('primitive safety: Lean fixture checked/preserved; 5 native results at O0/O2, '
-          'both object targets, 5 paired rejections, erasure and overflow boundaries')
+    print('primitive safety: Lean fixture checked/preserved; 8 native results at O0/O2, '
+          'both object targets, 6 paired rejections, erasure and overflow boundaries')
 
 
 def main():

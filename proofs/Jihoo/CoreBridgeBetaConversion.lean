@@ -1,6 +1,6 @@
 import Jihoo.CoreBridgeMetatheory
 
-/-! Untyped beta conversion on the existing unified target syntax. The
+/-! Untyped beta and bounded literal-arithmetic conversion on the unified target syntax. The
 Church–Rosser argument below proves, rather than postulates, Pi injectivity. -/
 namespace Jihoo.CoreBridge.Raw.Beta
 open Jihoo.Indexed (liftRenaming)
@@ -17,6 +17,8 @@ inductive Conv : Raw → Raw → Prop where
   | beta (e A body a) : Conv (.app (.lam e A body) a) (body.subst (single a))
   | add (a b : Nat) : a + b < wordBound →
       Conv (.uadd (.natural a) (.natural b)) (.natural (a + b))
+  | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
+      Conv (.usub (.natural a) (.natural b) p) (.natural (a - b))
   | array : Conv a b → Conv (.array a) (.array b)
   | lt : Conv a a' → Conv b b' → Conv (.lt a b) (.lt a' b')
   | eq : Conv a a' → Conv b b' → Conv (.eq a b) (.eq a' b')
@@ -44,6 +46,7 @@ theorem Conv.renaming (h : Conv A B) (ρ : Nat → Nat) :
       simpa only [rename, rename_instantiate] using
         (Conv.beta e (A.rename ρ) (b.rename (liftRenaming ρ)) (a.rename ρ))
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
+  | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.rename ρ) hb ha
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih ρ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ ρ) (ih₂ ρ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ ρ) (ih₂ ρ)
@@ -72,6 +75,7 @@ theorem Conv.substitution (h : Conv A B) (σ : Nat → Raw) :
       simpa only [subst, subst_instantiate] using
         (Conv.beta e (A.subst σ) (b.subst (liftSub σ)) (a.subst σ))
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
+  | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.subst σ) hb ha
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih σ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ σ) (ih₂ σ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ σ) (ih₂ σ)
@@ -135,6 +139,8 @@ inductive Par : Raw → Raw → Prop where
       Par (.app (.lam e A body) a) (body'.subst (single a'))
   | add (a b : Nat) : a + b < wordBound →
       Par (.uadd (.natural a) (.natural b)) (.natural (a + b))
+  | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
+      Par (.usub (.natural a) (.natural b) p) (.natural (a - b))
   | array : Par a b → Par (.array a) (.array b)
   | lt : Par a a' → Par b b' → Par (.lt a b) (.lt a' b')
   | eq : Par a a' → Par b b' → Par (.eq a b) (.eq a' b')
@@ -188,6 +194,7 @@ theorem Par.renaming (h : Par A B) (ρ : Nat → Nat) :
       simp only [rename, rename_instantiate]
       exact .beta (ihb (liftRenaming ρ)) (iha ρ)
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
+  | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.rename ρ) hb ha
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih ρ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ ρ) (ih₂ ρ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ ρ) (ih₂ ρ)
@@ -225,6 +232,7 @@ theorem Par.substitution (h : Par A B) (hσ : ∀ x, Par (σ x) (τ x)) :
       simp only [subst, subst_instantiate]
       exact .beta (ihb (lift_par hσ)) (iha hσ)
   | add a b h => simp only [subst]; exact .add a b h
+  | subLiteral a b p hb ha => simp only [subst]; exact .subLiteral a b _ hb ha
   | array _ ih => simp only [subst]; exact .array (ih hσ)
   | lt _ _ ih₁ ih₂ => simp only [subst]; exact .lt (ih₁ hσ) (ih₂ hσ)
   | eq _ _ ih₁ ih₂ => simp only [subst]; exact .eq (ih₁ hσ) (ih₂ hσ)
@@ -272,6 +280,9 @@ def develop : Raw → Raw
   | .uadd (.natural a) (.natural b) =>
       if a + b < wordBound then .natural (a + b) else .uadd (.natural a) (.natural b)
   | .uadd a b => .uadd (develop a) (develop b)
+  | .usub (.natural a) (.natural b) p =>
+      if b ≤ a ∧ a < wordBound then .natural (a - b)
+      else .usub (.natural a) (.natural b) (develop p)
   | .usub a b p => .usub (develop a) (develop b) (develop p)
 
 private theorem Par.lam_inv (h : Par (.lam e A b) t) :
@@ -298,6 +309,7 @@ theorem Par.to_develop (h : Par t u) : Par u (develop t) := by
   | i64 => simpa only [develop] using (Par.i64)
   | beta _ _ ihb iha => simpa only [develop] using ihb.instantiate iha
   | add a b hab => simpa only [develop, ite_eq_left hab] using Par.natural (a + b)
+  | subLiteral a b p hb ha => simpa [develop, hb, ha] using Par.natural (a - b)
   | array _ ih => simpa only [develop] using (Par.array ih)
   | lt _ _ ih₁ ih₂ => simpa only [develop] using (Par.lt ih₁ ih₂)
   | eq _ _ ih₁ ih₂ => simpa only [develop] using (Par.eq ih₁ ih₂)
@@ -328,7 +340,17 @@ theorem Par.to_develop (h : Par t u) : Par u (develop t) := by
         split
         · exact .add _ _ ‹_›
         · exact .uadd (.natural _) (.natural _)
-  | usub _ _ _ ih₁ ih₂ ih₃ => simpa only [develop] using (Par.usub ih₁ ih₂ ih₃)
+  | usub ha hb hp iha ihb ihp =>
+      rename_i a a' b b' p p'
+      cases a <;> cases b <;> try (simpa only [develop] using (Par.usub iha ihb ihp))
+      case natural.natural a b =>
+        have ea := ha.natural_inv
+        have eb := hb.natural_inv
+        subst a'; subst b'
+        simp only [develop]
+        split
+        next h => exact .subLiteral a b p' h.1 h.2
+        next => exact .usub (.natural _) (.natural _) ihp
   | nil => exact .nil
   | cons _ _ ih₁ ih₂ => exact .cons ih₁ ih₂
 
@@ -462,6 +484,7 @@ theorem Conv.church_rosser (h : Conv t u) : Join t u := by
   | trans _ _ ih₁ ih₂ => exact ih₁.trans ih₂
   | beta e A b a => exact ⟨_, .single (.beta (.refl b) (.refl a)), .refl⟩
   | add a b h => exact ⟨_, .single (.add a b h), .refl⟩
+  | subLiteral a b p hb ha => exact ⟨_, .single (.subLiteral a b p hb ha), .refl⟩
   | array _ ih => exact Join.map Raw.array Par.array ih
   | lt _ _ ih₁ ih₂ => exact Join.map₂ Raw.lt Par.lt ih₁ ih₂
   | eq _ _ ih₁ ih₂ => exact Join.map₂ Raw.eq Par.eq ih₁ ih₂
@@ -486,6 +509,7 @@ theorem Par.conv (h : Par t u) : Conv t u := by
   | var | natural | integer | u64 | i64 => exact .refl _
   | beta _ _ ihb iha => exact .trans (.app (.lam (.refl _) ihb) iha) (.beta _ _ _ _)
   | add a b h => exact .add a b h
+  | subLiteral a b p hb ha => exact .subLiteral a b p hb ha
   | array _ ih => exact .array ih
   | lt _ _ ih₁ ih₂ => exact .lt ih₁ ih₂
   | eq _ _ ih₁ ih₂ => exact .eq ih₁ ih₂

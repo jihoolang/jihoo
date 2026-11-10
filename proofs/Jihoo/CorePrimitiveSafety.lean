@@ -33,6 +33,9 @@ private theorem primitive_inversion (h : HasType Γ t T) : PrimitiveInversion Γ
   case usub ha hb hp _ _ _ => exact ⟨ha, hb, hp, .refl _⟩
   case convert _ hc ih => exact ih.convert hc
 
+theorem HasType.natural_bound (h : HasType Γ (.natural n) T) : n < wordBound :=
+  (primitive_inversion h).1
+
 /-- Conversion at any point in the typing derivation is retained. -/
 theorem HasType.index_inversion (h : HasType Γ (.index a i p) T) :
     ∃ n, HasType Γ a (.array n) ∧ HasType Γ i .u64 ∧
@@ -127,7 +130,7 @@ theorem HasType.closed_usub_reconstructs
     (h : HasType (fun _ => none) (.usub (.natural a) (.natural b) p) T) :
     (a - b) + b = a := Nat.sub_add_cancel h.closed_usub_safe.1
 
-/-- Contextual beta/add evaluations of operands can be transported into the
+/-- Contextual beta/add/subtract evaluations of operands can be transported into the
 primitive theorem. The finite operand evaluation premise is explicit; no
 universal arithmetic normalization or runtime evaluator correspondence is claimed. -/
 theorem HasType.evaluated_index_safe
