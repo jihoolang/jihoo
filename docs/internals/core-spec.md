@@ -645,3 +645,9 @@ The common constructor judgment also distinguishes [scalar and owned returns](le
 capability instead of falsely treating that result as a leak. Fresh-context
 consumption composes with the existing scalar continuation guarantees; arbitrary
 dependent result substitution and general lowering remain outside this slice.
+
+A [owned-producing application extension](lean-proofs.md#syntactic-owned-producing-application-composition)
+connects recursive direct App/Lam graph nodes to producer evaluation and binding
+of the exact returned capability. The producer accounts for every current
+resource and the body receives only the result. The singleton body restriction
+is not a proof that arbitrary captures can be discarded.
