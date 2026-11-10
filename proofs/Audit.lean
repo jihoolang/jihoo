@@ -917,3 +917,19 @@ import Jihoo
 #print axioms Jihoo.CallEntry.Examples.reserved_and_node_not_parameters
 #print axioms Jihoo.CallEntry.Examples.constructed_owner
 #print axioms Jihoo.CallEntry.Examples.wrong_base_counterexample
+
+#print axioms Jihoo.Initialization.subset_sound
+#print axioms Jihoo.Initialization.sub_trans
+#print axioms Jihoo.Initialization.sub_append
+#print axioms Jihoo.Initialization.run_sound
+#print axioms Jihoo.Initialization.check_entry
+#print axioms Jihoo.Initialization.check_block
+#print axioms Jihoo.Initialization.reachable_covered
+#print axioms Jihoo.Initialization.accepted_reads_safe
+#print axioms Jihoo.Initialization.Examples.cycle_accepted
+#print axioms Jihoo.Initialization.Examples.loop_reads
+#print axioms Jihoo.Initialization.Examples.read_before_write_rejected
+#print axioms Jihoo.Initialization.Examples.missing_predecessor_rejected
+#print axioms Jihoo.Initialization.Examples.invented_entry_rejected
+#print axioms Jihoo.Initialization.Examples.hidden_successor_rejected
+#print axioms Jihoo.Initialization.Examples.unreachable_accepted
