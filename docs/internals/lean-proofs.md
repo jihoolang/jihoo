@@ -2310,3 +2310,55 @@ Initialized pointers need not be live, allocated or point to initialized memory.
 Whole-aggregate initialization is conservative, and runtime array bounds remain
 outside this pass. This narrows a concrete lowering gap without establishing
 whole-specified-core consistency, preservation or value correspondence.
+
+
+### Checked initialization invariants and all-path read safety
+
+`Initialization.lean` proves soundness of an executable invariant checker for
+finite local-read/write CFGs. Its `Reach` relation follows arbitrary CFG edges,
+including backedges, and applies writes without assuming reads are safe. The
+main theorem `accepted_reads_safe` derives read safety for every reachable block
+from `check = true`; it does not take successful execution or read safety as a
+premise. Within each action, reads precede writes, so assigning a call result
+cannot justify reading that result as an argument to the same call.
+
+The certificate supplies optional incoming facts per block. The checker requires
+entry facts to be contained in the initial set, checks each claimed-reachable
+block's reads and transfers, and requires each successor to exist, have facts,
+and receive only facts established by the predecessor. A `none` fact entry may
+hide a disconnected block, but cannot hide a reachable successor. `run_sound`
+relates abstract facts to every concrete initialized-local set covering them;
+`reachable_covered` propagates this invariant through all finite paths. The proof
+is independent of the producer's iteration order, termination strategy or budget.
+Examples check cycles, late/missing predecessor facts, read-before-write,
+invented entry facts and unreachable code. All new results are in the axiom audit.
+
+The production solver now consumes an explicit read/write projection built by
+`core_init`, rather than interpreting MIR reads separately from the observer.
+The same returned graph, initial set and computed facts are exported by the
+fresh-module test probe. The probe re-runs shared analysis on the retained,
+already validated MIR; it does not intercept the earlier validation invocation.
+This removes a duplicate test-only event interpretation.
+Projection traversal has an additional 1,000,000-work-unit cap before retaining
+the graph; this cost is also charged to the existing total analysis budget.
+
+`tests/core_initialization_proof.py` reads four actual exports (plain/ghost and
+both targets), requires identical projections/facts, and generates Lean theorems
+for each native function by applying `accepted_reads_safe`. The concrete checker
+premises are discharged by kernel reduction (`decide`), not an unchecked native
+oracle. The current corpus yields 13 functions and 112 blocks. Four additional
+kernel-checked rejections cover missing entry facts, invented initial facts,
+hidden successors and a fresh read/write in the same action. The bounded export
+parser generates only numeric/list syntax; generated theorem dependencies are
+audited. Both Python modes run in the graph-certificates CI check.
+
+**Exact trust boundary:** these are genuine all-path theorems about the exported
+local-event graphs, plus implementation-linked regression evidence. They are not
+a proof that every native compiler acceptance produces an accepted Lean invariant,
+or that native MIR-to-event projection preserves all reads/writes. Production
+compilation does not invoke Lean. The shared projection, exporter/parser, native
+compiler, external call ABI and backend remain trusted for the implementation
+connection. The exports are test observations, not authenticated certificates for
+arbitrary retained MIR snapshots. Heap initialization, live pointers, bounds,
+move/borrow discipline, runtime value preservation and whole-core consistency
+remain separate obligations. No full 0.6 soundness claim follows from this bridge.

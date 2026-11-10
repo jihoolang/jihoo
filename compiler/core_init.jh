@@ -6,6 +6,7 @@ import types
 
 const MAX_FACTS: i64 = 4000000
 const MAX_WORK: i64 = 64000000
+const MAX_PROJECTION: i64 = 1000000
 
 fn spend(inout left: i64, count: i64, sp: diag.Span) -> Result((), diag.Diag) {
     if count > left { return Err(diag.Diag.new(sp, "core MIR: initialization work limit reached")) }
@@ -18,51 +19,121 @@ fn read_local(state: Vec(bool), id: u32, sp: diag.Span) -> Result((), diag.Diag)
     Ok(())
 }
 
-fn read_place(
-    state: Vec(bool),
+// This is the exact local-read/write projection consumed by the solver and
+// exposed to the independent Lean invariant checker in integration tests.
+pub struct Action {
+    pub reads: Vec(u32)
+    pub writes: Vec(u32)
+    pub span: diag.Span
+}
+
+pub struct Block {
+    pub actions: Vec(Action)
+    pub successors: Vec(u32)
+}
+
+pub struct Analysis {
+    pub graph: Vec(Block)
+    pub initial: Vec(u32)
+    pub facts: Vec(Vec(bool))
+    pub reached: Vec(bool)
+}
+
+fn place_reads(
+    inout reads: Vec(u32),
     p: mir.Place,
     inout left: i64,
     sp: diag.Span
 ) -> Result((), diag.Diag) {
     spend(&left, 1, sp)?
-    read_local(state, p.local, sp)?
+    reads.push(p.local)
     for projection in p.proj {
         spend(&left, 1, sp)?
-        match projection { Index(i) => read_local(state, i, sp)?, _ => {} }
+        match projection { Index(i) => reads.push(i), _ => {} }
     }
     Ok(())
 }
 
-fn read_operand(
-    state: Vec(bool),
+fn operand_reads(
+    inout reads: Vec(u32),
     op: mir.Operand,
     inout left: i64,
     sp: diag.Span
 ) -> Result((), diag.Diag) {
     spend(&left, 1, sp)?
     match op {
-        Copy(p) | Move(p) => read_place(state, p, &left, sp)?
+        Copy(p) | Move(p) => place_reads(&reads, p, &left, sp)?
         Const(_) => {}
     }
     Ok(())
 }
 
-fn read_value(
-    state: Vec(bool),
+fn value_reads(
+    inout reads: Vec(u32),
     rv: mir.Rvalue,
     inout left: i64,
     sp: diag.Span
 ) -> Result((), diag.Diag) {
     match rv {
-        Use(a) | Cast(a, _, _) => read_operand(state, a, &left, sp)?
+        Use(a) | Cast(a, _, _) => operand_reads(&reads, a, &left, sp)?
         Bin(_, a, b) | Offset(a, b) => {
-            read_operand(state, a, &left, sp)?
-            read_operand(state, b, &left, sp)?
+            operand_reads(&reads, a, &left, sp)?
+            operand_reads(&reads, b, &left, sp)?
         }
-        Aggregate(_, ops) => for op in ops { read_operand(state, op, &left, sp)? }
+        Aggregate(_, ops) => for op in ops { operand_reads(&reads, op, &left, sp)? }
         _ => return Err(diag.Diag.new(sp, "core MIR: unsupported initialization rvalue"))
     }
     Ok(())
+}
+
+fn project(body: mir.Body, inout left: i64, sp: diag.Span) -> Result(Vec(Block), diag.Diag) {
+    var graph = Vec(Block).new()
+    for block in body.blocks {
+        var actions = Vec(Action).new()
+        var successors = Vec(u32).new()
+        for stmt in block.stmts {
+            spend(&left, 1, sp)?
+            let mir.Stmt.Assign(dest, rv, at) = stmt else { return Err(diag.Diag.new(
+                sp,
+                "core MIR: unsupported initialization statement"
+            )) }
+            var reads = Vec(u32).new()
+            var writes = Vec(u32).new()
+            value_reads(&reads, rv, &left, at)?
+            if dest.proj.len() == 0 { writes.push(dest.local) }
+            else { place_reads(&reads, dest, &left, at)? }
+            actions.push(Action { reads, writes, span: at })
+        }
+        spend(&left, 1, sp)?
+        var reads = Vec(u32).new()
+        var writes = Vec(u32).new()
+        var term_span = sp
+        match block.term {
+            Goto(next) => successors.push(next)
+            Switch(op, cases, otherwise) => {
+                operand_reads(&reads, op, &left, sp)?
+                successors.push(otherwise)
+                for c in cases { spend(&left, 1, sp)?; successors.push(c.block) }
+            }
+            Assert(op, _, next, at) => {
+                term_span = at
+                operand_reads(&reads, op, &left, at)?
+                successors.push(next)
+            }
+            Call(_, args, dest, next, at) => {
+                term_span = at
+                for op in args { operand_reads(&reads, op, &left, at)? }
+                writes.push(dest.local)
+                successors.push(next)
+            }
+            Return => reads.push(0)
+            Unreachable => {}
+            _ => return Err(diag.Diag.new(sp, "core MIR: unsupported initialization terminator"))
+        }
+        actions.push(Action { reads, writes, span: term_span })
+        graph.push(Block { actions, successors })
+    }
+    Ok(graph)
 }
 
 struct Flow {
@@ -96,7 +167,7 @@ impl Flow {
 
 // Precondition: core_mir's complete structural/type pass has succeeded. All
 // indices and forms below are checked there before this function is invoked.
-pub fn validate(body: mir.Body, sp: diag.Span) -> Result((), diag.Diag) {
+pub fn analyze(body: mir.Body, sp: diag.Span) -> Result(Analysis, diag.Diag) {
     let blocks = body.blocks.len()
     let locals = body.locals.len()
     if blocks == 0 || locals == 0 || locals > MAX_FACTS / blocks {
@@ -114,11 +185,17 @@ pub fn validate(body: mir.Body, sp: diag.Span) -> Result((), diag.Diag) {
         flow.reached.push(false)
         flow.queued.push(false)
     }
+    var projection_left = MAX_PROJECTION
+    let graph = project(body, &projection_left, sp)?
+    spend(&flow.left, MAX_PROJECTION - projection_left, sp)?
+    var initial = Vec(u32).new()
     var entry = Vec(bool).new()
     for i, local in body.locals {
         // Unit's return has no bytes; generated destructors return it without
         // assigning local zero. No non-unit return gets this exemption.
-        entry.push((i > 0 && i <= body.arg_count) || (i == 0 && local.ty == types.UNIT))
+        let initialized = (i > 0 && i <= body.arg_count) || (i == 0 && local.ty == types.UNIT)
+        entry.push(initialized)
+        if initialized { initial.push(i as u32) }
     }
     flow.edge(0, entry, sp)?
     while flow.pending.len() > 0 {
@@ -126,45 +203,19 @@ pub fn validate(body: mir.Body, sp: diag.Span) -> Result((), diag.Diag) {
         flow.queued[id] = false
         spend(&flow.left, locals + 1, sp)?
         var state = flow.inputs[id].clone()
-        let block = body.blocks[id]
-        for stmt in block.stmts {
-            spend(&flow.left, 1, sp)?
-            let mir.Stmt.Assign(dest, rv, at) = stmt else { return Err(diag.Diag.new(
-                sp,
-                "core MIR: unsupported initialization statement"
-            )) }
-            read_value(state, rv, &flow.left, at)?
-            if dest.proj.len() == 0 {
-                state[dest.local as i64] = true
-            } else {
-                // A projected store reads its base/index. It does not prove
-                // that the entire aggregate or any pointed-to allocation is initialized.
-                read_place(state, dest, &flow.left, at)?
-            }
+        let block = graph[id]
+        for action in block.actions {
+            spend(&flow.left, 1 + action.reads.len() + action.writes.len(), action.span)?
+            for local in action.reads { read_local(state, local, action.span)? }
+            for local in action.writes { state[local as i64] = true }
         }
-        spend(&flow.left, 1, sp)?
-        match block.term {
-            Goto(next) => flow.edge(next, state, sp)?
-            Switch(op, cases, otherwise) => {
-                read_operand(state, op, &flow.left, sp)?
-                flow.edge(otherwise, state, sp)?
-                for c in cases { flow.edge(c.block, state, sp)? }
-            }
-            Assert(op, _, next, at) => {
-                read_operand(state, op, &flow.left, at)?
-                flow.edge(next, state, at)?
-            }
-            Call(_, args, dest, next, at) => {
-                // Arguments are read before the normal-return edge writes the
-                // result, even when an argument aliases the destination local.
-                for op in args { read_operand(state, op, &flow.left, at)? }
-                state[dest.local as i64] = true
-                flow.edge(next, state, at)?
-            }
-            Return => read_local(state, 0, sp)?
-            Unreachable => {}
-            _ => return Err(diag.Diag.new(sp, "core MIR: unsupported initialization terminator"))
-        }
+        for next in block.successors { flow.edge(next, state, sp)? }
     }
+    let Flow { inputs, reached, .. } = move flow
+    Ok(Analysis { graph, initial, facts: inputs, reached })
+}
+
+pub fn validate(body: mir.Body, sp: diag.Span) -> Result((), diag.Diag) {
+    analyze(body, sp)?;
     Ok(())
 }
