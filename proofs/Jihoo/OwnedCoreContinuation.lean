@@ -1,10 +1,15 @@
-import Jihoo.LinearCoreCallers
+import Jihoo.OwnedLendContext
 
 /-! Declarative ownership rules on original Core graph nodes. The continuation
-slice has literal scalar return, direct free, and allocation binding. There is
-no accepted-callee or safe-trace premise. This is not whole-Core typing. -/
+slice has literal scalar return, direct free, allocation binding and
+compositional owned-result Lend. There is
+no accepted-callee or safe-trace premise. This is resource/ownership typing,
+not full scalar/dependent typing: reader Represents does not itself validate
+all numeric literal bounds. The outer OwnedLendTyping rule separately requires
+Graph.valid; neither judgment claims whole-Core typing. -/
 namespace Jihoo.OwnedCoreContinuation
 open HeapLeases ScopedLend LinearHeapPrograms LinearCoreCallers
+open OwnedLendContext
 
 inductive Allocation (g : Graph.Graph) (root value body : Nat) : Prop where
   | intro (function argument domain length payload : Nat) :
@@ -32,6 +37,10 @@ inductive Typed (g : Graph.Graph) : Context → Nat → Nat → Prop where
   | allocate : Allocation g root value body → value < 2^63 →
       Typed g (fresh ctx) (n + 1) body → Typed g ctx n root
 
+  | lend : Shape g root owner init body → ownerSlot g ctx owner = some slot → slot < n →
+      Graph.Represents g (readerRoles ctx slot) init reader →
+      Typed g (returnedContext ctx slot) (n + 1) body → Typed g ctx n root
+
 def freedState (s : State) (x : Nat) : State := { s with live := put s.live x false }
 
 inductive Runs (g : Graph.Graph) : Context → Nat → List Nat → State → Nat → List Event → State → Prop where
@@ -42,6 +51,13 @@ inductive Runs (g : Graph.Graph) : Context → Nat → List Nat → State → Na
   | allocate : Allocation g root payload body →
       Runs g (fresh ctx) body (s.nextObject :: owners) (allocatedState s payload) value events t →
       Runs g ctx root owners s value (.alloc s.nextObject payload :: events) t
+
+  | lend : Shape g root owner init body → ownerSlot g ctx owner = some slot →
+      Select owners slot x rest →
+      Graph.CoreReads g (opened s x) s.nextLease x (readerRoles ctx slot) init copied reads →
+      Runs g (returnedContext ctx slot) body (s.nextObject :: owners)
+        (OwnedLendTransfer.final s copied) value suffix t →
+      Runs g ctx root owners s value (OwnedLendTransfer.events s x copied reads ++ suffix) t
 
 theorem free_owns (owned : Owns s owners) (selected : Select owners slot x rest) :
     Owns (freedState s x) rest := by
@@ -74,6 +90,21 @@ theorem total (typed : Typed g ctx n root) (length : owners.length = n)
       obtain ⟨v, es, t, run⟩ := ih (by simp [length])
         (step_valid valid (Step.alloc (value := _))) (allocate_owns valid owned)
       exact ⟨v, _, t, .allocate shape run⟩
+  | lend shape resolved bound reading typed ih =>
+      have bound' := bound
+      rw [← length] at bound'
+      obtain ⟨x, rest, selected⟩ := select_total bound'
+      have active : (opened s x).lease s.nextLease = some x := by simp [opened, put]
+      have env : EnvValid (opened s x) [s.nextLease] := by
+        intro l member
+        have : l = s.nextLease := List.mem_singleton.mp member
+        subst l
+        exact ⟨x, active⟩
+      obtain ⟨copied, reads, run⟩ := reader_total (env := [s.nextLease]) reading.scoped env
+      obtain ⟨v, es, t, suffix⟩ := ih (by simp [length])
+        (OwnedLendTransfer.prefix_valid valid (owned.live _ selected.member) run)
+        (OwnedLendTransfer.transfer_owns valid owned)
+      exact ⟨v, _, t, .lend shape resolved selected (reading.execution active run) suffix⟩
 
 private theorem Allocation.application (a : Allocation g root v b) :
     ∃ f x, Graph.nodeAt g root = .app f x := by
@@ -88,10 +119,12 @@ theorem execution_safe (typed : Typed g ctx n root) (length : owners.length = n)
       | finish _ => exact ⟨.nil, valid, ⟨by simp, by simp, by simp⟩⟩
       | free other _ _ _ => have := shape.symm.trans other; contradiction
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
   | free shape resolved bound typed ih =>
       cases run with
       | finish other => have := shape.symm.trans other; contradiction
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
       | free other resolved' selected restRun =>
           have eq := shape.symm.trans other; cases eq
           have eq := resolved.symm.trans resolved'; cases eq
@@ -103,11 +136,32 @@ theorem execution_safe (typed : Typed g ctx n root) (length : owners.length = n)
       cases run with
       | finish other => obtain ⟨f, x, shape⟩ := a.application; have := shape.symm.trans other; contradiction
       | free other _ _ _ => obtain ⟨f, x, shape⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend b _ _ _ _ =>
+          obtain ⟨f, x, shape⟩ := a.application
+          obtain ⟨r, k, other⟩ := b.head
+          have := shape.symm.trans other; contradiction
       | allocate a' restRun =>
           obtain ⟨rfl, rfl⟩ := a.unique a'
           obtain ⟨steps, vt, ot⟩ := ih (by simp [length])
             (step_valid valid (Step.alloc (value := _))) (allocate_owns valid owned) restRun
           exact ⟨.cons .alloc steps, vt, ot⟩
+
+  | lend shape resolved bound reading typed ih =>
+      cases run with
+      | finish other => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+      | free other _ _ _ => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+      | allocate a _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.application
+          have := h.symm.trans other; contradiction
+      | lend shape' resolved' selected read suffix =>
+          obtain ⟨rfl, rfl, rfl⟩ := shape.unique shape'
+          have eq := resolved.symm.trans resolved'; cases eq
+          have reader := reading.reflect read
+          have pre := OwnedLendTransfer.prefix_steps valid (owned.live _ selected.member) reader
+          obtain ⟨steps, vt, ot⟩ := ih (by simp [length]) (steps_valid valid pre)
+            (OwnedLendTransfer.transfer_owns valid owned) suffix
+          exact ⟨steps_append pre steps, vt, ot⟩
 
 /-- Accounting follows the original graph execution, including allocations
 inside the continuation, rather than a separately supplied usage trace. -/
@@ -123,10 +177,12 @@ theorem release_conservation (typed : Typed g ctx n root) (length : owners.lengt
           simp [released, allocations]
       | free other _ _ _ => have := shape.symm.trans other; contradiction
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
   | free shape resolved bound typed ih =>
       cases run with
       | finish other => have := shape.symm.trans other; contradiction
       | allocate a _ => obtain ⟨f, x, other⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend a _ _ _ _ => obtain ⟨f, x, other⟩ := a.head; have := shape.symm.trans other; contradiction
       | free other resolved' selected restRun =>
           have eq := shape.symm.trans other; cases eq
           have eq := resolved.symm.trans resolved'; cases eq
@@ -139,10 +195,34 @@ theorem release_conservation (typed : Typed g ctx n root) (length : owners.lengt
       cases run with
       | finish other => obtain ⟨f, x, shape⟩ := a.application; have := shape.symm.trans other; contradiction
       | free other _ _ _ => obtain ⟨f, x, shape⟩ := a.application; have := shape.symm.trans other; contradiction
+      | lend b _ _ _ _ =>
+          obtain ⟨f, x, shape⟩ := a.application
+          obtain ⟨r, k, other⟩ := b.head
+          have := shape.symm.trans other; contradiction
       | allocate a' restRun =>
           obtain ⟨rfl, rfl⟩ := a.unique a'
           have hr := ih (by simp [length]) restRun
           simp only [released, allocations, List.filterMap_cons, List.count_cons] at *
+          omega
+
+  | lend shape resolved bound reading typed ih =>
+      cases run with
+      | finish other => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+      | free other _ _ _ => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+      | allocate a _ =>
+          obtain ⟨f, x, h⟩ := shape.head
+          obtain ⟨r, k, other⟩ := a.application
+          have := h.symm.trans other; contradiction
+      | lend shape' resolved' selected read suffix =>
+          obtain ⟨rfl, rfl, rfl⟩ := shape.unique shape'
+          have eq := resolved.symm.trans resolved'; cases eq
+          have reader := reading.reflect read
+          have hr := ih (by simp [length]) suffix
+          have ha := reader_allocations reader
+          have hf := reader_releases reader
+          simp only [released, allocations] at ha hf
+          simp [OwnedLendTransfer.events, released, allocations, List.filterMap_append,
+            ha, hf, List.count_cons] at *
           omega
 
 theorem no_tracked_leaks (typed : Typed g ctx n root) (length : owners.length = n)
@@ -159,13 +239,52 @@ theorem no_tracked_leaks (typed : Typed g ctx n root) (length : owners.length = 
   have count := (releases_distinct valid steps).count (a := x)
   exact ⟨by simpa [member] using count, released_dead valid steps (released_mem.mp member)⟩
 
-/-- Neither allocation nor free changes an ambient lease or its counter. -/
-theorem lease_frame (run : Runs g ctx root owners s v es t) :
-    t.lease = s.lease ∧ t.nextLease = s.nextLease := by
+/-- Number of lexical reader entries in the actual heap event trace. -/
+def leaseStarts (events : List Event) : Nat :=
+  (events.filterMap fun e => match e with | .beginLease _ _ => some () | _ => none).length
+
+theorem leaseStarts_append : leaseStarts (xs ++ ys) = leaseStarts xs + leaseStarts ys := by
+  simp [leaseStarts, List.filterMap_append]
+
+private theorem CoreReads.no_lease_starts (run : Graph.CoreReads g s token owner ctx root v es) :
+    leaseStarts es = 0 := by
+  induction run <;> simp_all [leaseStarts, List.filterMap_append]
+
+theorem lease_counter (run : Runs g ctx root owners s v es t) :
+    t.nextLease = s.nextLease + leaseStarts es := by
   induction run with
-  | finish => exact ⟨rfl, rfl⟩
+  | finish => simp [leaseStarts]
+  | free _ _ _ _ ih => simpa [leaseStarts, freedState] using ih
+  | allocate _ _ ih => simpa [leaseStarts, allocatedState] using ih
+  | lend _ _ _ read _ ih =>
+      have hr := CoreReads.no_lease_starts read
+      simp only [leaseStarts] at hr
+      simp [OwnedLendTransfer.events, leaseStarts, List.filterMap_append, hr,
+        OwnedLendTransfer.final, allocatedState, restored] at *
+      omega
+
+/-- Completed nested lends restore every ambient lease; fresh token counters
+may advance, but never move backwards. -/
+theorem lease_frame (run : Runs g ctx root owners s v es t) :
+    t.lease = s.lease ∧ s.nextLease ≤ t.nextLease := by
+  induction run with
+  | finish => exact ⟨rfl, Nat.le_refl _⟩
   | free _ _ _ _ ih => exact ih
   | allocate _ _ ih => exact ih
+  | lend _ _ _ _ _ ih =>
+      refine ⟨ih.1, ?_⟩
+      have h := ih.2
+      dsimp [OwnedLendTransfer.final, allocatedState, restored] at h
+      omega
+
+/-- Every token created during this execution is expired at return. This
+covers all recursively nested reader scopes, not just the outermost one. -/
+theorem created_tokens_expired (valid : Valid s) (run : Runs g ctx root owners s v es t)
+    (fresh : s.nextLease ≤ token) : t.lease token = none := by
+  rw [(lease_frame run).1]
+  cases h : s.lease token with
+  | none => rfl
+  | some x => have := (valid.leased token x h).1; omega
 
 /-- If the initial capability environment covers every live object, every
 final object is dead. Ambient objects outside that environment are not owned. -/
@@ -198,6 +317,9 @@ theorem Typed.free_inversion (typed : Typed g ctx n root)
   | allocate a _ _ =>
       obtain ⟨f, x, other⟩ := a.application
       have := shape.symm.trans other; contradiction
+  | lend a _ _ _ _ =>
+      obtain ⟨f, x, other⟩ := a.head
+      have := shape.symm.trans other; contradiction
 
 theorem Typed.finish_inversion (typed : Typed g ctx n root)
     (shape : Graph.nodeAt g root = .integer value) : n = 0 ∧ value < 2^63 := by
@@ -209,6 +331,9 @@ theorem Typed.finish_inversion (typed : Typed g ctx n root)
   | allocate a _ _ =>
       obtain ⟨f, x, other⟩ := a.application
       have := shape.symm.trans other; contradiction
+  | lend a _ _ _ _ =>
+      obtain ⟨f, x, other⟩ := a.head
+      have := shape.symm.trans other; contradiction
 
 /-- A consumed lexical name cannot be freed again, including a second alias
 of the same original capability. -/
@@ -218,5 +343,21 @@ theorem dead_owner_rejected (shape : Graph.nodeAt g root = .free owner body)
   obtain ⟨slot, resolved, _⟩ := typed.free_inversion shape
   rw [dead] at resolved
   contradiction
+
+theorem Typed.lend_inversion (typed : Typed g ctx n root)
+    (shape : Shape g root owner init body) :
+    ∃ slot reader, ownerSlot g ctx owner = some slot ∧ slot < n ∧
+      Graph.Represents g (readerRoles ctx slot) init reader ∧
+      Typed g (returnedContext ctx slot) (n + 1) body := by
+  cases typed with
+  | finish other _ => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+  | free other _ _ _ => obtain ⟨f, x, h⟩ := shape.head; have := h.symm.trans other; contradiction
+  | allocate a _ _ =>
+      obtain ⟨f, x, h⟩ := shape.head
+      obtain ⟨r, k, other⟩ := a.application
+      have := h.symm.trans other; contradiction
+  | lend shape' resolved bound reading rest =>
+      obtain ⟨rfl, rfl, rfl⟩ := shape.unique shape'
+      exact ⟨_, _, resolved, bound, reading, rest⟩
 
 end Jihoo.OwnedCoreContinuation

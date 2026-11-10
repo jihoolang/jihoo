@@ -767,6 +767,10 @@ and reported as full-language soundness.
    lease expiry, invariant preservation, no double free and a nested-reader
    payload frame theorem. Exact free-event observations connect checked quantity
    traces to actual deallocation, conditional on authentic trace projection.
+   Direct graph ownership typing now composes owned-result Lends with
+   allocation/free rules across multiple live capabilities. Selected-owner
+   lexical authority, fresh-result transfer and exact resource accounting are
+   derived in the same recursive judgment; active-reader nesting remains open.
    Whole-Core typing must still establish lease authority/non-escape and the
    transition preconditions; recursive heap fields and native simulation remain
    open. This does not add checker-implementation refinement as a release gate.

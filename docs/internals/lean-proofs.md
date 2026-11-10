@@ -3229,3 +3229,55 @@ release orders, and extra nested reader allocations. Active-address tracking
 checks distinct live allocations even when payloads match. Six exact-diagnostic
 rejections cover duplication, omission and borrow escape. The broader native
 variants are regression evidence rather than extra formal coverage.
+
+### Compositional Lends in the same ownership judgment
+
+`OwnedCoreContinuation.Typed` and its existing independent `Runs` relation now
+include the owned-result Lend rule itself. A continuation may lend any live
+capability, including a non-newest owner or a previous reader result, and then
+continue with further Lends, allocations and frees. The totality, primitive
+step safety, exact release conservation and no-leak proofs all recurse through
+this same rule. This is not a new separately accepted execution wrapper.
+
+`OwnedLendContext` retains the original Lend/reader/continuation constructor
+edges. Its reader context authorizes the selected capability's aliases only;
+unrelated live owners and consumed lexical names cannot be borrowed using this
+reader's token. The bound borrow is a separate lexical slot. The returned
+context prepends the returned-original alias and the fresh result, shifts the
+old capability slots, and proves that every old lexical name still resolves to
+the same allocation identity. Consuming the returned original clears all its
+older aliases without clearing the fresh result or unrelated owners.
+
+The selected owner remains in the capability environment; lending does not
+consume it. The reader adds one fresh capability, then the recursive
+continuation must account for all old and new resources. The operational return
+rule still permits unused capabilities, so their exclusion follows from typing
+rather than a built-in safety condition on execution. No whole-Core checker
+refinement or `Graph.Accepted` premise is introduced.
+
+Lease-map framing remains exact, but the former unchanged-counter theorem is
+no longer true for a continuation containing Lends. `lease_counter` instead
+proves the exact increment equals the number of lease-opening events in the
+execution. Every token created during these recursive continuations is absent
+at return. The older outer-Lend theorem now guarantees an advanced counter, not
+the false statement that exactly one token was created.
+
+Formal examples select the non-newest original and the fresh prior result,
+prove concrete alias identities, reject reading through an unrelated owner,
+and derive all-run final heap emptiness. Native normal/-O tests each cover
+16 variants and 128 O0/O2 lifecycles, with three precisely diagnosed invalid
+programs. They also test free/allocation churn before a subsequent Lend and
+check unchanged unrelated payloads and simultaneous live-address disjointness.
+Native loads/arithmetic and richer input values remain regression evidence.
+
+**Scope:** the standalone continuation judgment is resource/ownership typing,
+not a complete scalar/dependent typing judgment. Reader `Represents` alone does
+not validate numeric literal bounds; the outer `OwnedLendTyping` rule separately
+requires `Graph.valid`. These resource theorems cannot replace source typing.
+Lends recurse through continuations. Their heap regions are
+sequential: the current reader closes before its continuation starts. This is
+not simultaneous nested lending inside an active reader. Readers still use
+the existing scalar initializer and allocate one Buffer1. General reader
+effects, recursive fields/data, `Back`, larger buffer extents, full dependent
+typing and native lowering remain outside these statements. This expands the
+same typing-to-runtime connection but does not complete the principal blocker.
