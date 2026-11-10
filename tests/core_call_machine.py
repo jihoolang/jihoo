@@ -57,7 +57,14 @@ def parse(payload):
     return functions
 
 
-def lower(functions):
+def lower(functions, *, fact_budget=500_000):
+    # Charge every materialized snapshot, including repeated references and
+    # copies with no new writes. This budget is shared across all functions.
+    def spend_facts(count):
+        nonlocal fact_budget
+        require(count <= fact_budget, 'expanded fact storage limit exceeded')
+        fact_budget -= count
+
     require(max(f['id'] for f in functions) < 128, 'function table limit exceeded')
     result = []
     by_id = {f['id']: f for f in functions}
@@ -78,14 +85,19 @@ def lower(functions):
         require(total <= 50000, 'expanded instruction limit exceeded')
         code, facts = [], []
         for bi, b in enumerate(f['blocks']):
-            state = copy.deepcopy(f['facts'][bi])
+            incoming = f['facts'][bi]
+            if incoming is not None:
+                spend_facts(len(incoming))
+            state = copy.deepcopy(incoming)
             control = b['control']
             prefix = b['actions'] if control[0] == 'atomic' else b['actions'][:-1]
             for reads, writes in prefix:
                 pc = len(code)
                 code.append(f'({pc}, .action ⟨{nums(reads)}, {nums(writes)}⟩ {pc + 1})')
                 facts.append(state)
-                state = None if state is None else writes + state
+                if state is not None:
+                    spend_facts(len(writes) + len(state))
+                    state = writes + state
             pc = len(code)
             facts.append(state)
             if control[0] == 'call':
@@ -109,7 +121,92 @@ def lower(functions):
     return result
 
 
-def definition(functions):
+def resource_controls():
+    def fixture(actions, initial=None, ident=0):
+        return dict(id=ident, parameters=0, unit_return=False,
+                    facts=[[] if initial is None else initial],
+                    blocks=[dict(actions=actions, control=('atomic',), successors=[])])
+
+    def rejected(functions, budget=500_000):
+        try:
+            lower(functions, fact_budget=budget)
+        except ValueError as error:
+            require(str(error) == 'expanded fact storage limit exceeded',
+                    'fact budget rejected for the wrong reason')
+        else:
+            require(False, 'fact expansion exceeded its cumulative budget')
+
+    # Three repeated writes retain snapshots of sizes 0, 1, 2, 3. Count every
+    # retained occurrence even when input objects are shared.
+    action = ([], [1])
+    tiny = fixture([action] * 3)
+    accepted = lower([tiny], fact_budget=6)
+    require([len(x) for x in accepted[0]['facts']] == [0, 1, 2, 3],
+            'exact-budget positive control changed snapshots')
+    rejected([tiny], 5)
+    definition(accepted, fact_budget=6)
+    try:
+        definition(accepted, fact_budget=5)
+    except ValueError as error:
+        require(str(error) == 'serialized fact storage limit exceeded',
+                'serialization budget rejected for the wrong reason')
+    else:
+        require(False, 'serialization exceeded its cumulative budget')
+
+    class NoSerialize(list):
+        def __iter__(self):
+            raise AssertionError('budget checked after fact serialization')
+
+    try:
+        definition([dict(facts=[NoSerialize([1, 2])])], fact_budget=1)
+    except ValueError as error:
+        require(str(error) == 'serialized fact storage limit exceeded',
+                'serialization preflight rejected for the wrong reason')
+    else:
+        require(False, 'serialization preflight did not reject')
+    rejected([fixture([action] * 2), fixture([action] * 2, ident=1)], 5)
+    blocks = fixture([action] * 2)
+    blocks['blocks'] *= 2
+    blocks['facts'] = [[], []]
+    rejected([blocks], 5)
+    # Even unchanged snapshots incur copying/retention cost.
+    repeated = fixture([([], [])] * 2, initial=[1, 2])
+    lower([repeated], fact_budget=6)
+    rejected([repeated], 5)
+    # This compact graph is far below both input-cell and instruction limits,
+    # but would expand to 1,125,750 fact cells without the new cumulative cap.
+    rejected([fixture([action] * 1500)])
+
+    class NoCopy(list):
+        def __deepcopy__(self, memo):
+            raise AssertionError('budget checked after incoming allocation')
+
+    rejected([fixture([action], initial=NoCopy([1, 2]))], 1)
+
+    class Writes(list):
+        additions = 0
+
+        def __add__(self, other):
+            self.additions += 1
+            require(self.additions <= 2, 'budget checked after concatenation')
+            return super().__add__(other)
+
+    writes = Writes([1])
+    rejected([fixture([([], writes)] * 3)], 5)
+    require(writes.additions == 2, 'concatenation guard was not exercised')
+    unreachable = fixture([action] * 3)
+    unreachable['facts'] = [None]
+    require(lower([unreachable], fact_budget=0)[0]['facts'] == [None] * 4,
+            'unreachable facts unexpectedly allocated cells')
+
+
+def definition(functions, *, fact_budget=500_000):
+    # Recheck before producing Lean strings, even if a caller bypasses lower().
+    for function in functions:
+        for facts in function['facts']:
+            if facts is not None:
+                require(len(facts) <= fact_budget, 'serialized fact storage limit exceeded')
+                fact_budget -= len(facts)
     entries = []
     for f in functions:
         facts = '[' + ','.join('none' if x is None else 'some ' + nums(x) for x in f['facts']) + ']'
@@ -119,6 +216,7 @@ def definition(functions):
 
 
 def test(compiler, probe, folder):
+    resource_controls()
     if probe is None:
         probe = folder / 'call-machine-probe'
         success(command([*compiler, 'build', '-O0', '-I', 'compiler',
@@ -178,7 +276,7 @@ def test(compiler, probe, folder):
                 'unexpected call proof axiom')
     print(f'call machine: 4 native exports, {len(observed)} functions, {len(calls)} internal calls; '
           f'{sum(len(f["code"]) for f in functions)} instructions kernel-checked; '
-          'recursive stack safety and 4 metadata rejections')
+          'recursive stack safety, 4 metadata rejections and cumulative fact-budget controls')
 
 
 def main():

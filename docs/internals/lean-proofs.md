@@ -2456,7 +2456,14 @@ metadata mutations reject; Lean examples independently reject missing callees,
 wrong arities, uninitialized caller locals and absent return values. Concrete
 call/return examples distinguish saved caller values from callee-local values.
 Both Python modes run in `graph-certificates` CI with explicit failures, bounds
-on observed/expanded work and an axiom audit.
+on observed/expanded work and an axiom audit. Expansion additionally charges a
+global 500,000-cell budget before each incoming-fact copy or write concatenation.
+The budget counts repeated snapshots, including empty-write copies, across all
+functions; an instruction-count bound alone would permit quadratic retained facts.
+Serialization independently preflights the same cumulative cell limit before
+constructing Lean strings.
+Regression controls test the exact boundary, cross-function accumulation, repeated
+references and rejection before allocation.
 
 **Boundary:** this is an interprocedural safety theorem for the stated machine,
 not a native MIR simulation proof. The observer rejects projected call arguments;
