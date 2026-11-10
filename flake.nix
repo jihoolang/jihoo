@@ -240,6 +240,8 @@
               root = ./.;
               fileset = lib.fileset.unions [
                 sources
+                ./scripts/verified_core.py
+                ./proofs/VerifyCore.lean
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/CheckGraph.lean
