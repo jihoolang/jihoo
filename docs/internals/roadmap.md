@@ -663,6 +663,11 @@ until the core replaces it. 0.5.0 requires:
 For 0.6, complete and stabilize the dependent-type kernel first, then
 mechanize its soundness, starting from that specification:
 
+The [current gap assessment](0.6-proof-status.md) identifies the principal
+remaining blocker: a common specified typing-to-runtime ownership theorem.
+Scoped metatheorems and passing implementation tests must not be added together
+and reported as full-language soundness.
+
 1. **Dependent-type stabilization.** Started: pure normalization retains
    dependent elimination and view motives on symbolic branches, while runtime
    lowering still distributes data cases. The core examples and preservation
