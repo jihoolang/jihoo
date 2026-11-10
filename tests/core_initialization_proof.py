@@ -41,15 +41,19 @@ def decode(payload):
         fields = line.split('\t')
         kind = fields[0]
         if kind == 'function':
-            require(len(fields) == 2 and current is None, 'invalid function boundary')
+            require(len(fields) == 4 and current is None, 'invalid function boundary')
             ident = number(fields[1])
             require(ident not in seen and len(functions) < 128, 'duplicate/excess functions')
             seen.add(ident)
-            current = {'id': ident, 'blocks': [], 'facts': []}
+            require(fields[3] in ('0', '1'), 'invalid return representation')
+            current = {'id': ident, 'parameters': number(fields[2]),
+                       'unit_return': fields[3] == '1', 'blocks': [], 'facts': []}
         elif kind == 'initial':
             require(current is not None and len(fields) == 2 and 'initial' not in current,
                     'invalid initial facts')
             current['initial'] = numbers(fields[1])
+            expected = ([0] if current['unit_return'] else []) + list(range(1, current['parameters'] + 1))
+            require(current['initial'] == expected, 'initial facts disagree with authentic frame')
         elif kind == 'facts':
             require(current is not None and 'initial' in current and len(fields) == 3,
                     'invalid block facts')
@@ -107,7 +111,25 @@ def lean_definition(name, function, accepted):
     else:
         source += (f'theorem {name} : check {name}_g {name}_initial {name}_cert = false '
                    ':= by decide\n')
-    return source + f'#print axioms {name}\n'
+    source += f'#print axioms {name}\n'
+    if accepted:
+        result_arg = '(unitValue : α) ' if function['unit_return'] else ''
+        result = '(some unitValue)' if function['unit_return'] else 'none'
+        source += (
+            f'theorem {name}_frame {{α : Type}} (arguments : List α) {result_arg}'
+            f'(arity : arguments.length = {function["parameters"]}) '
+            '(operation : Store.Operation α) (pc : Nat) (memory : Store.Memory α) (b : Block) '
+            f'(reach : Store.ValueReach {name}_g (Store.enter {result} arguments) pc memory) '
+            f'(member : (pc, b) ∈ {name}_g) : '
+            'Store.execute operation b.actions memory ≠ .uninitialized := by\n'
+            f'  have entry : Store.entryFacts {result} arguments = {name}_initial := by\n'
+            '    simp only [Store.entryFacts, arity]\n'
+            '    rfl\n'
+            f'  apply Store.accepted_frame_no_uninitialized (cert := {name}_cert) _ reach member\n'
+            '  rw [entry]\n'
+            '  decide\n'
+            f'#print axioms {name}_frame\n')
+    return source
 
 
 def test(compiler, probe, folder):
@@ -116,16 +138,34 @@ def test(compiler, probe, folder):
         success(command([*compiler, 'build', '-O0', '-I', 'compiler',
                          'tests/core_call_entry_probe.jh', '-o', probe], cwd=ROOT))
     exports = []
+    payloads = []
     for ghost in (False, True):
         path = folder / f'initialization-{ghost}.jh'
         path.write_text(program(ghost))
         for target in ('x86_64', 'aarch64'):
-            exports.append(decode(success(command([probe, path, target, 'init-certificate']))))
+            payload = success(command([probe, path, target, 'init-certificate']))
+            payloads.append(payload)
+            exports.append(decode(payload))
     require(all(export == exports[0] for export in exports),
             'target or ghosts changed production initialization projection/facts')
+    # Keep graph/facts intact while changing only authentic frame descriptors.
+    lines = payloads[0].decode('ascii').splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith('function\t'))
+    for field in (2, 3):
+        changed = lines.copy()
+        descriptor = changed[first].split('\t')
+        descriptor[field] = str(int(descriptor[field]) + 1) if field == 2 else str(1 - int(descriptor[field]))
+        changed[first] = '\t'.join(descriptor)
+        try:
+            decode(('\n'.join(changed) + '\n').encode('ascii'))
+        except ValueError as error:
+            require(str(error) == 'initial facts disagree with authentic frame',
+                    'frame mutation failed for the wrong reason')
+        else:
+            require(False, 'changed frame descriptor was accepted')
     functions = exports[0]
     require(len(functions) >= 8, 'vacuous native graph export')
-    source = ('import Jihoo.Initialization\nopen Jihoo.Initialization\n'
+    source = ('import Jihoo.InitializationStore\nopen Jihoo.Initialization\n'
               'set_option maxRecDepth 100000\nset_option maxHeartbeats 20000000\n')
     for i, function in enumerate(functions):
         source += lean_definition(f'native_cfg_{i}', function, True)
@@ -149,7 +189,7 @@ def test(compiler, probe, folder):
     tampered.append(bad)
     for i, bad in enumerate(tampered):
         source += lean_definition(f'rejected_cfg_{i}', bad, False)
-    success(subprocess.run(['lake', 'build', 'Jihoo.Initialization'], cwd=ROOT / 'proofs',
+    success(subprocess.run(['lake', 'build', 'Jihoo.InitializationStore'], cwd=ROOT / 'proofs',
                            capture_output=True, timeout=180))
     path = folder / 'NativeInitialization.lean'
     path.write_text(source)
@@ -157,13 +197,14 @@ def test(compiler, probe, folder):
                                     cwd=ROOT / 'proofs', capture_output=True, timeout=300)).decode()
     entries = re.findall(r'depends on axioms: \[([^\]]*)\]', result)
     closed = re.findall(r'does not depend on any axioms', result)
-    require(len(entries) + len(closed) == len(functions) + len(tampered), 'missing proof audit')
+    require(len(entries) + len(closed) == 2 * len(functions) + len(tampered), 'missing proof audit')
     for entry in entries:
         require(set(filter(None, re.split(r'[,\s]+', entry))) <=
                 {'propext', 'Quot.sound', 'Classical.choice'}, 'unexpected proof axiom')
     count = sum(len(f['blocks']) for f in functions)
     print(f'initialization proof bridge: 4 native exports; {len(functions)} functions, '
-          f'{count} blocks; kernel-checked all-path safety and {len(tampered)} tamper rejections')
+          f'{count} blocks; kernel-checked all-path safety, concrete local-read fault exclusion, '
+          f'and {len(tampered)} graph / 2 frame tamper rejections')
 
 
 def main():

@@ -2362,3 +2362,60 @@ connection. The exports are test observations, not authenticated certificates fo
 arbitrary retained MIR snapshots. Heap initialization, live pointers, bounds,
 move/borrow discipline, runtime value preservation and whole-core consistency
 remain separate obligations. No full 0.6 soundness claim follows from this bridge.
+
+
+### Concrete local stores and by-value entry
+
+`InitializationStore.lean` connects the initialized-fact checker to a value-level
+partial local store (`Nat → Option α`). `readMany` looks up actual values in read
+order; `writeMany` writes the supplied result values in destination order and
+rejects a result-vector arity mismatch. `execute` distinguishes normal completion,
+uninitialized-local lookup, operation traps and malformed results. Reads happen
+before writes, including when a call argument and result use the same local.
+
+Operation choices are indexed by instruction position and may differ on every
+block execution. Thus the result does not assume that heap-dependent operations
+are pure, or that two equal read/write footprints compute the same value. Normal
+block steps define `ValueReach`; a reachable next block is allowed to fail.
+`accepted_no_uninitialized` proves its failure cannot be an uninitialized-local
+lookup when the graph checker accepts. This is not the tautology that a completed
+execution has already succeeded. `execution_sound` additionally preserves coverage
+of the outgoing facts on normal results. Traps and malformed-result outcomes remain
+possible, and explicit examples preserve that distinction.
+
+`enter` constructs a by-value callee store with its optional return value at zero,
+parameters at `1..n`, and absent locals elsewhere. `enter_covers` derives entry
+coverage from that construction; `accepted_frame_no_uninitialized` combines it
+with the concrete execution theorem without an assumed entry-coverage witness.
+`call_entry_lookup` relates this store to the earlier `CallEntry` packed node and
+capture layout. The store model describes distinct local cells, not disjoint heap
+objects: copied pointer values may alias the same allocation.
+
+The production MIR gate now explicitly rejects `Borrow`/`Owned` parameter-passing
+flags and reference-result metadata. `core_lower` emits only `ParamPass.Value` and
+`returns_ref = false`. This matters because the LLVM backend gives borrow modes
+special attributes and may use an owned aggregate's incoming storage directly,
+whereas the local-store model uses by-value local cells. The new regressions change
+only those descriptors while retaining valid types, counts and layouts. Source
+owned buffers and lists remain supported: this path implements their ownership
+through Core checking and explicit operations, not legacy MIR `Owned` flags.
+
+The real-Core bridge now also kernel-checks a concrete no-local-read-fault theorem
+for each exported graph, universally quantified over entry values and operation
+choices. The observer also records the retained MIR frame's argument count and
+unit-return flag; the parser requires the initial facts to agree exactly with
+those descriptors. Each generated theorem uses `enter` with an argument list of
+that length, deriving coverage rather than assuming initialized storage.
+Both the earlier graph theorem and the new concrete theorem are dependency-audited
+for each of the 13 functions/112 blocks, in both Python modes. Operational examples
+cover absent reads, read ordering, repeated writes, position-sensitive operations,
+packed captures and loops, and demonstrate that traps and bad result arities are
+not ruled out by initialization checking.
+
+**Boundary:** this proves exclusion of the specific `None` local-lookup fault in
+the stated partial-store semantics. Opaque values may still represent invalid
+pointers or other semantically invalid values; no LLVM poison/undef, heap, bounds,
+borrow, arithmetic or general value-validity theorem follows. The native ABI-mode
+guard is tested implementation evidence, not a proof of LLVM frame copying. Native
+MIR/event projection, native checker refinement and whole-core consistency remain
+unproved. The theorem does not assert that execution terminates or avoids traps.

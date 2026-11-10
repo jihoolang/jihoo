@@ -285,6 +285,16 @@ pub fn validate(p: mir.Program) -> Result((), diag.Diag) {
         if f.pass.len() != f.sig.params.len() || f.variadic || f.sig.variadic {
             return Err(diag.Diag.new(f.span, "core MIR: invalid parameter signature"))
         }
+        for mode in f.pass {
+            if mode != mir.ParamPass.Value { return Err(diag.Diag.new(
+                f.span,
+                "core MIR: unsupported parameter passing mode"
+            )) }
+        }
+        if f.returns_ref { return Err(diag.Diag.new(
+            f.span,
+            "core MIR: unsupported reference result"
+        )) }
         known(valid, f.sig.ret, f.span)?
         for t in f.sig.params { known(valid, t, f.span)? }
         let Some(body) = f.body else { continue }

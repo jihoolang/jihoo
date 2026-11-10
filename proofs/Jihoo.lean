@@ -139,3 +139,5 @@ import Jihoo.OwnershipLoweringExamples
 import Jihoo.CallEntryExamples
 
 import Jihoo.InitializationExamples
+
+import Jihoo.InitializationStoreExamples
