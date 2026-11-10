@@ -1370,3 +1370,9 @@ The open scalar-let boundary now reuses the existing pure Raw typed substitution
 and strict reduction theorems inside the common ownership execution. This
 connects actual lexical scalar arguments and continuation values, but does not
 add dependent owned-function substitution or higher-order termination.
+
+Immediate Buffer1 function application now transfers existing owner authority
+into a linear formal parameter in that same judgment. All old aliases are
+invalidated, unlike the aliases intentionally retained by Lend. This closes a
+concrete missing application rule, not dependent owned substitution or the
+remaining common-Core/lowering gates.

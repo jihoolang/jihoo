@@ -162,3 +162,5 @@ import Jihoo.CompositionalLendExamples
 import Jihoo.MixedLendExamples
 
 import Jihoo.PureOwnedExamples
+import Jihoo.OwnedArgumentExecution
+import Jihoo.OwnedArgumentExamples

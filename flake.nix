@@ -335,6 +335,8 @@
               python3 -O tests/core_mixed_lend.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_pure_owned.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_pure_owned.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_owned_binding.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_owned_binding.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
