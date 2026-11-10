@@ -248,6 +248,7 @@
                 ./proofs/CheckArtifact.lean
                 ./proofs/CheckMixedProof.lean
                 ./proofs/CheckMixedRaw.lean
+                ./proofs/CheckScalarCaller.lean
                 ./proofs/CheckLinearCaller.lean
                 ./proofs/CheckScopedLend.lean
                 ./proofs/CheckTyping.lean
@@ -282,6 +283,8 @@
             python3 -O tests/verified_core.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_linear_graph.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_linear_graph.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_scoped_graph.py --compiler ${jihoo}/bin/jihoo
@@ -328,6 +331,8 @@
               python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_lease_erasure.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_lease_erasure.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_scalar_callers.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_scalar_callers.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_linear_heap.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_linear_heap.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_scoped_lend.py --compiler ${jihoo}/bin/jihoo

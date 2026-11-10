@@ -2993,3 +2993,57 @@ of allocation-failure behavior, finite-width arithmetic, address reuse, general
 recursive heap fields or unrestricted source Lends. Exporter/JSON association
 remains trusted. The original roadmap's broader erasure/lowering obligations
 remain open; optional checker implementation refinement is still not required.
+
+### Scalar results through owned caller bindings
+
+`ScalarCoreCallers.lean` separates three lexical binding roles that cannot be
+conflated: a live owner (indexed in the compact capability list), a scalar
+(indexed in a separate result-value list), and a consumed-owner tombstone.
+Allocating an owner shifts only ownership indices. A consuming call removes
+that owner, retains its lexical tombstone, and prepends the actual callee result
+to the scalar environment, shifting existing scalar indices. Thus allocating
+between calls cannot change which earlier scalar result a lexical name denotes.
+The return fragment admits a literal or a scalar variable, not an owner/dead
+binding reinterpreted as an integer.
+
+This is a result-bearing extension of the original constructor caller fragment,
+not a claim that the earlier heap-only relation already preserved return values.
+Recognition follows the original App/Lam/Alloc and admitted Lend-callee edges.
+The ownership projection continues to use the preceding linear heap model;
+the result-bearing source and lease-free target additionally carry scalar values.
+Tests distinguish returning the first, middle and latest callee result after
+further allocations and calls, including a callee returning 99 when its owner
+payload was 11. That case prevents accidentally treating a saved result as a
+reload of the consumed owner's payload.
+
+The graph exporter and JSON association remain trusted. The fragment still
+excludes general arithmetic/control flow, recursive heap fields, allocation
+failure and general caller inputs. Native signed-value/lifecycle regressions
+are implementation evidence, not a proof of mathematical-Nat/machine-I64
+representation, pure-Core evaluation or MIR CFG/native simulation. O2 may remove
+balanced allocations; proof-level ownership traces are not physical counts.
+
+`fresh_scalarBindings` and `consumed_scalarBindings` preserve concrete old scalar
+values, not merely context lengths; `ownerBinding_identity` separately connects
+original owner variables to selected allocation identities. `Checked.forget`
+and `Runs.forget` retain the existing ownership/no-leak obligations. Successful
+recognition implies both successful target lowering and a complete execution.
+`program_forward` preserves the returned scalar, ordered common observations and
+erased final heap. Independent target determinism plus source totality gives
+`accepted_target_reflect` for every complete target run, with the **same final
+returned value** in the original constructor execution. `accepted_source_total`, `accepted_forward` and
+`accepted_source_result_unique` also expose source totality, every-source-run
+forward correspondence and uniqueness of the returned scalar.
+`accepted_target_safe`
+retains empty final heaps and exactly-once freeing. The common read observation
+is still payload-only, with read-owner identity supplied by the separate
+callee/selection proofs from the preceding erasure stage.
+
+`CheckScalarCaller.lean` consumes the existing bounded original-graph snapshot;
+no additional native constructor is approximated. Native scalar caller tests
+cover older/middle/latest and constant returns, signed extremes, allocation
+insertion, changed callee results and exact diagnostics for live/dead owner
+returns and scalar-as-owner misuse. Graph tests separately forge role indices,
+annotations, callee shapes, rooted bounds and malformed snapshots. Both Python
+modes run in CI. These proofs close the earlier final-caller-result omission
+only for this finite literal/scalar-variable return fragment.
