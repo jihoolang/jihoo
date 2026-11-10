@@ -11,25 +11,26 @@
 
       version = "0.5.0";
 
-      # Only what the compiler needs, so that editing the website (or docs)
-      # does not rebuild it.
-      sources = lib.fileset.unions [
+      # Stage 1/2 compile compiler/main.jh and install lib/. Tests and
+      # examples belong only to testSrc: editing them must not bootstrap
+      # the compiler again.
+      compilerSources = lib.fileset.unions [
         ./compiler
         ./lib
-        ./examples
-        ./tests
       ];
-      src = lib.fileset.toSource {
+      compilerSrc = lib.fileset.toSource {
         root = ./.;
-        fileset = sources;
+        fileset = compilerSources;
       };
+
+      testSources = lib.fileset.unions [ compilerSources ./examples ./tests ];
 
       # The tests also read the pages they check against the compiler. Editing
       # these reruns the tests, and does not rebuild the compiler.
       testSrc = lib.fileset.toSource {
         root = ./.;
         fileset = lib.fileset.unions [
-          sources
+          testSources
           ./scripts/benchmark_compile.py
           ./docs/internals/core-spec.md
           ./docs/language/dependent-types.md
@@ -121,7 +122,8 @@
           # once stages 1 and 2 write the same IR for it: a fixed point.
           jihoo = pkgs.stdenv.mkDerivation {
             pname = "jihoo";
-            inherit version src;
+            inherit version;
+            src = compilerSrc;
             nativeBuildInputs = [ jihoo-seed pkgs.makeWrapper ];
             buildPhase = ''
               runHook preBuild
@@ -243,7 +245,7 @@
             cp -r ${lib.fileset.toSource {
               root = ./.;
               fileset = lib.fileset.unions [
-                sources
+                testSources
                 ./scripts/verified_core.py
                 ./proofs/VerifyCore.lean
                 ./proofs/Jihoo
