@@ -732,8 +732,10 @@ mechanize its soundness, starting from that specification:
    whole specified core or prove native evaluation/erasure correspondence.
    An intermediate annotation/proof-payload erasure now commutes with typed-core
    syntax substitution and forward-simulates strict steps, values and traps.
-   It retains binder slots and uses an untyped Raw carrier; complete ghost-slot
-   deletion, reverse execution correspondence and native lowering remain open.
+   It retains binder slots and uses an untyped Raw carrier. Generic reverse
+   step/trap reflection now lifts every finite erased execution back to this
+   pure source model, preserving scalar/terminal observations and typed-source
+   safety. Complete ghost-slot deletion and native lowering remain open.
    [Checked typing artifacts](typing-certificates.md) independently validate
    closed typing/formation derivations for exact exported graph roots, with
    explicit conversion evidence. The producer is untrusted for artifact typing;
