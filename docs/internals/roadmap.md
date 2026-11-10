@@ -1360,3 +1360,8 @@ pointer without `(*p)`.
   `extern fn`s would let a custom kernel use `Vec` and `String`.
 - **Tail calls** that never grow the stack.
 - **Macros**, if reflection turns out not to cover what they would do.
+
+The mixed-result continuation rules additionally connect scalar value bindings
+and owned-result capabilities in the same recursive judgment. Their combined
+range/ownership theorem has explicit graph validity and initial payload/value
+bounds; it does not close the broader common-typing or lowering gates.

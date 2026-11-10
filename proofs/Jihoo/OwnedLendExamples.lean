@@ -12,10 +12,10 @@ def graph : ScopedLend.Graph.Graph := #[
   .free 4 12, .free 10 13, .lam false 1 14, .lam false 1 15,
   .lend 4 9 16, .lam false 1 17, .pi false 1 2]
 
-theorem continuation_typed : OwnedCoreContinuation.Typed graph context 2 14 := by
+theorem continuation_typed : OwnedCoreContinuation.Typed graph context 2 0 14 := by
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
 def typed : Typed graph 18 19 :=
   ⟨7, 14, .read 0, by decide, by decide,
@@ -23,10 +23,10 @@ def typed : Typed graph 18 19 :=
 
 def originalName : ScopedLend.Graph.Graph := graph.set! 13 (.free 11 12)
 
-theorem original_name_continuation : OwnedCoreContinuation.Typed originalName context 2 14 := by
+theorem original_name_continuation : OwnedCoreContinuation.Typed originalName context 2 0 14 := by
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
 def originalTyped : Typed originalName 18 19 :=
   ⟨7, 14, .read 0, by decide, by decide,
@@ -34,23 +34,23 @@ def originalTyped : Typed originalName 18 19 :=
 
 def reversed : ScopedLend.Graph.Graph := (graph.set! 13 (.free 10 12)).set! 14 (.free 4 13)
 
-theorem reverse_order_continuation : OwnedCoreContinuation.Typed reversed context 2 14 := by
+theorem reverse_order_continuation : OwnedCoreContinuation.Typed reversed context 2 0 14 := by
   apply OwnedCoreContinuation.Typed.free (slot := 1) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
 def reversedTyped : Typed reversed 18 19 :=
   ⟨7, 14, .read 0, by decide, by decide,
     .read rfl (by decide) (by decide), reverse_order_continuation⟩
 
 theorem consuming_original_clears_both_aliases :
-    LinearCoreCallers.consumed 1 context = [none, some 0, none] := rfl
+    OwnedScalarContext.consumed 1 context = [.dead, .owner 0, .dead] := rfl
 
 theorem consuming_result_preserves_original_aliases :
-    LinearCoreCallers.consumed 0 context = [some 0, none, some 0] := rfl
+    OwnedScalarContext.consumed 0 context = [.owner 0, .dead, .owner 0] := rfl
 
 theorem lexical_identity :
-    LinearCoreCallers.bindings context [1, 0] = [some 0, some 1, some 0] := rfl
+    LinearCoreCallers.bindings (OwnedScalarContext.ownerView context) [1, 0] = [some 0, some 1, some 0] := rfl
 
 def initial : State := allocatedState empty 11
 
@@ -68,36 +68,36 @@ theorem source_execution_exists : ∃ value events t, Runs graph 18 19 initial 0
 
 def duplicatedResult : ScopedLend.Graph.Graph := graph.set! 13 (.free 10 12)
 
-theorem duplicate_result_rejected : ¬ OwnedCoreContinuation.Typed duplicatedResult context 2 14 := by
+theorem duplicate_result_rejected : ¬ OwnedCoreContinuation.Typed duplicatedResult context 2 0 14 := by
   intro h
   obtain ⟨slot, resolved, _, rest⟩ := h.free_inversion rfl
-  have eq : 0 = slot := by simpa [LinearCoreCallers.ownerSlot, duplicatedResult,
+  have eq : 0 = slot := by simpa [OwnedScalarContext.ownerSlot, ScalarCoreCallers.ownerSlot, OwnedScalarContext.consumed, duplicatedResult,
     graph, ScopedLend.Graph.nodeAt, context] using resolved
   subst slot
   exact OwnedCoreContinuation.dead_owner_rejected rfl (by decide) rest
 
 def duplicatedOriginal : ScopedLend.Graph.Graph := (graph.set! 14 (.free 4 13)).set! 13 (.free 11 12)
 
-theorem duplicate_original_alias_rejected : ¬ OwnedCoreContinuation.Typed duplicatedOriginal context 2 14 := by
+theorem duplicate_original_alias_rejected : ¬ OwnedCoreContinuation.Typed duplicatedOriginal context 2 0 14 := by
   intro h
   obtain ⟨slot, resolved, _, rest⟩ := h.free_inversion rfl
-  have eq : 1 = slot := by simpa [LinearCoreCallers.ownerSlot, duplicatedOriginal,
+  have eq : 1 = slot := by simpa [OwnedScalarContext.ownerSlot, ScalarCoreCallers.ownerSlot, OwnedScalarContext.consumed, duplicatedOriginal,
     graph, ScopedLend.Graph.nodeAt, context] using resolved
   subst slot
   exact OwnedCoreContinuation.dead_owner_rejected rfl (by decide) rest
 
 def omittedOriginal : ScopedLend.Graph.Graph := graph.set! 14 (.free 10 12)
 
-theorem missing_original_rejected : ¬ OwnedCoreContinuation.Typed omittedOriginal context 2 14 := by
+theorem missing_original_rejected : ¬ OwnedCoreContinuation.Typed omittedOriginal context 2 0 14 := by
   intro h
   obtain ⟨slot, resolved, _, rest⟩ := h.free_inversion rfl
-  have eq : 0 = slot := by simpa [LinearCoreCallers.ownerSlot, omittedOriginal,
+  have eq : 0 = slot := by simpa [OwnedScalarContext.ownerSlot, ScalarCoreCallers.ownerSlot, OwnedScalarContext.consumed, omittedOriginal,
     graph, ScopedLend.Graph.nodeAt, context] using resolved
   subst slot
   have impossible := (rest.finish_inversion rfl).1
   contradiction
 
-theorem missing_result_rejected : ¬ OwnedCoreContinuation.Typed graph context 2 12 := by
+theorem missing_result_rejected : ¬ OwnedCoreContinuation.Typed graph context 2 0 12 := by
   intro h
   have impossible := (h.finish_inversion rfl).1
   contradiction
@@ -129,13 +129,13 @@ def allocating : ScopedLend.Graph.Graph := graph ++ #[
   .app 28 21, .lam false 1 29, .lam false 1 30,
   .lend 4 9 31, .lam false 1 32]
 
-theorem allocating_continuation : OwnedCoreContinuation.Typed allocating context 2 29 := by
+theorem allocating_continuation : OwnedCoreContinuation.Typed allocating context 2 0 29 := by
   apply OwnedCoreContinuation.Typed.allocate (value := 37) (body := 27)
     (.intro 28 21 1 0 20 rfl rfl (by decide) rfl rfl rfl) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 1) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
 def allocatingTyped : Typed allocating 33 19 :=
   ⟨7, 29, .read 0, by decide, by decide,

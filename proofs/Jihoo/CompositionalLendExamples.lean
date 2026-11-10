@@ -17,29 +17,29 @@ theorem nested_shape : Shape graph 27 4 7 24 :=
   .intro 9 26 3 8 0 1 25 1 rfl rfl (by decide) rfl rfl rfl (by decide) rfl (by decide)
 
 theorem nested_tail_typed :
-    OwnedCoreContinuation.Typed graph (returnedContext context 1) 3 24 := by
+    OwnedCoreContinuation.Typed graph (OwnedScalarContext.ownedReturned context 1) 3 0 24 := by
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
 /-- Only the original's aliases are reader-authorized; the first result stays
 owned but cannot be borrowed through this reader's active token. -/
 theorem nonselected_result_not_reader :
-    (readerRoles context 1)[2]? = some .ghost := rfl
+    (OwnedScalarContext.readerRoles context 1)[2]? = some .ghost := rfl
 
 theorem selected_aliases_are_readable :
-    (readerRoles context 1)[1]? = some .owner ∧
-      (readerRoles context 1)[3]? = some .owner := ⟨rfl, rfl⟩
+    (OwnedScalarContext.readerRoles context 1)[1]? = some .owner ∧
+      (OwnedScalarContext.readerRoles context 1)[3]? = some .owner := ⟨rfl, rfl⟩
 
 theorem nested_context_identity :
-    bindings (returnedContext context 1) [2, 1, 0] =
+    bindings (OwnedScalarContext.ownerView (OwnedScalarContext.ownedReturned context 1)) [2, 1, 0] =
       [some 0, some 2, some 0, some 1, some 0] := rfl
 
 theorem clearing_original_does_not_clear_results :
-    consumed 2 (returnedContext context 1) = [none, some 0, none, some 1, none] := rfl
+    OwnedScalarContext.consumed 2 (OwnedScalarContext.ownedReturned context 1) = [.dead, .owner 0, .dead, .owner 1, .dead] := rfl
 
-theorem nested_continuation_typed : OwnedCoreContinuation.Typed graph context 2 27 :=
+theorem nested_continuation_typed : OwnedCoreContinuation.Typed graph context 2 0 27 :=
   .lend nested_shape (by decide) (by decide)
     (.read rfl (by decide) (by decide)) nested_tail_typed
 
@@ -62,13 +62,13 @@ theorem every_nested_run_empty
 def freshResult : ScopedLend.Graph.Graph := graph.set! 27 (.lend 10 9 26)
 
 theorem fresh_result_tail_typed :
-    OwnedCoreContinuation.Typed freshResult (returnedContext context 0) 3 24 := by
+    OwnedCoreContinuation.Typed freshResult (OwnedScalarContext.ownedReturned context 0) 3 0 24 := by
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
   apply OwnedCoreContinuation.Typed.free (slot := 0) rfl (by decide) (by decide)
-  exact .finish rfl (by decide)
+  exact .finish rfl (by decide) (by exact (by decide : 99 < 2^63))
 
-theorem fresh_result_continuation_typed : OwnedCoreContinuation.Typed freshResult context 2 27 :=
+theorem fresh_result_continuation_typed : OwnedCoreContinuation.Typed freshResult context 2 0 27 :=
   .lend (.intro 9 26 3 8 0 1 25 1 rfl rfl (by decide) rfl rfl rfl (by decide) rfl (by decide))
     (by decide) (by decide) (.read rfl (by decide) (by decide)) fresh_result_tail_typed
 
@@ -84,11 +84,11 @@ theorem fresh_result_execution_exists :
 def unrelatedBorrow : ScopedLend.Graph.Graph := graph ++ #[.borrow 11, .index 32 5 6]
 
 theorem unrelated_borrow_operand_rejected :
-    ScopedLend.Graph.borrowOperand unrelatedBorrow (readerRoles context 1) 32 = false := by decide
+    ScopedLend.Graph.borrowOperand unrelatedBorrow (OwnedScalarContext.readerRoles context 1) 32 = false := by decide
 
 /-- An initializer cannot redirect the active lease to a different live owner. -/
 theorem unrelated_reader_rejected :
-    ¬ ScopedLend.Graph.Represents unrelatedBorrow (readerRoles context 1) 33 r := by
+    ¬ ScopedLend.Graph.Represents unrelatedBorrow (OwnedScalarContext.readerRoles context 1) 33 r := by
   intro h
   cases h with
   | scalar shape => cases shape
