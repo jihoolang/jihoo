@@ -207,6 +207,7 @@
                 ./proofs/EmitMixedProofTranslation.lean
                 ./proofs/EmitMixedInference.lean
                 ./proofs/EmitMixedTelescope.lean
+                ./proofs/EmitMirFixture.lean
                 ./proofs/EmitCore.lean
                 ./proofs/EmitPrimitiveSafety.lean
                 ./proofs/EmitBinderClassification.lean
@@ -224,6 +225,7 @@
             cp ${./tests/core_mixed_inference.tsv} tests/core_mixed_inference.tsv
             cp ${./tests/core_preserves/lean-mixed-proof-translation.jhc} tests/core_preserves/lean-mixed-proof-translation.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
+            cp ${./tests/core_mir_single.json} tests/core_mir_single.json
             bash proofs/check.sh
             touch $out
           '';
@@ -248,6 +250,8 @@
                 ./proofs/CheckArtifact.lean
                 ./proofs/CheckMixedProof.lean
                 ./proofs/CheckMixedRaw.lean
+                ./proofs/EmitMirFixture.lean
+                ./proofs/CheckMirCaller.lean
                 ./proofs/CheckScalarCaller.lean
                 ./proofs/CheckLinearCaller.lean
                 ./proofs/CheckScopedLend.lean
@@ -283,6 +287,8 @@
             python3 -O tests/verified_core.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_linear_graph.py --compiler ${jihoo}/bin/jihoo

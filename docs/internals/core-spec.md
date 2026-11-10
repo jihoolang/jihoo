@@ -619,3 +619,11 @@ Its finite return fragment can select a literal or an earlier/later callee resul
 owner insertion and consumption preserve the meaning of existing scalar names.
 This addresses caller results for that restricted constructor subset, not general
 Core arithmetic/control flow or native MIR/machine result adequacy.
+
+[Bounded emitted-MIR execution](lean-proofs.md#bounded-execution-of-emitted-mir-caller-graphs)
+retains actual local/block/instruction identities for closed one-cell caller
+examples, including malloc/assert and the initialization-loop backedge. A checked
+source/MIR pair compares its scalar result and allocation/free lifecycle under
+an independent bounded MIR semantics. This is conditional translation validation,
+not a general `core_lower.compile` theorem or concrete-address machine refinement;
+unsupported shapes and exhausted fuel reject rather than certify a partial run.
