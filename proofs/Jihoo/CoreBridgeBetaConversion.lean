@@ -1,6 +1,6 @@
 import Jihoo.CoreBridgeMetatheory
 
-/-! Untyped beta and bounded literal-arithmetic conversion on the unified target syntax. The
+/-! Untyped beta, bounded literal-arithmetic and local-array-read conversion on the unified target syntax. The
 Church–Rosser argument below proves, rather than postulates, Pi injectivity. -/
 namespace Jihoo.CoreBridge.Raw.Beta
 open Jihoo.Indexed (liftRenaming)
@@ -19,6 +19,8 @@ inductive Conv : Raw → Raw → Prop where
       Conv (.uadd (.natural a) (.natural b)) (.natural (a + b))
   | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
       Conv (.usub (.natural a) (.natural b) p) (.natural (a - b))
+  | read (xs : List Raw) (k : Nat) (p v : Raw) : xs[k]? = some v →
+      Conv (.index (.elements xs) (.natural k) p) v
   | array : Conv a b → Conv (.array a) (.array b)
   | lt : Conv a a' → Conv b b' → Conv (.lt a b) (.lt a' b')
   | eq : Conv a a' → Conv b b' → Conv (.eq a b) (.eq a' b')
@@ -47,6 +49,9 @@ theorem Conv.renaming (h : Conv A B) (ρ : Nat → Nat) :
         (Conv.beta e (A.rename ρ) (b.rename (liftRenaming ρ)) (a.rename ρ))
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
   | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.rename ρ) hb ha
+  | read xs k p v selected =>
+      simp only [rename]
+      exact .read _ k _ _ (by simp [List.getElem?_map, selected])
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih ρ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ ρ) (ih₂ ρ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ ρ) (ih₂ ρ)
@@ -76,6 +81,9 @@ theorem Conv.substitution (h : Conv A B) (σ : Nat → Raw) :
         (Conv.beta e (A.subst σ) (b.subst (liftSub σ)) (a.subst σ))
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
   | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.subst σ) hb ha
+  | read xs k p v selected =>
+      simp only [subst]
+      exact .read _ k _ _ (by simp [List.getElem?_map, selected])
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih σ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ σ) (ih₂ σ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ σ) (ih₂ σ)
@@ -141,6 +149,8 @@ inductive Par : Raw → Raw → Prop where
       Par (.uadd (.natural a) (.natural b)) (.natural (a + b))
   | subLiteral (a b : Nat) (p : Raw) : b ≤ a → a < wordBound →
       Par (.usub (.natural a) (.natural b) p) (.natural (a - b))
+  | read (xs : List Raw) (k : Nat) (p v v' : Raw) : xs[k]? = some v → Par v v' →
+      Par (.index (.elements xs) (.natural k) p) v'
   | array : Par a b → Par (.array a) (.array b)
   | lt : Par a a' → Par b b' → Par (.lt a b) (.lt a' b')
   | eq : Par a a' → Par b b' → Par (.eq a b) (.eq a' b')
@@ -195,6 +205,9 @@ theorem Par.renaming (h : Par A B) (ρ : Nat → Nat) :
       exact .beta (ihb (liftRenaming ρ)) (iha ρ)
   | add a b h => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .add a b h
   | subLiteral a b p hb ha => simp only [rename, subst]; exact .subLiteral a b (p.rename ρ) hb ha
+  | read xs k p v v' selected _ ih =>
+      simp only [rename]
+      exact .read _ k _ _ _ (by simp [List.getElem?_map, selected]) (ih ρ)
   | array _ ih => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .array (ih ρ)
   | lt _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .lt (ih₁ ρ) (ih₂ ρ)
   | eq _ _ ih₁ ih₂ => (try simp only [rename, subst, List.map_nil, List.map_cons]); exact .eq (ih₁ ρ) (ih₂ ρ)
@@ -233,6 +246,9 @@ theorem Par.substitution (h : Par A B) (hσ : ∀ x, Par (σ x) (τ x)) :
       exact .beta (ihb (lift_par hσ)) (iha hσ)
   | add a b h => simp only [subst]; exact .add a b h
   | subLiteral a b p hb ha => simp only [subst]; exact .subLiteral a b _ hb ha
+  | read xs k p v v' selected _ ih =>
+      simp only [subst]
+      exact .read _ k _ _ _ (by simp [List.getElem?_map, selected]) (ih hσ)
   | array _ ih => simp only [subst]; exact .array (ih hσ)
   | lt _ _ ih₁ ih₂ => simp only [subst]; exact .lt (ih₁ hσ) (ih₂ hσ)
   | eq _ _ ih₁ ih₂ => simp only [subst]; exact .eq (ih₁ hσ) (ih₂ hσ)
@@ -273,6 +289,10 @@ def develop : Raw → Raw
   | .app (.lam _ _ b) a => (develop b).subst (single (develop a))
   | .app f a => .app (develop f) (develop a)
   | .elements xs => .elements (xs.map develop)
+  | .index (.elements xs) (.natural k) p =>
+      match (xs.map develop)[k]? with
+      | some v => v
+      | none => .index (.elements (xs.map develop)) (.natural k) (develop p)
   | .index a i p => .index (develop a) (develop i) (develop p)
   | .refl a => .refl (develop a)
   | .zeroLe a => .zeroLe (develop a)
@@ -298,6 +318,16 @@ private theorem Par.pi_inv (h : Par (.pi e A B) t) :
 private theorem Par.natural_inv (h : Par (.natural n) t) : t = .natural n := by
   cases h; rfl
 
+private theorem ListRel.lookup_left {k : Nat} (h : ListRel R xs ys) (selected : ys[k]? = some v) :
+    ∃ w, xs[k]? = some w ∧ R w v := by
+  induction h generalizing k with
+  | nil => simp at selected
+  | cons hr hs ih =>
+      cases k with
+      | zero => simp only [List.getElem?_cons_zero, Option.some.injEq] at selected
+                subst v; exact ⟨_, rfl, hr⟩
+      | succ k => exact ih selected
+
 /-- Every parallel reduct reduces again to the same complete development. -/
 theorem Par.to_develop (h : Par t u) : Par u (develop t) := by
   induction h using Par.rec
@@ -310,6 +340,8 @@ theorem Par.to_develop (h : Par t u) : Par u (develop t) := by
   | beta _ _ ihb iha => simpa only [develop] using ihb.instantiate iha
   | add a b hab => simpa only [develop, ite_eq_left hab] using Par.natural (a + b)
   | subLiteral a b p hb ha => simpa [develop, hb, ha] using Par.natural (a - b)
+  | read xs k p v v' selected _ ih =>
+      simpa only [develop, List.getElem?_map, selected, Option.map_some] using ih
   | array _ ih => simpa only [develop] using (Par.array ih)
   | lt _ _ ih₁ ih₂ => simpa only [develop] using (Par.lt ih₁ ih₂)
   | eq _ _ ih₁ ih₂ => simpa only [develop] using (Par.eq ih₁ ih₂)
@@ -325,7 +357,22 @@ theorem Par.to_develop (h : Par t u) : Par u (develop t) := by
         obtain ⟨_, rfl, rfl⟩ := heq
         simpa only [develop] using (Par.beta (e := e) (A := A') hb iha)
   | elements _ ih => simpa only [develop] using (Par.elements ih)
-  | index _ _ _ ih₁ ih₂ ih₃ => simpa only [develop] using (Par.index ih₁ ih₂ ih₃)
+  | index ha hi hp iha ihi ihp =>
+      rename_i a a' i i' p p'
+      cases a <;> cases i <;> try (simpa only [develop] using (Par.index iha ihi ihp))
+      case elements.natural xs k =>
+        cases ha with
+        | elements hxs =>
+          cases hi
+          simp only [develop] at iha
+          cases iha with
+          | elements hdev =>
+            simp only [develop]
+            cases selected : (xs.map develop)[k]? with
+            | none => exact .index (.elements hdev) (.natural _) ihp
+            | some v =>
+              obtain ⟨w, hw, hv⟩ := hdev.lookup_left selected
+              exact .read _ k p' w v hw hv
   | reflTerm _ ih => simpa only [develop] using (Par.reflTerm ih)
   | zeroLe _ ih => simpa only [develop] using (Par.zeroLe ih)
   | decide _ _ ih₁ ih₂ => simpa only [develop] using (Par.decide ih₁ ih₂)
@@ -485,6 +532,7 @@ theorem Conv.church_rosser (h : Conv t u) : Join t u := by
   | beta e A b a => exact ⟨_, .single (.beta (.refl b) (.refl a)), .refl⟩
   | add a b h => exact ⟨_, .single (.add a b h), .refl⟩
   | subLiteral a b p hb ha => exact ⟨_, .single (.subLiteral a b p hb ha), .refl⟩
+  | read xs k p v selected => exact ⟨_, .single (.read xs k p v v selected (.refl v)), .refl⟩
   | array _ ih => exact Join.map Raw.array Par.array ih
   | lt _ _ ih₁ ih₂ => exact Join.map₂ Raw.lt Par.lt ih₁ ih₂
   | eq _ _ ih₁ ih₂ => exact Join.map₂ Raw.eq Par.eq ih₁ ih₂
@@ -510,6 +558,7 @@ theorem Par.conv (h : Par t u) : Conv t u := by
   | beta _ _ ihb iha => exact .trans (.app (.lam (.refl _) ihb) iha) (.beta _ _ _ _)
   | add a b h => exact .add a b h
   | subLiteral a b p hb ha => exact .subLiteral a b p hb ha
+  | read xs k p v v' selected _ ih => exact (Conv.read xs k p v selected).trans ih
   | array _ ih => exact .array ih
   | lt _ _ ih₁ ih₂ => exact .lt ih₁ ih₂
   | eq _ _ ih₁ ih₂ => exact .eq ih₁ ih₂

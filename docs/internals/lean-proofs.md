@@ -1067,8 +1067,8 @@ so it does not truncate or assume representability of the ghost bound `MAX + 1`.
 `ArrayRead` specifies selection after head-beta preparation; it is not a new
 `Core.normal` reduction rule. The evaluated-operand corollaries require explicit
 finite contextual beta/add/subtract evaluations. These results do not prove universal
-arithmetic normalization, heap/borrow safety, quantity soundness, contextual
-preservation for array-read reductions, or erasure/lowering adequacy.
+arithmetic normalization, heap/borrow safety, quantity soundness, or
+erasure/lowering adequacy. Contextual local-array read preservation is added below.
 They cover the stated `Raw.Beta` fragment, not the whole specified calculus.
 Existing certificate formats and their admitted rules are unchanged.
 
@@ -1120,6 +1120,44 @@ The historical beta-only `Beta.Step` and executable certificate admission rules
 remain unchanged; their narrower evaluators need not find all conversions now
 admitted by the declarative relation. The generated fixture checks are finite
 implementation correspondence tests, not a verified parser or compiler refinement.
+
+
+### Contextual local-array reads
+
+`CoreArrayReduction.lean` closes a gap between the existing selection theorem
+and the contextual computation semantics. A successful literal-index lookup in
+`elements xs` now contracts to the selected term in `Beta.Conv` and
+`Computation.Step`. Parallel read reduction also reduces the selected term, so
+complete developments join reading before or after array-element reduction.
+Church–Rosser, substitution, formation and fixed-type preservation are rechecked
+for this expanded relation; closed false-proposition exclusion remains proved.
+
+The preservation rule works in arbitrary contexts and at the original type,
+including under lambdas. `HasType.closed_index_computes` turns a closed typing
+derivation and a finite index evaluation into an actual read trace and a typed
+result. Array head preparation, the in-range bound and proof truth are derived,
+not additional premises. The result may itself need evaluation: no universal
+normalization for the expanded read relation is asserted. Invalid empty or
+out-of-range reads cannot convert to an integer; successful selection of an
+integer has a unique integer result even through untyped beta expansion.
+
+The generated Core fixture adds nested reads and a function taking a runtime
+index plus an erased bound proof. Its Lean trace theorem gives exactly the
+selected array entry after both applications. Foreign exports cannot require
+erased evidence. A separately tested Core wrapper uses `if-lt` to supply that evidence to the generated helper; this wrapper
+is outside the Lean syntax. Native tests check three valid reads and two rejected
+indices returning a fallback at O0/O2, in addition to nine closed results, both
+object targets and seven paired negative controls. No out-of-range read executes.
+
+This is a pure **abstract read semantics**, not a claim that `Core.normal`
+performs this contraction. Its `Index` branch normalizes operands but retains
+the read; `compiler/core_lower.jh` lowers a local array read to a MIR indexed
+place, omitting proof storage. These implementation connections are tested,
+not formally refined. The abstract contraction can discard unselected entries;
+it does not model the production compiler's eager evaluation, traps or effects.
+No heap, borrowed-pointer, ownership, native memory or whole-language theorem
+is claimed. Existing certificate admission and the historical beta-only `Step`
+remain unchanged and narrower than the extended declarative conversion.
 
 
 ## Quantity control and partial executions
