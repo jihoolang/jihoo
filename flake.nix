@@ -323,6 +323,8 @@
               python3 tests/core_call_entry.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_binder_projection.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_lend_projection.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_linear_heap.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_linear_heap.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_scoped_lend.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_scoped_lend.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_proof_functions.py --compiler ${jihoo}/bin/jihoo

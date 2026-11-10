@@ -774,6 +774,11 @@ mechanize its soundness, starting from that specification:
    correspondence makes its heap endpoint apply to every admitted constructor
    execution. The constructor semantics remains restricted; native export fidelity,
    general ownership contexts and the broader specified-Core rules remain open.
+   Finite allocation/admitted-call programs now thread distinct live, lease-free
+   capabilities, derive callee guards and conserve concrete allocation/free IDs.
+   Closed complete executions release every allocation and leave no live heap
+   object. General native caller translation, allocation failure, recursive
+   fields and the rest of the specified runtime remain outside this result.
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
