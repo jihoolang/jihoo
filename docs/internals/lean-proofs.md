@@ -2931,3 +2931,65 @@ association, opaque unsupported nodes, parsing/elaboration, machine bounds,
 allocation failure, general contexts, recursion and broader erasure/MIR
 correspondence remain outside the theorem. This closes the explicit caller-
 structure gap for this finite subset, not the full original 0.6 soundness gate.
+
+### Lease-free heap erasure of admitted callers
+
+`LeaseErasure.lean` supplies an explicit target for the admitted finite caller
+pipeline. `Heap` retains allocation identities, liveness and scalar payloads,
+but has no lease counter/map. Its independent `Step`, `Reads`, `Calls` and
+`Runs` rules execute direct pointer-identity loads, stores, allocations and
+frees. They do not inspect a source trace or require a source execution proof.
+This models the erasure decision in `core_lower.jh`: `Borrow` forwards the owner
+operand, and `Lend` evaluates its reader with that pointer before passing the
+result and unchanged owner to its continuation. It is **not** a definition of
+native MIR blocks or a raw-address allocator.
+
+`lowerReader` removes the singleton borrow-slot access in favor of a direct
+load. `reader_forward` preserves each callee's scalar result and read-owner
+identity. `lower` specializes admitted callee graphs to reader code and a
+consuming continuation, and recursively lowers the checked finite program.
+`lower_sound` connects successful translation to its declarative relation.
+`lower_total` covers the executable resource check; `admitted_lower_total` and
+`admitted_execution` show successful original graph recognition cannot get
+stuck in this erasure pass. An arbitrary abstract `Checked` proof is not silently
+assumed to satisfy the executable recognizer's resource budgets.
+
+`program_forward` preserves the erased final heap and the exact order of common
+observations. Those observations retain allocation/write/free identities and
+read scalar values; they omit source read-token and target read-pointer IDs.
+The separate reader/selection proofs establish that a target load addresses the
+same owner, rather than claiming the common payload-only observation encodes
+that fact. Begin/close lease bookkeeping disappears entirely. Target execution
+is independently deterministic. Combined with source totality, `closed_reflect`
+and `accepted_target_reflect` therefore cover **every** complete target run,
+producing a corresponding original admitted constructor execution, the same
+observable effects and the same erased final heap. `closed_target_safe` proves
+primitive target execution and no final live object; `target_exact_release`
+transfers exactly-once freeing of every target allocation through the trace
+correspondence. These are not merely claims about one chosen forward trace.
+
+Examples execute two equal-payload owners in older-first order, show direct
+reads without tokens, preserve a changed reader result through store-before-free,
+and reject reads/frees after death. An explicit counterexample allows a target
+write to an object that has a source lease: arbitrary untyped target steps do
+**not** reflect into lease-safe source steps. Only compilation from the checked
+program/recognized graph gets the all-run erasure theorem.
+
+`tests/core_lease_erasure.py` exercises six emitted MIR fixtures and forty
+native scalar/lifecycle comparisons in each Python mode. It compares exact MIR
+for reader-reference versus owner-`Borrow`, and returned versus original owner
+aliases; checks ordinary pointer effects and only malloc/free calls; and observes
+payloads immediately before free at O0. A constant-result App/Lam reader is
+inside the formal fragment, while the extra read-plus-one case is explicitly
+native-only. Even O0 normalization can remove an unused read. O2 can eliminate
+dead stores and balanced allocation/free pairs, so the tests do not assert the
+abstract trace is the optimized physical instruction trace.
+
+**Boundary:** this is an abstract pointer-heap erasure stage with mathematical
+payloads and successful fresh allocation, not Core-to-MIR CFG adequacy or native
+machine simulation. It preserves each callee result, not the final caller scalar
+result (which the preceding caller relation still omits). There is no proof here
+of allocation-failure behavior, finite-width arithmetic, address reuse, general
+recursive heap fields or unrestricted source Lends. Exporter/JSON association
+remains trusted. The original roadmap's broader erasure/lowering obligations
+remain open; optional checker implementation refinement is still not required.

@@ -789,6 +789,11 @@ mechanize its soundness, starting from that specification:
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
    heap nodes, cases, recursions, views, lends, frees). Differential
    tests remain regression checks, not this proof.
+   The admitted finite caller subset now has an independent lease-free pointer-
+   heap target with callee-value/effect/final-heap correspondence and all-target-
+   run safety. Native MIR checks are regressions; full MIR CFG semantics, caller
+   return-value adequacy, failure and machine-address behavior remain open.
+
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
    kernel's implementation, lowering where not proved, MIR to LLVM, LLVM
