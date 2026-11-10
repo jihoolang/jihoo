@@ -42,6 +42,8 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: nix flake check
         run: nix flake check -L
+      - name: Source isolation checks
+        run: python3 scripts/check_nix_sources.py --offline --system ${{ matrix.system }}
       - name: Fusion benchmark checks
         run: |
           nix build .#jihoo
