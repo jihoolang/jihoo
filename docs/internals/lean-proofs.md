@@ -3180,3 +3180,52 @@ traps plus three precisely diagnosed rejections. Native erased U64 binders and
 IfLt cases deliberately provide additional implementation coverage outside the
 small formal typing grammar. These twins are not literal submissions of the
 untyped erased carrier to the source checker.
+
+### Typed owned-result Lend transfer
+
+The [release-gap assessment](0.6-proof-status.md) identifies a missing connection
+between specified ownership typing and runtime semantics. The native `outlived`
+rule permits owned Buffer results, whereas the earlier scalar-only reader model
+excluded that case by syntax. This extension addresses that specific rule on
+the existing Core constructor graph and the existing heap/lease semantics.
+
+`OwnedCoreContinuation.Typed` gives declarative rules for integer return, direct
+free, and allocation binding. Context entries interpret lexical names as live
+capability slots; original/returned names may alias the same capability, but
+consuming either clears both. Allocation adds a fresh capability and shifts
+existing lexical interpretations. Arbitrarily nested finite continuations are
+covered by induction, not by enumerating two hardcoded free sequences. The
+independent constructor execution relation does not assume typing or primitive
+step guards. Those guards, exact release accounting and no tracked leaks follow
+from typing and the live unique ownership environment.
+
+`OwnedLendTransfer` proves that opening the original owner's lease, reading a
+scalar initializer, allocating a fresh result, and closing that exact local
+lease preserves all existing ownership and adds one independently owned object.
+Freshness follows from heap validity, not unequal payloads or a supplied
+disjointness premise. The original payload and all preexisting leases remain
+unchanged. The local token is expired permanently.
+
+`OwnedLendTyping` connects those results to the original lambda/Lend/Alloc
+constructor edges and Buffer/Ref annotations. The reader's initializer follows
+the existing scalar-reader rules; its result is now an owned Buffer1. The
+continuation receives lexical slots `[returned original, fresh result, original
+name]`, interpreted by two distinct capabilities. The main theorem takes a
+declarative typing derivation, not an `Accepted` certificate or an assumed safe
+heap trace. Both resource-release orders and the original-name alternative are
+covered.
+
+**Boundary:** this is the specified one-cell/nonnegative-payload rule subset,
+not full dependent `HasType`, a refinement of `core.jh`, or all types admitted
+by `outlived`. General buffer extents, recursive data/fields, `Back`, arbitrary
+reader effects, recursion and native lowering remain outside the theorem.
+Ambient objects are not claimed to be freed; full final-heap emptiness needs
+the explicit initial heap coverage premise. Source export association remains
+trusted wherever the retained graph is obtained from the implementation.
+
+Native `core_owned_lend.py` independently tests 24 variants and 192 O0/O2
+lifecycles per Python mode, including copied/constant results, both aliases and
+release orders, and extra nested reader allocations. Active-address tracking
+checks distinct live allocations even when payloads match. Six exact-diagnostic
+rejections cover duplication, omission and borrow escape. The broader native
+variants are regression evidence rather than extra formal coverage.

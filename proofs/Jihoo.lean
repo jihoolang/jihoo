@@ -156,3 +156,4 @@ import Jihoo.BoundedMirExamples
 import Jihoo.ScalarCallerEvaluationExamples
 import Jihoo.MirCallerValidationExamples
 import Jihoo.CorePayloadAdequacyExamples
+import Jihoo.OwnedLendExamples

@@ -9,26 +9,28 @@ case "$actual" in
 esac
 # Warnings (including admitted proofs) are errors, also on cached builds.
 lake build --wfail
-report=$(lake env lean -DwarningAsError=true Audit.lean)
-printf '%s\n' "$report"
+report=$(mktemp)
+generated=$(mktemp)
+trap 'rm -f "$report" "$generated"' EXIT
+lake env lean -DwarningAsError=true Audit.lean > "$report"
+cat "$report"
 # Audit actual elaborated dependencies, not merely source text. Only Lean's
 # standard logical axioms may occur; in particular sorryAx is never accepted.
 python3 - "$report" <<'PY'
 import re
 import sys
-report = sys.argv[1]
+with open(sys.argv[1], encoding="utf-8") as audit:
+    report = audit.read()
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 1388, report
+assert len(entries) + len(closed) == 1440, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
 PY
 # The exact Lean-generated program is a normal core preservation fixture.
 # Its acceptance by the executable checker is separately tested by core.py.
-generated=$(mktemp)
-trap 'rm -f "$generated"' EXIT
 lake env lean -DwarningAsError=true --run EmitCore.lean > "$generated"
 diff -u ../tests/core_preserves/lean-core-translation.jhc "$generated"
 lake env lean -DwarningAsError=true --run EmitPrimitiveSafety.lean > "$generated"

@@ -633,3 +633,10 @@ every finite execution of an annotation/proof-payload-erased term lifts back to
 the source, with scalar and trap observations preserved. This is generic over
 the existing pure grammar and retains ghost binder slots. It is not a theorem
 about the full Core grammar or native ghost-slot deletion/lowering.
+
+The [typed owned-result Lend slice](lean-proofs.md#typed-owned-result-lend-transfer)
+now accounts separately for a newly allocated Buffer result and the original
+owner. Direct continuation typing derives alias-safe consumption and primitive
+heap guards. This covers a previously omitted `outlived` result class only for
+the stated one-cell subset, not all specified ownership rules; see the
+[release-gap assessment](0.6-proof-status.md).
