@@ -640,3 +640,8 @@ owner. Direct continuation typing derives alias-safe consumption and primitive
 heap guards. This covers a previously omitted `outlived` result class only for
 the stated one-cell subset, not all specified ownership rules; see the
 [release-gap assessment](0.6-proof-status.md).
+
+The common constructor judgment also distinguishes [scalar and owned returns](lean-proofs.md#returning-owned-results). An owned result retains exactly one live, unborrowed
+capability instead of falsely treating that result as a leak. Fresh-context
+consumption composes with the existing scalar continuation guarantees; arbitrary
+dependent result substitution and general lowering remain outside this slice.

@@ -164,3 +164,6 @@ import Jihoo.MixedLendExamples
 import Jihoo.PureOwnedExamples
 import Jihoo.OwnedArgumentExecution
 import Jihoo.OwnedArgumentExamples
+
+import Jihoo.OwnedCoreResults
+import Jihoo.OwnedResultExamples

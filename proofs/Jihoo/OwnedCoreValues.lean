@@ -32,7 +32,7 @@ theorem execution_bounded (graphValid : Graph.valid g = true)
     (valid : Valid s) (owned : Owns s owners) (payloads : PayloadsBounded s)
     (scalarBounds : ValuesBounded values) (run : Runs g ctx root owners values s v es t) :
     v < 2^63 ∧ PayloadsBounded t := by
-  induction typed generalizing owners values s v es t with
+  induction typed using OwnedCoreContinuation.Typed.induct generalizing owners values s v es t with
   | finish shape checked bound =>
       cases run with
       | finish shape' evaluated =>
