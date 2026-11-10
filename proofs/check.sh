@@ -24,7 +24,7 @@ with open(sys.argv[1], encoding="utf-8") as audit:
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 1870, report
+assert len(entries) + len(closed) == 1939, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
@@ -46,3 +46,6 @@ diff -u ../tests/core_preserves/lean-mixed-proof-translation.jhc "$generated"
 # Every local, operand, statement and CFG edge matches the native-export fixture.
 lake env lean -DwarningAsError=true --run EmitMirFixture.lean > "$generated"
 diff -u ../tests/core_mir_single.json "$generated"
+# Full original-Core constructor view of the closed composed-program proof.
+lake env lean -DwarningAsError=true --run EmitComposedGraph.lean > "$generated"
+diff -u ../tests/core_composed_graph.json "$generated"

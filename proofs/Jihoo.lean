@@ -173,3 +173,5 @@ import Jihoo.OwnedCallContext
 import Jihoo.OwnedApplicationFrame
 import Jihoo.FramedOwnedApplications
 import Jihoo.FramedApplicationExamples
+import Jihoo.FramedCoreEmbedding
+import Jihoo.ComposedCoreExamples
