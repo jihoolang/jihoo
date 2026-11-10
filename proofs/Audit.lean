@@ -1138,3 +1138,27 @@ import Jihoo
 #print axioms Jihoo.ScopedLend.Examples.returned_and_original_agree
 #print axioms Jihoo.ScopedLend.Examples.double_alias_rejected
 #print axioms Jihoo.ScopedLend.Examples.omitted_owner_rejected
+
+#print axioms Jihoo.ScopedLend.Graph.project_sound
+#print axioms Jihoo.ScopedLend.Graph.Represents.scoped
+#print axioms Jihoo.ScopedLend.Graph.Represents.execution
+#print axioms Jihoo.ScopedLend.Graph.Represents.reflect
+#print axioms Jihoo.ScopedLend.Graph.accepted_execution
+#print axioms Jihoo.ScopedLend.Graph.accepted_reflect
+#print axioms Jihoo.ScopedLend.Graph.accepted_all_runs
+#print axioms Jihoo.ScopedLend.Graph.accepted_token_expires
+#print axioms Jihoo.ScopedLend.Graph.Examples.correct_reader
+#print axioms Jihoo.ScopedLend.Graph.Examples.original_constructor_execution
+#print axioms Jihoo.ScopedLend.Graph.Examples.all_runs_safe
+#print axioms Jihoo.ScopedLend.Graph.Examples.constructs_execution
+#print axioms Jihoo.ScopedLend.Graph.Examples.erased_reader_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.wrong_borrow_domain_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.wrong_owner_slot_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.false_index_evidence_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.return_owner_as_scalar_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.cyclic_child_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.requested_type_rejected
+#print axioms Jihoo.ScopedLend.Graph.Examples.role_shift_reader
+#print axioms Jihoo.ScopedLend.Graph.Examples.role_shift_owner
+#print axioms Jihoo.ScopedLend.Graph.Examples.ghost_is_not_reader
+#print axioms Jihoo.ScopedLend.Graph.Examples.scalar_is_not_owner

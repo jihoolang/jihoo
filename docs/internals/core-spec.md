@@ -577,3 +577,12 @@ syntax. It instantiates the existing original/returned-owner quantity rule.
 A live target with no preexisting lease is an entry premise, not a proof of
 unique ownership aliases. Full graph/context correspondence and the broader
 owned-result, nested-Lend and recursive-heap cases remain open.
+
+The [bounded original-constructor Lend bridge](lean-proofs.md#original-constructor-graphs-for-scalar-lend)
+now checks the exact root/type/lambda spine, tracks scalar/ghost binder shifts
+and original/returned-owner aliases, and translates supported read bodies to
+the scoped model. Forward and reverse correspondence cover the new restricted
+constructor semantics; every admitted execution satisfies the primitive heap
+endpoint. This does not yet formalize the whole Core operational semantics or
+prove the native exporter faithfully supplies the view; opaque constructors,
+general ownership contexts and broader heap features remain outside its scope.

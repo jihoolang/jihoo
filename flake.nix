@@ -248,6 +248,7 @@
                 ./proofs/CheckArtifact.lean
                 ./proofs/CheckMixedProof.lean
                 ./proofs/CheckMixedRaw.lean
+                ./proofs/CheckScopedLend.lean
                 ./proofs/CheckTyping.lean
                 ./proofs/CheckBetaReplay.lean
                 ./proofs/CheckEvidence.lean
@@ -280,6 +281,8 @@
             python3 -O tests/verified_core.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_scoped_graph.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_scoped_graph.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_raw.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_raw.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_typing_certificates.py --compiler ${jihoo}/bin/jihoo
