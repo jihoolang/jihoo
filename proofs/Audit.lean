@@ -1015,3 +1015,24 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.empty_read_not_integer
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.end_read_not_integer
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.literal_read_unique
+
+#print axioms Jihoo.CoreBridge.Raw.Beta.HasType.elements_inversion
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.Step.computation
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.preservation
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.Step.not_value
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.Trap.not_value
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.progress
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.preservation_steps
+#print axioms Jihoo.CoreBridge.Raw.Beta.Evaluation.execution_safety
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.strict_scalar_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.strict_scalar_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.overflowing_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.overflowing_traps
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.discard_trap_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.discard_argument_traps
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_overflow_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_overflow_computes
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.array_trap_typed
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.unselected_element_traps
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.abstract_read_skips_trap
+#print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.strict_closed_execution_safe

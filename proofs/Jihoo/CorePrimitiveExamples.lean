@@ -1,4 +1,4 @@
-import Jihoo.CoreArrayReduction
+import Jihoo.CoreEvaluation
 import Jihoo.CoreBridgeExamples
 
 namespace Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples
@@ -231,6 +231,81 @@ theorem literal_read_unique
     (h : Conv (.index (.elements values) (.natural 1) p) (.integer z)) : 37 = z :=
   Conv.read_integer_unique rfl h
 
+def strictScalar : Raw := .app (.lam false .u64 (.integer 7))
+  (.uadd (.natural 1) (.natural 2))
+
+theorem strict_scalar_typed : HasType (fun _ => none) strictScalar .i64 := by
+  simpa only [strictScalar, subst, proposition] using
+    HasType.app (HasType.lam (Γ := fun _ => none) .u64 rfl
+      (.integer (n := 7) (by decide) (by decide)))
+      (HasType.uadd (.natural (n := 1) (by decide)) (.natural (n := 2) (by decide)))
+
+theorem strict_scalar_computes : Evaluation.Steps strictScalar (.integer 7) := by
+  have first : Evaluation.Step strictScalar (.app (.lam false .u64 (.integer 7)) (.natural 3)) :=
+    .context (.appArgument .u64 (.integer 7)) (.add (by decide))
+  have last : Evaluation.Step (.app (.lam false .u64 (.integer 7)) (.natural 3)) (.integer 7) := by
+    simpa only [subst] using Evaluation.Step.betaRuntime (A := .u64) (body := .integer 7)
+      (Evaluation.Value.natural 3)
+  exact .next first (.next last .refl)
+
+def overflowing : Raw := .uadd (.natural maxWord) (.natural 1)
+
+theorem overflowing_typed (Γ : Context) : HasType Γ overflowing .u64 :=
+  .uadd (.natural (by decide)) (.natural (by decide))
+
+theorem overflowing_traps : Evaluation.Trap overflowing := .overflow (by decide)
+
+def discardTrap : Raw := .app (.lam false .u64 (.integer 7)) overflowing
+
+theorem discard_trap_typed : HasType (fun _ => none) discardTrap .i64 := by
+  simpa only [discardTrap, subst, proposition] using
+    HasType.app (HasType.lam (Γ := fun _ => none) .u64 rfl
+      (.integer (n := 7) (by decide) (by decide))) (overflowing_typed _)
+
+theorem discard_argument_traps : Evaluation.Trap discardTrap :=
+  .context (.appArgument .u64 (.integer 7)) overflowing_traps
+
+def erasedOverflowDomain : Raw := .lt (.natural 0) (.uadd overflowing (.natural 1))
+def erasedOverflow : Raw := .app (.lam true erasedOverflowDomain (.integer 7)) (.zeroLe overflowing)
+
+theorem erased_overflow_typed : HasType (fun _ => none) erasedOverflow .i64 := by
+  have hD : IsType (fun _ => none) erasedOverflowDomain :=
+    .lt (.natural (by decide)) (.uadd (overflowing_typed _) (.natural (by decide)))
+  simpa only [erasedOverflow, erasedOverflowDomain, subst, proposition] using
+    HasType.app (HasType.lam hD rfl (.integer (n := 7) (by decide) (by decide)))
+      (HasType.zeroLe (overflowing_typed _))
+
+theorem erased_overflow_computes : Evaluation.Step erasedOverflow (.integer 7) := by
+  simpa only [erasedOverflow, subst] using
+    (Evaluation.Step.betaErased (A := erasedOverflowDomain) (body := .integer 7)
+      (a := .zeroLe overflowing))
+
+def arrayTrap : Raw := .index (.elements [.integer 7, discardTrap])
+  (.natural 0) (.decide (.natural 0) (.natural 2))
+
+theorem array_trap_typed : HasType (fun _ => none) arrayTrap .i64 := by
+  apply HasType.index (n := .natural 2)
+  · apply HasType.elements _ (by decide)
+    intro x hx
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hx
+    rcases hx with rfl | rfl
+    · exact .integer (by decide) (by decide)
+    · exact discard_trap_typed
+  · exact .natural (by decide)
+  · exact .decide (by decide) (by decide) (by decide)
+
+theorem unselected_element_traps : Evaluation.Trap arrayTrap :=
+  .context (.indexArray (.natural 0) (.decide (.natural 0) (.natural 2)))
+    (.context (.elements [.integer 7] [] (by intro x hx; simp only [List.mem_singleton] at hx; subst x; exact .integer 7)) discard_argument_traps)
+
+/-- The abstract relation can skip work that strict execution must retain. -/
+theorem abstract_read_skips_trap : Computation.Step arrayTrap (.integer 7) :=
+  .read _ 0 _ _ rfl
+
+theorem strict_closed_execution_safe (hs : Evaluation.Steps erasedOverflow u) :
+    HasType (fun _ => none) u .i64 ∧ Evaluation.Outcome u :=
+  Evaluation.execution_safety erased_overflow_typed hs
+
 /-- Each serialized fixture carries a checked closed typing derivation. The
 renderer/parser/compiler association is tested rather than formally assumed. -/
 structure Fixture where
@@ -251,6 +326,10 @@ def fixtures : List Fixture := [
   ⟨"primitive_sub_annotation", true, .i64, subApplication, sub_application_typed⟩,
   ⟨"primitive_nested_read", true, .i64, nestedRead, nested_read_typed⟩,
   ⟨"primitive_dynamic_read", false, dynamicReadType, dynamicRead, dynamic_read_typed⟩,
+  ⟨"primitive_strict_scalar", true, .i64, strictScalar, strict_scalar_typed⟩,
+  ⟨"primitive_erased_overflow", true, .i64, erasedOverflow, erased_overflow_typed⟩,
+  ⟨"primitive_discard_trap", false, .i64, discardTrap, discard_trap_typed⟩,
+  ⟨"primitive_array_trap", false, .i64, arrayTrap, array_trap_typed⟩,
   ⟨"primitive_max_proof", false, .lt (.natural 0) (.uadd (.natural maxWord) (.natural 1)),
     maxProof, max_proof_typed _⟩]
 

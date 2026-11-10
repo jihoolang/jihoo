@@ -1160,6 +1160,47 @@ is claimed. Existing certificate admission and the historical beta-only `Step`
 remain unchanged and narrower than the extended declarative conversion.
 
 
+### Strict evaluation, progress and arithmetic traps
+
+`CoreEvaluation.lean` gives the existing `Raw.Beta.HasType` fragment a strict
+execution strategy. Ordinary application evaluates its function and argument;
+erased application substitutes its argument without executing it. Arrays evaluate
+entries left-to-right before selection, and arithmetic evaluates its operands
+left-to-right. There are no evaluation frames for type annotations or proof
+contents. Proof constructors count as erased values. Unsigned addition overflow
+is an explicit `Trap`, propagated through the same runtime frames.
+
+`Evaluation.progress` proves that **every closed derivation in this restricted
+judgment** is a value, has a next evaluation step, or has a propagated overflow
+trap. There is no caller-supplied normal form, execution witness, or proposition
+truth assumption. Canonical forms follow from typing and proved conversion
+injectivity; closed evidence consistency rules out subtraction underflow and
+out-of-range array selection once their operands are values. `Step.computation`
+embeds successful steps in the existing contextual relation, giving fixed-type
+preservation. `execution_safety` composes these results for every finite strict
+execution: the final term retains the original type and cannot be stuck outside
+the stated value/step/trap outcomes. Values cannot also step or trap.
+
+The distinction from unconstrained contextual computation is intentional. The
+abstract array rule can select the first entry while discarding a trapping second
+entry; strict evaluation retains that trap. Lean examples and generated Core
+fixtures test an ignored ordinary argument and an unselected array entry, both
+of which must trap, plus an erased proof with overflowing indices that must return
+normally. Safe ordinary application has a two-step argument-then-beta trace.
+The native harness checks all of these at O0/O2, isolates traps in child processes,
+checks both object architectures, and retains paired rejection controls. The
+safe generated exports still lower without runtime assertions; separate aliases
+export the deliberately trapping definitions only for subprocess tests.
+
+This is a language-model safety theorem for the stated pure fragment, not a
+proof that `Core.normal`, native normalization, erasure or lowering implements
+this strategy. Native correspondence remains regression-tested. The judgment
+omits general recursion, cases, heap/borrow operations, ownership quantities,
+`Strict`, general machine arithmetic and the rest of the specified core. The
+result permits overflow traps and does not establish termination, whole-core
+consistency, memory safety or the 0.6 release gates as a whole.
+
+
 ## Quantity control and partial executions
 
 `QuantityControl.lean` starts the runtime quantity obligation with a control-flow

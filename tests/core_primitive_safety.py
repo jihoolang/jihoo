@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import platform
 import shlex
+import signal
 import struct
 import subprocess
 import sys
@@ -56,13 +57,16 @@ def test(compiler, out):
     runtime = out / 'guarded-reads.jhc'
     runtime.write_text(FIXTURE.read_text() +
         '(export primitive_guarded_read (pi i U64 I64) (lam i U64 '
-        '(if-lt i 3 p (app (app primitive_dynamic_read i) p) (int -1))))\n')
+        '(if-lt i 3 p (app (app primitive_dynamic_read i) p) (int -1))))\n'
+        '(export primitive_discard_trap_run I64 primitive_discard_trap)\n'
+        '(export primitive_array_trap_run I64 primitive_array_trap)\n')
     success(core('check', runtime))
     success(core('preserves', runtime))
     mir = success(core('emit-mir', runtime))
     require(b'primitive_max_proof' not in mir and b'zero-le' not in mir and b'decide-lt' not in mir,
             'evidence escaped erasure')
-    require(b'assert' not in mir, 'closed safe primitives unexpectedly require runtime checks')
+    safe_mir = success(core('emit-mir', FIXTURE))
+    require(b'assert' not in safe_mir, 'closed safe primitives unexpectedly require runtime checks')
     host = 'aarch64' if platform.machine() in ('aarch64', 'arm64') else 'x86_64'
     cc = shlex.split(os.environ.get('JIHOO_CC', 'clang'))
     expected = {'primitive_first': (ctypes.c_int64, -(1 << 63)),
@@ -73,7 +77,9 @@ def test(compiler, out):
                 'primitive_nested_subtract': (ctypes.c_uint64, 2),
                 'primitive_subtracted_index': (ctypes.c_int64, (1 << 63)-1),
                 'primitive_sub_annotation': (ctypes.c_int64, 9),
-                'primitive_nested_read': (ctypes.c_int64, (1 << 63)-1)}
+                'primitive_nested_read': (ctypes.c_int64, (1 << 63)-1),
+                'primitive_erased_overflow': (ctypes.c_int64, 7),
+                'primitive_strict_scalar': (ctypes.c_int64, 7)}
     for target, machine in [('x86_64', 62), ('aarch64', 183)]:
         for level in ['-O0', '-O2']:
             obj = out / f'{target}{level}.o'
@@ -96,6 +102,16 @@ def test(compiler, out):
                     require(dynamic(index) == value, f'dynamic read {index} {level}: wrong result')
                 for index in [3, (1 << 64)-1]:
                     require(dynamic(index) == -1, f'guarded read {index} {level}: wrong fallback')
+                # An ignored runtime argument and an unselected array entry
+                # must still trap. Run traps in children, never the test process.
+                for name in ['primitive_discard_trap_run', 'primitive_array_trap_run']:
+                    script = ("import ctypes,sys; f=getattr(ctypes.CDLL(sys.argv[1]),sys.argv[2]); "
+                              "f.argtypes=[]; f.restype=ctypes.c_int64; "
+                              "print('entered',flush=True); f()")
+                    trapped = subprocess.run([sys.executable, '-c', script, str(library), name],
+                                             capture_output=True, timeout=10)
+                    require(trapped.returncode in (-signal.SIGILL, -signal.SIGTRAP) and trapped.stdout == b'entered\n',
+                            f'{name} {level}: runtime work was incorrectly discarded: {trapped}')
     for name, (bad, fixed) in PAIRS.items():
         bad_path, good_path = out / f'{name}.jhc', out / f'{name}-control.jhc'
         bad_path.write_text(ANCHOR + bad)
@@ -123,9 +139,9 @@ def test(compiler, out):
                   "f.restype=ctypes.c_uint64; print('entered',flush=True); f()")
         result = subprocess.run([sys.executable, '-c', script, str(library)],
                                 capture_output=True, timeout=10)
-        require(result.returncode < 0 and result.stdout == b'entered\n',
+        require(result.returncode in (-signal.SIGILL, -signal.SIGTRAP) and result.stdout == b'entered\n',
                 f'{level}: expected arithmetic trap after successful load: {result}')
-    print('primitive safety: Lean fixture checked/preserved; 9 closed, 3 guarded reads and 2 fallback results at O0/O2, '
+    print('primitive safety: Lean fixture checked/preserved; 11 closed, 3 guarded reads, 2 fallbacks and 2 strict traps at O0/O2, '
           'both object targets, 7 paired rejections, erasure and overflow boundaries')
 
 
