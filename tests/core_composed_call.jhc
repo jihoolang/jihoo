@@ -1,0 +1,17 @@
+(export composed I64
+ (app (lam saved I64
+  (app (lam held (Buffer 1)
+   (app (lam input (Buffer 1)
+    (app (lam received (Buffer 1)
+     (lend held
+      (lam ref (Ref (Buffer 1)) (index ref 0 (decide-lt 0 1)))
+      (lam copied I64 (lam restored (Buffer 1)
+       (free restored
+        (app (lam final (Buffer 1)
+         (app (lam chosen I64
+          (app (lam move (Buffer 1) (free move chosen)) final)) saved))
+         (app (lam moved (Buffer 1) moved) received)))))))
+     (app (lam moved (Buffer 1) moved) input)))
+    (alloc 1 (int 7))))
+   (alloc 1 (int 7))))
+  (int 99)))

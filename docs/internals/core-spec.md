@@ -656,3 +656,8 @@ is not a proof that arbitrary captures can be discarded.
 retains captured owner/scalar bindings across an explicit static resource split.
 Its frame safety is derived from typing and execution; deterministic evaluation
 is stated for a fixed partition plan, not arbitrary erased or inferred plans.
+
+The [constructor-closure integration](lean-proofs.md#composing-calls-under-existing-core-constructors)
+uses that same framed judgment for calls inside allocation, Free, mixed Lend
+and let continuations. Lend readers retain their existing restrictions: the
+new continuation runs after the lease closes, not inside an active reader.
