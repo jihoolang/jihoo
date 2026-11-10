@@ -240,6 +240,8 @@
               root = ./.;
               fileset = lib.fileset.unions [
                 sources
+                ./scripts/verified_core.py
+                ./proofs/VerifyCore.lean
                 ./proofs/Jihoo
                 ./proofs/Jihoo.lean
                 ./proofs/CheckGraph.lean
@@ -274,6 +276,8 @@
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/verified_core.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/verified_core.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_raw.py --compiler ${jihoo}/bin/jihoo

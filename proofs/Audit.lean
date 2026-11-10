@@ -1060,3 +1060,7 @@ import Jihoo
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_argument_still_traps
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.erased_array_still_traps
 #print axioms Jihoo.CoreBridge.Raw.Beta.PrimitiveExamples.mixed_binder_erased_substitution
+
+#print axioms Jihoo.VerifiedCore.execution_safety
+#print axioms Jihoo.VerifiedCore.erased_execution
+#print axioms Jihoo.VerifiedCore.requested_truth

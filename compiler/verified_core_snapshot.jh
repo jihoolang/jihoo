@@ -1,0 +1,14 @@
+// Producer for scripts/verified_core.py. This binary alone does not verify proofs.
+import core_snapshot
+
+fn produce() -> Result(String, String) {
+    let source = core_snapshot.stdin_once()?
+    core_snapshot.snapshot(source.as_str(), "require")
+}
+
+fn main() -> i32 {
+    match produce() {
+        Ok(bytes) => { print(bytes); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}
