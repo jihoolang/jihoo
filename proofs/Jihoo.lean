@@ -145,3 +145,4 @@ import Jihoo.InitializationStoreExamples
 import Jihoo.InitializationCallsExamples
 
 import Jihoo.VerifiedCore
+import Jihoo.HeapLeaseExamples

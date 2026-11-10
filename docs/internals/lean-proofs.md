@@ -2640,3 +2640,55 @@ and independent mixed admission mandatory for its own success result. It binds
 one retained source and snapshot byte value to an exact verifier response and
 composes admission with strict execution safety and intermediate erasure. This
 is dual checking, not a refinement proof of the ordinary production checker.
+
+### Allocation identities and scoped read leases
+
+`HeapLeases.lean` starts the missing heap/lifetime part of the original 0.6
+soundness gate. It specifies primitive allocation, free, lease-open/close,
+read and write events. Object identities and lease tokens are separate,
+monotonically fresh natural numbers; live objects carry a scalar payload.
+A valid state maps every active lease to a live allocation. Opening a lease
+requires a live allocation, reads record that allocation's actual payload,
+and writing/freeing requires that no active lease names the object.
+
+`step_valid` and `steps_valid` preserve this invariant. More importantly,
+`dead_steps` and `expired_steps` show that arbitrarily many intervening
+allocations and nested lends cannot resurrect a freed object or expired token.
+Consequently `no_double_free` excludes a second free after any finite trace,
+and `closed_lease_unreadable` excludes stale-token reads after the region ends.
+`reader_steps` is a heap/value frame theorem: arbitrary reader activity,
+including nested leases, keeps the outer borrowed object live with exactly the
+same payload, provided the reader does not close its lender's token.
+
+The quantity connection now identifies its observation precisely: `released`
+collects **free events naming allocation identities**, not reads, pointer
+values, arbitrary slot uses or lease opens. `released_dead` proves that every
+observed free leaves its object dead at the endpoint. `checked_owner_released`
+combines an actual heap trace with existing quantity checking: if its release
+observation is a completed checked control trace with demand one, that exact
+allocation is freed once and is dead. The trace-projection premise is explicit;
+this theorem does not derive it for arbitrary typed Core.
+
+`HeapLeaseExamples.lean` constructs a complete allocation / nested-reader /
+close / free execution and applies both frame and quantity endpoints. Negative
+proofs cover freeing/writing under a lease, freeing while an outer lease remains,
+reading the wrong payload, resurrection after allocation and expired-token
+reads. An explicit counterexample permits close-then-write when the reader's
+close-authority restriction is omitted. This demonstrates why the restriction
+must be established by the future Core typing/translation theorem, not treated
+as a consequence of quantity counts.
+
+**Boundary:** this is a primitive runtime specification and invariant theorem,
+not whole-Core progress, borrow typing, or a proof that the native implementation
+satisfies it. State transitions reject invalid heap actions by definition; the
+remaining typing-to-execution proof must show checked programs never request
+such actions. It must also establish lender-only close authority, no escaping
+borrow results, authentic ownership/free-event projection, heap-field ownership
+and recursive destruction. Payloads here are scalars, not buffers or recursive
+node graphs. Fresh identities are not raw addresses: a native allocator may
+reuse addresses and needs an explicit identity/generation simulation. Allocation
+failure and arithmetic traps may stop a prefix; successful allocation and
+termination are not claimed. The implementation checker may remain trusted and
+tested under the original roadmap; proving a refinement of that checker is not
+an additional release requirement. Erasure, complete runtime/MIR semantics and
+their correspondence remain separate required work.

@@ -561,3 +561,11 @@ proves that variable/borrow substitution commutes with quantity-annotated source
 projection, including nested scopes/Lends, and compares it with actual kernel
 substitution. Native transformation refinement and typed mode stability, as well
 as runtime and heap/borrow soundness, remain separate obligations.
+
+The [heap/lease primitive semantics](lean-proofs.md#allocation-identities-and-scoped-read-leases)
+now proves allocation/lease invariant preservation, permanent expiry, no double
+free, and a nested-reader payload frame property. Coupling exact free-event
+identities to checked quantity traces yields actual deallocation, conditional
+on that trace projection. This is not a proof that whole-Core typing establishes
+the primitive preconditions or prevents escaping borrows; recursive heap fields,
+allocator address reuse and native execution correspondence remain open.
