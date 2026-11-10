@@ -651,3 +651,8 @@ connects recursive direct App/Lam graph nodes to producer evaluation and binding
 of the exact returned capability. The producer accounts for every current
 resource and the body receives only the result. The singleton body restriction
 is not a proof that arbitrary captures can be discarded.
+
+[Framed application](lean-proofs.md#framed-owned-application-with-captured-bindings)
+retains captured owner/scalar bindings across an explicit static resource split.
+Its frame safety is derived from typing and execution; deterministic evaluation
+is stated for a fixed partition plan, not arbitrary erased or inferred plans.

@@ -169,3 +169,7 @@ import Jihoo.OwnedCoreResults
 import Jihoo.OwnedResultExamples
 import Jihoo.OwnedCoreApplications
 import Jihoo.OwnedApplicationExamples
+import Jihoo.OwnedCallContext
+import Jihoo.OwnedApplicationFrame
+import Jihoo.FramedOwnedApplications
+import Jihoo.FramedApplicationExamples

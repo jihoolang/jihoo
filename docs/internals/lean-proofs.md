@@ -3524,3 +3524,46 @@ per Python mode across O0/O2, with five exact-diagnostic rejections. O0 compares
 concrete allocation IDs and their release order, so equal payloads cannot hide a
 wrong returned owner. Some captured-scalar and signed-native cases exceed the
 formal fragment; they are explicitly implementation regression evidence.
+
+## Framed owned application with captured bindings
+
+The direct application boundary now has a resource-partition specification.
+A static plan chooses a prefix of the incoming owner inventory for the producer;
+the suffix is reserved for the lambda body. This mirrors the relevant source
+rule: `Core.infer` checks an App's function and argument in the same lexical
+context, while `Core.uses` counts uses in the argument and direct lambda body.
+The plan is proof data, not a new runtime instruction or a claim that the native
+checker exports or infers this partition.
+
+The producer context preserves every lexical position and scalar binding but
+masks frame owners. The body binds the returned object at its new parameter,
+tombstones all old aliases of the consumed prefix, and remaps the remaining
+frame owners. Scalar captures retain their original values. A live owner is
+therefore assigned to exactly one side, rather than forgotten at the call or
+made accessible to both sides. The split must be in bounds.
+
+The frame argument is derived, not assumed as an untouched trace: freshness,
+resource conservation and the initial disjoint ownership inventory imply that
+the producer cannot release or return a frame object. Lease framing preserves
+its unborrowed status. The restricted grammar has no writes; its derived
+write-free execution property also preserves a frame object's payload. Returning
+a fresh allocation with the same payload does not make it the same identity as
+a captured owner.
+
+Typing and evaluation are indexed by the explicit plan. The execution result,
+event sequence and final heap are deterministic for a fixed plan. The proof
+does not assert uniqueness of inferred partitions or coherence after erasing
+arbitrary plans. Those are separate questions from safety of a checked partition.
+Direct Buffer1 applications and the existing constructor leaves remain the
+fragment: arbitrary dependent substitution, general higher-order closures,
+active borrowed frame owners and native lowering refinement are not added.
+
+Native `core_framed_call.py` exercises 12 producer/consumer combinations, with
+120 executions per Python mode across O0/O2 and five exact rejection diagnostics.
+A retained allocation stays live while the producer receives a different object,
+allocates a temporary and returns either its input or the temporary. The body
+can use its returned argument, captured owner and scalar value. O0 checks exact
+allocation IDs, release order and the simultaneous live-object peak; equal
+payload cases distinguish ownership identity from observed contents. Signed
+native values and compiler normalization are implementation evidence rather than
+a proof of inferred partition correctness.
