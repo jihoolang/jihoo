@@ -167,3 +167,5 @@ import Jihoo.OwnedArgumentExamples
 
 import Jihoo.OwnedCoreResults
 import Jihoo.OwnedResultExamples
+import Jihoo.OwnedCoreApplications
+import Jihoo.OwnedApplicationExamples

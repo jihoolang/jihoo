@@ -3477,3 +3477,50 @@ remove allocations but must preserve values and balanced address accounting.
 Negative native integers and nested general application are implementation
 regressions, not an enlargement of the formal nonnegative scalar subset or a
 compiler-refinement theorem.
+
+## Syntactic owned-producing application composition
+
+The next application layer connects actual Core `App`/`Lam` nodes rather than
+composing two unrelated execution derivations. It recursively closes the existing
+result-indexed ownership `Types`/`Exec` rules under a direct, runtime `Buffer 1`
+lambda whose argument is itself an owned-producing application. The argument is
+checked in the current lexical, owner and scalar context and must account for
+all currently tracked resources, returning exactly one. Its returned identity
+is then the sole capability bound to the body parameter. The body can itself
+contain this application form. The existing judgment remains the leaf rule, so
+its allocation, scalar computation, Lend, owner transfer and return proofs are
+reused, not replaced by a new assumed-safe evaluator.
+
+The singleton body context is a real restriction: this is not an argument
+that arbitrary captured environments can be discarded. The producer handles
+the entire current inventory; resources not returned must have been released.
+The body cannot use older captured owners or scalar variables. Partial
+applications and dependent Buffer lengths require further rules. The application-form restriction also distinguishes this layer
+from existing allocation and variable-binding application rules. No native
+checker acceptance or successful execution is assumed in the typing premise.
+
+The modeled execution evaluates the producer first, binds its exact result
+identity, and executes the body. Scalar completion releases the returned resource;
+owned completion passes on one live unborrowed resource and accounts for all
+others. Native tests supply separate implementation evidence, not a general
+proof of `core_lower` or LLVM.
+
+`OwnedCoreApplications.total` constructs a complete execution from typing and
+initial heap/ownership invariants. `execution_safe` covers every execution, not
+only that chosen witness. `conservation` counts each initial or newly allocated
+identity as either released or retained as the result. Execution determinism
+compares result, event sequence and final state. The coverage theorem requires
+all initially live objects to be in the supplied owner inventory; without that
+premise it does not claim that an external heap frame disappears. Lease framing
+and expiry preserve the existing lifetime boundary through recursive calls.
+
+The extension does not recursively add applications inside every old constructor:
+old `Types`/`Exec` derivations are leaves, and the new recursive rule is the
+application boundary itself. General captured-body application and substitution
+remain part of the release gap. The pure Raw typing language is unchanged.
+
+Native `core_owned_call.py` covers 24 closed/captured variants and 240 executions
+per Python mode across O0/O2, with five exact-diagnostic rejections. O0 compares
+concrete allocation IDs and their release order, so equal payloads cannot hide a
+wrong returned owner. Some captured-scalar and signed-native cases exceed the
+formal fragment; they are explicitly implementation regression evidence.
