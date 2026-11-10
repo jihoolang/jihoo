@@ -149,3 +149,4 @@ import Jihoo.HeapLeaseExamples
 import Jihoo.ScopedLendExamples
 import Jihoo.ScopedLendGraphExamples
 import Jihoo.LinearHeapExamples
+import Jihoo.LinearCoreCallerExamples

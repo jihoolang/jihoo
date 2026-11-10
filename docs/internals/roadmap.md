@@ -779,6 +779,11 @@ mechanize its soundness, starting from that specification:
    Closed complete executions release every allocation and leave no live heap
    object. General native caller translation, allocation failure, recursive
    fields and the rest of the specified runtime remain outside this result.
+   Original finite caller graphs now recognize literal allocation/App/Lam
+   spines, preserve concrete lexical-owner identities across consumption, and
+   prove all-run closed heap safety. This restricted heap-effect subset retains
+   exporter trust and does not discharge general caller/result/lowering adequacy.
+
 3. **Erasure and lowering.** A proof that the erased program computes
    the pure model's value, and a statement of lowering to MIR against
    a semantics of MIR stated in Lean, proved for the core's runtime fragment (scalars, arrays, buffers,
