@@ -52,6 +52,20 @@ def test(compiler, out):
         return command([*compiler, 'core', *args])
     success(core('check', FIXTURE))
     success(core('preserves', FIXTURE))
+    # Two independently typed source programs have identical computational
+    # structure but different annotations and computed proof payloads. Compare
+    # actual lowering after giving them the same exported symbol.
+    payload_mir = []
+    for name in ['primitive_erased_overflow', 'primitive_simple_evidence']:
+        matches = [line for line in FIXTURE.read_text().splitlines()
+                   if line.startswith(f'(export {name} ')]
+        require(len(matches) == 1, f'{name}: missing or duplicate generated fixture')
+        source = out / f'{name}-pair.jhc'
+        source.write_text(matches[0].replace(f'(export {name} ', '(export payload_pair ', 1) + '\n')
+        success(core('check', source))
+        success(core('preserves', source))
+        payload_mir.append(success(core('emit-mir', source)))
+    require(payload_mir[0] == payload_mir[1], 'computed proof payload changed native MIR')
     # Foreign exports cannot require erased evidence. This implementation-only
     # wrapper checks the bound and supplies evidence to the Lean-derived helper.
     runtime = out / 'guarded-reads.jhc'
@@ -79,7 +93,8 @@ def test(compiler, out):
                 'primitive_sub_annotation': (ctypes.c_int64, 9),
                 'primitive_nested_read': (ctypes.c_int64, (1 << 63)-1),
                 'primitive_erased_overflow': (ctypes.c_int64, 7),
-                'primitive_strict_scalar': (ctypes.c_int64, 7)}
+                'primitive_strict_scalar': (ctypes.c_int64, 7),
+                'primitive_simple_evidence': (ctypes.c_int64, 7)}
     for target, machine in [('x86_64', 62), ('aarch64', 183)]:
         for level in ['-O0', '-O2']:
             obj = out / f'{target}{level}.o'
@@ -141,8 +156,8 @@ def test(compiler, out):
                                 capture_output=True, timeout=10)
         require(result.returncode in (-signal.SIGILL, -signal.SIGTRAP) and result.stdout == b'entered\n',
                 f'{level}: expected arithmetic trap after successful load: {result}')
-    print('primitive safety: Lean fixture checked/preserved; 11 closed, 3 guarded reads, 2 fallbacks and 2 strict traps at O0/O2, '
-          'both object targets, 7 paired rejections, erasure and overflow boundaries')
+    print('primitive safety: Lean fixture checked/preserved; 12 closed, 3 guarded reads, 2 fallbacks and 2 strict traps at O0/O2, '
+          'both object targets, 7 paired rejections, equal proof-payload MIR, erasure and overflow boundaries')
 
 
 def main():
