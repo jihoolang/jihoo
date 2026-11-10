@@ -152,3 +152,6 @@ import Jihoo.LinearHeapExamples
 import Jihoo.LinearCoreCallerExamples
 import Jihoo.LeaseErasureExamples
 import Jihoo.ScalarCoreCallerExamples
+import Jihoo.BoundedMirExamples
+import Jihoo.ScalarCallerEvaluationExamples
+import Jihoo.MirCallerValidationExamples

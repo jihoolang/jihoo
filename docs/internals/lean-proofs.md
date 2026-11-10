@@ -3047,3 +3047,91 @@ returns and scalar-as-owner misuse. Graph tests separately forge role indices,
 annotations, callee shapes, rooted bounds and malformed snapshots. Both Python
 modes run in CI. These proofs close the earlier final-caller-result omission
 only for this finite literal/scalar-variable return fragment.
+
+### Bounded execution of emitted MIR caller graphs
+
+The next correspondence stage uses the actual ordered MIR blocks, local IDs,
+statements and terminators, not an atomic allocation or an opaque "safe action".
+Even a one-cell buffer emits a malloc call, a nonnull assertion and an
+initialization loop with a backedge. The bounded machine therefore tracks both
+block and statement position, optional local values and initially uninitialized
+heap cells. A malloc event does not install the source payload: the emitted
+store must execute before a load can read that cell.
+
+The supported vocabulary is explicit: typed scalar/pointer/unit locals; local
+or single-dereference places; Copy/constants; Use, checked unsigned Add/Mul/Lt/Ne,
+pointer-to-unsigned cast used for a null test, pointer Offset; Assign; and
+Goto/Switch/malloc/free/Assert/Return. Unsupported forms are rejected rather
+than translated to anonymous operations. Pointers carry allocation identity and
+element offset. Free requires a live base pointer; dereference requires a live,
+in-bounds initialized cell. Address casts produce a symbolic nonnull-address
+value that cannot participate in arbitrary integer arithmetic or address-based
+ordering, rather than pretending an allocation ID is a physical address.
+
+This stage validates particular **closed** source/MIR pairs. The source side
+independently evaluates the already-proved result-bearing caller target. The
+comparison includes the returned scalar and ordered allocation/free lifecycle,
+with 16 bytes for each source one-cell buffer (`1*8+8` in the lowerer). It does
+not compare initialization writes or all reads: source allocation installs the
+payload atomically, and native normalization can remove unused reads. This is
+not a general theorem that every invocation of `core_lower.compile` emits a
+matching CFG, nor an all-input theorem for parameterized functions.
+
+The allocator is fresh and successful in the abstract machine. Allocation
+failure, concrete addresses/reuse and native-machine refinement remain outside
+this stage. The native exporter/JSON association is trusted and preserves the
+checked-arithmetic mode and external malloc/free signatures. Acceptance must
+witness a complete bounded execution, not fuel exhaustion, a partially computed
+return value or an unexecuted path assumed safe. The broader original roadmap
+obligations remain open beyond the explicitly supported closed fragment.
+
+This is internal translation-validation evidence, not a newly required user
+certificate workflow. A pair may be rejected because it exceeds the bounded
+vocabulary/resources even when native Jihoo can compile it. The theorem is
+conditional on successful pair admission; it does not turn testing/exporter
+association into a proof of the whole native lowerer.
+
+`BoundedMir.Step` states the instruction rules independently of the executable
+`tick`/`execute`. `tick_sound` and `execute_sound` turn successful evaluation into
+those real instruction transitions. Step and completed-run determinism compare
+the full final frame, returned scalar and lifecycle, not merely an output token.
+The validator scans all blocks, including unreachable ones, for supported typed
+operands/destinations and valid IDs; it also rejects duplicate Switch cases.
+Limits are 512 locals/blocks, 4096 statements, 512 switch cases, 10000 ticks and
+4096 cumulative allocated cells. Those allocation limits are checked before
+constructing a cell array, including for a huge but otherwise valid U64 request.
+
+`ScalarCallerEvaluation` proves its structural source-side evaluator sound and
+complete against the existing result-bearing target semantics.
+`MirCallerValidation.mir_execution`, `all_returns` and `all_source_runs` connect
+accepted pairs in both directions: original Core scalar/lifecycle behavior and
+the actual specified-MIR execution agree. Final MIR heap emptiness is checked
+independently, not inferred from event counts alone. The comparison deliberately
+does not equate dead-cell payloads, initialization writes or all read/write
+observations across the two heap representations.
+
+Kernel-checked examples retain the emitted 13-local/7-block single-buffer CFG,
+including its two visits to the loop head. It needs 22 instruction/terminator
+steps; 21 fuel rejects. Examples cover raw uninitialized allocation, skipped
+initialization, uninitialized return locals, dead/double/interior frees,
+unsupported address observations, checked overflow, resource limits and invalid
+unreachable blocks. A memory-safe MIR returning 77 instead of source 11 and a
+memory-safe malloc8 variant both pass independent MIR safety admission but fail
+the pair comparison. Thus pair acceptance is not just a check that the target
+runs safely. Examples use kernel reduction, not an additional native-evaluation
+axiom.
+
+`core_mir_probe.jh` emits the structured checked MIR from the same source used
+for the original Core snapshot. `CheckMirCaller.lean` parses the paired envelope
+with a dedicated bounded lexical guard (nested MIR requires more depth than the
+older Core-only format). Native paired tests run in normal and Python -O modes:
+seven original pairs are accepted and twenty-seven forged/resource-exhausted
+pairs rejected, including wrong-but-safe results, allocation extent changes,
+huge malloc requests, false asserts, loop fuel and invalid/duplicate switches.
+
+The retained single-buffer CFG is linked structurally in three directions:
+`EmitMirFixture.lean` serializes every supported type, place, operand, statement,
+terminator and edge from the kernel-tested Lean `single`; `proofs/check.sh`
+compares that complete output with `tests/core_mir_single.json`; and the native
+paired test requires full parsed-snapshot equality with that same fixture.
+Equal local/block counts alone are not accepted as fixture correspondence.

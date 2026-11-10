@@ -799,6 +799,12 @@ mechanize its soundness, starting from that specification:
    source/lease-free-target correspondence includes the returned scalar; general
    arithmetic/control flow and actual MIR/machine result adequacy remain open.
 
+   Bounded translation validation now targets actual emitted MIR local/block
+   graphs, including allocation initialization loops, for closed finite callers.
+   Conditional scalar/lifecycle correspondence is not the general native lowerer
+   theorem; exporter association, allocation failure and physical addresses
+   remain explicit boundaries, and no new mandatory user certificate gate is added.
+
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
    kernel's implementation, lowering where not proved, MIR to LLVM, LLVM

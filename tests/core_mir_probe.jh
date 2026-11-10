@@ -1,0 +1,136 @@
+// Test-only structured actual MIR exporter. Parsing/lowering/export association
+// is trusted, not a compiler refinement theorem. Unsupported operations fail.
+import core_parse
+import core_snapshot
+import core_lower
+import check
+import mir
+import types
+import lex
+import target
+import timing
+
+fn ty(t: types.Types, id: u32) -> Result(String, String) {
+    if id == types.I64 { return Ok("\"i64\"".to_string()) }
+    if id == types.U64 { return Ok("\"u64\"".to_string()) }
+    if id == types.BOOL { return Ok("\"bool\"".to_string()) }
+    if id == types.UNIT { return Ok("\"unit\"".to_string()) }
+    match t.kind(id) {
+        Ptr(p) if p == types.I64 => Ok("\"ptr\"".to_string())
+        _ => Err("unsupported local/constant type".to_string())
+    }
+}
+fn place(p: mir.Place) -> Result(String, String) {
+    let deref = if p.proj.len() == 0 { 0 } else if p.proj.len() == 1 {
+        match p.proj[0] { Deref => 1, _ => return Err("unsupported place projection".to_string()) }
+    } else { return Err("nested place projection".to_string()) }
+    Ok("[".to_string() + p.local.to_string() + "," + deref.to_string() + "]")
+}
+fn operand(t: types.Types, op: mir.Operand) -> Result(String, String) {
+    match op {
+        Copy(p) => Ok("[\"copy\",".to_string() + place(p)? + "]")
+        Const(c) => match c {
+            Int(v, kind) if v >= 0 => Ok("[\"int\",".to_string() + ty(t, kind)? + "," + v.to_string() + "]")
+            _ => Err("unsupported constant".to_string())
+        }
+        _ => Err("unsupported move operand".to_string())
+    }
+}
+fn rhs(t: types.Types, r: mir.Rvalue) -> Result(String, String) {
+    match r {
+        Use(v) => Ok("[\"use\",".to_string() + operand(t, v)? + "]")
+        Bin(op, a, b) => {
+            let name = match op {
+                Add => "add", Mul => "mul", Lt => "lt", Ne => "ne"
+                _ => return Err("unsupported binary operation".to_string())
+            }
+            Ok("[\"".to_string() + name + "\"," + operand(t, a)? + "," + operand(t, b)? + "]")
+        }
+        Cast(v, kind, mode) => {
+            match mode { Numeric => {}, _ => return Err("unsupported cast mode".to_string()) }
+            if kind != types.U64 { return Err("unsupported cast target".to_string()) }
+            Ok("[\"cast\",".to_string() + operand(t, v)? + ",\"u64\"]")
+        }
+        Offset(p, i) => Ok("[\"offset\",".to_string() + operand(t, p)? + "," + operand(t, i)? + "]")
+        _ => Err("unsupported MIR rvalue".to_string())
+    }
+}
+fn external(p: mir.Program, id: u32) -> Result(str, String) {
+    if id as i64 >= p.fns.len() { return Err("unknown function id".to_string()) }
+    let f = p.fns[id as i64]
+    match f.linkage { Extern => {}, _ => return Err("non-extern call".to_string()) }
+    if f.body.is_some() || !f.sig.c_abi || f.sig.variadic || f.variadic || f.sig.params.len() != 1 {
+        return Err("unsupported external signature".to_string())
+    }
+    let arg = ty(p.types, f.sig.params[0])?
+    let ret = ty(p.types, f.sig.ret)?
+    if f.symbol == "malloc" && arg == "\"u64\"" && ret == "\"ptr\"" { return Ok("malloc") }
+    if f.symbol == "free" && arg == "\"ptr\"" && ret == "\"unit\"" { return Ok("free") }
+    Err("unknown external identity/signature".to_string())
+}
+fn terminator(p: mir.Program, term: mir.Term) -> Result(String, String) {
+    match term {
+        Goto(b) => Ok("[\"goto\",".to_string() + b.to_string() + "]")
+        Return => Ok("[\"return\"]".to_string())
+        Assert(v, message, next, _) => {
+            if message != "allocation failed" { return Err("unsupported assertion".to_string()) }
+            Ok("[\"assert\",".to_string() + operand(p.types, v)? + "," + next.to_string() + "]")
+        }
+        Switch(v, cases, other) => {
+            var out = "[\"switch\",".to_string() + operand(p.types, v)? + ",["
+            var first = true
+            for c in cases {
+                if c.value < 0 { return Err("negative switch case".to_string()) }
+                if !first { out += "," }; first = false
+                out += "[" + c.value.to_string() + "," + c.block.to_string() + "]"
+            }
+            Ok(out + "]," + other.to_string() + "]")
+        }
+        Call(callee, args, dest, next, _) => {
+            let Fn(id) = callee else { return Err("indirect/intrinsic call".to_string()) }
+            if args.len() != 1 { return Err("call arity".to_string()) }
+            Ok("[\"".to_string() + external(p, id)? + "\"," + operand(p.types, args[0])? + "," + place(dest)? + "," + next.to_string() + "]")
+        }
+        _ => Err("unsupported MIR terminator".to_string())
+    }
+}
+fn snapshot() -> Result(String, String) {
+    let text = core_snapshot.stdin_once()?
+    let c = match core_parse.parse(text.as_str(), 0) { Ok(c) => c, Err(e) => return Err(e.msg.clone()) }
+    var p = match core_lower.compile(c, target.Target.host()) { Ok(p) => p, Err(e) => return Err(e.msg.clone()) }
+    var timer = timing.Timer.start()
+    match check.program(&p, &timer) { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    if !p.checked { return Err("unchecked arithmetic".to_string()) }
+    var found = false
+    var out = "[1,[".to_string()
+    for index in 0..p.fns.len() {
+        let f = p.fns[index]
+        match f.body { Some(body) => {
+            if found || body.arg_count != 0 || f.sig.params.len() != 0 || f.sig.ret != types.I64 {
+                return Err("expected one closed I64 function".to_string())
+            }
+            found = true
+            if body.locals.len() > 512 || body.blocks.len() > 512 { return Err("MIR size limit".to_string()) }
+            var first = true
+            for l in body.locals { if !first { out += "," }; first = false; out += ty(p.types, l.ty)? }
+            out += "],["
+            first = true
+            for b in body.blocks {
+                if !first { out += "," }; first = false
+                out += "[["
+                var first_stmt = true
+                for stmt in b.stmts {
+                    let Assign(dest, value, _) = stmt else { return Err("unsupported MIR statement".to_string()) }
+                    if !first_stmt { out += "," }; first_stmt = false
+                    out += "[" + place(dest)? + "," + rhs(p.types, value)? + "]"
+                }
+                out += "]," + terminator(p, b.term)? + "]"
+            }
+        }, None => { let _ = external(p, index as u32)? } }
+    }
+    if !found { return Err("missing exported body".to_string()) }
+    Ok(out + "]]\n")
+}
+fn main() -> i32 {
+    match snapshot() { Ok(s) => { print(s); 0 }, Err(e) => { eprintln(e); 1 } }
+}
