@@ -933,3 +933,25 @@ import Jihoo
 #print axioms Jihoo.Initialization.Examples.invented_entry_rejected
 #print axioms Jihoo.Initialization.Examples.hidden_successor_rejected
 #print axioms Jihoo.Initialization.Examples.unreachable_accepted
+
+#print axioms Jihoo.Initialization.Store.covers_sub
+#print axioms Jihoo.Initialization.Store.covers_write
+#print axioms Jihoo.Initialization.Store.readMany_exists
+#print axioms Jihoo.Initialization.Store.writeMany_covers
+#print axioms Jihoo.Initialization.Store.execution_sound
+#print axioms Jihoo.Initialization.Store.normal_result_covered
+#print axioms Jihoo.Initialization.Store.reachable_store_covered
+#print axioms Jihoo.Initialization.Store.accepted_no_uninitialized
+#print axioms Jihoo.Initialization.Store.seed_covers
+#print axioms Jihoo.Initialization.Store.enter_parameter
+#print axioms Jihoo.Initialization.Store.enter_covers
+#print axioms Jihoo.Initialization.Store.call_entry_lookup
+#print axioms Jihoo.Initialization.Store.accepted_frame_no_uninitialized
+#print axioms Jihoo.Initialization.Store.Examples.absent_read_fault
+#print axioms Jihoo.Initialization.Store.Examples.initialized_read_order
+#print axioms Jihoo.Initialization.Store.Examples.trap_remains_possible
+#print axioms Jihoo.Initialization.Store.Examples.wrong_result_arity_remains_possible
+#print axioms Jihoo.Initialization.Store.Examples.duplicate_write_keeps_last
+#print axioms Jihoo.Initialization.Store.Examples.operations_distinguish_positions
+#print axioms Jihoo.Initialization.Store.Examples.captured_argument_values
+#print axioms Jihoo.Initialization.Store.Examples.concrete_cycle_no_fault

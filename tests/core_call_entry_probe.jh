@@ -208,9 +208,15 @@ fn initialization_certificate(p: mir.Program) -> Result(String, String) {
             Ok(a) => a
             Err(e) => return Err(e.msg.clone())
         }
-        out.push_str(("function\t" + i.to_string().as_str() + "\ninitial\t" + numbers(
-            analysis.initial
-        ).as_str() + "\n").as_str())
+        out.push_str(
+            (
+                "function\t" + i.to_string().as_str() + "\t" + body.arg_count.to_string().as_str() + "\t" + (
+                    if body.locals[0].ty == types.UNIT { "1" } else { "0" }
+                ) + "\ninitial\t" + numbers(
+                    analysis.initial
+                ).as_str() + "\n"
+            ).as_str()
+        )
         for j, block in analysis.graph {
             var facts = Vec(u32).new()
             if analysis.reached[j] {
@@ -271,6 +277,9 @@ fn inspect(path: str, tgt: target.Target, mutation: str) -> Result(String, Strin
             if mutation == "late-argument" {
                 body.locals.push(body.locals[1].clone()); changed = true
             }
+            if mutation == "pass-borrow" { p.fns[i].pass[0] = mir.ParamPass.Borrow; changed = true }
+            if mutation == "pass-owned" { p.fns[i].pass[0] = mir.ParamPass.Owned; changed = true }
+            if mutation == "reference-result" { p.fns[i].returns_ref = true; changed = true }
             if mutation == "pass" { p.fns[i].pass.push(mir.ParamPass.Value); changed = true }
             if mutation == "variadic" { p.fns[i].variadic = true; changed = true }
             let sp = p.fns[i].span
