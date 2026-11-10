@@ -25,7 +25,9 @@ function reset(dir) {
 }
 
 function writePage(slug, { title, description, sidebar }, body) {
-  const front = ['---', `title: ${JSON.stringify(title)}`];
+  // Keep the TOC route authoritative: Astro otherwise normalizes punctuation
+  // in filenames (for example, `0.6-proof-status`) into a different slug.
+  const front = ['---', `title: ${JSON.stringify(title)}`, `slug: ${JSON.stringify(slug)}`];
   if (description) front.push(`description: ${JSON.stringify(description)}`);
   if (sidebar) front.push(`sidebar: ${JSON.stringify(sidebar)}`);
   front.push('---', '');
