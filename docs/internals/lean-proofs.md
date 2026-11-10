@@ -2875,3 +2875,59 @@ translation theorem. The ambient theorem preserves leases, not a complete
 live/payload frame for all untracked objects. The original roadmap still permits
 trusting/testing the implementation checker and still requires broader specified
 Core soundness, erasure adequacy and Core-to-MIR correspondence.
+
+### Original Core allocation/caller graph recognition
+
+`LinearCoreCallers.lean` connects the preceding finite program to a bounded
+fragment of original constructor graphs rather than accepting a caller-supplied
+sequence of ownership operations. It recognizes closed `I64` expressions made
+of literal results, `App (Lam false (Buffer 1) body) (Alloc 1 literal)`, and
+`App (Lam false I64 body) (App callee (Var k))`. Callees must independently pass
+the existing scalar-Lend graph recognizer. A structurally matching function type
+is selected from the graph before admitting the callee once; the scanner does
+not repeatedly run whole-graph validation for every candidate node. Root/type
+bounds, graph validity, depth 32 and a shared 512-step projection budget are
+checked. Unsupported initializer expressions, erased binders, captured callee
+owners and nonliteral final results are not silently erased into this fragment.
+
+Lexical bindings and live ownership slots are distinct. Allocation shifts live
+slot numbers and adds a lexical name. Consumption leaves a tombstone at every
+lexical entry naming the consumed slot, compacts higher ownership slots, and
+adds a nonowner scalar-result binder. Old names therefore cannot accidentally
+refer to a different owner after compaction. `fresh_bindings`,
+`consumed_bindings` and `ownerSlot_identity` prove that these operations preserve
+the concrete allocation identities associated with unconsumed names and that
+the lexical variable selected for a call denotes the exact consumed allocation.
+
+`project_sound` proves original graph recognition produces a corresponding
+finite program; the accepted record additionally proves that program's linear
+resource check. Forward and reverse execution correspondence relate its runs
+to the new restricted constructor `CoreRuns` semantics. The finish rule itself
+does **not** demand an empty capability list: reflection must derive that from
+the checked program, so a no-leak assumption is not hidden in termination.
+`accepted_total` constructs a successful abstract execution, while
+`accepted_all_runs` proves primitive heap safety, lease restoration,
+exactly-once release and an empty final live heap for **every** constructor run
+of a recognized closed graph. No caller supplies a safe trace or a heap-entry
+ownership premise. Examples exercise a shared `Var 1` node that names an older
+owner before a scalar binder and a newer owner afterward, equal payloads,
+tombstones, leaks, captured outer owners and rejection budgets.
+
+`tests/core_linear_graph_probe.jh` exports original checked Core node IDs,
+including allocation edges; `CheckLinearCaller.lean` parses the bounded snapshot
+and calls the proof-producing recognizer. Native graph regressions cover both
+owner-consumption orders, allocation between calls, an empty scalar program,
+and forged snapshots involving reuse, scalar/owner confusion, annotations,
+lengths, unsupported shapes and resource limits. Both Python modes run in CI.
+These tests are separate from the native result/allocation instrumentation in
+`core_linear_heap.py`.
+
+**Boundary:** the new operational relation is the specified fragment's heap-
+effect semantics. It ignores call results that the fragment cannot use, and
+its theorem is not scalar-result preservation or a native evaluation/lowering
+simulation. Allocation still succeeds with fresh abstract identities, and only
+nonnegative literal initializers/final results are recognized. Exporter/JSON
+association, opaque unsupported nodes, parsing/elaboration, machine bounds,
+allocation failure, general contexts, recursion and broader erasure/MIR
+correspondence remain outside the theorem. This closes the explicit caller-
+structure gap for this finite subset, not the full original 0.6 soundness gate.

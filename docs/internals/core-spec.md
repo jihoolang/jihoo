@@ -596,3 +596,12 @@ formal caller-program rules, not yet a translation of general native caller
 graphs. Successful-allocation, finite-control and scalar-fragment restrictions
 remain explicit; full capabilities, failures, recursion and MIR correspondence
 remain open.
+
+[Original finite caller graphs](lean-proofs.md#original-core-allocationcaller-graph-recognition)
+now recognize literal allocation and App/Lam call-binding spines directly from
+constructor IDs. A lexical-binding interpretation proves consumed names remain
+tombstones while live capability slots compact, and admitted closed caller
+executions inherit heap safety and a completely empty final live heap. This is
+a restricted heap-effect semantics, not scalar-result preservation or general
+native caller/lowering adequacy; the trusted exporter and finite successful-
+allocation restrictions remain explicit.

@@ -1,0 +1,65 @@
+// Test-only constructor view of original checked Core roots. Unknown constructors
+// are opaque and cannot authorize a reachable projection. Node IDs are unchanged.
+import core
+import core_parse
+import core_snapshot
+
+fn row(tag: str, fields: [u64]) -> String {
+    var out = "[\"".to_string() + tag + "\""
+    for field in fields { out += "," + field.to_string() }
+    out + "]"
+}
+
+fn node(term: core.Term) -> String {
+    match term {
+        Var(k) => row("var", [k as u64])
+        Natural(v) => row("natural", [v])
+        Integer(v) if v >= 0 => row("integer", [v as u64])
+        I64 => row("i64", [])
+        Buffer(n) => row("buffer", [n as u64])
+        Ref(t) => row("ref", [t as u64])
+        Pi(e, t, b) => row("pi", [if e { 1 } else { 0 }, t as u64, b as u64])
+        Lam(e, t, b) => row("lam", [if e { 1 } else { 0 }, t as u64, b as u64])
+        Alloc(n, v) => row("alloc", [n as u64, v as u64])
+        App(f, a) => row("app", [f as u64, a as u64])
+        Index(a, i, p) => row("index", [a as u64, i as u64, p as u64])
+        Decide(a, b) => row("decide", [a as u64, b as u64])
+        Strict(a, b) => row("strict", [a as u64, b as u64])
+        Borrow(x) => row("borrow", [x as u64])
+        Lend(x, f, g) => row("lend", [x as u64, f as u64, g as u64])
+        Free(x, rest) => row("free", [x as u64, rest as u64])
+        Store(x, i, v, p) => row("store", [x as u64, i as u64, v as u64, p as u64])
+        IfLt(a, b, yes, no) => row("ifLt", [a as u64, b as u64, yes as u64, no as u64])
+        _ => row("opaque", [])
+    }
+}
+
+fn snapshot() -> Result(String, String) {
+    let source = core_snapshot.stdin_once()?
+    var c = match core_parse.parse(source.as_str(), 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 || c.families.len() != 0 {
+        return Err("expected one definition and no families".to_string())
+    }
+    let root = c.definitions[0].value
+    let ty = c.definitions[0].ty
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    if c.nodes.len() > 4096 { return Err("graph exceeds 4096 nodes".to_string()) }
+    var out = "[1,".to_string() + root.to_string() + "," + ty.to_string() + ",["
+    var first = true
+    for n in c.nodes {
+        if !first { out += "," }
+        first = false
+        out += node(n.term)
+    }
+    Ok(out + "]]\n")
+}
+
+fn main() -> i32 {
+    match snapshot() {
+        Ok(output) => { print(output); 0 }
+        Err(message) => { eprintln(message); 1 }
+    }
+}
