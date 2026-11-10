@@ -141,3 +141,5 @@ import Jihoo.CallEntryExamples
 import Jihoo.InitializationExamples
 
 import Jihoo.InitializationStoreExamples
+
+import Jihoo.InitializationCallsExamples

@@ -269,6 +269,8 @@
             (cd proofs && lake build --wfail)
             python3 tests/core_initialization_proof.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_initialization_proof.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo

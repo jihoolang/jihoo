@@ -955,3 +955,28 @@ import Jihoo
 #print axioms Jihoo.Initialization.Store.Examples.operations_distinguish_positions
 #print axioms Jihoo.Initialization.Store.Examples.captured_argument_values
 #print axioms Jihoo.Initialization.Store.Examples.concrete_cycle_no_fault
+
+#print axioms Jihoo.Initialization.Calls.arguments_exist
+#print axioms Jihoo.Initialization.Calls.validate_sound
+#print axioms Jihoo.Initialization.Calls.validated_call
+#print axioms Jihoo.Initialization.Calls.entry_covered
+#print axioms Jihoo.Initialization.Calls.call_continuation
+#print axioms Jihoo.Initialization.Calls.preservation
+#print axioms Jihoo.Initialization.Calls.reaches_invariant
+#print axioms Jihoo.Initialization.Calls.no_uninitialized
+#print axioms Jihoo.Initialization.Calls.Examples.recursive_program_accepted
+#print axioms Jihoo.Initialization.Calls.Examples.recursive_execution_safe
+#print axioms Jihoo.Initialization.Calls.Examples.argument_order
+#print axioms Jihoo.Initialization.Calls.Examples.argument_missing
+#print axioms Jihoo.Initialization.Calls.Examples.caller_cell_survives_return
+#print axioms Jihoo.Initialization.Calls.Examples.returned_value_installed
+#print axioms Jihoo.Initialization.Calls.Examples.invalid_callee_rejected
+#print axioms Jihoo.Initialization.Calls.Examples.invalid_arity_rejected
+#print axioms Jihoo.Initialization.Calls.Examples.unsaved_caller_local_rejected
+#print axioms Jihoo.Initialization.Calls.Examples.missing_return_value_rejected
+#print axioms Jihoo.Initialization.Calls.Examples.unit_return_accepted
+
+#print axioms Jihoo.Initialization.Calls.arguments_length
+#print axioms Jihoo.Initialization.Calls.validated_call_ready
+#print axioms Jihoo.Initialization.Calls.Examples.call_pushes_caller
+#print axioms Jihoo.Initialization.Calls.Examples.return_restores_caller
