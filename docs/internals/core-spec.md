@@ -627,3 +627,9 @@ source/MIR pair compares its scalar result and allocation/free lifecycle under
 an independent bounded MIR semantics. This is conditional translation validation,
 not a general `core_lower.compile` theorem or concrete-address machine refinement;
 unsupported shapes and exhausted fuel reject rather than certify a partial run.
+
+The pure model now also has [bidirectional payload-erasure adequacy](lean-proofs.md#bidirectional-pure-payload-erasure-adequacy):
+every finite execution of an annotation/proof-payload-erased term lifts back to
+the source, with scalar and trap observations preserved. This is generic over
+the existing pure grammar and retains ghost binder slots. It is not a theorem
+about the full Core grammar or native ghost-slot deletion/lowering.

@@ -3135,3 +3135,48 @@ terminator and edge from the kernel-tested Lean `single`; `proofs/check.sh`
 compares that complete output with `tests/core_mir_single.json`; and the native
 paired test requires full parsed-snapshot equality with that same fixture.
 Equal local/block counts alone are not accepted as fixture correspondence.
+
+### Bidirectional pure payload-erasure adequacy
+
+`CorePayloadReflection.lean` and `CorePayloadAdequacy.lean` close the reverse
+execution gap in the existing pure evaluation model. The result is structural
+and quantified over arbitrary terms and finite executions, not a collection of
+accepted closed examples or a second bounded evaluator. It covers the existing
+model's higher-order runtime and erased beta applications, strict arrays and
+indexing, checked unsigned addition, proof-guided subtraction, and explicit
+propagated overflow traps.
+
+Payload erasure removes annotations and computed evidence payloads but retains
+binder modes, slots, and application structure. Every step of an erased term
+lifts to a source step whose result has exactly that erasure; erased traps also
+reflect. Array-context inversion recovers the original prefix and selected
+position rather than assuming erasure is injective. Together with the earlier
+forward simulation and value reflection, all finite erased executions lift to
+source executions. Closed source typing then supplies preservation and progress
+at every lifted endpoint. The intermediate target is an untyped `Raw` carrier;
+it need not satisfy the source annotation/mode rules.
+
+Counted executions preserve exactly the same number of transitions in both
+directions, including retained erased-beta contractions. Arbitrarily long finite
+execution capacity is equivalent; no coinductive infinite-run or termination
+claim is inferred. Scalar observations and reachable terminal outcomes agree in both directions.
+Different proof payloads with identical erasures cannot change these runtime
+observations. Strict runtime arguments and every array entry still evaluate,
+even when an argument is discarded or an array entry is not selected. Computed
+proof/annotation payloads, by contrast, are not evaluation positions.
+
+**Boundary:** this is the full grammar of the existing small pure model, not
+whole Jihoo Core. It does not remove ghost slots, establish normalization, add
+heap/ownership/recursion rules, or identify the erased carrier with native MIR.
+The native paired-program regression suite is independent implementation
+evidence, not a premise that substitutes for a proof of compiler lowering.
+The original broader 0.6 gates remain open; ordinary implementation checking
+remains trusted/tested rather than requiring optional user certificates.
+
+`tests/core_pure_erasure.py` generates well-typed native program twins at three
+binder depths. Each normal/-O test compares 18 complete MIR pairs, executes
+300 scalar-result checks at O0/O2, and verifies 60 retained runtime-overflow
+traps plus three precisely diagnosed rejections. Native erased U64 binders and
+IfLt cases deliberately provide additional implementation coverage outside the
+small formal typing grammar. These twins are not literal submissions of the
+untyped erased carrier to the source checker.

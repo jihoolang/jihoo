@@ -325,6 +325,8 @@
               jihoo run tests/runner.jh
               python3 tests/dependent_benchmark.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_primitive_safety.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_pure_erasure.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_pure_erasure.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
