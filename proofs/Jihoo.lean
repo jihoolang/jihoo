@@ -207,3 +207,7 @@ import Jihoo.DynamicMir
 import Jihoo.DynamicMirExecution
 import Jihoo.DynamicMirCorrespondence
 import Jihoo.DynamicMirSnapshot
+import Jihoo.MirLocalOverlay
+import Jihoo.MirBufferHeap
+import Jihoo.MirBufferFragment
+import Jihoo.MirBufferFragmentExamples

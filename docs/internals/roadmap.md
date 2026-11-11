@@ -815,6 +815,11 @@ and reported as full-language soundness.
    Conditional scalar/lifecycle correspondence is not the general native lowerer
    theorem; exporter association, allocation failure and physical addresses
    remain explicit boundaries, and no new mandatory user certificate gate is added.
+   A reusable allocation/fill fragment now supports arbitrary distinct local
+   slots, relocated CFG blocks and prior heap objects under cumulative resource
+   limits. It proves initialized fresh contents and preservation of unrelated
+   state, then composes with an independently proved continuation. General
+   source-to-fragment translation and arbitrary continuation safety remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the

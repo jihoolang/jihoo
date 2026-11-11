@@ -176,6 +176,9 @@ A separate beta-aware target proves fixed-type contextual beta preservation,
 including annotation changes, using proved conversion and context transport.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
+A relocatable MIR allocation/fill fragment now proves initialization and framing
+inside enclosing programs with existing heap objects, with separately proved
+continuations. Source lowering and arbitrary continuations remain outside it.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).

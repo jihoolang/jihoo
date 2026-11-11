@@ -3871,3 +3871,41 @@ boundary lengths and signed payload cases; negative I64 tests remain implementat
 evidence outside the theorem. The source-to-MIR snapshot association, exporter,
 MIR-to-LLVM and native runtime remain trust boundaries. This is a parametric
 result for one actual compiled program, not a general compiler-correctness theorem.
+
+### Relocatable allocation-and-fill MIR fragments
+
+`MirBufferFragment` generalizes the allocation and initialization loop into a
+structural fragment of an enclosing `BoundedMir.Code`. Its ten roles map to
+arbitrary distinct physical locals, and its entry, guard, initialization, test,
+body and continuation labels may be relocated. `Embedded` checks the five
+instruction blocks and role declarations; it is not an execution certificate.
+The retained compiler graph is one proved instance of this interface.
+
+`fills_from_frame` starts from the actual local array with length and payload in
+the two input roles. Scratch contents are arbitrary. The initial heap may hold
+both live and released objects, provided it has fewer than 512 objects and its
+cumulative cell count plus `n + 1` is at most 4096. Released objects still count
+toward these bounds. The same nonnegative I64 payload bound applies.
+
+The theorem constructs a terminating instruction execution to the continuation,
+with exactly one fresh allocation event. Every logical cell contains the
+payload and the spare cell is uninitialized. The two input roles remain intact,
+the fresh base pointer and final cursor are available to the continuation, all
+non-role locals retain their values, and every prior heap object retains its
+liveness and cells. `MirLocalOverlay` supplies the local-array frame laws;
+`MirBufferHeap` supplies cumulative allocation, prefix-store, load and free laws.
+
+`continue_after_fill` composes this result with an independently proved
+continuation in the same enclosing code, preserving its event trace and allowing
+its final state to depend on the remaining scratch value. The fragment itself
+leaves the new Buffer live. It does not prove that an arbitrary continuation
+uses or frees it safely, nor that the whole heap is empty.
+
+Kernel-checked examples include the actual dynamic compiler graph and a shifted-
+local, permuted-block program over a preexisting live object and a released
+object. A proved free/return continuation releases only the fresh object and
+preserves the old live object. Symbolic examples cover zero length and the
+cumulative-capacity boundary; executable reductions check exact small runs, and
+negative examples reject a missing store and excess cumulative allocation.
+This reusable MIR result does not extend source translation, general lowering,
+MIR-to-LLVM, physical-address or allocation-failure claims.
