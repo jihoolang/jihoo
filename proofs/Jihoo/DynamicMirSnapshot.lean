@@ -48,9 +48,9 @@ private def term : Jihoo.BoundedMir.Term → Json
 
 private def block (b : Block) : Json := row [.arr (b.statements.map statement), term b.term]
 
-private def code (c : Code) : Json := row [nat 2, .arr (Jihoo.DynamicMir.entry.argumentSlots.map nat), .arr (c.locals.map ty), .arr (c.blocks.map block)]
+def code (c : Code) (entry : Entry) : Json := row [nat 2, .arr (entry.argumentSlots.map nat), .arr (c.locals.map ty), .arr (c.blocks.map block)]
 
-def mir : Json := code Jihoo.DynamicMir.code
+def mir : Json := code Jihoo.DynamicMir.code Jihoo.DynamicMir.entry
 
 end Jihoo.DynamicMirSnapshot
 
@@ -82,9 +82,11 @@ private def node : Graph.Node → Json
   | .store x i v p => row "store" [x, i, v, p]
   | .ifLt a b yes no => row "ifLt" [a, b, yes, no]
 
-def snapshot : Json := .arr #[toJson (1 : Nat),
-  toJson Jihoo.DependentBufferGraph.root, toJson Jihoo.DependentBufferGraph.typeRoot,
-  .arr (Jihoo.DependentBufferGraph.graph.map node)]
+def serialize (graph : Array Graph.Node) (root typeRoot : Nat) : Json := .arr #[toJson (1 : Nat),
+  toJson root, toJson typeRoot, .arr (graph.map node)]
+
+def snapshot : Json := serialize Jihoo.DependentBufferGraph.graph
+  Jihoo.DependentBufferGraph.root Jihoo.DependentBufferGraph.typeRoot
 end Jihoo.DynamicMirSnapshot.Source
 
 namespace Jihoo.DynamicMirSnapshot

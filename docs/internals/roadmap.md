@@ -831,9 +831,13 @@ and reported as full-language soundness.
    lowering now constructs a comparison/switch and typed result joins for scalar,
    natural and owner intermediates. Explicit initial representation-kind agreement
    supports join writes; the unchanged sized-composition Core graph retains both
-   comparisons in its generated execution/totality theorem. More general lender
-   shapes, arbitrary continuation safety and correspondence to the native
-   lowering implementation remain open.
+   comparisons in its generated execution/totality theorem. A separate retained
+   36-local, 22-block native output now has a parametric execution theorem for
+   that exact fixture, with ordered ABI admission, both fill-loop inductions,
+   and exact source/generated/native heap and allocator-lifecycle agreement.
+   Complete exported source/MIR snapshots are matched externally; this does not
+   prove generic native lowering. More general lender shapes, arbitrary
+   continuation safety and generic native compiler correspondence remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the

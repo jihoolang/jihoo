@@ -184,8 +184,10 @@ constructor now covers bindings, repeated allocation and release, the existing
 scalar/owned-result read-only lends, and conditional scalar/natural/owner result
 joins, with scalar-returning program theorems connected to source typing. The
 unchanged sized-composition Core graph retains both of its branches in this
-constructed translation. More general lender forms and correspondence to native
-lowering remain outside the result.
+constructed translation. Its actual native MIR is also retained separately, with
+a parametric execution theorem for the same four-argument fixture and exact
+source/generated/native heap and allocation-lifecycle correspondence. More
+general lender forms and a generic native-lowering theorem remain outside the result.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).

@@ -4174,3 +4174,46 @@ coercions, unit/never results and arbitrary Boolean conditions. Neither native
 implementation nor native ABI entry is proved here. Backward equivalence,
 general lender forms, MIR-to-LLVM, physical addresses and allocator failure
 remain outside this result, and the broader 0.6 release gate remains open.
+
+
+### Retained native sized-composition MIR
+
+`NativeCompositionMir` retains the complete output of the test exporter compiled
+against `compiler/core_lower.jh` for the unchanged sized-composition fixture.
+Its 36 locals, 22 blocks and ordered `(U64,U64,U64,I64)` entry are separate from
+`SizedMirBranchCoreExamples`' generated program. The exporter keeps every local,
+statement and control-flow edge. Native inputs are `n,m,i,value`, not the reversed
+compact environment order. Native comparisons select their false edge on zero;
+the second allocation shares block 6 with the preceding three-instruction read.
+Neither difference is hidden by comparing only final values or graph sizes.
+
+`NativeCompositionMirExecution` proves actual `BoundedMir.Steps` with two fill-loop
+inductions. Under `n+m+2 <= 4096`, nonnegative `value < 2^63`, and a checked ABI
+index `i < 2^64`, every admitted input terminates with `value` if `i<n`, otherwise
+99. Empty originals and zero-length copies retain the original branches. Reads
+come from initialized cells, the captured original survives the second allocation,
+and the owner frees occur in order. Returned heaps preserve all allocated
+identities, initialized logical cells and the uninitialized spare cell, with
+no live objects.
+
+`NativeCompositionMirCorrespondence` connects this retained execution with the
+original Core body root 81 and the already-proved generated MIR execution. It
+constructs all executions, relates the exact final source heap with `HeapRel`,
+and proves native and generated final heap equality. Only the explicit
+allocation/free lifecycle projection is compared across source and MIR; read,
+lease and initialization-store traces are not claimed equal.
+
+`NativeCompositionMirSnapshot` serializes the formal code and complete source
+graph. `CheckNativeCompositionMir.lean` admits only that full JSON association,
+including ordered entry slots. The bounded JSON guard is shared with the existing
+dynamic fixture checker. It is an exact fixture adapter, not a decoder or
+verification procedure for arbitrary native programs. Tests compare fresh native
+exports, mutate entry metadata, branches, allocations, reads, stores, frees,
+join writes and source rows, and run native ABI cases at both optimization levels.
+Signed payloads remain native-only regression evidence.
+
+The exporter/parser association is trusted and regression-tested. This result
+is a universal input theorem for one retained native fixture, not a generic
+`core_lower.jh` refinement theorem. The broader native language, arbitrary lender
+forms, machine addresses, allocator failure, MIR-to-LLVM and LLVM remain outside
+its scope. It does not close the 0.6 release gate.

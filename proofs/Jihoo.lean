@@ -235,3 +235,9 @@ import Jihoo.SizedMirKinds
 import Jihoo.SizedMirBranchSteps
 import Jihoo.SizedMirBranchExamples
 import Jihoo.SizedMirBranchCoreExamples
+
+import Jihoo.MirFixtureAdmission
+import Jihoo.NativeCompositionMir
+import Jihoo.NativeCompositionMirExecution
+import Jihoo.NativeCompositionMirCorrespondence
+import Jihoo.NativeCompositionMirSnapshot

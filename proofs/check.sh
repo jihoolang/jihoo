@@ -24,7 +24,7 @@ with open(sys.argv[1], encoding="utf-8") as audit:
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 2679, report
+assert len(entries) + len(closed) == 2699, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
@@ -58,3 +58,7 @@ diff -u ../tests/core_sized_composition.json "$generated"
 # The single runtime-parameterized MIR fixture includes explicit argument slots.
 lake env lean -DwarningAsError=true --run EmitDynamicMir.lean > "$generated"
 diff -u ../tests/core_dynamic_mir.json "$generated"
+
+# Full native four-argument composition fixture, separate from generated MIR.
+lake env lean -DwarningAsError=true --run EmitNativeCompositionMir.lean > "$generated"
+diff -u ../tests/core_native_composition_mir.json "$generated"
