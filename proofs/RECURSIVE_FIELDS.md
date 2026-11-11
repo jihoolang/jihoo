@@ -18,7 +18,7 @@ Run with the repository-pinned Lean version and Python available:
 bash proofs/check-recursive-fields.sh
 ```
 
-This builds the dependency closure with warnings as errors and checks all 70
+This builds the dependency closure with warnings as errors and checks all 101
 named new theorem dependencies against the standard logical axiom allowlist.
 Regressions reject shared children, deep ancestor aliases, dead fields and
 active field leases, and check parent release with a retained child and frame.
@@ -74,3 +74,7 @@ The [lexical field interface](RECURSIVE_LEXICAL_FIELDS.md) now binds actual chil
 roots, retires parent aliases, and preserves a pending shell for later release.
 Its separate Buffer-only compatibility theorem connects to sized Core typing;
 recursive source Case typing and dependent elimination remain open.
+
+The [source-typed body segment](RECURSIVE_CASE_BODY.md) derives preservation of
+the pending parent and child inventory from existing sized Core body typing.
+It leaves residual child ownership for a continuation and is not a full Case rule.
