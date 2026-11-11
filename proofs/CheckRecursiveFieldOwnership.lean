@@ -1,4 +1,4 @@
-import Jihoo.RecursiveFieldRuntimeExamples
+import Jihoo.RecursiveLexicalFieldsExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
 #print axioms Jihoo.RecursiveFieldOwnership.root_not_in_fields
@@ -37,3 +37,39 @@ import Jihoo.RecursiveFieldRuntimeExamples
 #print axioms Jihoo.RecursiveFieldRuntime.Represents.unique
 #print axioms Jihoo.RecursiveFieldRuntimeExamples.allocate_then_take
 #print axioms Jihoo.RecursiveFieldRuntimeExamples.truncated_witness_rejected
+
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.lookup
+#print axioms Jihoo.RecursiveLexicalFields.Rel.retire
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.retire
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.ghosts
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.bind
+#print axioms Jihoo.RecursiveLexicalFields.Fields.bind
+#print axioms Jihoo.RecursiveLexicalFields.enter_total
+#print axioms Jihoo.RecursiveLexicalFields.footprint_member
+#print axioms Jihoo.RecursiveLexicalFields.Fields.clear
+#print axioms Jihoo.RecursiveLexicalFields.finish_safe
+#print axioms Jihoo.RecursiveLexicalFields.data_not_buffer
+#print axioms Jihoo.RecursiveLexicalFields.buffer_not_data
+#print axioms Jihoo.RecursiveLexicalFields.embedValue_injective
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.embedded_lookup
+#print axioms Jihoo.RecursiveLexicalFields.buffer_lookup
+#print axioms Jihoo.RecursiveLexicalFields.Agrees.toSized
+#print axioms Jihoo.RecursiveLexicalFields.footprint_buffers
+#print axioms Jihoo.RecursiveLexicalFields.buffer_total
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.agrees_fixture
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.inventory_fixture
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.actual_root_order
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.all_parent_aliases_retired
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.lexical_entry_safe
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.delayed_release_preserves_children
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.parent_release_timing
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.buffer_not_a_case_root
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.empty_not_a_node
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.missing_cell_rejected
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.freed_parent_rejected
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.tail_buffer_aliases_preserved
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.mixed_tail_preserved
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.stale_alias_cannot_select
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.recursive_root_not_buffer
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.buffer_environment_bridge
+#print axioms Jihoo.RecursiveLexicalFieldsExamples.existing_buffer_program
