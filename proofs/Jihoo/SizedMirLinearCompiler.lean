@@ -2,7 +2,8 @@ import Jihoo.SizedMirAllocation
 
 /-! Structural construction of straight-line compact programs. Pure values are
 operand aliases; applications concatenate generated fragments and Free retains
-its lexical environment. Branches and lends are deliberately unsupported. -/
+its lexical environment. Lends generate pointer reads; owned lends additionally
+allocate and fill a fresh buffer. Branches remain deliberately unsupported. -/
 namespace Jihoo.SizedMir.Linear
 open BoundedMir
 set_option maxRecDepth 4096
@@ -18,12 +19,16 @@ def localCost : SizedErasure.Term → Nat
   | .allocate _ _ => 10
   | .app argument body => localCost argument + localCost body
   | .free _ body => 1 + localCost body
+  | .lend _ _ body => 2 + localCost body
+  | .ownedLend _ _ _ body => 12 + localCost body
   | _ => 0
 
 def blockCost : SizedErasure.Term → Nat
   | .allocate _ _ => 6
   | .app argument body => blockCost argument + blockCost body
   | .free _ body => 1 + blockCost body
+  | .lend _ _ body => 1 + blockCost body
+  | .ownedLend _ _ _ body => 7 + blockCost body
   | _ => 0
 
 def entry (base exit : Nat) (term : SizedErasure.Term) : Nat :=
@@ -39,6 +44,19 @@ def freeBlock (localBase : Nat) (owner : Operand) (next : Nat) : Block :=
   ⟨#[], .free owner ⟨localBase, false⟩ next⟩
 def freeFragment (localBase : Nat) (owner : Operand) (next : Nat) (body : Fragment) : Fragment :=
   ⟨#[.unit] ++ body.locals, #[freeBlock localBase owner next] ++ body.blocks, body.result⟩
+
+/-- Read one cell through a fresh pointer, leaving the owner's operand intact. -/
+def readBlock (localBase : Nat) (owner index : Operand) (next : Nat) : Block :=
+  ⟨#[⟨⟨localBase, false⟩, .offset owner index⟩,
+      ⟨⟨localBase + 1, false⟩, .use (.copy ⟨localBase, true⟩)⟩], .goto next⟩
+def readFragment (localBase : Nat) (owner index : Operand) (next : Nat) : Fragment :=
+  ⟨#[.ptr, .i64], #[readBlock localBase owner index next], .copy ⟨localBase + 1, false⟩⟩
+def lendFragment (l : Nat) (owner index : Operand) (next : Nat) (body : Fragment) : Fragment :=
+  appendFragment (readFragment l owner index next) body
+def ownedLendFragment (l b : Nat) (owner length index : Operand) (next : Nat)
+    (body : Fragment) : Fragment :=
+  appendFragment (readFragment l owner index (b + 1))
+    (appendFragment (allocationFragment (l + 2) (b + 1) next length (.copy ⟨l + 1, false⟩)) body)
 
 def compile (inputs : List Operand) (localBase blockBase exit : Nat) :
     SizedErasure.Term → Option Fragment
@@ -59,7 +77,21 @@ def compile (inputs : List Operand) (localBase blockBase exit : Nat) :
       let owner ← inputs[k]?
       let last ← compile inputs (localBase + 1) (blockBase + 1) exit body
       return freeFragment localBase owner (entry (blockBase + 1) exit body) last
-  | .ifLt _ _ _ _ | .lend _ _ _ | .ownedLend _ _ _ _ => none
+  | .lend k index body => do
+      let owner ← inputs[k]?
+      let indexOp ← lowerNat (owner :: inputs) index
+      let last ← compile (owner :: .copy ⟨localBase + 1, false⟩ :: inputs)
+        (localBase + 2) (blockBase + 1) exit body
+      return lendFragment localBase owner indexOp (entry (blockBase + 1) exit body) last
+  | .ownedLend k length index body => do
+      let owner ← inputs[k]?
+      let lengthOp ← lowerNat (owner :: inputs) length
+      let indexOp ← lowerNat (owner :: inputs) index
+      let last ← compile (owner :: .copy ⟨localBase + 6, false⟩ :: inputs)
+        (localBase + 12) (blockBase + 7) exit body
+      return ownedLendFragment localBase blockBase owner lengthOp indexOp
+        (entry (blockBase + 7) exit body) last
+  | .ifLt _ _ _ _ => none
 
 inductive Compiles : List Operand → Nat → Nat → Nat → SizedErasure.Term → Fragment → Prop where
   | scalar : v < scalarBound → Compiles inputs l b exit (.scalar v) (pureFragment (.constant (.i64 v)))
@@ -72,6 +104,15 @@ inductive Compiles : List Operand → Nat → Nat → Nat → SizedErasure.Term 
       Compiles inputs l b exit (.app argument body) (appendFragment first last)
   | free : inputs[k]? = some owner → Compiles inputs (l + 1) (b + 1) exit body last →
       Compiles inputs l b exit (.free k body) (freeFragment l owner (entry (b + 1) exit body) last)
+  | lend : inputs[k]? = some owner → lowerNat (owner :: inputs) index = some indexOp →
+      Compiles (owner :: .copy ⟨l + 1, false⟩ :: inputs) (l + 2) (b + 1) exit body last →
+      Compiles inputs l b exit (.lend k index body)
+        (lendFragment l owner indexOp (entry (b + 1) exit body) last)
+  | ownedLend : inputs[k]? = some owner → lowerNat (owner :: inputs) length = some lengthOp →
+      lowerNat (owner :: inputs) index = some indexOp →
+      Compiles (owner :: .copy ⟨l + 6, false⟩ :: inputs) (l + 12) (b + 7) exit body last →
+      Compiles inputs l b exit (.ownedLend k length index body)
+        (ownedLendFragment l b owner lengthOp indexOp (entry (b + 7) exit body) last)
 
 theorem compile_sound (success : compile inputs l b exit term = some fragment) :
     Compiles inputs l b exit term fragment := by
@@ -114,7 +155,36 @@ theorem compile_sound (success : compile inputs l b exit term = some fragment) :
       cases hl : compile inputs (l + 1) (b + 1) exit body with
       | none => simp [compile, ho, hl] at success
       | some last => simp [compile, ho, hl] at success; subst fragment; exact .free ho (ih hl)
-  | ifLt | lend | ownedLend => simp [compile] at success
+  | lend k index body ih =>
+    cases ho : inputs[k]? with
+    | none => simp [compile, ho] at success
+    | some owner =>
+      cases hi : lowerNat (owner :: inputs) index with
+      | none => simp [compile, ho, hi] at success
+      | some indexOp =>
+        cases hl : compile (owner :: .copy ⟨l + 1, false⟩ :: inputs) (l + 2) (b + 1) exit body with
+        | none => simp [compile, ho, hi, hl] at success
+        | some last =>
+          simp [compile, ho, hi, hl] at success
+          subst fragment
+          exact .lend ho hi (ih hl)
+  | ownedLend k length index body ih =>
+    cases ho : inputs[k]? with
+    | none => simp [compile, ho] at success
+    | some owner =>
+      cases hn : lowerNat (owner :: inputs) length with
+      | none => simp [compile, ho, hn] at success
+      | some lengthOp =>
+        cases hi : lowerNat (owner :: inputs) index with
+        | none => simp [compile, ho, hn, hi] at success
+        | some indexOp =>
+          cases hl : compile (owner :: .copy ⟨l + 6, false⟩ :: inputs) (l + 12) (b + 7) exit body with
+          | none => simp [compile, ho, hn, hi, hl] at success
+          | some last =>
+            simp [compile, ho, hn, hi, hl] at success
+            subst fragment
+            exact .ownedLend ho hn hi (ih hl)
+  | ifLt => simp [compile] at success
 
 theorem Compiles.complete (run : Compiles inputs l b exit term fragment) :
     compile inputs l b exit term = some fragment := by
@@ -125,6 +195,8 @@ theorem Compiles.complete (run : Compiles inputs l b exit term fragment) :
   | allocate hn hf => simp [compile, hn, hf]
   | app _ _ first last => simp [compile, first, last]
   | free ho _ ih => simp [compile, ho, ih]
+  | lend ho hi _ ih => simp [compile, ho, hi, ih]
+  | ownedLend ho hn hi _ ih => simp [compile, ho, hn, hi, ih]
 
 theorem Compiles.sizes (run : Compiles inputs l b exit term fragment) :
     fragment.locals.size = localCost term ∧ fragment.blocks.size = blockCost term := by
@@ -133,6 +205,10 @@ theorem Compiles.sizes (run : Compiles inputs l b exit term fragment) :
   | allocate => simp [allocationFragment, Allocation.roleTypes, Allocation.fragmentBlocks, localCost, blockCost]
   | app _ _ first last => simp [appendFragment, localCost, blockCost, first, last]
   | free _ _ ih => simp [freeFragment, localCost, blockCost, ih]
+  | lend _ _ _ ih => simp [lendFragment, appendFragment, readFragment, localCost, blockCost, ih]
+  | ownedLend _ _ _ _ ih =>
+    simp [ownedLendFragment, appendFragment, readFragment, allocationFragment,
+      Allocation.roleTypes, Allocation.fragmentBlocks, localCost, blockCost, ih, ← Nat.add_assoc]
 
 theorem Compiles.result_before (run : Compiles inputs l b exit term fragment)
     (before : InputsBefore l inputs) : Before (l + localCost term) fragment.result := by
@@ -150,6 +226,24 @@ theorem Compiles.result_before (run : Compiles inputs l b exit term fragment)
     simpa [appendFragment, localCost, Nat.add_assoc] using lastIH args
   | @free inputs k owner l b exit body last lookup run ih =>
     simpa [freeFragment, localCost, Nat.add_assoc] using ih (before.mono (by omega))
+  | @lend inputs k owner index indexOp l b exit body last lookup _ run ih =>
+    have args : InputsBefore (l + 2) (owner :: .copy ⟨l + 1, false⟩ :: inputs) := by
+      intro op member
+      simp only [List.mem_cons] at member
+      rcases member with rfl | rfl | old
+      · exact (before _ (List.mem_of_getElem? lookup)).mono (by omega)
+      · simp [Before]
+      · exact (before _ old).mono (by omega)
+    simpa [lendFragment, appendFragment, localCost, Nat.add_assoc] using ih args
+  | @ownedLend inputs k owner length lengthOp index indexOp l b exit body last lookup _ _ run ih =>
+    have args : InputsBefore (l + 12) (owner :: .copy ⟨l + 6, false⟩ :: inputs) := by
+      intro op member
+      simp only [List.mem_cons] at member
+      rcases member with rfl | rfl | old
+      · exact (before _ (List.mem_of_getElem? lookup)).mono (by omega)
+      · simp [Before]
+      · exact (before _ old).mono (by omega)
+    simpa [ownedLendFragment, appendFragment, localCost, Nat.add_assoc] using ih args
 
 /-- A fragment occupies exact slices of the final declarations and block array.
 This contains only structural facts, not an execution or safety premise. -/
@@ -170,6 +264,12 @@ theorem entry_app :
   simp [entry, blockCost]
 
 @[simp] theorem entry_allocate : entry b exit (.allocate length fill) = b := by
+  simp [entry, blockCost]
+
+@[simp] theorem entry_lend : entry b exit (.lend k index body) = b := by
+  simp [entry, blockCost]
+
+@[simp] theorem entry_ownedLend : entry b exit (.ownedLend k length index body) = b := by
   simp [entry, blockCost]
 
 theorem Embedded.append_left (embedded : Embedded code l b (appendFragment first last)) :
@@ -197,6 +297,49 @@ theorem Embedded.append_right (embedded : Embedded code l b (appendFragment firs
 
   · have h := embedded.localBound; simpa [appendFragment, Nat.add_assoc] using h
   · have h := embedded.blockBound; simpa [appendFragment, Nat.add_assoc] using h
+
+theorem Embedded.read_type (embedded : Embedded code l b (readFragment l owner index target)) :
+    code.locals[l]? = some .ptr ∧ code.locals[l + 1]? = some .i64 := by
+  constructor
+  · simpa [readFragment] using embedded.locals 0 (by simp [readFragment])
+  · simpa [readFragment] using embedded.locals 1 (by simp [readFragment])
+
+theorem Embedded.read_ptr_type (embedded : Embedded code l b (readFragment l owner index target)) :
+    code.locals[l]? = some .ptr := embedded.read_type.1
+
+theorem Embedded.read_scalar_type (embedded : Embedded code l b (readFragment l owner index target)) :
+    code.locals[l + 1]? = some .i64 := embedded.read_type.2
+
+theorem Embedded.read_block (embedded : Embedded code l b (readFragment l owner index target)) :
+    code.blocks[b]? = some (readBlock l owner index target) := by
+  simpa [readFragment] using embedded.blocks 0 (by simp [readFragment])
+
+theorem Embedded.lend_read (embedded : Embedded code l b (lendFragment l owner index target body)) :
+    Embedded code l b (readFragment l owner index target) :=
+  embedded.append_left
+
+theorem Embedded.lend_tail (embedded : Embedded code l b (lendFragment l owner index target body)) :
+    Embedded code (l + 2) (b + 1) body := by
+  simpa [readFragment] using embedded.append_right
+
+theorem Embedded.ownedLend_read
+    (embedded : Embedded code l b (ownedLendFragment l b owner length index target body)) :
+    Embedded code l b (readFragment l owner index (b + 1)) :=
+  embedded.append_left
+
+theorem Embedded.ownedLend_allocation
+    (embedded : Embedded code l b (ownedLendFragment l b owner length index target body)) :
+    Embedded code (l + 2) (b + 1)
+      (allocationFragment (l + 2) (b + 1) target length (.copy ⟨l + 1, false⟩)) := by
+  have h := embedded.append_right.append_left
+  simpa [readFragment] using h
+
+theorem Embedded.ownedLend_tail
+    (embedded : Embedded code l b (ownedLendFragment l b owner length index target body)) :
+    Embedded code (l + 12) (b + 7) body := by
+  have h := embedded.append_right.append_right
+  simpa [readFragment, allocationFragment, Allocation.roleTypes, Allocation.fragmentBlocks,
+    ← Nat.add_assoc] using h
 
 theorem Embedded.free_tail (embedded : Embedded code l b (freeFragment l owner target body)) :
     Embedded code (l + 1) (b + 1) body := by

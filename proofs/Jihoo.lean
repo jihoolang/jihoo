@@ -226,3 +226,7 @@ import Jihoo.SizedMirLinearSimulation
 import Jihoo.SizedMirLinearProgram
 import Jihoo.SizedMirLinearValueBounds
 import Jihoo.SizedMirLinearExamples
+
+import Jihoo.SizedMirRead
+import Jihoo.SizedMirLendExamples
+import Jihoo.SizedMirOwnedCoreExamples
