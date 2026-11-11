@@ -242,6 +242,12 @@ import Jihoo.NativeCompositionMirExecution
 import Jihoo.NativeCompositionMirCorrespondence
 import Jihoo.NativeCompositionMirSnapshot
 
+import Jihoo.BoundedMirExecutionAdequacy
+import Jihoo.BoundedMirExecutionAdequacyChecks
+import Jihoo.SizedMirEntryArguments
+import Jihoo.SizedMirEntryProgram
+import Jihoo.SizedMirEntryAdequacy
+import Jihoo.SizedMirEntryExamples
 import Jihoo.SymbolicCoreContext
 import Jihoo.SymbolicCoreTyping
 import Jihoo.SymbolicCoreIndices
