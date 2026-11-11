@@ -670,3 +670,10 @@ produce the same value, exact events and final heap. Consumed names stay in the
 runtime environment but cannot be accessed through the static context. This
 statement still covers the documented fragment, not arbitrary Core programs or
 a refinement proof for the native compiler.
+
+The [runtime-length refinement](lean-proofs.md#runtime-dependent-uniform-buffer-lengths)
+adds exact lengths and indices for uniformly initialized, read-only buffers.
+Its source judgment interprets open runtime U64 parameters and branch-derived
+Lt evidence, including a no-read path for zero length. It is a semantic
+closing-instance result for a stated source subset, not the general dependent
+Core typing theorem or a proof of native allocation capacity.

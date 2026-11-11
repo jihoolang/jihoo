@@ -179,3 +179,14 @@ import Jihoo.CoreLexicalContext
 import Jihoo.CoreLexicalExecution
 import Jihoo.CoreLexicalSimulation
 import Jihoo.CoreLexicalExamples
+import Jihoo.SizedBufferHeap
+import Jihoo.DependentBufferIndices
+import Jihoo.SizedBufferContext
+import Jihoo.SizedCoreExecution
+import Jihoo.SizedCorePure
+import Jihoo.SizedCoreDeterminism
+import Jihoo.SizedCoreTyping
+import Jihoo.SizedCoreSafety
+import Jihoo.SizedCoreAccounting
+import Jihoo.DependentBufferGraph
+import Jihoo.SizedCoreExamples

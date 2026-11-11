@@ -1,0 +1,10 @@
+(export dynamic
+ (pi n U64 (pi i U64 (pi value I64 I64)))
+ (lam n U64 (lam i U64 (lam value I64
+  (app (lam xs (Buffer n)
+   (if-lt i n bound
+    (lend xs
+     (lam ref (Ref (Buffer n)) (index ref i bound))
+     (lam got I64 (lam back (Buffer n) (free back got))))
+    (free xs (int 99))))
+   (alloc n value))))))

@@ -69,6 +69,16 @@ def main():
             edit(data)
             check(data, False)
 
+        # The shared Core exporter preserves U64 annotations, not opaque nodes.
+        # Recognizing that leaf must not admit malformed rows or U64 as a term.
+        u64_nodes = [i for i, row in enumerate(original[1][3]) if row == ['u64']]
+        require(u64_nodes, 'native Core snapshot lost explicit U64 annotations')
+        u64_node = u64_nodes[0]
+        mutation(lambda s: s[1][3].__setitem__(u64_node, ['u64', 0]))
+        mutation(lambda s: s[1][3].__setitem__(u64_node, ['unknownType']))
+        mutation(lambda s: s[1].__setitem__(1, u64_node))
+        mutation(lambda s: s[1].__setitem__(2, u64_node))
+
         # Unsupported bounds/operations/types and invalid control edges.
         mutation(lambda s: s[2][2][2].__setitem__(1, ['goto', 999]))
         mutation(lambda s: s[2][2][2].__setitem__(1, ['goto', 2]))

@@ -14,6 +14,7 @@ inductive Node where
   | natural (value : Nat)
   | integer (value : Nat)
   | i64
+  | u64
   | buffer (length : Nat)
   | ref (type : Nat)
   | pi (erased : Bool) (type body : Nat)
@@ -35,7 +36,7 @@ abbrev Graph := Array Node
 def nodeAt (g : Graph) (id : Nat) : Node := g[id]?.getD .opaque
 
 def Node.children : Node → List Nat
-  | .opaque | .var _ | .natural _ | .integer _ | .i64 => []
+  | .opaque | .var _ | .natural _ | .integer _ | .i64 | .u64 => []
   | .buffer a | .ref a | .borrow a => [a]
   | .alloc a b | .pi _ a b | .lam _ a b | .app a b | .decide a b | .strict a b | .free a b => [a,b]
   | .index a b c | .lend a b c => [a,b,c]

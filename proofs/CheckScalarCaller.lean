@@ -19,6 +19,7 @@ private def node (j : Json) : Except String Node := do
   | [.str "natural", v] => return .natural (← v.getNat?)
   | [.str "integer", v] => return .integer (← v.getNat?)
   | [.str "i64"] => return .i64
+  | [.str "u64"] => return .u64
   | [.str "buffer", a] => return .buffer (← a.getNat?)
   | [.str "ref", a] => return .ref (← a.getNat?)
   | [.str "pi", e, a, b] => return .pi (← bit e) (← a.getNat?) (← b.getNat?)
