@@ -3966,8 +3966,9 @@ addresses and allocation failure retain their existing trust boundaries.
 
 `SizedMirLinearCompiler` extends constructed lowering to the straight-line
 compact grammar: scalar and natural literals, variables, application, allocation
-and release. It rejects comparisons and both lend constructors. Pure values and
-application binders become operand aliases; effectful fragments generate actual
+and release, extended below with the existing compact lend forms. Conditional
+branches remain unsupported. Pure values and application binders become operand
+aliases; effectful fragments generate actual
 MIR instructions. Allocation uses ten local roles and six blocks, while release
 uses one unit scratch local and one free terminator. Recursive size functions
 place fragments consecutively and compute forward continuation labels. An
@@ -4017,9 +4018,11 @@ finite source resources remain explicit premises.
 
 Heap resource bounds do not imply that arbitrary dynamic scalar/natural inputs
 fit machine words. `SizedMirLinearValueBounds` states this distinction directly:
-`EnvBounded` bounds represented natural and scalar inputs; `Compiles.value_bounded`
-derives the corresponding result bound; `bounded_program_run` combines that
-property with the generated execution. The underlying execution theorem is about
+`EnvBounded` bounds represented natural and scalar inputs. Together with initial
+source validity, a safe trace and `PayloadBounded` for final allocated identities,
+`Compiles.value_bounded` derives the corresponding result bound, including values
+introduced by reads. `bounded_program_run` combines that property with the generated
+execution. The underlying execution theorem is about
 `BoundedMir` semantics and does not silently assume all input values are bounded.
 
 The examples construct two allocations over a prior live/dead heap, retain an
@@ -4031,6 +4034,75 @@ source execution and the generated-program totality theorem. Negative tests also
 show why static MIR validity alone cannot justify a double free.
 
 These are forward results for the supported straight-line grammar. They do not
-establish backward equivalence, arbitrary conditional/lend lowering, general
+establish backward equivalence, arbitrary conditional or lender lowering, general
 continuation safety, native compiler association, MIR-to-LLVM correctness, physical
 addresses or allocator success. They do not complete the broader 0.6 release gate.
+
+
+### Generated read-only lends and owned reader results
+
+The branch-free constructor now lowers the existing compact `lend` and
+`ownedLend` forms recursively, including beneath applications, releases and other
+lenders. It reuses the source forms already covered by `SizedErasure`: a scalar
+reader performs one indexed read; the owned reader allocates a uniform fresh
+buffer initialized by that read. It does not broaden the source judgment to
+arbitrary effectful reader bodies or dependent applications.
+
+`SizedMir.Linear.read_run` in `SizedMirRead` constructs the actual pointer-offset, dereferenced-load
+and jump instructions in an enclosing code. It derives the loaded payload from
+`HeapRel`, a live allocated identity and the strict source index bound. Both input
+operands are evaluated before scratch writes, so the generic prefix tolerates
+arbitrary old scratch contents and operand aliases. That local theorem does not
+assert whole-code validity; `lowerProgram` still validates the completed code,
+and the generated compiler reserves fresh scratch slots and preserves its input
+mapping.
+
+A scalar lender reserves a pointer and scalar local, then passes the original
+owner and loaded scalar to the continuation at their exact retained lexical
+positions. An owned lender runs that read, then the already proved allocation/fill
+fragment, then passes the original owner and fresh owner to its continuation.
+The two lengths remain independent. In particular, the new buffer may have zero
+length, while the original read still requires an index strictly below the
+original buffer length.
+
+`Trace.lend_prefix` and `Trace.owned_lend_prefix` invert safe source event prefixes
+to obtain liveness, the read bound and the precise restored source state for the
+continuation. Fresh lease closure uses initial source validity. `HeapRel.restore`
+forgets only the source lease metadata: the physical heap retains all liveness,
+length and initialized-content information. This erasure lemma does not authorize
+reads or releases on its own. The typed source bridges derive the required safe
+trace from the existing source typing judgment.
+
+The extended simulation preserves allocation/free observations. Read and lease
+bookkeeping events are erased by the existing lifecycle observation, but the
+read's scalar value is established by an actual MIR load. For an owned result,
+the generated allocation has the exact fresh identity, byte request and filled
+contents, and its source event precedes lease closure. The representation can
+relate that final source state because closing the local lease does not change
+physical objects.
+
+Reads require an additional width justification: a bounded input environment
+does not itself bound arbitrary heap contents. `PayloadBounded` covers every
+allocated identity, live or released, without adding an object/cell capacity
+restriction. It propagates backward through a safe trace. Source validity then
+puts the read owner among those allocated identities, establishing the scalar
+bound. The whole-program bounded-result corollary keeps its previous public
+premises by obtaining this property from `Trace.Bounds.payloads`.
+
+Kernel-checked examples cover dynamic scalar and owned readers, nested operand
+lets and aliases, prior live/dead objects, zero-length owned results, and copied
+buffers both shorter and longer than their source. Invalid, spare-cell and
+read-after-free cases fail safe source execution or the executable MIR prefix.
+An unchanged scalar-lend Core root has checked typing, proof-binder compaction and
+generated execution/totality. A separate owned-result example explicitly replaces
+one conditional in an existing graph with its branch-free release continuation;
+it proves the derived Core graph's typing, compaction, generated execution and
+totality for independent lengths. This is a stated source graph construction, not
+a claim that the native exporter produced that derived graph.
+
+The program, typed execution and typed totality theorems now cover these additional
+constructors through their structural compilation derivations. Conditional
+branches are still rejected, and successful static MIR validation alone still
+does not establish source ownership, index validity or borrow safety. Native
+compiler association, general lender forms, backward equivalence, MIR-to-LLVM,
+physical addresses and allocator failure remain outside this result.

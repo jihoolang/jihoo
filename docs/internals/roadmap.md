@@ -825,8 +825,11 @@ and reported as full-language soundness.
    applications, allocation and release into scalar-returning programs. Its typed
    source bridge derives safe release and constructs terminating MIR execution
    under explicit source resource adequacy and initial representation premises.
-   Branches, lends, arbitrary continuation safety and correspondence to the native
-   lowering implementation remain open.
+   The existing scalar and owned-result read-only lends now generate pointer
+   offset/load fragments and compose with allocation and safe continuations;
+   source safety supplies the live object and strict index bound. Branches, more
+   general lender shapes, arbitrary continuation safety and correspondence to the
+   native lowering implementation remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the

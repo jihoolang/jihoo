@@ -2,7 +2,7 @@ import Jihoo.SizedMirHeap
 import Jihoo.SizedErasedRuntime
 
 /-! Safe source trace decomposition and cumulative physical resource bounds.
-The straight-line predicate excludes branching and leases, but trace bounds apply
+The straight-line predicate excludes branching, but trace bounds apply
 to every sized heap event. Released objects still consume physical capacity. -/
 namespace Jihoo.SizedMir.Trace
 open SizedBufferHeap
@@ -14,6 +14,8 @@ inductive LinearTerm : SizedErasure.Term → Prop where
   | allocate : LinearTerm (.allocate length fill)
   | app : LinearTerm argument → LinearTerm body → LinearTerm (.app argument body)
   | free : LinearTerm body → LinearTerm (.free k body)
+  | lend : LinearTerm body → LinearTerm (.lend k index body)
+  | ownedLend : LinearTerm body → LinearTerm (.ownedLend k length index body)
 
 theorem steps_append (first : Steps s es t) (last : Steps t fs u) :
     Steps s (es ++ fs) u := by
@@ -54,9 +56,60 @@ theorem steps_deterministic (first : Steps s es t) (second : Steps s es u) : t =
       obtain rfl := step_deterministic step other
       exact ih tail
 
+/-- Invert a safe local read cycle, retaining the exact restored source state. -/
+theorem lend_prefix (valid : Valid s)
+    (safe : Steps s ([.beginLease s.heap.nextLease owner,
+      .read s.heap.nextLease i (s.heap.payload owner), .close s.heap.nextLease] ++ suffix) t) :
+    s.heap.live owner = true ∧ i < s.length owner ∧ Steps (restore s) suffix t := by
+  cases safe with
+  | cons begin rest =>
+    cases begin with
+    | beginLease live =>
+      cases rest with
+      | cons read rest =>
+        obtain ⟨x, present, _, bound, _⟩ :=
+          read_bound (step_valid valid (.beginLease live)) read
+        simp [lend, HeapLeases.put] at present
+        subst x
+        have same := step_update read
+        simp only [update] at same
+        subst_vars
+        cases rest with
+        | cons shut tail =>
+          cases shut
+          rw [close_lend_restore valid] at tail
+          exact ⟨live, bound, tail⟩
+
+/-- Invert the allocating read cycle without assuming any target execution. -/
+theorem owned_lend_prefix (valid : Valid s)
+    (safe : Steps s (SizedOwnedLend.events s owner i m ++ suffix) t) :
+    s.heap.live owner = true ∧ i < s.length owner ∧
+      Steps (SizedOwnedLend.final s m (s.heap.payload owner)) suffix t := by
+  cases safe with
+  | cons begin rest =>
+    cases begin with
+    | beginLease live =>
+      cases rest with
+      | cons read rest =>
+        obtain ⟨x, present, _, bound, _⟩ :=
+          read_bound (step_valid valid (.beginLease live)) read
+        simp [lend, HeapLeases.put] at present
+        subst x
+        have same := step_update read
+        simp only [update] at same
+        subst_vars
+        cases rest with
+        | cons alloc rest =>
+          cases alloc
+          cases rest with
+          | cons shut tail =>
+            cases shut
+            rw [SizedOwnedLend.allocate_close valid] at tail
+            exact ⟨live, bound, tail⟩
+
 /-- Split a safe trace at the exact state selected by compact evaluation, rather
 than introducing an unrelated existential midpoint. No target execution occurs. -/
-theorem trace_suffix (covered : LinearTerm term)
+theorem trace_suffix (covered : LinearTerm term) (valid : Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : Steps s (events ++ suffix) u) :
     Steps s events t ∧ Steps t suffix u := by
@@ -76,8 +129,8 @@ theorem trace_suffix (covered : LinearTerm term)
     | app firstRun lastRun =>
       have adjusted := safe
       rw [List.append_assoc] at adjusted
-      obtain ⟨firstSteps, rest⟩ := ihFirst firstRun adjusted
-      obtain ⟨lastSteps, tail⟩ := ihLast lastRun rest
+      obtain ⟨firstSteps, rest⟩ := ihFirst valid firstRun adjusted
+      obtain ⟨lastSteps, tail⟩ := ihLast (steps_valid valid firstSteps) lastRun rest
       exact ⟨steps_append firstSteps lastSteps, tail⟩
   | free body ih =>
     cases run with
@@ -86,14 +139,34 @@ theorem trace_suffix (covered : LinearTerm term)
       | cons step rest =>
         cases step with
         | free live unborrowed =>
-          obtain ⟨bodySteps, tail⟩ := ih bodyRun rest
+          obtain ⟨bodySteps, tail⟩ := ih (step_valid valid (.free live unborrowed)) bodyRun rest
           exact ⟨.cons (.free live unborrowed) bodySteps, tail⟩
 
-theorem eval_state_eq (covered : LinearTerm term)
+  | lend body ih =>
+    cases run with
+    | lend lookup index bodyRun =>
+      have adjusted := safe
+      rw [List.append_assoc] at adjusted
+      obtain ⟨live, bound, rest⟩ := lend_prefix valid adjusted
+      have cycle :=  read_cycle valid live bound
+      obtain ⟨bodySteps, tail⟩ := ih (steps_valid valid cycle) bodyRun rest
+      exact ⟨steps_append cycle bodySteps, tail⟩
+  | ownedLend body ih =>
+    cases run with
+    | ownedLend lookup index length bodyRun =>
+      rename_i owner i m bodyEvents
+      have adjusted := safe
+      rw [List.append_assoc] at adjusted
+      obtain ⟨live, bound, rest⟩ := owned_lend_prefix valid adjusted
+      have cycle :=  SizedOwnedLend.prefix_steps (length := m) valid live bound
+      obtain ⟨bodySteps, tail⟩ := ih (steps_valid valid cycle) bodyRun rest
+      exact ⟨steps_append cycle bodySteps, tail⟩
+
+theorem eval_state_eq (covered : LinearTerm term) (valid : Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : Steps s events u) : t = u := by
   have suffix : Steps s (events ++ []) u := by simpa using safe
-  obtain ⟨_, rest⟩ := trace_suffix covered run suffix
+  obtain ⟨_, rest⟩ := trace_suffix covered valid run suffix
   cases rest
   rfl
 

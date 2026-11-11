@@ -95,8 +95,16 @@ theorem inputs_bounded (hn : n < wordBound) (hm : m < wordBound)
 
 theorem generated_scalar_width (hn : n < wordBound) (hm : m < wordBound)
     (hf : fill < scalarBound) (hr : result < scalarBound) :
-    ValueBounded (.scalar result) :=
-  (lowerProgram_shape compiled).1.value_bounded (inputs_bounded hn hm hf hr) compact_run
+    ValueBounded (.scalar result) := by
+  apply (lowerProgram_shape compiled).1.value_bounded
+    (inputs_bounded hn hm hf hr) prior_valid compact_run safe_run
+  intro objectId old
+  change objectId < 4 at old
+  have alternatives : objectId = 0 ∨ objectId = 1 ∨ objectId = 2 ∨ objectId = 3 := by omega
+  rcases alternatives with rfl | rfl | rfl | rfl <;>
+    simp_all [finalState, second, first, prior, SizedMirExamples.prior, SizedBufferHeap.release,
+      SizedBufferHeap.allocate, SizedBufferHeap.empty, HeapLeases.put, HeapLeases.empty,
+      scalarBound]
 
 structure Observation where
   result : Nat
@@ -127,8 +135,8 @@ theorem capacity_run : ∃ final, Steps code
   exact ⟨final, run, heap⟩
 
 theorem branch_rejected : lowerProgram inputTypes inputs (.ifLt (.literal 0) (.literal 1) (.scalar 1) (.scalar 2)) = none := by decide +kernel
-theorem lend_rejected : lowerProgram inputTypes inputs (.lend 0 (.literal 0) (.scalar 1)) = none := by decide +kernel
-theorem owned_lend_rejected : lowerProgram inputTypes inputs (.ownedLend 0 (.literal 0) (.literal 0) (.scalar 1)) = none := by decide +kernel
+theorem lend_wrong_owner_type_rejected : lowerProgram inputTypes inputs (.lend 0 (.literal 0) (.scalar 1)) = none := by decide +kernel
+theorem owned_lend_wrong_owner_type_rejected : lowerProgram inputTypes inputs (.ownedLend 0 (.literal 0) (.literal 0) (.scalar 1)) = none := by decide +kernel
 theorem missing_slot_rejected : lowerProgram inputTypes inputs (.var 4) = none := by decide +kernel
 theorem wrong_input_type_rejected : lowerProgram #[.i64,.i64,.u64,.i64,.i64] inputs term = none := by decide +kernel
 theorem wrong_return_type_rejected : lowerProgram inputTypes inputs (.allocate (.literal 0) (.literal 1)) = none := by decide +kernel
