@@ -3909,3 +3909,54 @@ cumulative-capacity boundary; executable reductions check exact small runs, and
 negative examples reject a missing store and excess cumulative allocation.
 This reusable MIR result does not extend source translation, general lowering,
 MIR-to-LLVM, physical-address or allocation-failure claims.
+
+### Constructed lowering of source allocation constructors
+
+`SizedMirOperands`, `SizedMirHeap`, `SizedMirAllocation` and
+`SizedMirTranslation` connect an allocation constructor of the existing compact
+runtime to a generated MIR fragment. The source root can be any graph root
+whose proved compaction yields that constructor. This extends the fixed-pair
+result with an actual Lean code-construction function and a forward execution
+proof for its successful results.
+
+Natural operands support literals, runtime variables and nested lexical lets.
+Because this natural grammar has no effectful operations, lowering substitutes
+operand aliases for let binders. Scalar operands support literals and variables.
+The input mapping contains constants or non-dereferenced copies of existing
+locals. Its relation to the compact environment records the actual encoded
+values, including physical base pointers for owners and borrows. Literals are
+checked against the existing U64 and nonnegative-I64 bounds.
+
+The builder appends ten fresh locals and six blocks: an input-copy block followed
+by the five proved allocation/fill blocks. It proves their structural embedding,
+executes both input copies without clobbering either operand, initializes the
+fresh object, and stops before the existing continuation's first instruction.
+The old local declarations, code blocks and runtime local values are preserved.
+Successful lowering also passes the existing complete `BoundedMir.valid` scan,
+including the local, block and statement budgets. This validates the completed
+code, not the prefix independently: a continuation may refer forward to the new
+result local or generated blocks.
+
+`HeapRel` identifies the source allocation counter with the physical array size
+and represents every allocated identity, live or released, by its exact liveness,
+uniform initialized contents and one uninitialized spare cell. Allocation and
+release preserve this relation. Its read and capacity theorems retain the source
+length and payload; released objects still consume their original capacity.
+Source lease metadata is deliberately not represented by this array relation.
+
+`compact_to_mir` constructs an execution prefix for every compact allocation
+execution whose lowering succeeds, whose initial heap and environment are related,
+and whose final state satisfies the explicit heap/object/payload bounds. Its final
+heap and fresh owner agree with the compact result, and the retained environment
+extends with the new result-pointer operand. `source_to_mir` composes that result
+with the proved graph compactor and an original Core allocation execution.
+Allocation events agree through an explicit logical-length-to-byte observation.
+Neither theorem assumes that a successful MIR execution already exists.
+
+The correspondence is forward only. A discarded ill-typed natural-let argument
+can disappear during operand substitution, so successful lowering alone does
+not establish source evaluation or backward equivalence. Source execution and
+its typing obligations remain separate from construction. Other runtime
+constructors, arbitrary continuation safety, whole-program termination and the
+native compiler's lowering implementation are not covered. MIR-to-LLVM, machine
+addresses and allocation failure retain their existing trust boundaries.
