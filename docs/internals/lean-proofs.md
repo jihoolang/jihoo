@@ -3674,3 +3674,75 @@ rejection checks per Python mode. O0 compares allocation identities and release
 order. Native leases are erased rather than instrumented, and no partition plan
 is passed to the compiler. These remain implementation regressions, not a proof
 of the native checker, exporter or lowerer.
+
+## Runtime-dependent uniform buffer lengths
+
+`SizedBufferHeap` refines the existing identity/lease heap with an exact length
+for each object. Allocation events retain the requested length; read events
+retain the actual index. Projecting these events recovers the previous lifecycle
+semantics. The supported buffers are uniformly initialized and never written,
+so every in-bounds element has the recorded fill value. This is an exact
+abstraction for that read-only fragment, not a model of arbitrary nonuniform
+incoming arrays or Store. Zero-length allocation is permitted, but no read of
+that object has a safe step. The previous read-only Buffer1 traces embed into
+this refinement.
+
+`DependentBufferIndices` interprets actual U64 graph literals, lexical variables
+and immediate U64 lets. Natural slots stay separate from I64 scalar, owner and
+erased-proof slots. Its index-expression renaming, substitution and beta laws
+preserve lexical positions and connect to the existing Raw U64 substitution
+proof. Buffer/Ref length interpretation uses these expressions; this does not
+extend Raw with general dependent Buffer typing. Literal Decide evidence and
+ghost less-than facts must refer to the exact evaluated index and length. A
+runtime IfLt branch supplies its own less-than fact, rather than accepting an
+unrelated safe-index premise.
+
+The new sized source judgment is a **semantic closing-instance judgment**:
+its natural context entries contain the closing values, and its owner inventory
+contains their exact lengths. It is not a syntax-directed implementation of
+Core.infer or a full dependent Pi preservation theorem. The source graph and
+binder positions are retained. Runtime execution does not assume a valid bound
+or borrow proof; those primitive guards must follow from the typing derivation.
+The sized subset covers natural lets, uniform allocation, scalar-result indexed
+Lend, Free, conditional less-than branches, and scalar/owner results. The
+previous full Buffer1 continuation/call calculus is retained separately; this
+step does not generalize all of its owned-result Lends and framed applications
+to arbitrary lengths.
+
+The checked `core_dependent_index.jhc` fixture has runtime n/i:U64 parameters
+and an I64 fill parameter. Its complete exported graph retains the function
+root and original IDs; the formal body entry is opened under those explicit
+lexical parameter bindings. The same graph is used at different closing n/i
+values, including zero and nonzero indices, not regenerated for each length.
+The graph's U64 nodes are explicit, rather than inferred from opaque nodes.
+Extending the constructor view also refines formerly opaque U64 entries in the
+older composition fixture without changing its node IDs or roots.
+
+The mathematical heap continues to assume successful allocation. These results
+do not prove physical allocator capacity, byte-size arithmetic/overflow, signed
+I64 arithmetic, native pointer layout, C ABI opening, or LLVM lowering. An erased
+natural may be legal in a Core type annotation; only its use as a runtime value
+is rejected. The present index context conservatively models runtime natural
+availability and erased Lt evidence, not every legal type-only erased binder.
+
+`SizedCoreExamples.body_typed` quantifies over arbitrary closing n/i values for
+that body. The explicit executions return the fill value when i<n and 99
+otherwise, with exact length-tagged allocation/read/free events and no live
+objects afterwards. Its U64-input wrapper records n/i<2^64 separately from the
+underlying mathematical memory-safety theorem. The allocation subexpression's
+owned result has length n, not a fixed surrogate length. The natural fill-value
+abstraction does not establish signed I64 preservation.
+
+Native `core_dependent_buffer.py` executes four variants through 264 O0/O2
+lifecycles per Python mode, checking five precise rejected programs. It compares
+the complete checked graph, distinguishes runtime U64 from I64/erased inputs,
+checks nonzero and out-of-range indices, and checks exact O0 allocation sizes,
+object identities and release order. The richer native App/re-Lend cases are
+regressions beyond the sized formal subset, not additional theorem coverage.
+
+`SizedCoreAccounting` also proves resource-count conservation for the sized
+judgment. Every tracked owner other than the returned owner is released exactly
+once. With explicit coverage of the initially live heap, the final live objects
+are exactly the result's owners; a scalar program started from the empty heap
+leaves no live buffer. These are generic statements for the admitted sized
+closing-instance fragment, not an inference from balanced native counters.

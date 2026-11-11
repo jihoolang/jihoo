@@ -16,6 +16,7 @@ fn node(term: core.Term) -> String {
         Natural(v) => row("natural", [v])
         Integer(v) if v >= 0 => row("integer", [v as u64])
         I64 => row("i64", [])
+        U64 => row("u64", [])
         Buffer(n) => row("buffer", [n as u64])
         Ref(t) => row("ref", [t as u64])
         Pi(e, t, b) => row("pi", [if e { 1 } else { 0 }, t as u64, b as u64])

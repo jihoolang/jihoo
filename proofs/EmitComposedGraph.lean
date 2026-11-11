@@ -16,6 +16,7 @@ private def node : Graph.Node → Json
   | .natural n => row "natural" [n]
   | .integer n => row "integer" [n]
   | .i64 => row "i64" []
+  | .u64 => row "u64" []
   | .buffer n => row "buffer" [n]
   | .ref t => row "ref" [t]
   | .pi e t b => row "pi" [if e then 1 else 0, t, b]
