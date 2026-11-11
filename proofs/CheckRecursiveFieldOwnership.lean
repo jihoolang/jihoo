@@ -1,4 +1,4 @@
-import Jihoo.CommonDataAccountingChecks
+import Jihoo.CommonDataSourceRulesChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -289,3 +289,24 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataAccountingChecks.buffer_projection
 #print axioms Jihoo.CommonDataAccountingChecks.buffer_reader_typed
 #print axioms Jihoo.CommonDataAccountingChecks.buffer_reader_accounted
+
+#print axioms Jihoo.CommonDataSourceRules.adapted_at
+#print axioms Jihoo.CommonDataSourceRules.Typing.elaborate
+#print axioms Jihoo.CommonDataSourceRules.Typing.case_motive
+#print axioms Jihoo.CommonDataSourceRules.CheckedEntry.elaborate
+#print axioms Jihoo.CommonDataSourceRules.Typing.total_accounted
+#print axioms Jihoo.CommonDataSourceRulesChecks.source_valid
+#print axioms Jihoo.CommonDataSourceRulesChecks.scalar_case
+#print axioms Jihoo.CommonDataSourceRulesChecks.checked_entry
+#print axioms Jihoo.CommonDataSourceRulesChecks.computed_nil
+#print axioms Jihoo.CommonDataSourceRulesChecks.nested_case
+#print axioms Jihoo.CommonDataSourceRulesChecks.motive_rejections
+#print axioms Jihoo.CommonDataSourceRulesChecks.wrong_result_rejected
+#print axioms Jihoo.CommonDataSourceRulesChecks.nil_kind_mismatch
+#print axioms Jihoo.CommonDataSourceRulesChecks.node_kind_mismatch
+#print axioms Jihoo.CommonDataSourceRulesChecks.parent_alias_rejected
+
+#print axioms Jihoo.CommonDataSourceRulesChecks.split_application
+#print axioms Jihoo.CommonDataSourceRulesChecks.wrong_entry_annotation
+#print axioms Jihoo.CommonDataSourceRulesChecks.scalar_run
+#print axioms Jihoo.CommonDataSourceRulesChecks.scalar_accounted
