@@ -7,7 +7,7 @@ case "$actual" in
   "Lean (version $expected,"*) ;;
   *) printf 'Expected Lean %s; got %s\n' "$expected" "$actual" >&2; exit 1 ;;
 esac
-lake build Jihoo.RecursiveFieldRuntimeExamples --wfail
+lake build Jihoo.RecursiveLexicalFieldsExamples --wfail
 report=$(mktemp)
 trap 'rm -f "$report"' EXIT
 lake env lean -DwarningAsError=true CheckRecursiveFieldOwnership.lean > "$report"
@@ -19,8 +19,8 @@ with open(sys.argv[1], encoding="utf-8") as audit:
     report = audit.read()
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-if len(entries) + len(closed) != 35:
-    raise SystemExit("Expected 35 elaborated theorem audits")
+if len(entries) + len(closed) != 70:
+    raise SystemExit("Expected 70 elaborated theorem audits")
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - {
         "propext", "Quot.sound", "Classical.choice"

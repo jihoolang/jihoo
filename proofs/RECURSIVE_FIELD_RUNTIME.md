@@ -31,9 +31,8 @@ execution and output interpretation are conclusions rather than premises.
 
 Run `bash proofs/check-recursive-fields.sh` with pinned Lean and Python, or
 `nix build .#checks.x86_64-linux.recursive-field-proofs`. The existing independent
-Nix check runs on both CI architectures. It now audits 35 named theorems across
-the original and runtime interfaces, with warnings as errors and only standard
-logical axioms allowed. The shared Core audit and #168 files are unchanged.
+Nix check runs on both CI architectures. See [the interface overview](RECURSIVE_FIELDS.md) for the current audit count.
+It uses warnings as errors and allows only standard logical axioms. The shared Core audit and #168 files are unchanged.
 
 The new fixture contains parent 0, left leaf 1, and right subtree 2 -> 3. It
 proves initial ownership and store interpretation, checks actual returned
@@ -80,3 +79,7 @@ and frees the parent at the end of the block, with same-size node reuse when
 applicable (`docs/internals/core-spec.md`, data Case runtime rule). This model
 releases the parent immediately in `take`, before running the consumer. No
 reordering, release-timing, or node-reuse correspondence theorem is claimed.
+
+The subsequent [lexical interface](RECURSIVE_LEXICAL_FIELDS.md) adds actual
+child-root binding and a separate pending-shell release model. It does not
+extend this eager consumer into a source Case body or prove trace equivalence.
