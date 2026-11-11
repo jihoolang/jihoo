@@ -197,6 +197,28 @@
           # UEFI programs in QEMU.
           # Independent specification fragment, not a verified compiler.
           # The toolchain version is checked against proofs/lean-toolchain.
+          # Independent field-resource interface, kept separate from the
+          # shared Core audit while the symbolic/entry integrations proceed.
+          recursive-field-proofs = pkgs.runCommand "jihoo-recursive-field-proofs" {
+            nativeBuildInputs = [ pkgs.lean4 pkgs.python3 ];
+            LEAN_NUM_THREADS = "2";
+          } ''
+            cp -r ${lib.fileset.toSource {
+              root = ./proofs;
+              fileset = lib.fileset.unions [
+                ./proofs/Jihoo
+                ./proofs/CheckRecursiveFieldOwnership.lean
+                ./proofs/check-recursive-fields.sh
+                ./proofs/lean-toolchain
+                ./proofs/lakefile.toml
+                ./proofs/lake-manifest.json
+              ];
+            }} proofs
+            chmod -R u+w proofs
+            bash proofs/check-recursive-fields.sh
+            touch $out
+          '';
+
           lean-proofs = pkgs.runCommand "jihoo-lean-proofs" {
             nativeBuildInputs = [ pkgs.lean4 pkgs.python3 ];
           } ''
