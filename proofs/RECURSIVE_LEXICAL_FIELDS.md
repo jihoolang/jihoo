@@ -65,3 +65,7 @@ Run `bash proofs/check-recursive-fields.sh` with pinned Lean and Python, or
 `nix build .#checks.x86_64-linux.recursive-field-proofs`. This uses the existing
 standalone CI check and leaves shared proof aggregators and compiler sources
 unchanged. These results do not close the 0.6 common-Core soundness gate.
+
+The subsequent [Buffer body segment](RECURSIVE_CASE_BODY.md) derives the pending
+shell and child preservation premises for a source-typed scalar Buffer body.
+Arbitrary recursive bodies and dependent Case remain outside that segment.

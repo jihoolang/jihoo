@@ -1,4 +1,4 @@
-import Jihoo.RecursiveLexicalFieldsExamples
+import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
 #print axioms Jihoo.RecursiveFieldOwnership.root_not_in_fields
@@ -73,3 +73,35 @@ import Jihoo.RecursiveLexicalFieldsExamples
 #print axioms Jihoo.RecursiveLexicalFieldsExamples.recursive_root_not_buffer
 #print axioms Jihoo.RecursiveLexicalFieldsExamples.buffer_environment_bridge
 #print axioms Jihoo.RecursiveLexicalFieldsExamples.existing_buffer_program
+
+#print axioms Jihoo.RecursiveBodyProjection.project_rel
+#print axioms Jihoo.RecursiveBodyProjection.project_agrees
+#print axioms Jihoo.RecursiveBodyProjection.retain_rel
+#print axioms Jihoo.RecursiveBodyProjection.retain_agrees
+#print axioms Jihoo.RecursiveBodyProjection.continuation_agrees
+#print axioms Jihoo.RecursiveCaseBody.owns_rotate
+#print axioms Jihoo.RecursiveCaseBody.body_total
+#print axioms Jihoo.RecursiveCaseBody.BodyRun.deterministic
+#print axioms Jihoo.RecursiveCaseBody.body_every_run
+#print axioms Jihoo.RecursiveCaseBody.SegmentRun.deterministic
+#print axioms Jihoo.RecursiveCaseBody.footprint_append
+#print axioms Jihoo.RecursiveCaseBody.segment_total
+#print axioms Jihoo.RecursiveCaseBody.segment_every_run
+#print axioms Jihoo.RecursiveCaseBodyExamples.agreement
+#print axioms Jihoo.RecursiveCaseBodyExamples.initial_valid
+#print axioms Jihoo.RecursiveCaseBodyExamples.inventory
+#print axioms Jihoo.RecursiveCaseBodyExamples.layout
+#print axioms Jihoo.RecursiveCaseBodyExamples.read_shape
+#print axioms Jihoo.RecursiveCaseBodyExamples.typed
+#print axioms Jihoo.RecursiveCaseBodyExamples.body_run
+#print axioms Jihoo.RecursiveCaseBodyExamples.segment_run
+#print axioms Jihoo.RecursiveCaseBodyExamples.segment_safe
+#print axioms Jihoo.RecursiveCaseBodyExamples.all_buffer_aliases_retired
+#print axioms Jihoo.RecursiveCaseBodyExamples.parent_only_freed_last
+#print axioms Jihoo.RecursiveCaseBodyExamples.parent_live_through_body
+#print axioms Jihoo.RecursiveCaseBodyExamples.data_projected_dead
+#print axioms Jihoo.RecursiveCaseBodyExamples.ghosts_supply_no_bound
+#print axioms Jihoo.RecursiveCaseBodyExamples.graph_valid
+#print axioms Jihoo.RecursiveCaseBodyExamples.cannot_free_data
+#print axioms Jihoo.RecursiveCaseBodyExamples.shared_data_buffer_rejected
+#print axioms Jihoo.RecursiveCaseBodyExamples.empty_suffix_total
