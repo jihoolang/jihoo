@@ -72,6 +72,7 @@ same on GitHub.
 - [Checked MIR entry and adequacy](internals/mir-entry-adequacy.md)
 - [0.6 proof status](internals/0.6-proof-status.md)
 - [Symbolic dependent Buffer typing](internals/symbolic-core-typing.md)
+- [Symbolic typing through checked MIR entry](internals/symbolic-mir-entry.md)
 - [Graph artifact certificates](internals/graph-certificates.md)
 - [Checked typing artifacts](internals/typing-certificates.md)
 - [Core representation bridge](internals/core-bridge.md)
