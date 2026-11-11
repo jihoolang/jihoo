@@ -3790,3 +3790,43 @@ execution construction and determinism also establish the exact mathematical
 scalar result `if i < n then value else 99`. Separate instances exhibit n=7,
 m=2 and n=7,m=0. This opens a stated source body, not a proof of native ABI
 entry, signed-I64 preservation or general dependent Pi typing.
+
+### Physical ghost-slot compaction
+
+`SizedErasure` gives the sized composed fragment an independent compact syntax
+and runtime semantics. Target values have no ghost constructor, target syntax
+has no type annotations or proof operands, and true `ifLt` branches introduce
+no runtime binder. A Boolean source-slot mask reindexes each retained variable
+by counting the retained slots before it. `compactEnv` physically removes proof
+placeholders. Consumed owner aliases remain runtime values: source typing
+revokes their authority; erasure does not conflate them with proof slots.
+
+`compileTarget` is an executable, fuel-bounded traversal of the original graph.
+Every successful output carries a kernel-checked `Erases` derivation. It visits
+both comparison branches, rejects reads of erased slots, and refuses unsupported
+or out-of-range nodes. Fuel bounds traversal depth, not total expanded work;
+shared subgraphs may be duplicated. This is not a production compiler frontend
+or a hardened resource-bounded service.
+
+`Erases.forward` constructs a compact execution from a source execution, and
+`Erases.backward` constructs the source execution from a compact execution.
+Their terminating-execution equivalence preserves the actual result, complete
+event trace and final heap. Target totality, safe execution, exact ownership
+accounting and retained-frame contents then follow from the same sized source
+typing rules. A successful target run or safe trace is never supplied as an
+extra premise of target totality.
+
+Structural erasure coverage and closing-instance typing remain separate
+premises. In particular, typing for a closing instance can constrain only its
+taken comparison branch, whereas executable erasure checks both branches.
+These results do not establish full dependent-Core erasure or that the native
+compiler's output refines this mathematical compact interpreter.
+
+`SizedErasureExamples` compiles the unchanged 465-node source graph with fuel
+128 into an explicit compact syntax tree by kernel reduction. It exhibits the
+outer six source slots becoming five runtime slots and inner ten becoming
+eight, with actual variable-index changes. The same compact program covers
+arbitrary closing n/m/i values, including zero and unequal lengths. It has a
+derived execution, exact scalar result, safe/accounted events and no live final
+buffer. Kernel-checked rejection examples cover zero fuel, erased payload reads,
+an invalid untaken branch, unsupported nodes, invalid references and cycles.

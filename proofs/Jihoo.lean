@@ -193,3 +193,11 @@ import Jihoo.SizedCoreExamples
 
 import Jihoo.SizedCompositionGraph
 import Jihoo.SizedCompositionExamples
+import Jihoo.SizedErasureContext
+import Jihoo.SizedErasedRuntime
+import Jihoo.SizedErasureIndices
+import Jihoo.SizedCoreErasure
+import Jihoo.SizedErasureForward
+import Jihoo.SizedErasureCompiler
+import Jihoo.SizedErasureChecks
+import Jihoo.SizedErasureExamples
