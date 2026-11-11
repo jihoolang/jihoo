@@ -661,3 +661,12 @@ The [constructor-closure integration](lean-proofs.md#composing-calls-under-exist
 uses that same framed judgment for calls inside allocation, Free, mixed Lend
 and let continuations. Lend readers retain their existing restrictions: the
 new continuation runs after the lease closes, not inside an active reader.
+
+
+The [plan-free lexical execution bridge](lean-proofs.md#plan-free-lexical-execution-of-the-composed-core-fragment)
+relates that composed ownership judgment to concrete captured lexical values.
+Static resource plans do not select runtime behavior: supported typed plans
+produce the same value, exact events and final heap. Consumed names stay in the
+runtime environment but cannot be accessed through the static context. This
+statement still covers the documented fragment, not arbitrary Core programs or
+a refinement proof for the native compiler.
