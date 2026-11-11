@@ -69,6 +69,7 @@ same on GitHub.
 - [Design: native dependent core](internals/dependent-core.md)
 - [Core specification](internals/core-spec.md)
 - [Lean proof boundary](internals/lean-proofs.md)
+- [Checked MIR entry and adequacy](internals/mir-entry-adequacy.md)
 - [0.6 proof status](internals/0.6-proof-status.md)
 - [Symbolic dependent Buffer typing](internals/symbolic-core-typing.md)
 - [Graph artifact certificates](internals/graph-certificates.md)
