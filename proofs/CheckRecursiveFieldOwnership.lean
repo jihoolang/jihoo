@@ -1,4 +1,4 @@
-import Jihoo.CommonDataApplicationExamples
+import Jihoo.CommonDataSourceChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -212,3 +212,20 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataApplicationExamples.nested_application_typed
 #print axioms Jihoo.CommonDataApplicationExamples.nested_application_run
 #print axioms Jihoo.CommonDataApplicationExamples.scalar_argument_rejected
+#print axioms Jihoo.CommonDataSource.adapted_at
+#print axioms Jihoo.CommonDataSource.opaque_not_typed
+#print axioms Jihoo.CommonDataSource.case_empty_result
+#print axioms Jihoo.CommonDataSourceExamples.source_valid
+#print axioms Jihoo.CommonDataSourceExamples.entry_decoded
+#print axioms Jihoo.CommonDataSourceExamples.target_valid
+#print axioms Jihoo.CommonDataSourceExamples.entry_typed
+#print axioms Jihoo.CommonDataSourceExamples.entry_total
+#print axioms Jihoo.CommonDataSourceChecks.family_rejections
+#print axioms Jihoo.CommonDataSourceChecks.telescope_rejections
+#print axioms Jihoo.CommonDataSourceChecks.entry_rejections
+#print axioms Jihoo.CommonDataSourceChecks.foreign_nodes_opaque
+#print axioms Jihoo.CommonDataSourceChecks.case_rejections
+#print axioms Jihoo.CommonDataSourceChecks.case_result
+#print axioms Jihoo.CommonDataSourceChecks.fixture_run
+#print axioms Jihoo.CommonDataSourceChecks.fixture_safe
+#print axioms Jihoo.CommonDataSourceChecks.empty_input_run

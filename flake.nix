@@ -208,6 +208,7 @@
               fileset = lib.fileset.unions [
                 ./proofs/Jihoo
                 ./proofs/CheckRecursiveFieldOwnership.lean
+                ./proofs/EmitCommonDataSource.lean
                 ./proofs/check-recursive-fields.sh
                 ./proofs/lean-toolchain
                 ./proofs/lakefile.toml
@@ -215,6 +216,8 @@
               ];
             }} proofs
             chmod -R u+w proofs
+            mkdir -p tests
+            cp ${./tests/core_data_source.json} tests/core_data_source.json
             bash proofs/check-recursive-fields.sh
             touch $out
           '';
@@ -395,6 +398,8 @@
               python3 -O tests/core_lexical_execution.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_dependent_buffer.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_dependent_buffer.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_data_source.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_data_source.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_sized_composition.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_sized_composition.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo

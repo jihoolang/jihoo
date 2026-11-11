@@ -61,6 +61,11 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
     obtain ⟨n, es, t, run, steps, vt, kept, _, _⟩ :=
       scalar_total old agreement layout valid owned fields
     exact ⟨.scalar n, _, ⟨t,s.cells⟩, .core shape run, steps, vt, ⟨n,rfl⟩, kept⟩
+  | literal shape bound =>
+    have noTrees := List.eq_nil_of_length_eq_zero length
+    have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
+    subst trees; subst owners
+    exact ⟨_, [], s, .literal shape, .nil, valid, ⟨_,rfl⟩, owned⟩
   | empty shape =>
     have noTrees := List.eq_nil_of_length_eq_zero length
     have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
