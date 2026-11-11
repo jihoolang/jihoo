@@ -54,7 +54,9 @@ exact accounting result for **Drop itself**, not for arbitrary common programs.
 General common-language allocation/release accounting remains open. The body
 language now admits nested Case and scalar tree consumption, but general
 recursive functions, dependent motives/indexed families, arbitrary constructors,
-general data let-binding and Back remain outside the judgment.
+general context-splitting application and Back remain outside the judgment.
+The subsequent [Data application extension](COMMON_DATA_APPLICATION.md) adds
+whole-inventory sequencing through direct source-shaped lambdas.
 
 ## Regression coverage
 

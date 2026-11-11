@@ -21,6 +21,11 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
       SizedCoreTyping.Typing (coreGraph g) (context count ctx) sizes arg .scalar →
       Typing g (continuation count ctx) count [] body kind →
       Typing g ctx count sizes term kind
+  | dataLet : nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
+      Typing g ctx count sizes arg .data →
+      Typing g (dataContinuation ctx) 1 [] body kind →
+      Typing g ctx count sizes term kind
   | drop : nodeAt g term = .drop 0 owner body →
       nodeAt g owner = .core (.var index) → ctx[index]? = some (.data 0) →
       Typing g (removeHead ctx) count sizes body kind →
@@ -51,6 +56,11 @@ inductive Eval (g : Graph) : List Value → Nat → State → Value →
       SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers (.scalar n) before middle →
       Eval g (.scalar n :: env) body ⟨middle,s.cells⟩ result after t →
       Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  | dataLet : nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
+      Eval g env arg s (.data ref) before middle →
+      Eval g (.data ref :: env) body middle result after t →
+      Eval g env term s result (before ++ after) t
   | drop : nodeAt g term = .drop 0 owner body →
       nodeAt g owner = .core (.var index) → env[index]? = some (.data ref) →
       Destroy ref s before middle → Eval g env body middle result after t →

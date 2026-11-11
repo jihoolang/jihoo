@@ -1,4 +1,4 @@
-import Jihoo.CommonDataDropExamples
+import Jihoo.CommonDataApplicationExamples
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -182,3 +182,33 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataDropExamples.buffer_continuation_typed
 #print axioms Jihoo.CommonDataDropExamples.buffer_continuation_run
 #print axioms Jihoo.CommonDataDropExamples.buffer_continuation_safe
+#print axioms Jihoo.CommonData.rel_retireAll
+#print axioms Jihoo.CommonData.agrees_dataContinuation
+#print axioms Jihoo.CommonDataApplicationExamples.graph_valid
+#print axioms Jihoo.CommonDataApplicationExamples.rebuild_typed
+#print axioms Jihoo.CommonDataApplicationExamples.drop_typed
+#print axioms Jihoo.CommonDataApplicationExamples.rebuild_then_drop_typed
+#print axioms Jihoo.CommonDataApplicationExamples.rebuild_twice_typed
+#print axioms Jihoo.CommonDataApplicationExamples.producer_run
+#print axioms Jihoo.CommonDataApplicationExamples.twice_run
+#print axioms Jihoo.CommonDataApplicationExamples.computed_destroy
+#print axioms Jihoo.CommonDataApplicationExamples.drop_run
+#print axioms Jihoo.CommonDataApplicationExamples.twice_safe
+#print axioms Jihoo.CommonDataApplicationExamples.drop_safe
+#print axioms Jihoo.CommonDataApplicationExamples.empty_argument_typed
+#print axioms Jihoo.CommonDataApplicationExamples.empty_argument_run
+#print axioms Jihoo.CommonDataApplicationExamples.aliases_retired
+#print axioms Jihoo.CommonDataApplicationExamples.erased_lambda_rejected
+#print axioms Jihoo.CommonDataApplicationExamples.wrong_family_rejected
+#print axioms Jihoo.CommonDataApplicationExamples.indexed_domain_rejected
+#print axioms Jihoo.CommonDataApplicationExamples.stale_alias_rejected
+#print axioms Jihoo.CommonDataApplicationExamples.ind_projects_opaque
+#print axioms Jihoo.CommonDataApplicationExamples.empty_then_drop_typed
+#print axioms Jihoo.CommonDataApplicationExamples.empty_then_drop_run
+#print axioms Jihoo.CommonDataApplicationExamples.buffer_argument_typed
+#print axioms Jihoo.CommonDataApplicationExamples.buffer_application_typed
+#print axioms Jihoo.CommonDataApplicationExamples.buffer_argument_run
+#print axioms Jihoo.CommonDataApplicationExamples.buffer_application_run
+#print axioms Jihoo.CommonDataApplicationExamples.nested_application_typed
+#print axioms Jihoo.CommonDataApplicationExamples.nested_application_run
+#print axioms Jihoo.CommonDataApplicationExamples.scalar_argument_rejected

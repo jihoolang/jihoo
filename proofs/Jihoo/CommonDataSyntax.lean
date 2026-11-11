@@ -9,6 +9,7 @@ open RecursiveLexicalFields
 inductive Node where
   | core (node : ScopedLend.Graph.Node)
   | embedded (body : Nat)
+  | ind (family : Nat) (arguments : List Nat)
   | empty
   | drop (family owner rest : Nat)
   | construct (left right : Nat)
@@ -32,6 +33,7 @@ def Node.children : Node → List Nat
   | .core n => n.children
   | .embedded body => [body]
   | .empty => []
+  | .ind _ arguments => arguments
   | .construct l r => [l,r]
   | .drop _ owner rest => [owner,rest]
   | .caseTree scrutinee emptyBranch nodeBranch _ => [scrutinee,emptyBranch,nodeBranch]
@@ -56,6 +58,25 @@ def removeEntry : Entry → Entry
   | other => other
 
 def removeHead (ctx : List Entry) := ctx.map removeEntry
+
+/-- A computed argument consumes the entire old capability inventory. Only
+non-owning lexical values survive; its returned tree gets one fresh slot. -/
+def retireAll : Entry → Entry
+  | .data _ | .buffer _ => .dead
+  | other => other
+
+def dataContinuation (ctx : List Entry) := .data 0 :: ctx.map retireAll
+
+theorem rel_retireAll (h : Rel old e v) : Rel new (retireAll e) v := by
+  cases e <;> first | trivial | exact h
+
+theorem agrees_dataContinuation (h : Agrees old ctx env) :
+    Agrees [.data tree] (dataContinuation ctx) (.data (root tree) :: env) := by
+  constructor
+  · exact ⟨tree,rfl,rfl⟩
+  · induction h with
+    | nil => exact .nil
+    | cons head tail ih => exact .cons (rel_retireAll head) ih
 
 def caps (trees : List Tree) (owners : List Nat) :=
   trees.map Capability.data ++ owners.map Capability.buffer
