@@ -1,3 +1,4 @@
+import Jihoo.CommonDataChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -105,3 +106,49 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.RecursiveCaseBodyExamples.cannot_free_data
 #print axioms Jihoo.RecursiveCaseBodyExamples.shared_data_buffer_rejected
 #print axioms Jihoo.RecursiveCaseBodyExamples.empty_suffix_total
+#print axioms Jihoo.CommonDataChecks.duplicate_child_rejected
+#print axioms Jihoo.CommonDataChecks.empty_cannot_discard_data
+#print axioms Jihoo.CommonDataChecks.empty_cannot_discard_buffer
+#print axioms Jihoo.CommonDataChecks.variable_cannot_discard_child
+#print axioms Jihoo.CommonDataChecks.constructor_cannot_return_scalar
+#print axioms Jihoo.CommonDataChecks.parent_aliases_retired
+#print axioms Jihoo.CommonDataChecks.suffix_slots_shift
+#print axioms Jihoo.CommonDataChecks.missing_cell_rejected
+#print axioms Jihoo.CommonDataChecks.embedded_typed
+#print axioms Jihoo.CommonDataChecks.embedded_run
+#print axioms Jihoo.CommonDataChecks.extension_projects_opaque
+#print axioms Jihoo.CommonData.Eval.deterministic
+#print axioms Jihoo.CommonData.Typing.every_run
+#print axioms Jihoo.CommonDataExamples.graph_valid
+#print axioms Jihoo.CommonDataExamples.read_shape
+#print axioms Jihoo.CommonDataExamples.node_buffer_typed
+#print axioms Jihoo.CommonDataExamples.nil_buffer_typed
+#print axioms Jihoo.CommonDataExamples.case_typed
+#print axioms Jihoo.CommonDataExamples.valid_start
+#print axioms Jihoo.CommonDataExamples.owns_start
+#print axioms Jihoo.CommonDataExamples.fields_start
+#print axioms Jihoo.CommonDataExamples.layout_start
+#print axioms Jihoo.CommonDataExamples.node_buffer_run
+#print axioms Jihoo.CommonDataExamples.case_run
+#print axioms Jihoo.CommonDataExamples.case_safe
+#print axioms Jihoo.CommonDataExamples.result_fields
+#print axioms Jihoo.CommonDataExamples.complete_result_ownership
+#print axioms Jihoo.CommonDataExamples.old_parent_freed_last
+#print axioms Jihoo.CommonDataExamples.empty_agreement
+#print axioms Jihoo.CommonDataExamples.empty_valid
+#print axioms Jihoo.CommonDataExamples.empty_owned
+#print axioms Jihoo.CommonDataExamples.empty_fields
+#print axioms Jihoo.CommonDataExamples.empty_run
+#print axioms Jihoo.CommonDataExamples.empty_safe
+#print axioms Jihoo.CommonData.scalar_total
+#print axioms Jihoo.CommonData.empty_layout
+#print axioms Jihoo.CommonData.Typing.total
+#print axioms Jihoo.CommonData.core_at
+#print axioms Jihoo.CommonData.rel_remove
+#print axioms Jihoo.CommonData.agrees_remove
+#print axioms Jihoo.CommonData.data_lookup
+#print axioms Jihoo.CommonData.owns_permute
+#print axioms Jihoo.CommonData.move_pending
+#print axioms Jihoo.CommonData.restore_pending
+#print axioms Jihoo.CommonData.steps_append
+#print axioms Jihoo.CommonData.Post.finish
