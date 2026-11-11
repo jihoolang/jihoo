@@ -1,4 +1,4 @@
-import Jihoo.RecursiveFieldOwnershipExamples
+import Jihoo.RecursiveFieldRuntimeExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
 #print axioms Jihoo.RecursiveFieldOwnership.root_not_in_fields
@@ -16,3 +16,24 @@ import Jihoo.RecursiveFieldOwnershipExamples
 #print axioms Jihoo.RecursiveFieldOwnershipExamples.fixture_valid
 #print axioms Jihoo.RecursiveFieldOwnershipExamples.fixture_owned
 #print axioms Jihoo.RecursiveFieldOwnershipExamples.concrete_core_consumer
+
+#print axioms Jihoo.RecursiveFieldRuntime.Represents.congr
+#print axioms Jihoo.RecursiveFieldRuntime.Represents.clear_other
+#print axioms Jihoo.RecursiveFieldRuntime.take_total
+#print axioms Jihoo.RecursiveFieldRuntime.split_safe
+#print axioms Jihoo.RecursiveFieldRuntime.take_result
+#print axioms Jihoo.RecursiveFieldRuntime.allocate_safe
+#print axioms Jihoo.RecursiveFieldRuntime.consume_left_total
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.valid_fixture
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.owns_fixture
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.fields_fixture
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.split_actual_pointers
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.missing_cell_stuck
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.dead_parent_stuck
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.wrong_field_rejected
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.borrowed_parent_rejected
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.interpreted_core_consumer
+
+#print axioms Jihoo.RecursiveFieldRuntime.Represents.unique
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.allocate_then_take
+#print axioms Jihoo.RecursiveFieldRuntimeExamples.truncated_witness_rejected
