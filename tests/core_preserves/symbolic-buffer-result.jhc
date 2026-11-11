@@ -1,0 +1,11 @@
+; Natural beta substitution changes the owned result from Buffer(m) to Buffer(n).
+; The allocation remains effectful, and its returned capability is consumed once.
+(def symbolic_buffer
+ (pi n U64 (pi value I64 (Buffer n)))
+ (lam n U64 (lam value I64
+  (app (lam m U64 (alloc m value)) n))))
+(export symbolic_release
+ (pi n U64 (pi value I64 I64))
+ (lam n U64 (lam value I64
+  (app (lam buffer (Buffer n) (free buffer value))
+   (app symbolic_buffer n value)))))

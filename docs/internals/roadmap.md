@@ -668,6 +668,13 @@ remaining blocker: a common specified typing-to-runtime ownership theorem.
 Scoped metatheorems and passing implementation tests must not be added together
 and reported as full-language soundness.
 
+A [symbolic dependent Buffer judgment](symbolic-core-typing.md) now checks one
+restricted source rule family independently of closing values, including both
+comparison arms and dependent natural-result instantiation. Its closing theorem
+derives the existing sized ownership judgment and constructs safe execution
+with exact resource accounting. This does not cover all prior sized rules or
+full dependent Pi preservation, and the common full-Core blocker remains open.
+
 1. **Dependent-type stabilization.** Started: pure normalization retains
    dependent elimination and view motives on symbolic branches, while runtime
    lowering still distributes data cases. The core examples and preservation

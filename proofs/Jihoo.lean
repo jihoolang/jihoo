@@ -241,3 +241,10 @@ import Jihoo.NativeCompositionMir
 import Jihoo.NativeCompositionMirExecution
 import Jihoo.NativeCompositionMirCorrespondence
 import Jihoo.NativeCompositionMirSnapshot
+
+import Jihoo.SymbolicCoreContext
+import Jihoo.SymbolicCoreTyping
+import Jihoo.SymbolicCoreIndices
+import Jihoo.SymbolicCoreClosing
+import Jihoo.SymbolicCoreExamples
+import Jihoo.SymbolicCoreRejections
