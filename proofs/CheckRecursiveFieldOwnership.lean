@@ -1,4 +1,4 @@
-import Jihoo.CommonDataSourceChecks
+import Jihoo.CommonDataPartitionChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -229,3 +229,35 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataSourceChecks.fixture_run
 #print axioms Jihoo.CommonDataSourceChecks.fixture_safe
 #print axioms Jihoo.CommonDataSourceChecks.empty_input_run
+
+#print axioms Jihoo.CommonData.sized_lengths_frame
+#print axioms Jihoo.CommonData.Eval.lengths_frame
+#print axioms Jihoo.CommonData.Eval.cells_frame
+#print axioms Jihoo.CommonData.surviving_untouched
+#print axioms Jihoo.CommonData.Eval.frame_cells
+#print axioms Jihoo.CommonData.Eval.frame_fields
+#print axioms Jihoo.CommonData.Eval.frame_layout
+#print axioms Jihoo.CommonData.Post.frame_owned
+#print axioms Jihoo.CommonData.Typing.total_preserving
+#print axioms Jihoo.CommonData.Typing.every_run_preserving
+#print axioms Jihoo.CommonData.data_partition_disjoint
+#print axioms Jihoo.CommonData.buffer_partition_disjoint
+#print axioms Jihoo.CommonData.rel_argument
+#print axioms Jihoo.CommonData.rel_captured
+#print axioms Jihoo.CommonData.agrees_argument
+#print axioms Jihoo.CommonData.agrees_captured
+#print axioms Jihoo.CommonDataPartitionChecks.graph_valid
+#print axioms Jihoo.CommonDataPartitionChecks.reassemble_typed
+#print axioms Jihoo.CommonDataPartitionChecks.consume_captures_typed
+#print axioms Jihoo.CommonDataPartitionChecks.mixed_captures_typed
+#print axioms Jihoo.CommonDataPartitionChecks.pending_parent_typed
+#print axioms Jihoo.CommonDataPartitionChecks.alias_partition
+#print axioms Jihoo.CommonDataPartitionChecks.empty_slots_partition
+#print axioms Jihoo.CommonDataPartitionChecks.reserved_alias_rejected
+#print axioms Jihoo.CommonDataPartitionChecks.consumed_alias_rejected
+#print axioms Jihoo.CommonDataPartitionChecks.mixed_captures_total
+
+#print axioms Jihoo.CommonDataPartitionChecks.empty_producer_retains
+#print axioms Jihoo.CommonDataPartitionChecks.nonempty_captures_run
+#print axioms Jihoo.CommonDataPartitionChecks.nonempty_captures_safe
+#print axioms Jihoo.CommonDataPartitionChecks.retained_store_observations

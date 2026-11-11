@@ -1,4 +1,4 @@
-import Jihoo.CommonDataTyping
+import Jihoo.CommonDataFrame
 
 namespace Jihoo.CommonData
 open HeapLeases LinearHeapPrograms RecursiveFieldOwnership RecursiveFieldRuntime
@@ -128,6 +128,72 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
         empty_layout vm (by simpa [caps, footprint, Capability.owners] using kept) fs
     exact ⟨v, _, t, .dataLet shape lam domain first second,
       steps_append steps tail, vt, result⟩
+  | @dataLetSplit activeCount retainedCount count usedSizes savedSizes sizes term fn arg ty body ctx kind countSplit sizeSplit shape lam domain argTyped bodyTyped argIH bodyIH =>
+    subst count; subst sizes
+    let active := trees.take activeCount
+    let retained := trees.drop activeCount
+    let used := owners.take usedSizes.length
+    let saved := owners.drop usedSizes.length
+    have ts : trees = active ++ retained := (List.take_append_drop _ _).symm
+    have os : owners = used ++ saved := (List.take_append_drop _ _).symm
+    have alen : active.length = activeCount := by simp [active, length]
+    have rlen : retained.length = retainedCount := by simp [retained, length]
+    have ulen : used.length = usedSizes.length := by simp [used, layout.length]
+    have argLayout : SizedBufferContext.Layout s.buffers used usedSizes := by
+      simpa [used] using layout.take (p := usedSizes.length)
+    have savedLayout : SizedBufferContext.Layout s.buffers saved savedSizes := by
+      simpa [saved] using layout.drop (p := usedSizes.length)
+    have lexical := agreement
+    rw [ts,os] at lexical
+    have argLexical := agrees_argument lexical
+    rw [alen,rlen,ulen] at argLexical
+    have partitioned : Owns s.buffers.heap
+        (footprint (caps active used) ++ (footprint (caps retained saved) ++ frame)) := by
+      apply owns_permute owned
+      rw [ts,os]
+      simp only [caps, List.map_append, RecursiveCaseBody.footprint_append, footprint_buffers]
+      have perm := (List.perm_append_comm (l₁ := footprint (retained.map Capability.data))
+        (l₂ := used)).append_left (footprint (active.map Capability.data))
+      simpa [List.append_assoc] using perm.append_right (saved ++ frame)
+    have argFields : Fields s.cells (caps active used) := by
+      intro c hc
+      apply fields c
+      rw [ts,os]
+      simp only [caps, List.map_append, List.mem_append] at hc ⊢
+      rcases hc with h | h
+      · exact Or.inl (Or.inl h)
+      · exact Or.inr (Or.inl h)
+    have savedFields : Fields s.cells (caps retained saved) := by
+      intro c hc
+      apply fields c
+      rw [ts,os]
+      simp only [caps, List.map_append, List.mem_append] at hc ⊢
+      rcases hc with h | h
+      · exact Or.inl (Or.inr h)
+      · exact Or.inr (Or.inr h)
+    obtain ⟨value,before,middle,first,steps,vm,post⟩ :=
+      argIH alen argLexical argLayout valid partitioned argFields
+    obtain ⟨result,rfl,rep,kept⟩ := post
+    have savedBefore := OwnedApplicationFrame.owns_left (OwnedApplicationFrame.owns_right partitioned)
+    have savedAfter := OwnedApplicationFrame.owns_left (OwnedApplicationFrame.owns_right kept)
+    have fs := first.frame_fields valid steps savedBefore savedAfter savedFields
+    have savedBuffers : Owns s.buffers.heap saved := by
+      apply OwnedApplicationFrame.owns_right
+      simpa [caps, RecursiveCaseBody.footprint_append, footprint_buffers] using savedBefore
+    have bodyLayout := first.frame_layout valid steps savedBuffers savedLayout
+    have bodyLexical := agrees_captured (result := result) lexical
+    rw [alen,rlen,ulen] at bodyLexical
+    have bodyFields : Fields middle.cells (caps (result :: retained) saved) := by
+      intro c hc
+      change c ∈ Capability.data result :: caps retained saved at hc
+      rcases List.mem_cons.mp hc with rfl | hc
+      · exact rep
+      · exact fs c hc
+    obtain ⟨v,after,t,second,tail,vt,final⟩ :=
+      bodyIH (trees := result :: retained) (owners := saved)
+        (by simp [rlen]) bodyLexical bodyLayout vm
+        (by simpa [caps, footprint, Capability.owners, List.append_assoc] using kept) bodyFields
+    exact ⟨v,_,t,.dataLet shape lam domain first second,steps_append steps tail,vt,final⟩
   | drop shape owner selected body ih =>
     cases trees with
     | nil => simp at length

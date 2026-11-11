@@ -1,4 +1,5 @@
 import Jihoo.CommonDataDestroy
+import Jihoo.CommonDataPartition
 
 /-! One closing-instance judgment for binary data reconstruction and existing
 scalar Buffer Core and store-driven binary Drop. No dependent motives are admitted. -/
@@ -27,6 +28,14 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
       nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
       Typing g ctx count sizes arg .data →
       Typing g (dataContinuation ctx) 1 [] body kind →
+      Typing g ctx count sizes term kind
+  | dataLetSplit : activeCount + retainedCount = count → usedSizes ++ savedSizes = sizes →
+      nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
+      Typing g (argumentContext activeCount retainedCount usedSizes.length ctx)
+        activeCount usedSizes arg .data →
+      Typing g (capturedContext activeCount retainedCount usedSizes.length ctx)
+        (retainedCount+1) savedSizes body kind →
       Typing g ctx count sizes term kind
   | drop : nodeAt g term = .drop 0 owner body →
       nodeAt g owner = .core (.var index) → ctx[index]? = some (.data 0) →
