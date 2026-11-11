@@ -18,7 +18,7 @@ Run with the repository-pinned Lean version and Python available:
 bash proofs/check-recursive-fields.sh
 ```
 
-This builds the dependency closure with warnings as errors and checks all 254
+This builds the dependency closure with warnings as errors and checks all 281
 named new theorem dependencies against the standard logical axiom allowlist.
 Regressions reject shared children, deep ancestor aliases, dead fields and
 active field leases, and check parent release with a retained child and frame.
@@ -102,3 +102,10 @@ recursive and Buffer captures across computed arguments in that same judgment.
 General frame theorems derive actual cell and length preservation from execution;
 explicit capability partitions revoke consumed aliases without changing runtime
 lexical positions. Dependent Pi and full-language soundness remain open.
+
+The [common allocation accounting theorem](COMMON_DATA_ACCOUNTING.md) now
+conserves every tracked initial/new allocation across all rules of that
+judgment. Whole-tree result footprints share their actual representation
+witness with ownership. Exact release and live-domain/no-leak corollaries
+retain explicit initial coverage where required; this is not whole-language
+quantity soundness or accounting of empty logical capabilities.

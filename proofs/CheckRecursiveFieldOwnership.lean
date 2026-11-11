@@ -1,4 +1,4 @@
-import Jihoo.CommonDataPartitionChecks
+import Jihoo.CommonDataAccountingChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -261,3 +261,31 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataPartitionChecks.nonempty_captures_run
 #print axioms Jihoo.CommonDataPartitionChecks.nonempty_captures_safe
 #print axioms Jihoo.CommonDataPartitionChecks.retained_store_observations
+
+#print axioms Jihoo.CommonData.Typing.total_accounted
+#print axioms Jihoo.CommonData.AccountedPost.toPost
+#print axioms Jihoo.CommonData.Account.refl
+#print axioms Jihoo.CommonData.Account.free
+#print axioms Jihoo.CommonData.Account.compose
+#print axioms Jihoo.CommonData.AccountedPost.compose
+#print axioms Jihoo.CommonData.AccountedPost.permute
+#print axioms Jihoo.CommonData.AccountedPost.finish
+#print axioms Jihoo.CommonData.ResultFootprint.unique
+#print axioms Jihoo.CommonData.AccountedPost.output
+#print axioms Jihoo.CommonData.AccountedPost.account_for
+#print axioms Jihoo.CommonData.Typing.every_run_accounted
+#print axioms Jihoo.CommonData.Typing.other_released
+#print axioms Jihoo.CommonData.Typing.survivors
+#print axioms Jihoo.CommonData.Typing.live_domain
+#print axioms Jihoo.CommonData.Typing.scalar_no_leaks
+#print axioms Jihoo.CommonDataAccountingChecks.computed_drop_accounted
+#print axioms Jihoo.CommonDataAccountingChecks.fresh_replacement_released
+#print axioms Jihoo.CommonDataAccountingChecks.rebuilt_descendants_accounted
+#print axioms Jihoo.CommonDataAccountingChecks.nested_shells_accounted
+#print axioms Jihoo.CommonDataAccountingChecks.split_return_accounted
+#print axioms Jihoo.CommonDataAccountingChecks.split_live_domain
+#print axioms Jihoo.CommonDataAccountingChecks.untracked_survives
+#print axioms Jihoo.CommonDataAccountingChecks.empty_footprint_limit
+#print axioms Jihoo.CommonDataAccountingChecks.buffer_projection
+#print axioms Jihoo.CommonDataAccountingChecks.buffer_reader_typed
+#print axioms Jihoo.CommonDataAccountingChecks.buffer_reader_accounted

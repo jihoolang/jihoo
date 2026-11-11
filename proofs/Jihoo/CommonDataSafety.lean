@@ -1,4 +1,4 @@
-import Jihoo.CommonDataFrame
+import Jihoo.CommonDataConservation
 
 namespace Jihoo.CommonData
 open HeapLeases LinearHeapPrograms RecursiveFieldOwnership RecursiveFieldRuntime
@@ -43,34 +43,36 @@ theorem scalar_total
 theorem empty_layout {bufferState : SizedBufferHeap.State} : SizedBufferContext.Layout bufferState [] [] :=
   ⟨rfl, by intro k x n h; simp at h⟩
 
-/-- A single judgment now constructs safe execution and ownership of the final
-scalar/data result. The postcondition contains no residual child inventory;
-this theorem does not assert exact trace accounting for all input allocations. -/
-theorem Typing.total (typed : Typing g ctx count sizes term kind)
+/-- A single judgment constructs safe execution and exact allocation-ID
+conservation, using the same returned-tree witness as runtime ownership. -/
+theorem Typing.total_accounted (typed : Typing g ctx count sizes term kind)
     (length : trees.length = count) (agreement : Agrees (caps trees owners) ctx env)
     (layout : SizedBufferContext.Layout s.buffers owners sizes)
     (valid : Valid s.buffers.heap)
     (owned : Owns s.buffers.heap (footprint (caps trees owners) ++ frame))
     (fields : Fields s.cells (caps trees owners)) :
     ∃ v es t, Eval g env term s v es t ∧ Steps s.buffers.heap es t.buffers.heap ∧
-      Valid t.buffers.heap ∧ Post kind t v frame := by
+      Valid t.buffers.heap ∧ AccountedPost kind t v frame (footprint (caps trees owners)) es := by
   induction typed generalizing trees owners env s frame with
   | core shape old =>
     have nil := List.eq_nil_of_length_eq_zero length
     subst trees
     obtain ⟨n, es, t, run, steps, vt, kept, _, _⟩ :=
       scalar_total old agreement layout valid owned fields
-    exact ⟨.scalar n, _, ⟨t,s.cells⟩, .core shape run, steps, vt, ⟨n,rfl⟩, kept⟩
+    refine ⟨.scalar n, _, ⟨t,s.cells⟩, .core shape run, steps, vt, ⟨n,rfl⟩, kept, ?_⟩
+    have counted := old.every_run_accounted (by simpa [caps] using project_agrees agreement)
+      layout valid (by simpa [caps,footprint_buffers] using OwnedApplicationFrame.owns_left owned) run
+    simpa [SizedCoreTyping.Account,SizedCoreTyping.resultOwners,Account,caps,footprint_buffers] using counted
   | literal shape bound =>
     have noTrees := List.eq_nil_of_length_eq_zero length
     have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
     subst trees; subst owners
-    exact ⟨_, [], s, .literal shape, .nil, valid, ⟨_,rfl⟩, owned⟩
+    exact ⟨_, [], s, .literal shape, .nil, valid, ⟨_,rfl⟩, owned, Account.refl⟩
   | empty shape =>
     have noTrees := List.eq_nil_of_length_eq_zero length
     have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
     subst trees; subst owners
-    exact ⟨.data none, [], s, .empty shape, .nil, valid, Tree.empty, rfl, trivial, owned⟩
+    exact ⟨.data none, [], s, .empty shape, .nil, valid, Tree.empty, rfl, trivial, owned, Account.refl⟩
   | dataVar shape selected =>
     have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
     subst owners
@@ -81,7 +83,8 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
       subst rest
       have lookup := data_lookup agreement selected (tree := tree) rfl
       exact ⟨.data (root tree), [], s, .dataVar shape lookup, .nil, valid, tree, rfl,
-        fields (.data tree) (by simp [caps]), by simpa [caps, footprint, Capability.owners] using owned⟩
+        fields (.data tree) (by simp [caps]), by simpa [caps, footprint, Capability.owners] using owned,
+        by simpa [caps,footprint,Capability.owners] using (Account.refl (input := tree.owners))⟩
   | construct shape leftVar leftSlot rightVar rightSlot =>
     have noOwners : owners = [] := List.eq_nil_of_length_eq_zero layout.length
     subst owners
@@ -98,10 +101,12 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
         have arranged : Owns s.buffers.heap (left.owners ++ right.owners ++ frame) := by
           simpa [caps, footprint, Capability.owners, List.append_assoc] using owned
         have fresh := allocate_safe (s := s.recursive) (payload := 0) valid lrep rrep arranged
-        exact ⟨.data (some s.buffers.heap.nextObject), _, allocate s (root left) (root right),
+        refine ⟨.data (some s.buffers.heap.nextObject), _, allocate s (root left) (root right),
           .construct shape leftVar (data_lookup agreement leftSlot rfl)
             rightVar (data_lookup agreement rightSlot rfl), .cons .alloc .nil,
-          fresh.1, .node s.buffers.heap.nextObject left right, rfl, fresh.2.1, fresh.2.2⟩
+          fresh.1, .node s.buffers.heap.nextObject left right, rfl, fresh.2.1, fresh.2.2, ?_⟩
+        intro x
+        simp [released,allocations,caps,footprint,Capability.owners,Tree.owners,List.count_append,List.count_cons]
   | bufferLet shape lam scalarTy arg body ih =>
     have argTyped := arg
     rw [← length] at argTyped
@@ -111,12 +116,23 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
       ih (owners := []) (s := ⟨middle,s.cells⟩) length
         (by simpa [caps, length] using lexical) empty_layout vm
         (by simpa [caps] using kept) (by simpa [caps] using fs)
-    exact ⟨v, _, t, .bufferLet shape lam scalarTy first second,
-      steps_append steps tail, vt, post⟩
+    have bufferOwned : Owns s.buffers.heap owners := by
+      apply OwnedApplicationFrame.owns_right (xs := footprint (trees.map Capability.data))
+      simpa [caps,RecursiveCaseBody.footprint_append,footprint_buffers] using
+        OwnedApplicationFrame.owns_left owned
+    have firstAccount := argTyped.every_run_accounted (by simpa using project_agrees agreement)
+      layout valid bufferOwned first
+    have scalarAccount : Account owners [] (before.map SizedBufferHeap.Event.project) := firstAccount
+    have last : AccountedPost _ _ _ _ ([] ++ footprint (caps trees [])) after := post
+    have combined := AccountedPost.compose scalarAccount last
+    refine ⟨v, _, t, .bufferLet shape lam scalarTy first second,steps_append steps tail,vt,?_⟩
+    apply combined.permute
+    simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers,List.append_nil]
+    exact List.perm_append_comm
   | dataLet shape lam domain arg body argIH bodyIH =>
     obtain ⟨value, before, middle, first, steps, vm, post⟩ :=
       argIH length agreement layout valid owned fields
-    obtain ⟨tree, rfl, rep, kept⟩ := post
+    obtain ⟨tree, rfl, rep, kept, firstAccount⟩ := post
     have fs : Fields middle.cells (caps [tree] []) := by
       intro c member
       simp [caps] at member
@@ -126,8 +142,10 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
       bodyIH (trees := [tree]) (owners := []) rfl
         (by simpa [caps] using agrees_dataContinuation (tree := tree) agreement)
         empty_layout vm (by simpa [caps, footprint, Capability.owners] using kept) fs
-    exact ⟨v, _, t, .dataLet shape lam domain first second,
-      steps_append steps tail, vt, result⟩
+    refine ⟨v, _, t, .dataLet shape lam domain first second,
+      steps_append steps tail, vt, ?_⟩
+    simpa [caps,footprint,Capability.owners] using
+      (AccountedPost.compose (retained := []) firstAccount (by simpa [caps,footprint,Capability.owners] using result))
   | @dataLetSplit activeCount retainedCount count usedSizes savedSizes sizes term fn arg ty body ctx kind countSplit sizeSplit shape lam domain argTyped bodyTyped argIH bodyIH =>
     subst count; subst sizes
     let active := trees.take activeCount
@@ -173,7 +191,7 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
       · exact Or.inr (Or.inr h)
     obtain ⟨value,before,middle,first,steps,vm,post⟩ :=
       argIH alen argLexical argLayout valid partitioned argFields
-    obtain ⟨result,rfl,rep,kept⟩ := post
+    obtain ⟨result,rfl,rep,kept,firstAccount⟩ := post
     have savedBefore := OwnedApplicationFrame.owns_left (OwnedApplicationFrame.owns_right partitioned)
     have savedAfter := OwnedApplicationFrame.owns_left (OwnedApplicationFrame.owns_right kept)
     have fs := first.frame_fields valid steps savedBefore savedAfter savedFields
@@ -193,7 +211,15 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
       bodyIH (trees := result :: retained) (owners := saved)
         (by simp [rlen]) bodyLexical bodyLayout vm
         (by simpa [caps, footprint, Capability.owners, List.append_assoc] using kept) bodyFields
-    exact ⟨v,_,t,.dataLet shape lam domain first second,steps_append steps tail,vt,final⟩
+    have combined := AccountedPost.compose firstAccount
+      (show AccountedPost _ _ _ _ (result.owners ++ footprint (caps retained saved)) after from
+        by simpa [caps,footprint,Capability.owners,List.append_assoc] using final)
+    refine ⟨v,_,t,.dataLet shape lam domain first second,steps_append steps tail,vt,?_⟩
+    apply combined.permute
+    rw [ts,os]
+    simp only [caps,List.map_append,RecursiveCaseBody.footprint_append,footprint_buffers]
+    have perm := (List.perm_append_comm (l₁ := used) (l₂ := footprint (retained.map Capability.data))).append_left (footprint (active.map Capability.data))
+    simpa [List.append_assoc] using perm.append_right saved
   | drop shape owner selected body ih =>
     cases trees with
     | nil => simp at length
@@ -225,8 +251,10 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
         ⟨layout.length, fun k x n hx hn => by rw [destroyed.lengths]; exact layout.lookup k x n hx hn⟩
       obtain ⟨v, after, t, run, tail, vt, post⟩ :=
         ih restLength (agrees_remove agreement) lengths vm kept fs
-      exact ⟨v, _, t, .drop shape owner lookup destroyed run,
-        steps_append steps tail, vt, post⟩
+      have firstAccount : Account tree.owners [] (tree.owners.map Event.free) := Account.free
+      have combined := AccountedPost.compose firstAccount post
+      exact ⟨v, _, t, .drop shape owner lookup destroyed run,steps_append steps tail,vt,
+        by simpa [caps,footprint,Capability.owners,List.append_assoc] using combined⟩
   | caseTree shape scrutinee selected nilBody nodeBody nilIH nodeIH =>
     cases trees with
     | nil => simp at length
@@ -242,7 +270,7 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
           intro c member; exact fields c (List.mem_cons_of_mem _ member)
         obtain ⟨v, es, t, run, steps, vt, post⟩ :=
           nilIH restLength lexical layout valid kept fs
-        exact ⟨v, es, t, .emptyCase shape scrutinee lookup run, steps, vt, post⟩
+        exact ⟨v, es, t, .emptyCase shape scrutinee lookup run, steps, vt, by simpa [caps,footprint,Capability.owners,Tree.owners] using post⟩
       | node parent left right =>
         have inventory : Inventory s.recursive (.data (.node parent left right) :: caps rest owners) :=
           ⟨OwnedApplicationFrame.owns_left owned, fields⟩
@@ -256,6 +284,18 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
             (by simp only [List.length_cons]; omega) lexical layout valid arranged fs
         obtain ⟨last, vu, finalPost⟩ := post.finish vt
         exact ⟨v, es ++ [.free parent], finish t parent,
-          .nodeCase shape scrutinee entered run, steps_append steps (.cons last .nil), vu, finalPost⟩
+          .nodeCase shape scrutinee entered run, steps_append steps (.cons last .nil), vu,
+          by simpa [caps,footprint,Capability.owners,Tree.owners,List.append_assoc] using finalPost⟩
+
+/-- Compatibility projection of the stronger allocation-accounted theorem. -/
+theorem Typing.total (typed : Typing g ctx count sizes term kind)
+    (length : trees.length = count) (agreement : Agrees (caps trees owners) ctx env)
+    (layout : SizedBufferContext.Layout s.buffers owners sizes) (valid : Valid s.buffers.heap)
+    (owned : Owns s.buffers.heap (footprint (caps trees owners) ++ frame))
+    (fields : Fields s.cells (caps trees owners)) :
+    ∃ v es t, Eval g env term s v es t ∧ Steps s.buffers.heap es t.buffers.heap ∧
+      Valid t.buffers.heap ∧ Post kind t v frame := by
+  obtain ⟨v,es,t,run,steps,vt,post⟩ := typed.total_accounted length agreement layout valid owned fields
+  exact ⟨v,es,t,run,steps,vt,post.toPost⟩
 
 end Jihoo.CommonData
