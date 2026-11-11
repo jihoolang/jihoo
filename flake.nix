@@ -247,7 +247,9 @@
           # whole-graph/root continuity before any subsequent consumer runs.
           # This is an integration check, not a proof of importer/exporter fidelity.
           graph-certificates = pkgs.runCommand "jihoo-graph-certificates" {
-            nativeBuildInputs = [ jihoo pkgs.lean4 pkgs.python3 ];
+            // Dynamic MIR checks link a C allocation counter directly, outside
+            // the compiler wrapper's private JIHOO_CC environment.
+            nativeBuildInputs = [ jihoo llvm.clang pkgs.lean4 pkgs.python3 ];
           } ''
             cp -r ${lib.fileset.toSource {
               root = ./.;
