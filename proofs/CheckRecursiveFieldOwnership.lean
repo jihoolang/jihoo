@@ -1,0 +1,18 @@
+import Jihoo.RecursiveFieldOwnershipExamples
+
+#print axioms Jihoo.RecursiveFieldOwnership.unpack
+#print axioms Jihoo.RecursiveFieldOwnership.root_not_in_fields
+#print axioms Jihoo.RecursiveFieldOwnership.fields_separate
+#print axioms Jihoo.RecursiveFieldOwnership.allocate_node
+#print axioms Jihoo.RecursiveFieldOwnership.release_node
+#print axioms Jihoo.RecursiveFieldOwnership.release_accounting
+#print axioms Jihoo.RecursiveFieldOwnership.consume_left
+#print axioms Jihoo.RecursiveFieldOwnership.consume_left_total
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.reject_shared_child
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.reject_ancestor_alias
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.reject_dead_field
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.reject_borrowed_field
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.release_preserves_child_and_frame
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.fixture_valid
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.fixture_owned
+#print axioms Jihoo.RecursiveFieldOwnershipExamples.concrete_core_consumer
