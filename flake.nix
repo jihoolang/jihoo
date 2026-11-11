@@ -212,6 +212,8 @@
                 ./proofs/EmitMirFixture.lean
                 ./proofs/EmitDynamicMir.lean
                 ./proofs/CheckDynamicMir.lean
+                ./proofs/EmitNativeCompositionMir.lean
+                ./proofs/CheckNativeCompositionMir.lean
                 ./proofs/EmitComposedGraph.lean
                 ./proofs/EmitDependentBufferGraph.lean
                 ./proofs/EmitSizedCompositionGraph.lean
@@ -233,6 +235,7 @@
             cp ${./tests/core_preserves/lean-mixed-proof-translation.jhc} tests/core_preserves/lean-mixed-proof-translation.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
             cp ${./tests/core_dynamic_mir.json} tests/core_dynamic_mir.json
+            cp ${./tests/core_native_composition_mir.json} tests/core_native_composition_mir.json
             cp ${./tests/core_mir_single.json} tests/core_mir_single.json
             cp ${./tests/core_composed_graph.json} tests/core_composed_graph.json
             cp ${./tests/core_dependent_index.json} tests/core_dependent_index.json
@@ -266,6 +269,8 @@
                 ./proofs/EmitMirFixture.lean
                 ./proofs/EmitDynamicMir.lean
                 ./proofs/CheckDynamicMir.lean
+                ./proofs/EmitNativeCompositionMir.lean
+                ./proofs/CheckNativeCompositionMir.lean
                 ./proofs/CheckMirCaller.lean
                 ./proofs/CheckScalarCaller.lean
                 ./proofs/CheckLinearCaller.lean
@@ -304,6 +309,8 @@
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_dynamic_mir.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_dynamic_mir.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_composition_mir.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_native_composition_mir.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo

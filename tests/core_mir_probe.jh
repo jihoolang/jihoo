@@ -116,8 +116,10 @@ fn snapshot() -> Result(String, String) {
             if body.arg_count == 0 {
                 out = "[1,[".to_string()
             } else {
-                if body.arg_count != 3 || f.sig.params[0] != types.U64 || f.sig.params[1] != types.U64 || f.sig.params[2] != types.I64 {
-                    return Err("expected U64,U64,I64 entry signature".to_string())
+                let dynamic = body.arg_count == 3 && f.sig.params[0] == types.U64 && f.sig.params[1] == types.U64 && f.sig.params[2] == types.I64
+                let composition = body.arg_count == 4 && f.sig.params[0] == types.U64 && f.sig.params[1] == types.U64 && f.sig.params[2] == types.U64 && f.sig.params[3] == types.I64
+                if !dynamic && !composition {
+                    return Err("expected U64,U64,I64 or U64,U64,U64,I64 entry signature".to_string())
                 }
                 for arg in 0..body.arg_count {
                     if body.locals[arg + 1].ty != f.sig.params[arg] || body.locals[arg + 1].kind != mir.LocalKind.Arg || f.pass[arg] != mir.ParamPass.Value {
@@ -125,7 +127,7 @@ fn snapshot() -> Result(String, String) {
                     }
                 }
                 // Slots identify arguments; the complete local table gives their types.
-                out = "[2,[1,2,3],[".to_string()
+                out = if composition { "[2,[1,2,3,4],[".to_string() } else { "[2,[1,2,3],[".to_string() }
             }
             for local in body.arg_count + 1..body.locals.len() {
                 if body.locals[local].kind == mir.LocalKind.Arg {

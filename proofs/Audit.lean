@@ -2766,3 +2766,24 @@ import Jihoo
 
 #print axioms Jihoo.SizedMir.Linear.Embedded.branch_yes
 #print axioms Jihoo.SizedMir.Linear.Embedded.branch_no
+
+#print axioms Jihoo.NativeCompositionMir.code_valid
+#print axioms Jihoo.NativeCompositionMir.final_heap
+#print axioms Jihoo.NativeCompositionMir.final_no_live
+#print axioms Jihoo.NativeCompositionMir.input_frame
+#print axioms Jihoo.NativeCompositionMir.initialization_prefix
+#print axioms Jihoo.NativeCompositionMir.first_iteration
+#print axioms Jihoo.NativeCompositionMir.first_total
+#print axioms Jihoo.NativeCompositionMir.first_filled_read
+#print axioms Jihoo.NativeCompositionMir.second_initialization
+#print axioms Jihoo.NativeCompositionMir.second_iteration
+#print axioms Jihoo.NativeCompositionMir.second_total
+#print axioms Jihoo.NativeCompositionMir.second_filled_read
+#print axioms Jihoo.NativeCompositionMir.outside_finish
+#print axioms Jihoo.NativeCompositionMir.inside_finish
+#print axioms Jihoo.NativeCompositionMir.terminates
+#print axioms Jihoo.NativeCompositionMir.every_return
+#print axioms Jihoo.NativeCompositionMirCorrespondence.heap_related
+#print axioms Jihoo.NativeCompositionMirCorrespondence.lifecycle_eq
+#print axioms Jihoo.NativeCompositionMirCorrespondence.three_way_termination
+#print axioms Jihoo.NativeCompositionMirCorrespondence.every_execution_agrees
