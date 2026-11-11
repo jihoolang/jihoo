@@ -212,6 +212,7 @@
                 ./proofs/EmitMirFixture.lean
                 ./proofs/EmitComposedGraph.lean
                 ./proofs/EmitDependentBufferGraph.lean
+                ./proofs/EmitSizedCompositionGraph.lean
                 ./proofs/EmitCore.lean
                 ./proofs/EmitPrimitiveSafety.lean
                 ./proofs/EmitBinderClassification.lean
@@ -232,6 +233,7 @@
             cp ${./tests/core_mir_single.json} tests/core_mir_single.json
             cp ${./tests/core_composed_graph.json} tests/core_composed_graph.json
             cp ${./tests/core_dependent_index.json} tests/core_dependent_index.json
+            cp ${./tests/core_sized_composition.json} tests/core_sized_composition.json
             bash proofs/check.sh
             touch $out
           '';
@@ -355,6 +357,8 @@
               python3 -O tests/core_lexical_execution.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_dependent_buffer.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_dependent_buffer.py --compiler ${jihoo}/bin/jihoo
+              python3 tests/core_sized_composition.py --compiler ${jihoo}/bin/jihoo
+              python3 -O tests/core_sized_composition.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_quantities.py --compiler ${jihoo}/bin/jihoo
               python3 tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo
               python3 -O tests/core_erasure_traces.py --compiler ${jihoo}/bin/jihoo

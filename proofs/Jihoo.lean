@@ -190,3 +190,6 @@ import Jihoo.SizedCoreSafety
 import Jihoo.SizedCoreAccounting
 import Jihoo.DependentBufferGraph
 import Jihoo.SizedCoreExamples
+
+import Jihoo.SizedCompositionGraph
+import Jihoo.SizedCompositionExamples
