@@ -217,3 +217,12 @@ import Jihoo.SizedMirHeap
 import Jihoo.SizedMirAllocation
 import Jihoo.SizedMirTranslation
 import Jihoo.SizedMirExamples
+
+import Jihoo.SizedMirAllocationEmbedded
+import Jihoo.SizedMirLinearCompiler
+import Jihoo.SizedMirLinearSteps
+import Jihoo.SizedMirTraceBounds
+import Jihoo.SizedMirLinearSimulation
+import Jihoo.SizedMirLinearProgram
+import Jihoo.SizedMirLinearValueBounds
+import Jihoo.SizedMirLinearExamples

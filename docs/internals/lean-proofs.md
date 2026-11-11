@@ -3960,3 +3960,77 @@ its typing obligations remain separate from construction. Other runtime
 constructors, arbitrary continuation safety, whole-program termination and the
 native compiler's lowering implementation are not covered. MIR-to-LLVM, machine
 addresses and allocation failure retain their existing trust boundaries.
+
+
+### Compositional generated allocation/release programs
+
+`SizedMirLinearCompiler` extends constructed lowering to the straight-line
+compact grammar: scalar and natural literals, variables, application, allocation
+and release. It rejects comparisons and both lend constructors. Pure values and
+application binders become operand aliases; effectful fragments generate actual
+MIR instructions. Allocation uses ten local roles and six blocks, while release
+uses one unit scratch local and one free terminator. Recursive size functions
+place fragments consecutively and compute forward continuation labels. An
+instruction-free term enters its continuation directly, so nested pure arguments
+and bodies never jump to a nonexistent block.
+
+Successful construction produces a structural `Compiles` derivation. `Embedded`
+records exact bounded declaration/block slices in the completed code, without
+assuming execution. Splitting these slices proves that each recursive fragment
+occupies the intended rows. `SizedMirAllocationEmbedded` generalizes the earlier
+allocation proof to arbitrary contents in its scratch slots and preserves all
+surrounding locals, including scratch slots reserved for later fragments.
+
+`Compiles.simulate` constructs execution compositionally from a compact execution,
+its safe source trace, related initial heap/environment, successful construction
+and structural placement, and finite final resource bounds. The result operand
+encodes the compact value, the final heap has the exact source representation,
+and earlier input locals retain their values. An application's producer result
+extends the operand environment for its body; release keeps lexical aliases but
+cannot authorize their unsafe reuse. No successful MIR execution is a premise.
+
+Safe release is essential: the independent compact evaluator describes releases
+even for stale aliases, whereas `SizedBufferHeap.Steps` requires a live,
+unborrowed object. `Trace.trace_suffix` splits a safe trace at the *actual*
+intermediate state of compact evaluation. This justifies each release and avoids
+assuming that an arbitrary trace midpoint matches the source program. The final
+`Trace.Bounds` condition bounds allocated object count, cumulative physical cells
+and payloads for every allocated identity. Released objects still occupy capacity
+and retain their payload; monotonicity and preservation propagate these final
+bounds backward to every earlier allocation.
+
+`SizedMirLinearProgram.lowerProgram` adds a scalar return block, validates the
+whole generated MIR and checks the declaration/block budgets. `programFrame`
+pads the supplied input locals with fresh empty scratch slots. `program_run`
+then constructs a terminating instruction execution with exact allocation/free
+observations and a related final heap. It preserves all original input slots
+except the designated return slot zero.
+
+The typed bridges compose this translation with the existing graph compactor and
+sized source judgment. `typed_source_run` derives the safe source trace from typing,
+not from an extra caller assumption. `typed_source_total` additionally constructs
+the Core execution and returns the source per-object ownership accounting. Its
+resource-adequacy premise bounds the final heaps of source executions; it assumes
+neither a target run nor target safety. Successful whole-syntax compaction and
+lowering, closing-environment interpretations, initial heap validity/ownership and
+finite source resources remain explicit premises.
+
+Heap resource bounds do not imply that arbitrary dynamic scalar/natural inputs
+fit machine words. `SizedMirLinearValueBounds` states this distinction directly:
+`EnvBounded` bounds represented natural and scalar inputs; `Compiles.value_bounded`
+derives the corresponding result bound; `bounded_program_run` combines that
+property with the generated execution. The underlying execution theorem is about
+`BoundedMir` semantics and does not silently assume all input values are bounded.
+
+The examples construct two allocations over a prior live/dead heap, retain an
+owner alias through a pure application, release the objects in a different order
+from their lexical positions, and return a captured scalar. Symbolic runs cover
+the cumulative-capacity boundary; kernel reductions check zero and nonzero
+lengths. A concrete Core graph has checked compaction, an actual typing derivation,
+source execution and the generated-program totality theorem. Negative tests also
+show why static MIR validity alone cannot justify a double free.
+
+These are forward results for the supported straight-line grammar. They do not
+establish backward equivalence, arbitrary conditional/lend lowering, general
+continuation safety, native compiler association, MIR-to-LLVM correctness, physical
+addresses or allocator success. They do not complete the broader 0.6 release gate.

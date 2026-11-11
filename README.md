@@ -179,8 +179,10 @@ validate closed typing and formation derivations bound to complete exported grap
 A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
 continuations. A Lean constructor now lowers compact/source allocations into
-that fragment, including dynamic operands and lexical natural lets. Other runtime
-constructors, arbitrary continuations and native lowering remain outside it.
+that fragment, including dynamic operands and lexical natural lets. A compositional
+constructor now covers straight-line bindings, repeated allocation and release,
+with a scalar-returning program theorem connected to source typing. Branches,
+lends and native lowering remain outside this constructed translation.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).

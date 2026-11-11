@@ -821,8 +821,12 @@ and reported as full-language soundness.
    state, then composes with an independently proved continuation. A structural
    Lean lowering now connects source/compact allocation constructors to generated
    fragments, with operand alias substitution and exact source/MIR heap relations.
-   Other runtime constructors, arbitrary continuation safety and correspondence to
-   the native lowering implementation remain open.
+   The generated translation now composes straight-line values, aliases,
+   applications, allocation and release into scalar-returning programs. Its typed
+   source bridge derives safe release and constructs terminating MIR execution
+   under explicit source resource adequacy and initial representation premises.
+   Branches, lends, arbitrary continuation safety and correspondence to the native
+   lowering implementation remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the
