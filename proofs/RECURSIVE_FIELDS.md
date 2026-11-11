@@ -18,7 +18,7 @@ Run with the repository-pinned Lean version and Python available:
 bash proofs/check-recursive-fields.sh
 ```
 
-This builds the dependency closure with warnings as errors and checks all 207
+This builds the dependency closure with warnings as errors and checks all 224
 named new theorem dependencies against the standard logical axiom allowlist.
 Regressions reject shared children, deep ancestor aliases, dead fields and
 active field leases, and check parent release with a retained child and frame.
@@ -91,3 +91,8 @@ exact release accounting; whole-language accounting and native refinement remain
 The [computed Data application extension](COMMON_DATA_APPLICATION.md) connects
 Data-producing arguments to subsequent typed bodies through source App/Lam/Ind
 shapes. It retires old aliases and derives the returned-tree interpretation.
+
+The [checked production source connection](COMMON_DATA_SOURCE.md) now compares
+a real parser/checker snapshot with the Lean source view, strictly adapts its
+Data body, and proves common typing/safety. Native lifecycle tests accompany it;
+exporter honesty and native execution refinement remain separate boundaries.

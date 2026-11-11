@@ -1,0 +1,10 @@
+(data Tree
+  (Nil Tree)
+  (Node (pi left Tree (pi right Tree Tree))))
+(export consume (pi tree Tree I64)
+  (lam tree Tree
+    (app (lam result Tree (drop Tree result (int 99)))
+      (case Tree (lam value Tree Tree)
+        Nil
+        (lam left Tree (lam right Tree (Node left right)))
+        tree))))

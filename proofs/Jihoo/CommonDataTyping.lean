@@ -9,6 +9,8 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
   | core : nodeAt g term = .embedded body →
       SizedCoreTyping.Typing (coreGraph g) (context 0 ctx) sizes body .scalar →
       Typing g ctx 0 sizes term .scalar
+  | literal : nodeAt g term = .core (.integer n) → n < 2^63 →
+      Typing g ctx 0 [] term .scalar
   | empty : nodeAt g term = .empty → Typing g ctx 0 [] term .data
   | dataVar : nodeAt g term = .core (.var index) → ctx[index]? = some (.data 0) →
       Typing g ctx 1 [] term .data
@@ -43,6 +45,7 @@ inductive Eval (g : Graph) : List Value → Nat → State → Value →
   | core : nodeAt g term = .embedded body →
       SizedCoreExecution.Eval (coreGraph g) (environment env) body s.buffers (.scalar n) es t →
       Eval g env term s (.scalar n) (es.map SizedBufferHeap.Event.project) ⟨t,s.cells⟩
+  | literal : nodeAt g term = .core (.integer n) → Eval g env term s (.scalar n) [] s
   | empty : nodeAt g term = .empty → Eval g env term s (.data none) [] s
   | dataVar : nodeAt g term = .core (.var index) → env[index]? = some (.data ref) →
       Eval g env term s (.data ref) [] s

@@ -14,6 +14,7 @@ theorem Eval.deterministic (a : Eval g env term s v es t)
     obtain ⟨eq, rfl, rfl⟩ := first.deterministic otherRun
     cases eq
     exact ⟨rfl, rfl, rfl⟩
+  | literal shape => cases b <;> simp_all
   | empty shape =>
     cases b <;> simp_all
   | dataVar shape lookup =>
