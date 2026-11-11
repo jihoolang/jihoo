@@ -1,4 +1,4 @@
-import Jihoo.CommonDataSourceRulesChecks
+import Jihoo.CommonDataSourceExecutionChecks
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -310,3 +310,19 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataSourceRulesChecks.wrong_entry_annotation
 #print axioms Jihoo.CommonDataSourceRulesChecks.scalar_run
 #print axioms Jihoo.CommonDataSourceRulesChecks.scalar_accounted
+
+#print axioms Jihoo.CommonDataSourceExecutionChecks.split_accounted
+#print axioms Jihoo.CommonDataSourceExecution.sourceCore_eq
+#print axioms Jihoo.CommonDataSourceExecution.Eval.to_common
+#print axioms Jihoo.CommonDataSourceExecution.reflect
+#print axioms Jihoo.CommonDataSourceExecution.total_accounted
+#print axioms Jihoo.CommonDataSourceExecution.Eval.deterministic
+#print axioms Jihoo.CommonDataSourceExecution.correspondence
+#print axioms Jihoo.CommonDataSourceExecution.every_run_accounted
+#print axioms Jihoo.CommonDataSourceExecutionChecks.scalar_source
+#print axioms Jihoo.CommonDataSourceExecutionChecks.nested_source
+#print axioms Jihoo.CommonDataSourceExecutionChecks.split_source
+#print axioms Jihoo.CommonDataSourceExecutionChecks.computed_nil_source
+#print axioms Jihoo.CommonDataSourceExecutionChecks.recursive_drop_source
+#print axioms Jihoo.CommonDataSourceExecutionChecks.nested_accounted
+#print axioms Jihoo.CommonDataSourceExecutionChecks.source_exists

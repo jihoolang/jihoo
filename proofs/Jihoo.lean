@@ -263,3 +263,6 @@ import Jihoo.SymbolicCoreCompaction
 import Jihoo.SymbolicCoreCompactionCompiler
 import Jihoo.SymbolicCoreCompactionTotality
 import Jihoo.SymbolicCoreCompactionChecks
+
+import Jihoo.CommonDataSourceExecution
+import Jihoo.CommonDataSourceExecutionChecks
