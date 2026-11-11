@@ -1,7 +1,7 @@
-import Jihoo.CommonDataSyntax
+import Jihoo.CommonDataDestroy
 
 /-! One closing-instance judgment for binary data reconstruction and existing
-scalar Buffer Core. No dependent motives or recursive destruction are admitted. -/
+scalar Buffer Core and store-driven binary Drop. No dependent motives are admitted. -/
 namespace Jihoo.CommonData
 open RecursiveFieldRuntime RecursiveLexicalFields RecursiveBodyProjection
 
@@ -21,6 +21,10 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
       SizedCoreTyping.Typing (coreGraph g) (context count ctx) sizes arg .scalar →
       Typing g (continuation count ctx) count [] body kind →
       Typing g ctx count sizes term kind
+  | drop : nodeAt g term = .drop 0 owner body →
+      nodeAt g owner = .core (.var index) → ctx[index]? = some (.data 0) →
+      Typing g (removeHead ctx) count sizes body kind →
+      Typing g ctx (count+1) sizes term kind
   | caseTree : nodeAt g term = .caseTree scrutinee nilBranch nodeBranch ghosts →
       nodeAt g scrutinee = .core (.var index) → ctx[index]? = some (.data 0) →
       Typing g (removeHead ctx) count sizes nilBranch kind →
@@ -47,6 +51,10 @@ inductive Eval (g : Graph) : List Value → Nat → State → Value →
       SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers (.scalar n) before middle →
       Eval g (.scalar n :: env) body ⟨middle,s.cells⟩ result after t →
       Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  | drop : nodeAt g term = .drop 0 owner body →
+      nodeAt g owner = .core (.var index) → env[index]? = some (.data ref) →
+      Destroy ref s before middle → Eval g env body middle result after t →
+      Eval g env term s result (before ++ after) t
   | emptyCase : nodeAt g term = .caseTree scrutinee nilBranch nodeBranch ghosts →
       nodeAt g scrutinee = .core (.var index) → env[index]? = some (.data none) →
       Eval g env nilBranch s result es t → Eval g env term s result es t

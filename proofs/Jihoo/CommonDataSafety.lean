@@ -108,6 +108,39 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
         (by simpa [caps] using kept) (by simpa [caps] using fs)
     exact ⟨v, _, t, .bufferLet shape lam scalarTy first second,
       steps_append steps tail, vt, post⟩
+  | drop shape owner selected body ih =>
+    cases trees with
+    | nil => simp at length
+    | cons tree rest =>
+      have restLength : rest.length = _ := Nat.succ.inj length
+      have lookup := data_lookup agreement selected (tree := tree) rfl
+      have rep : Represents s.cells tree := fields (.data tree) (by simp [caps])
+      have arranged : Owns s.buffers.heap
+          (tree.owners ++ (footprint (caps rest owners) ++ frame)) := by
+        simpa [caps, footprint, Capability.owners, List.append_assoc] using owned
+      obtain ⟨middle, destroyed, steps, vm, kept⟩ := destroy_total rep valid arranged
+      have fs : Fields middle.cells (caps rest owners) := by
+        intro c member
+        have original := fields c (List.mem_cons_of_mem _ member)
+        cases c with
+        | buffer x => trivial
+        | data subtree =>
+          apply original.congr
+          intro x hx
+          apply destroyed.cells_frame
+          have tailMember : x ∈ footprint (caps rest owners) := by
+            exact footprint_member member hx
+          have absent : x ∉ tree.owners := by
+            intro headMember
+            exact (List.pairwise_append.mp arranged.distinct).2.2 x headMember x
+              (List.mem_append_left frame tailMember) rfl
+          simpa [released] using absent
+      have lengths : SizedBufferContext.Layout middle.buffers owners _ :=
+        ⟨layout.length, fun k x n hx hn => by rw [destroyed.lengths]; exact layout.lookup k x n hx hn⟩
+      obtain ⟨v, after, t, run, tail, vt, post⟩ :=
+        ih restLength (agrees_remove agreement) lengths vm kept fs
+      exact ⟨v, _, t, .drop shape owner lookup destroyed run,
+        steps_append steps tail, vt, post⟩
   | caseTree shape scrutinee selected nilBody nodeBody nilIH nodeIH =>
     cases trees with
     | nil => simp at length

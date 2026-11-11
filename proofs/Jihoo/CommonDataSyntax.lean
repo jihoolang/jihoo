@@ -10,6 +10,7 @@ inductive Node where
   | core (node : ScopedLend.Graph.Node)
   | embedded (body : Nat)
   | empty
+  | drop (family owner rest : Nat)
   | construct (left right : Nat)
   | caseTree (scrutinee emptyBranch nodeBranch ghosts : Nat)
   deriving DecidableEq, Repr
@@ -32,6 +33,7 @@ def Node.children : Node → List Nat
   | .embedded body => [body]
   | .empty => []
   | .construct l r => [l,r]
+  | .drop _ owner rest => [owner,rest]
   | .caseTree scrutinee emptyBranch nodeBranch _ => [scrutinee,emptyBranch,nodeBranch]
 
 def validGraph (g : Graph) : Bool :=

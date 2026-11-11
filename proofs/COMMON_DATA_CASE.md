@@ -49,10 +49,10 @@ does not by itself establish that stronger claim for the entire common language.
 
 This is a common judgment for a **monomorphic binary reconstruction fragment**,
 not the full common-Core release gate. It supports arbitrary finite input
-subtrees, but no recursive function/body rule, Drop, general data sequencing or
+subtrees, but no general recursive function rule, general data sequencing or
 arbitrary constructor telescope. Construction is terminal and takes precisely
-two variables, which limits nested Case/reconstruction programs. In particular,
-there is no claim that arbitrary trees can be consumed to return a scalar.
+two variables, which limits nested Case/reconstruction programs. The subsequent [Drop extension](COMMON_DATA_DROP.md) adds tree consumption,
+scalar continuations and nested Case bodies within this same judgment.
 
 Both branches have the same coarse scalar/Data kind; dependent motives,
 indexed families, constructor tags and general exhaustiveness are unmodeled.
