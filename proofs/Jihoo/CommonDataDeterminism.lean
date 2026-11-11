@@ -27,6 +27,13 @@ theorem Eval.deterministic (a : Eval g env term s v es t)
     cases eq
     obtain ⟨rfl, rfl, rfl⟩ := ih otherSecond
     exact ⟨rfl, rfl, rfl⟩
+  | dataLet shape lam domain first second argIH bodyIH =>
+    cases b <;> simp_all
+    rename_i otherFirst otherSecond
+    obtain ⟨eq,rfl,rfl⟩ := argIH otherFirst
+    cases eq
+    obtain ⟨rfl,rfl,rfl⟩ := bodyIH otherSecond
+    exact ⟨rfl,rfl,rfl⟩
   | drop shape owner lookup destroyed branch ih =>
     cases b <;> simp_all
     rename_i otherDestroyed otherBranch

@@ -108,6 +108,21 @@ theorem Typing.total (typed : Typing g ctx count sizes term kind)
         (by simpa [caps] using kept) (by simpa [caps] using fs)
     exact ⟨v, _, t, .bufferLet shape lam scalarTy first second,
       steps_append steps tail, vt, post⟩
+  | dataLet shape lam domain arg body argIH bodyIH =>
+    obtain ⟨value, before, middle, first, steps, vm, post⟩ :=
+      argIH length agreement layout valid owned fields
+    obtain ⟨tree, rfl, rep, kept⟩ := post
+    have fs : Fields middle.cells (caps [tree] []) := by
+      intro c member
+      simp [caps] at member
+      subst c
+      exact rep
+    obtain ⟨v, after, t, second, tail, vt, result⟩ :=
+      bodyIH (trees := [tree]) (owners := []) rfl
+        (by simpa [caps] using agrees_dataContinuation (tree := tree) agreement)
+        empty_layout vm (by simpa [caps, footprint, Capability.owners] using kept) fs
+    exact ⟨v, _, t, .dataLet shape lam domain first second,
+      steps_append steps tail, vt, result⟩
   | drop shape owner selected body ih =>
     cases trees with
     | nil => simp at length
