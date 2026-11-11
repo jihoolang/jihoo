@@ -827,9 +827,13 @@ and reported as full-language soundness.
    under explicit source resource adequacy and initial representation premises.
    The existing scalar and owned-result read-only lends now generate pointer
    offset/load fragments and compose with allocation and safe continuations;
-   source safety supplies the live object and strict index bound. Branches, more
-   general lender shapes, arbitrary continuation safety and correspondence to the
-   native lowering implementation remain open.
+   source safety supplies the live object and strict index bound. Conditional
+   lowering now constructs a comparison/switch and typed result joins for scalar,
+   natural and owner intermediates. Explicit initial representation-kind agreement
+   supports join writes; the unchanged sized-composition Core graph retains both
+   comparisons in its generated execution/totality theorem. More general lender
+   shapes, arbitrary continuation safety and correspondence to the native
+   lowering implementation remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the

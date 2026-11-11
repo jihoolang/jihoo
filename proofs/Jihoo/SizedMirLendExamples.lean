@@ -25,8 +25,8 @@ def length : SizedErasure.NatTerm := .letE (.var 3) (.letE (.var 0) (.var 0))
 def scalarTerm : SizedErasure.Term := .lend 0 index (.app (.var 1) (.app (.var 0) (.free 2 (.var 0))))
 def ownedTerm : SizedErasure.Term := .ownedLend 0 length index
   (.app (.var 1) (.app (.var 0) (.free 2 (.free 0 (.var 8)))))
-def scalarFragment := (compile inputs 6 1 0 scalarTerm).getD (pureFragment (.constant (.i64 0)))
-def ownedFragment := (compile inputs 6 1 0 ownedTerm).getD (pureFragment (.constant (.i64 0)))
+def scalarFragment := (compile inputs ((inputKinds types inputs).getD []) 6 1 0 scalarTerm).getD (pureFragment (.constant (.i64 0)))
+def ownedFragment := (compile inputs ((inputKinds types inputs).getD []) 6 1 0 ownedTerm).getD (pureFragment (.constant (.i64 0)))
 def scalarCode := program types scalarFragment
 def ownedCode := program types ownedFragment
 
@@ -130,7 +130,7 @@ theorem scalar_generated (bound : i < n) (capacity : n ≤ 4092) (payload : valu
       (.running (start (programFrame scalarFragment (frame n m i value)) 1))
       [.free 2] (.returned value final) ∧ HeapRel (scalarFinal n value) final.heap := by
   obtain ⟨final, run, heap, _⟩ := program_run scalar_compiled (f := frame n m i value) rfl
-    inputs_related (HeapRel.materialize_related _) initial_valid scalar_eval (scalar_safe bound) (scalar_bounds capacity payload)
+    inputs_related rfl (HeapRel.materialize_related _) initial_valid scalar_eval (scalar_safe bound) (scalar_bounds capacity payload)
   exact ⟨final, run, heap⟩
 
 theorem owned_generated (bound : i < n) (capacity : n + m ≤ 4091) (payload : value < scalarBound) :
@@ -138,7 +138,7 @@ theorem owned_generated (bound : i < n) (capacity : n + m ≤ 4091) (payload : v
       (.running (start (programFrame ownedFragment (frame n m i value)) 1))
       [.alloc 3 (m*8+8),.free 2,.free 3] (.returned value final) ∧ HeapRel (ownedFinal n m value) final.heap := by
   obtain ⟨final, run, heap, _⟩ := program_run owned_compiled (f := frame n m i value) rfl
-    inputs_related (HeapRel.materialize_related _) initial_valid owned_eval (owned_safe bound) (owned_bounds capacity payload)
+    inputs_related rfl (HeapRel.materialize_related _) initial_valid owned_eval (owned_safe bound) (owned_bounds capacity payload)
   exact ⟨final, run, heap⟩
 
 theorem inputs_bounded (hn : n < wordBound) (hm : m < wordBound) (hi : i < wordBound)
@@ -199,8 +199,8 @@ theorem owned_no_safe_trace (outside : n ≤ i) :
   change i < n at bound
   omega
 
-theorem branch_rejected : lowerProgram types inputs
-    (.ifLt (.literal 0) (.literal 1) scalarTerm ownedTerm) = none := by decide +kernel
+theorem branch_kind_mismatch_rejected : lowerProgram types inputs
+    (.ifLt (.literal 0) (.literal 1) scalarTerm (.var 0)) = none := by decide +kernel
 theorem missing_owner_rejected : lowerProgram types inputs (.lend 5 index (.scalar 0)) = none := by decide +kernel
 theorem malformed_index_rejected : lowerProgram types inputs (.lend 0 (.var 0) (.scalar 0)) = none := by decide +kernel
 theorem malformed_length_rejected : lowerProgram types inputs (.ownedLend 0 (.var 0) index (.scalar 0)) = none := by decide +kernel
@@ -209,7 +209,7 @@ theorem dereference_operand_rejected : lowerProgram types
 
 /-- Static validation alone does not authorize a read after releasing its owner. -/
 def afterFree : SizedErasure.Term := .free 0 scalarTerm
-def afterFreeFragment := (compile inputs 6 1 0 afterFree).getD (pureFragment (.constant (.i64 0)))
+def afterFreeFragment := (compile inputs ((inputKinds types inputs).getD []) 6 1 0 afterFree).getD (pureFragment (.constant (.i64 0)))
 theorem after_free_compiled : lowerProgram types inputs afterFree = some afterFreeFragment := by decide +kernel
 
 theorem after_free_no_safe_trace :
@@ -240,7 +240,7 @@ def compactEnv (n i value : Nat) : SizedErasure.Env := [.owner 0,.scalar value,.
 def sourceTerm : SizedErasure.Term := .lend 0 (.var 3) (.free 0 (.var 1))
 def sourceTypes : Array Ty := #[.i64,.ptr,.i64,.u64,.u64]
 def sourceInputs : List Operand := [.copy ⟨1,false⟩,.copy ⟨2,false⟩,.copy ⟨3,false⟩,.copy ⟨4,false⟩]
-def sourceFragment := (compile sourceInputs 5 1 0 sourceTerm).getD (pureFragment (.constant (.i64 0)))
+def sourceFragment := (compile sourceInputs ((inputKinds sourceTypes sourceInputs).getD []) 5 1 0 sourceTerm).getD (pureFragment (.constant (.i64 0)))
 def sourceFrame (n i value : Nat) : Frame :=
   ⟨77,9,#[some (.i64 777),some (.pointer 0 0),some (.i64 value),some (.u64 i),some (.u64 n)],
     materialize (SizedCoreExamples.allocated n value)⟩
@@ -306,7 +306,7 @@ theorem original_core_to_generated (bound : i < n) (capacity : n ≤ 4095) (payl
       [.free 0] (.returned value final) ∧ HeapRel (SizedCoreExamples.readFinal n value) final.heap := by
   obtain ⟨final, run, heap, _⟩ := typed_source_run source_compacted source_compiled
     (source_typed bound) source_erased (source_agrees bound) source_layout source_initial_valid source_owned
-    (f := sourceFrame n i value) rfl source_related (HeapRel.materialize_related _) source_run
+    (f := sourceFrame n i value) rfl source_related rfl (HeapRel.materialize_related _) source_run
     (source_bounds capacity payload)
   exact ⟨final, run, heap⟩
 
@@ -321,7 +321,7 @@ theorem original_core_total (bound : i < n) (capacity : n ≤ 4095) (payload : v
         (lifecycle events) (.returned result final) ∧ HeapRel t final.heap ∧
       Account [0] (.scalar result) events := by
   apply typed_source_total source_compacted source_compiled (source_typed bound) source_erased
-    (source_agrees bound) source_layout source_initial_valid source_owned rfl source_related
+    (source_agrees bound) source_layout source_initial_valid source_owned rfl source_related rfl
     (HeapRel.materialize_related _)
   intro result events t run
   obtain ⟨_,_,same⟩ := run.deterministic source_run
@@ -337,7 +337,7 @@ theorem owned_bounded_generated (hn : n < wordBound) (hm : m < wordBound) (hi : 
       [.alloc 3 (m*8+8),.free 2,.free 3] (.returned value final) ∧
       HeapRel (ownedFinal n m value) final.heap := by
   obtain ⟨width, final, run, heap, _⟩ := bounded_program_run owned_compiled
-    (f := frame n m i value) rfl inputs_related (HeapRel.materialize_related _) initial_valid
+    (f := frame n m i value) rfl inputs_related rfl (HeapRel.materialize_related _) initial_valid
     owned_eval (owned_safe bound) (owned_bounds capacity hv) (inputs_bounded hn hm hi hv)
   exact ⟨width,final,run,heap⟩
 

@@ -230,3 +230,8 @@ import Jihoo.SizedMirLinearExamples
 import Jihoo.SizedMirRead
 import Jihoo.SizedMirLendExamples
 import Jihoo.SizedMirOwnedCoreExamples
+
+import Jihoo.SizedMirKinds
+import Jihoo.SizedMirBranchSteps
+import Jihoo.SizedMirBranchExamples
+import Jihoo.SizedMirBranchCoreExamples

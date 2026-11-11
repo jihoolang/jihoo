@@ -2,20 +2,21 @@ import Jihoo.SizedMirHeap
 import Jihoo.SizedErasedRuntime
 
 /-! Safe source trace decomposition and cumulative physical resource bounds.
-The straight-line predicate excludes branching, but trace bounds apply
-to every sized heap event. Released objects still consume physical capacity. -/
+The structured predicate covers both conditional outcomes, and trace bounds
+apply to every sized heap event. Released objects still consume physical capacity. -/
 namespace Jihoo.SizedMir.Trace
 open SizedBufferHeap
 
-inductive LinearTerm : SizedErasure.Term → Prop where
-  | scalar : LinearTerm (.scalar v)
-  | natural : LinearTerm (.natural n)
-  | var : LinearTerm (.var k)
-  | allocate : LinearTerm (.allocate length fill)
-  | app : LinearTerm argument → LinearTerm body → LinearTerm (.app argument body)
-  | free : LinearTerm body → LinearTerm (.free k body)
-  | lend : LinearTerm body → LinearTerm (.lend k index body)
-  | ownedLend : LinearTerm body → LinearTerm (.ownedLend k length index body)
+inductive StructuredTerm : SizedErasure.Term → Prop where
+  | scalar : StructuredTerm (.scalar v)
+  | natural : StructuredTerm (.natural n)
+  | var : StructuredTerm (.var k)
+  | allocate : StructuredTerm (.allocate length fill)
+  | app : StructuredTerm argument → StructuredTerm body → StructuredTerm (.app argument body)
+  | free : StructuredTerm body → StructuredTerm (.free k body)
+  | lend : StructuredTerm body → StructuredTerm (.lend k index body)
+  | ownedLend : StructuredTerm body → StructuredTerm (.ownedLend k length index body)
+  | ifLt : StructuredTerm yes → StructuredTerm no → StructuredTerm (.ifLt left right yes no)
 
 theorem steps_append (first : Steps s es t) (last : Steps t fs u) :
     Steps s (es ++ fs) u := by
@@ -109,7 +110,7 @@ theorem owned_lend_prefix (valid : Valid s)
 
 /-- Split a safe trace at the exact state selected by compact evaluation, rather
 than introducing an unrelated existential midpoint. No target execution occurs. -/
-theorem trace_suffix (covered : LinearTerm term) (valid : Valid s)
+theorem trace_suffix (covered : StructuredTerm term) (valid : Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : Steps s (events ++ suffix) u) :
     Steps s events t ∧ Steps t suffix u := by
@@ -162,7 +163,12 @@ theorem trace_suffix (covered : LinearTerm term) (valid : Valid s)
       obtain ⟨bodySteps, tail⟩ := ih (steps_valid valid cycle) bodyRun rest
       exact ⟨steps_append cycle bodySteps, tail⟩
 
-theorem eval_state_eq (covered : LinearTerm term) (valid : Valid s)
+  | ifLt yes no ihYes ihNo =>
+    cases run with
+    | yes _ _ _ body => exact ihYes valid body safe
+    | no _ _ _ body => exact ihNo valid body safe
+
+theorem eval_state_eq (covered : StructuredTerm term) (valid : Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : Steps s events u) : t = u := by
   have suffix : Steps s (events ++ []) u := by simpa using safe

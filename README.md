@@ -180,10 +180,12 @@ A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
 continuations. A Lean constructor now lowers compact/source allocations into
 that fragment, including dynamic operands and lexical natural lets. A compositional
-constructor now covers branch-free bindings, repeated allocation and release,
-and the existing scalar/owned-result read-only lends, with scalar-returning
-program theorems connected to source typing. Branches, more general lender forms
-and native lowering remain outside this constructed translation.
+constructor now covers bindings, repeated allocation and release, the existing
+scalar/owned-result read-only lends, and conditional scalar/natural/owner result
+joins, with scalar-returning program theorems connected to source typing. The
+unchanged sized-composition Core graph retains both of its branches in this
+constructed translation. More general lender forms and correspondence to native
+lowering remain outside the result.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).
