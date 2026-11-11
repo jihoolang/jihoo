@@ -254,3 +254,12 @@ import Jihoo.SymbolicCoreIndices
 import Jihoo.SymbolicCoreClosing
 import Jihoo.SymbolicCoreExamples
 import Jihoo.SymbolicCoreRejections
+
+import Jihoo.SymbolicMirEntry
+import Jihoo.SymbolicMirEntryExamples
+import Jihoo.SymbolicMirEntryChecks
+
+import Jihoo.SymbolicCoreCompaction
+import Jihoo.SymbolicCoreCompactionCompiler
+import Jihoo.SymbolicCoreCompactionTotality
+import Jihoo.SymbolicCoreCompactionChecks
