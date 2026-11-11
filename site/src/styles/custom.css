@@ -1,11 +1,580 @@
-/* jihoo's accent: a deep teal, light and dark. */
+/*
+ * jihoo's look, on top of Starlight. Everything here is unlayered, so it wins
+ * over Starlight's own (layered) styles without `!important`.
+ *
+ *   1. Colours and type        5. Landing page
+ *   2. Header                  6. Cards and buttons
+ *   3. Sidebar and contents    7. Code
+ *   4. Page text               8. Small things
+ */
+
+/* ---- 1. Colours and type ---- */
+
+/* Neutral grays, barely cool. The teal accent is kept for links, the current
+   page and focus, so that it reads as an accent and not as the page's colour. */
 :root {
+  --sl-color-white: hsl(0, 0%, 100%);
+  --sl-color-gray-1: hsl(220, 10%, 93%);
+  --sl-color-gray-2: hsl(220, 5%, 75%);
+  --sl-color-gray-3: hsl(220, 4%, 56%);
+  --sl-color-gray-4: hsl(220, 5%, 34%);
+  --sl-color-gray-5: hsl(220, 6%, 19%);
+  --sl-color-gray-6: hsl(220, 7%, 11.5%);
+  --sl-color-black: hsl(220, 8%, 6.5%);
+
   --sl-color-accent-low: #0b2e2d;
   --sl-color-accent: #14857f;
-  --sl-color-accent-high: #a6e8e1;
+  --sl-color-accent-high: #8fe3da;
+
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline: var(--sl-color-gray-5);
+  --sl-color-hairline-shade: var(--sl-color-gray-5);
+
+  /* Surfaces and effects used below. */
+  --jh-surface: var(--sl-color-gray-6);
+  --jh-glow: hsla(220, 30%, 80%, 0.09);
+  --jh-grid: hsla(220, 20%, 85%, 0.05);
+  --jh-current-bg: var(--sl-color-gray-6);
+  --jh-current-text: var(--sl-color-white);
+  --jh-radius: 0.625rem;
+
+  --sl-font-mono:
+    'JetBrains Mono', 'Cascadia Code', 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+  --sl-line-height: 1.7;
+  --sl-text-h1: 2.25rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.25rem;
+  --sl-text-h4: 1.0625rem;
+  --sl-text-h5: 1rem;
+  --sl-sidebar-width: 17.5rem;
+  --sl-nav-height: 3.75rem;
 }
+
 :root[data-theme='light'] {
+  --sl-color-white: hsl(220, 14%, 9%);
+  --sl-color-gray-1: hsl(220, 10%, 15%);
+  --sl-color-gray-2: hsl(220, 7%, 26%);
+  --sl-color-gray-3: hsl(220, 5%, 41%);
+  --sl-color-gray-4: hsl(220, 5%, 60%);
+  --sl-color-gray-5: hsl(220, 9%, 87%);
+  --sl-color-gray-6: hsl(220, 12%, 95%);
+  --sl-color-gray-7: hsl(220, 14%, 97.5%);
+  --sl-color-black: hsl(0, 0%, 100%);
+
   --sl-color-accent-low: #c9f0eb;
   --sl-color-accent: #0f6f6a;
   --sl-color-accent-high: #083d3a;
+
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline: var(--sl-color-gray-5);
+  --sl-color-hairline-shade: var(--sl-color-gray-5);
+
+  --jh-surface: var(--sl-color-gray-7);
+  --jh-glow: hsla(220, 40%, 50%, 0.08);
+  --jh-grid: hsla(220, 30%, 20%, 0.055);
+  --jh-current-bg: var(--sl-color-gray-6);
+  --jh-current-text: var(--sl-color-white);
+}
+
+::selection {
+  background-color: var(--sl-color-accent);
+  color: #fff;
+}
+
+html {
+  scrollbar-color: var(--sl-color-gray-5) transparent;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---- 2. Header ---- */
+
+.page > .header {
+  border-bottom-color: var(--sl-color-hairline);
+  background-color: color-mix(in srgb, var(--sl-color-black) 82%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  backdrop-filter: saturate(1.4) blur(12px);
+}
+
+/* The name as a wordmark, in the code font, after a prompt-like mark. */
+.site-title {
+  font-family: var(--__sl-font-mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--sl-color-white);
+  gap: 0.6rem;
+}
+.site-title::before {
+  content: '';
+  flex-shrink: 0;
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: 0.4rem;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M19 7v12.5a5.5 5.5 0 0 1-11 0' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round'/%3E%3C/svg%3E")
+      center / 100% no-repeat,
+    linear-gradient(145deg, #1a9a92, #0b5f5b);
+}
+
+site-search button[data-open-modal] {
+  border-radius: var(--jh-radius);
+}
+@media (min-width: 50rem) {
+  site-search button[data-open-modal] {
+    height: 2.25rem;
+    background-color: var(--jh-surface);
+    border-color: var(--sl-color-hairline);
+    color: var(--sl-color-gray-3);
+    transition:
+      border-color 0.15s,
+      color 0.15s;
+  }
+  site-search button[data-open-modal]:hover {
+    border-color: var(--sl-color-gray-4);
+  }
+  site-search button[data-open-modal] > kbd {
+    background-color: transparent;
+    border: 1px solid var(--sl-color-hairline);
+    color: var(--sl-color-gray-3);
+  }
+}
+site-search dialog {
+  background-color: var(--sl-color-black);
+}
+@media (min-width: 50rem) {
+  site-search dialog {
+    border-radius: 0.875rem;
+  }
+}
+
+.social-icons::after {
+  height: 1.5rem;
+}
+
+/* ---- 3. Sidebar and contents ---- */
+
+.sidebar-content {
+  padding-top: 1.5rem;
+}
+
+/* Group names are quiet labels; the pages under them carry the weight. */
+.sidebar-content .large {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+.sidebar-content summary {
+  padding-block: 0.35rem;
+  border-radius: 0.375rem;
+}
+.sidebar-content summary:hover .large {
+  color: var(--sl-color-white);
+}
+.sidebar-content summary .caret {
+  color: var(--sl-color-gray-4);
+  font-size: 1rem;
+}
+.sidebar-content .top-level > li + li {
+  margin-top: 1.1rem;
+}
+.sidebar-content ul ul li {
+  margin-inline-start: 0.5rem;
+  padding-inline-start: 0;
+  border-inline-start-color: var(--sl-color-hairline);
+}
+.sidebar-content a {
+  margin-inline-start: -1px;
+  border-inline-start: 1px solid transparent;
+  border-radius: 0 0.375rem 0.375rem 0;
+  padding: 0.32em 0.75rem;
+  color: var(--sl-color-gray-2);
+  transition:
+    color 0.12s,
+    background-color 0.12s,
+    border-color 0.12s;
+}
+.sidebar-content a:hover,
+.sidebar-content a:focus {
+  color: var(--sl-color-white);
+  border-inline-start-color: var(--sl-color-gray-4);
+}
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  font-weight: 600;
+  color: var(--jh-current-text);
+  background-color: var(--jh-current-bg);
+  border-inline-start-color: var(--sl-color-accent);
+}
+.sidebar-content .sl-badge {
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  border-radius: 999rem;
+  padding: 0.05rem 0.45rem;
+  vertical-align: 0.1em;
+}
+
+/* "On this page". */
+starlight-toc h2,
+mobile-starlight-toc .toggle {
+  letter-spacing: 0.07em;
+}
+starlight-toc h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+starlight-toc a {
+  border-radius: 0.375rem;
+  transition: color 0.12s;
+}
+starlight-toc a[aria-current='true'] {
+  color: var(--sl-color-text-accent);
+  font-weight: 600;
+}
+
+/* ---- 4. Page text ---- */
+
+.content-panel h1 {
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.content-panel + .content-panel {
+  border-top-color: var(--sl-color-hairline);
+}
+
+.sl-markdown-content :is(h2, h3, h4, h5) {
+  letter-spacing: -0.015em;
+}
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)) {
+  margin-top: 2em;
+}
+/* A rule above each section makes long reference pages easy to scan. */
+:root:not([data-has-hero]) .sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2.75rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--sl-color-hairline);
+}
+:root:not([data-has-hero]) .sl-markdown-content .sl-heading-wrapper.level-h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+:root:not([data-has-hero]) .sl-markdown-content .sl-heading-wrapper.level-h2 > h2 {
+  margin-top: 0;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--sl-color-text-accent);
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color 0.12s;
+}
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  color: var(--sl-color-text-accent);
+  text-decoration-color: currentColor;
+}
+
+.sl-markdown-content code:not(:where(.not-content *)) {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+  color: var(--sl-color-gray-1);
+}
+.sl-markdown-content a code:not(:where(.not-content *)) {
+  color: inherit;
+}
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) code:not(:where(.not-content *)) {
+  font-size: 0.9em;
+}
+
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+  border-inline-start: 3px solid var(--sl-color-accent);
+  border-radius: 0 var(--jh-radius) var(--jh-radius) 0;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--jh-surface);
+  color: var(--sl-color-gray-2);
+}
+
+.sl-markdown-content hr:not(:where(.not-content *)) {
+  border-bottom-color: var(--sl-color-hairline);
+}
+
+.sl-markdown-content table:not(:where(.not-content *)) {
+  font-size: var(--sl-text-sm);
+  line-height: 1.55;
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6rem 0.9rem;
+  border-bottom-color: var(--sl-color-hairline);
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  border-bottom-color: var(--sl-color-gray-4);
+  white-space: nowrap;
+}
+/* The first column usually names an option or a form: keep it on one line. */
+.sl-markdown-content td:first-child code:not(:where(.not-content *)) {
+  white-space: nowrap;
+}
+.sl-markdown-content tbody tr:hover:not(:where(.not-content *)) {
+  background-color: var(--jh-surface);
+}
+.sl-markdown-content tr:nth-child(2n):not(:where(thead *)) {
+  background-color: transparent;
+}
+.sl-markdown-content tbody tr:nth-child(2n):hover:not(:where(.not-content *)) {
+  background-color: var(--jh-surface);
+}
+
+.starlight-aside {
+  border-radius: 0 var(--jh-radius) var(--jh-radius) 0;
+}
+
+/* Previous / next. */
+.pagination-links a {
+  border-color: var(--sl-color-hairline);
+  border-radius: var(--jh-radius);
+  padding: 0.9rem 1.1rem;
+  box-shadow: none;
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.pagination-links a:hover {
+  border-color: var(--sl-color-gray-4);
+  background-color: var(--jh-surface);
+}
+.pagination-links .link-title {
+  font-size: var(--sl-text-base);
+  font-weight: 600;
+}
+
+footer .meta {
+  font-size: var(--sl-text-xs);
+}
+
+/* ---- 5. Landing page ---- */
+
+/* A faint grid fading out under a soft light, behind the title. */
+:root[data-has-hero] .main-frame {
+  position: relative;
+}
+:root[data-has-hero] .main-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: min(46rem, 100vh);
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 0%, var(--jh-glow), transparent 70%),
+    linear-gradient(var(--jh-grid) 1px, transparent 1px) 50% 0 / 3rem 3rem,
+    linear-gradient(90deg, var(--jh-grid) 1px, transparent 1px) 50% 0 / 3rem 3rem;
+  -webkit-mask-image: radial-gradient(ellipse 75% 85% at 50% 0%, #000 35%, transparent 100%);
+  mask-image: radial-gradient(ellipse 75% 85% at 50% 0%, #000 35%, transparent 100%);
+}
+:root[data-has-hero] main {
+  position: relative;
+}
+:root[data-has-hero] .page > .header {
+  border-bottom-color: transparent;
+}
+
+.hero {
+  grid-template-columns: 100%;
+  padding-block: clamp(2.5rem, 9vmin, 6.5rem) clamp(1.5rem, 5vmin, 3.5rem);
+}
+.hero .stack {
+  text-align: center;
+  gap: 2rem;
+}
+.hero .copy {
+  align-items: center;
+  gap: 1.5rem;
+}
+.hero .copy > * {
+  max-width: 44rem;
+}
+.hero h1 {
+  font-family: var(--__sl-font-mono);
+  font-size: clamp(3.5rem, 2rem + 8vw, 6.5rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  /* Room for the descender of the `j`, which the gradient would otherwise clip. */
+  padding: 0 0.06em 0.14em;
+  background: linear-gradient(180deg, var(--sl-color-white) 35%, var(--sl-color-gray-3) 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero .tagline {
+  font-size: clamp(1rem, 0.9rem + 0.5vw, 1.1875rem);
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+  text-wrap: pretty;
+}
+.hero .actions {
+  justify-content: center;
+  gap: 0.75rem 1.75rem;
+}
+
+/* The three programs read as one column; the cards below use the full width. */
+:root[data-has-hero] .sl-markdown-content > .expressive-code {
+  max-width: 47rem;
+  margin-inline: auto;
+}
+:root[data-has-hero] .sl-markdown-content > .expressive-code + .expressive-code {
+  margin-top: 1.25rem;
+}
+:root[data-has-hero] .sl-markdown-content > .card-grid {
+  margin-top: clamp(2.5rem, 7vmin, 4.5rem) !important;
+}
+:root[data-has-hero] main {
+  padding-bottom: 4rem;
+}
+
+/* ---- 6. Cards and buttons ---- */
+
+@media (min-width: 72rem) {
+  :root[data-has-hero] .card-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.card-grid {
+  gap: 1rem;
+}
+.card {
+  /* One colour for every icon, instead of Starlight's rotation. */
+  --sl-card-border: transparent;
+  --sl-card-bg: var(--sl-color-gray-5);
+  border-color: var(--sl-color-hairline);
+  border-radius: 0.875rem;
+  background-color: var(--jh-surface);
+  padding: 1.5rem;
+  gap: 0.75rem;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.card:nth-child(n) {
+  --sl-card-border: transparent;
+  --sl-card-bg: var(--sl-color-gray-5);
+}
+.card:hover {
+  border-color: var(--sl-color-gray-4);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card:hover {
+    transform: translateY(-2px);
+  }
+}
+.card .title {
+  font-size: 1.0625rem;
+  letter-spacing: -0.01em;
+  gap: 0.75rem;
+}
+.card .icon {
+  box-sizing: content-box;
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  color: var(--sl-color-white);
+}
+.card .body {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--sl-color-gray-2);
+}
+.card .body code {
+  font-size: 0.82em;
+}
+
+.sl-link-button {
+  border-radius: var(--jh-radius);
+  font-weight: 600;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+@media (min-width: 50rem) {
+  .sl-link-button {
+    font-size: 0.9375rem;
+    padding: 0.75rem 1.25rem;
+  }
+}
+.sl-link-button.primary {
+  background: var(--sl-color-white);
+  border-color: var(--sl-color-white);
+  color: var(--sl-color-black);
+}
+.sl-link-button.primary:hover {
+  color: var(--sl-color-black);
+  background: var(--sl-color-gray-2);
+  border-color: var(--sl-color-gray-2);
+}
+.sl-link-button.secondary {
+  border-color: var(--sl-color-gray-4);
+}
+.sl-link-button.secondary:hover {
+  border-color: var(--sl-color-gray-2);
+}
+.sl-link-button.minimal {
+  color: var(--sl-color-gray-2);
+}
+.sl-link-button.minimal:hover {
+  color: var(--sl-color-white);
+}
+
+/* ---- 7. Code ---- */
+
+.expressive-code .frame.has-title:not(.is-terminal) .header {
+  font-family: var(--__sl-font-mono);
+}
+.expressive-code .frame.has-title:not(.is-terminal) .title {
+  font-size: 0.78rem;
+  color: var(--sl-color-gray-2);
+}
+.expressive-code pre {
+  scrollbar-width: thin;
+}
+.expressive-code .copy button {
+  border-radius: 0.4rem;
+}
+
+/* ---- 8. Small things ---- */
+
+starlight-theme-select select,
+starlight-lang-select select {
+  border-radius: 0.375rem;
+}
+
+:focus-visible {
+  outline-color: var(--sl-color-accent);
+}
+
+@media print {
+  :root[data-has-hero] .main-frame::before {
+    display: none;
+  }
 }

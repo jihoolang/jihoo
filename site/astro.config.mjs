@@ -37,7 +37,7 @@ export default defineConfig({
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/jihoolang/jihoo' }],
       customCss: ['./src/styles/custom.css'],
-      expressiveCode: { shiki: { langs: [jihoo] } },
+      expressiveCode: { shiki: { langs: [jihoo] }, styleOverrides: { borderRadius: '0.625rem' } },
       sidebar,
     }),
   ],
