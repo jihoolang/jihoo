@@ -211,3 +211,9 @@ import Jihoo.MirLocalOverlay
 import Jihoo.MirBufferHeap
 import Jihoo.MirBufferFragment
 import Jihoo.MirBufferFragmentExamples
+
+import Jihoo.SizedMirOperands
+import Jihoo.SizedMirHeap
+import Jihoo.SizedMirAllocation
+import Jihoo.SizedMirTranslation
+import Jihoo.SizedMirExamples

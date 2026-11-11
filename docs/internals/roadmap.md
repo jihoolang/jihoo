@@ -818,8 +818,11 @@ and reported as full-language soundness.
    A reusable allocation/fill fragment now supports arbitrary distinct local
    slots, relocated CFG blocks and prior heap objects under cumulative resource
    limits. It proves initialized fresh contents and preservation of unrelated
-   state, then composes with an independently proved continuation. General
-   source-to-fragment translation and arbitrary continuation safety remain open.
+   state, then composes with an independently proved continuation. A structural
+   Lean lowering now connects source/compact allocation constructors to generated
+   fragments, with operand alias substitution and exact source/MIR heap relations.
+   Other runtime constructors, arbitrary continuation safety and correspondence to
+   the native lowering implementation remain open.
 
 4. **The published theorem.** What an accepted core program is
    guaranteed to do, under which semantics, and what stays trusted: the

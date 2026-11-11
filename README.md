@@ -178,7 +178,9 @@ including annotation changes, using proved conversion and context transport.
 validate closed typing and formation derivations bound to complete exported graphs.
 A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
-continuations. Source lowering and arbitrary continuations remain outside it.
+continuations. A Lean constructor now lowers compact/source allocations into
+that fragment, including dynamic operands and lexical natural lets. Other runtime
+constructors, arbitrary continuations and native lowering remain outside it.
 These do not establish full kernel or compiler soundness.
 These are stabilization steps, not a completed or formally verified 0.6 release
 ([roadmap](docs/internals/roadmap.md#6-verification-05)).
