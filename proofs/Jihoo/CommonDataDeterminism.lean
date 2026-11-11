@@ -27,6 +27,12 @@ theorem Eval.deterministic (a : Eval g env term s v es t)
     cases eq
     obtain ⟨rfl, rfl, rfl⟩ := ih otherSecond
     exact ⟨rfl, rfl, rfl⟩
+  | drop shape owner lookup destroyed branch ih =>
+    cases b <;> simp_all
+    rename_i otherDestroyed otherBranch
+    obtain ⟨rfl,rfl⟩ := destroyed.deterministic otherDestroyed
+    obtain ⟨rfl,rfl,rfl⟩ := ih otherBranch
+    exact ⟨rfl,rfl,rfl⟩
   | emptyCase shape scrutinee lookup branch ih =>
     cases b <;> simp_all
     case emptyCase => exact ih (by assumption)

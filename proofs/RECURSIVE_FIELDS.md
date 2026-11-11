@@ -18,7 +18,7 @@ Run with the repository-pinned Lean version and Python available:
 bash proofs/check-recursive-fields.sh
 ```
 
-This builds the dependency closure with warnings as errors and checks all 147
+This builds the dependency closure with warnings as errors and checks all 177
 named new theorem dependencies against the standard logical axiom allowlist.
 Regressions reject shared children, deep ancestor aliases, dead fields and
 active field leases, and check parent release with a retained child and frame.
@@ -83,3 +83,7 @@ The [common binary Case judgment](COMMON_DATA_CASE.md) now checks both branches,
 executes existing sized Buffer effects and returns a complete owned Data tree.
 It closes the residual-inventory gap for a monomorphic reconstruction fragment,
 while dependent motives, recursive bodies and native correspondence remain open.
+
+The [store-driven Drop extension](COMMON_DATA_DROP.md) adds recursive tree
+consumption and scalar/nested Case bodies to that judgment. Its primitive has
+exact release accounting; whole-language accounting and native refinement remain open.

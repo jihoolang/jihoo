@@ -1,4 +1,4 @@
-import Jihoo.CommonDataChecks
+import Jihoo.CommonDataDropExamples
 import Jihoo.RecursiveCaseBodyExamples
 
 #print axioms Jihoo.RecursiveFieldOwnership.unpack
@@ -152,3 +152,33 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonData.restore_pending
 #print axioms Jihoo.CommonData.steps_append
 #print axioms Jihoo.CommonData.Post.finish
+#print axioms Jihoo.CommonData.Destroy.deterministic
+#print axioms Jihoo.CommonData.Destroy.lengths
+#print axioms Jihoo.CommonData.Destroy.cells_frame
+#print axioms Jihoo.CommonData.destroy_total
+#print axioms Jihoo.CommonData.destroy_every_run
+#print axioms Jihoo.CommonData.destroy_accounting
+#print axioms Jihoo.CommonDataDropExamples.graph_valid
+#print axioms Jihoo.CommonDataDropExamples.drop_typed
+#print axioms Jihoo.CommonDataDropExamples.destroy_run
+#print axioms Jihoo.CommonDataDropExamples.drop_run
+#print axioms Jihoo.CommonDataDropExamples.input_owned
+#print axioms Jihoo.CommonDataDropExamples.drop_safe
+#print axioms Jihoo.CommonDataDropExamples.empty_drop_run
+#print axioms Jihoo.CommonDataDropExamples.nested_case_typed
+#print axioms Jihoo.CommonDataDropExamples.nested_case_run
+#print axioms Jihoo.CommonDataDropExamples.drop_child_typed
+#print axioms Jihoo.CommonDataDropExamples.drop_child_run
+#print axioms Jihoo.CommonDataDropExamples.input_fields
+#print axioms Jihoo.CommonDataDropExamples.nested_case_safe
+#print axioms Jihoo.CommonDataDropExamples.sibling_fields
+#print axioms Jihoo.CommonDataDropExamples.wrong_family_rejected
+#print axioms Jihoo.CommonDataDropExamples.all_aliases_retired
+#print axioms Jihoo.CommonDataDropExamples.missing_cell_rejected
+#print axioms Jihoo.CommonDataDropExamples.shared_child_ownership_rejected
+#print axioms Jihoo.CommonDataDropExamples.drop_projects_opaque
+#print axioms Jihoo.CommonDataDropExamples.leased_child_rejected
+#print axioms Jihoo.CommonDataDropExamples.stale_alias_rejected
+#print axioms Jihoo.CommonDataDropExamples.buffer_continuation_typed
+#print axioms Jihoo.CommonDataDropExamples.buffer_continuation_run
+#print axioms Jihoo.CommonDataDropExamples.buffer_continuation_safe
