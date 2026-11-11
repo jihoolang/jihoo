@@ -18,7 +18,7 @@ Run with the repository-pinned Lean version and Python available:
 bash proofs/check-recursive-fields.sh
 ```
 
-This builds the dependency closure with warnings as errors and checks all 281
+This builds the dependency closure with warnings as errors and checks all 300
 named new theorem dependencies against the standard logical axiom allowlist.
 Regressions reject shared children, deep ancestor aliases, dead fields and
 active field leases, and check parent release with a retained child and frame.
@@ -109,3 +109,5 @@ judgment. Whole-tree result footprints share their actual representation
 witness with ownership. Exact release and live-domain/no-leak corollaries
 retain explicit initial coverage where required; this is not whole-language
 quantity soundness or accounting of empty logical capabilities.
+
+[Constant-motive source typing](COMMON_DATA_SOURCE_RULES.md) connects recursive source rules to the common judgment.
