@@ -201,3 +201,9 @@ import Jihoo.SizedErasureForward
 import Jihoo.SizedErasureCompiler
 import Jihoo.SizedErasureChecks
 import Jihoo.SizedErasureExamples
+import Jihoo.BoundedMirArguments
+import Jihoo.BoundedMirRun
+import Jihoo.DynamicMir
+import Jihoo.DynamicMirExecution
+import Jihoo.DynamicMirCorrespondence
+import Jihoo.DynamicMirSnapshot

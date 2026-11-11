@@ -24,7 +24,7 @@ with open(sys.argv[1], encoding="utf-8") as audit:
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 2203, report
+assert len(entries) + len(closed) == 2251, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
@@ -55,3 +55,6 @@ diff -u ../tests/core_dependent_index.json "$generated"
 # Complete original graph for framed sized calls and owned-result Lend.
 lake env lean -DwarningAsError=true --run EmitSizedCompositionGraph.lean > "$generated"
 diff -u ../tests/core_sized_composition.json "$generated"
+# The single runtime-parameterized MIR fixture includes explicit argument slots.
+lake env lean -DwarningAsError=true --run EmitDynamicMir.lean > "$generated"
+diff -u ../tests/core_dynamic_mir.json "$generated"
