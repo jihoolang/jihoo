@@ -176,6 +176,11 @@ A separate beta-aware target proves fixed-type contextual beta preservation,
 including annotation changes, using proved conversion and context transport.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
+A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)
+checks a restricted source rule family before runtime inputs are known. It
+instantiates the existing ownership judgment, including dependent natural-result
+substitution, and constructs safe execution with exact resource accounting.
+It does not cover all sized rules or close the common full-Core typing gap.
 A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
 continuations. A Lean constructor now lowers compact/source allocations into

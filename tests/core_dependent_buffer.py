@@ -67,12 +67,14 @@ def main():
                 'full checked dynamic graph differs from exact formal fixture')
         specs=[('dependent',False,False),('original',False,True),('copied',True,False)]
         text=''.join(source(*spec) for spec in specs)+exact.read_text()
+        text+=(ROOT/'tests/core_preserves/symbolic-buffer-result.jhc').read_text()
         specs.append(('dynamic',False,False))
         core=tmp/'all.jhc';core.write_text(text)
         command([compiler,'core','check',core]);command([compiler,'core','preserves',core])
         counter=tmp/'counter.c';counter.write_text(SIZED_COUNTER)
         cc=shlex.split(os.environ.get('JIHOO_CC','clang'))
         cases=0
+        symbolic_cases=0
         inputs=((0,0,0,3),(0,(1<<64)-1,-7,0),(1,0,11,0),(1,1,22,9),
                 (2,1,-9,31),(4,3,37,1),(4,1,99,0),(4,4,9,2),
                 (7,6,-11,1),(7,(1<<64)-1,44,0),(64,63,17,3))
@@ -114,6 +116,27 @@ def main():
                         require(stats['active_count'].value==0 and stats['bad'].value==0,
                                 f'{name}: invalid release/leak')
                         cases+=1
+            # A natural application returns Buffer(m), instantiated to Buffer(n),
+            # then a consuming continuation frees that result exactly once.
+            symbolic=native.symbolic_release
+            symbolic.argtypes=[ctypes.c_uint64,ctypes.c_int64]
+            symbolic.restype=ctypes.c_int64
+            for n in (0,1,8,64,4095):
+                for value in (-(1<<63),0,(1<<63)-1):
+                    before=stats['allocations'].value,stats['frees'].value
+                    stats['peak'].value=stats['free_count'].value=stats['request_count'].value=0
+                    require(symbolic(n,value)==value,'dependent owned-result substitution')
+                    delta=stats['allocations'].value-before[0],stats['frees'].value-before[1]
+                    require(delta[0]==delta[1] and 0<=delta[0]<=1,'symbolic result lifecycle')
+                    if level=='-O0':
+                        require(delta==(1,1) and stats['peak'].value==1,'symbolic result ownership')
+                        require(stats['request_count'].value==1 and sizes[0]==8*(n+1),
+                                'symbolic result length was not instantiated')
+                        require(stats['free_count'].value==1 and frees[0]==before[0],
+                                'symbolic result freed a different identity')
+                    require(stats['active_count'].value==stats['bad'].value==0,
+                            'symbolic result invalid release/leak')
+                    symbolic_cases+=1
         invalid={
             'mismatched-length': ('type mismatch',
                 '(def bad (pi n U64 (Buffer 1)) (lam n U64 (alloc n (int 7))))'),
@@ -133,7 +156,7 @@ def main():
             require(diagnostic in failed.stderr,f'{name}: unexpected diagnostic: {failed.stderr}')
             obj=tmp/f'{name}.o';command([compiler,'core','emit-obj',path,'-o',obj],success=False)
             require(not obj.exists(),f'{name}: invalid program emitted object')
-        print(f'dependent-buffer: runtime U64 graph, {len(specs)} variants, {cases} native lifecycles, {len(invalid)} rejects')
+        print(f'dependent-buffer: runtime U64 graph, {len(specs)} variants, {cases} native lifecycles, {symbolic_cases} symbolic-result runs, {len(invalid)} rejects')
 
 
 if __name__=='__main__':
