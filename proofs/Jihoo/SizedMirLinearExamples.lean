@@ -16,7 +16,7 @@ def term : SizedErasure.Term :=
   .app (.allocate (.var 0) (.var 2))
     (.app (.allocate (.var 2) (.var 3))
       (.app (.var 1) (.free 0 (.free 1 (.var 6)))))
-def fragment : Fragment := (compile inputs 5 1 0 term).getD (pureFragment (.constant (.i64 0)))
+def fragment : Fragment := (compile inputs ((inputKinds inputTypes inputs).getD []) 5 1 0 term).getD (pureFragment (.constant (.i64 0)))
 def code : Code := program inputTypes fragment
 
 theorem compiled : lowerProgram inputTypes inputs term = some fragment := by decide +kernel
@@ -86,7 +86,7 @@ theorem generated_run (capacity : n + m ≤ 4091) (payload : fill < scalarBound)
       final.locals.size = 27 ∧
       (∀ i, i < 5 → i ≠ 0 → final.locals[i]? = (frame n m fill result).locals[i]?) := by
   simpa [code, term, entry, blockCost, events, lifecycle, frame, program, inputTypes, sizes] using
-    program_run compiled (f := frame n m fill result) rfl related_inputs
+    program_run compiled (f := frame n m fill result) rfl related_inputs rfl
       (HeapRel.materialize_related prior) prior_valid compact_run safe_run (final_bounds capacity payload)
 
 theorem inputs_bounded (hn : n < wordBound) (hm : m < wordBound)
@@ -134,7 +134,7 @@ theorem capacity_run : ∃ final, Steps code
     (by decide) (by decide)
   exact ⟨final, run, heap⟩
 
-theorem branch_rejected : lowerProgram inputTypes inputs (.ifLt (.literal 0) (.literal 1) (.scalar 1) (.scalar 2)) = none := by decide +kernel
+theorem branch_kind_mismatch_rejected : lowerProgram inputTypes inputs (.ifLt (.literal 0) (.literal 1) (.scalar 1) (.natural 2)) = none := by decide +kernel
 theorem lend_wrong_owner_type_rejected : lowerProgram inputTypes inputs (.lend 0 (.literal 0) (.scalar 1)) = none := by decide +kernel
 theorem owned_lend_wrong_owner_type_rejected : lowerProgram inputTypes inputs (.ownedLend 0 (.literal 0) (.literal 0) (.scalar 1)) = none := by decide +kernel
 theorem missing_slot_rejected : lowerProgram inputTypes inputs (.var 4) = none := by decide +kernel
@@ -159,7 +159,7 @@ theorem zero_fragment_return : runFor 2 pureCode (.running ⟨0,0,#[none],#[]⟩
     some ⟨.returned 99 ⟨0,1,#[some (.i64 99)],#[]⟩,[]⟩ := by decide +kernel
 
 def doubleFree : SizedErasure.Term := .free 0 (.free 0 (.scalar 7))
-def doubleFreeFragment : Fragment := (compile [.copy ⟨1,false⟩] 2 1 0 doubleFree).getD (pureFragment (.constant (.i64 0)))
+def doubleFreeFragment : Fragment := (compile [.copy ⟨1,false⟩] [.pointer] 2 1 0 doubleFree).getD (pureFragment (.constant (.i64 0)))
 
 theorem double_free_static_valid : lowerProgram #[.i64,.ptr] [.copy ⟨1,false⟩] doubleFree = some doubleFreeFragment := by decide +kernel
 
@@ -184,7 +184,7 @@ def sourceTerm : SizedErasure.Term :=
   .app (.allocate (.var 2) (.var 0)) (.free 0 (.scalar 99))
 def sourceTypes : Array Ty := #[.i64,.u64,.u64,.i64]
 def sourceInputs : List Operand := [.copy ⟨3,false⟩,.copy ⟨2,false⟩,.copy ⟨1,false⟩]
-def sourceFragment : Fragment := (compile sourceInputs 4 1 0 sourceTerm).getD (pureFragment (.constant (.i64 0)))
+def sourceFragment : Fragment := (compile sourceInputs ((inputKinds sourceTypes sourceInputs).getD []) 4 1 0 sourceTerm).getD (pureFragment (.constant (.i64 0)))
 def sourceFrame (n i value : Nat) : Frame :=
   ⟨0,0,#[some (.i64 777),some (.u64 n),some (.u64 i),some (.i64 value)],#[]⟩
 def sourceEnv (n i value : Nat) : SizedErasure.Env := [.scalar value,.nat i,.nat n]
@@ -243,7 +243,7 @@ theorem original_core_to_generated (capacity : n ≤ 4095) (payload : value < sc
   obtain ⟨final, target, heap, _⟩ := typed_source_run source_compacted source_lowered
     (source_typed n i) source_env_erased (SizedCoreExamples.input_agrees n i value)
     SizedCoreExamples.empty_layout SizedBufferHeap.empty_valid LinearHeapPrograms.empty_owns
-    (f := sourceFrame n i value) rfl source_inputs_related HeapRel.empty (source_run n i value)
+    (f := sourceFrame n i value) rfl source_inputs_related rfl HeapRel.empty (source_run n i value)
     (source_bounds capacity payload)
   exact ⟨final, target, heap⟩
 
@@ -259,7 +259,7 @@ theorem typed_source_totality (capacity : n ≤ 4095) (payload : value < scalarB
       SizedCoreTyping.Account [] (.scalar result) events := by
   apply typed_source_total source_compacted source_lowered (source_typed n i) source_env_erased
     (SizedCoreExamples.input_agrees n i value) SizedCoreExamples.empty_layout SizedBufferHeap.empty_valid
-    LinearHeapPrograms.empty_owns rfl source_inputs_related HeapRel.empty
+    LinearHeapPrograms.empty_owns rfl source_inputs_related rfl HeapRel.empty
   intro result events t run
   obtain ⟨_,_,same⟩ := run.deterministic (source_run n i value)
   rw [same]

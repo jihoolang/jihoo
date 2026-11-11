@@ -84,7 +84,7 @@ theorem erased : SizedErasure.EnvRel mask (sourceEnv n m i value) (env n m i val
 def inputTypes : Array Ty := #[.i64,.ptr,.i64,.u64,.u64,.u64]
 def inputs : List Operand := [.copy ⟨1,false⟩,.copy ⟨2,false⟩,.copy ⟨3,false⟩,
   .copy ⟨4,false⟩,.copy ⟨5,false⟩]
-def fragment : Fragment := (compile inputs 6 1 0 term).getD (pureFragment (.constant (.i64 0)))
+def fragment : Fragment := (compile inputs ((inputKinds inputTypes inputs).getD []) 6 1 0 term).getD (pureFragment (.constant (.i64 0)))
 def code : Code := program inputTypes fragment
 
 theorem lowered : lowerProgram inputTypes inputs term = some fragment := by decide +kernel
@@ -126,7 +126,7 @@ theorem generated_run (bound : i < n) (capacity : n + m + 2 ≤ 4096)
       HeapRel (finalState n m value) final.heap := by
   obtain ⟨final, target, heap, _⟩ := typed_source_run compacted lowered (typed bound)
     erased (agrees bound) initial_layout initial_valid initial_owned
-    (f := frame n m i value) rfl related (HeapRel.materialize_related _)
+    (f := frame n m i value) rfl related rfl (HeapRel.materialize_related _)
     source_run (final_bounds capacity payload)
   exact ⟨final,target,heap⟩
 
@@ -141,7 +141,7 @@ theorem typed_total (bound : i < n) (capacity : n + m + 2 ≤ 4096)
         (lifecycle es) (.returned result final) ∧ HeapRel t final.heap ∧
       Account [0] (.scalar result) es := by
   apply typed_source_total compacted lowered (typed bound) erased (agrees bound)
-    initial_layout initial_valid initial_owned rfl related (HeapRel.materialize_related _)
+    initial_layout initial_valid initial_owned rfl related rfl (HeapRel.materialize_related _)
   intro result es t run
   obtain ⟨_,_,same⟩ := run.deterministic source_run
   rw [same]

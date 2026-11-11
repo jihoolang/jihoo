@@ -3964,10 +3964,10 @@ addresses and allocation failure retain their existing trust boundaries.
 
 ### Compositional generated allocation/release programs
 
-`SizedMirLinearCompiler` extends constructed lowering to the straight-line
+`SizedMirLinearCompiler` initially extends constructed lowering to the straight-line
 compact grammar: scalar and natural literals, variables, application, allocation
-and release, extended below with the existing compact lend forms. Conditional
-branches remain unsupported. Pure values and application binders become operand
+and release, extended below with the existing compact lend forms and conditional
+result joins. Pure values and application binders become operand
 aliases; effectful fragments generate actual
 MIR instructions. Allocation uses ten local roles and six blocks, while release
 uses one unit scratch local and one free terminator. Recursive size functions
@@ -3983,7 +3983,7 @@ allocation proof to arbitrary contents in its scratch slots and preserves all
 surrounding locals, including scratch slots reserved for later fragments.
 
 `Compiles.simulate` constructs execution compositionally from a compact execution,
-its safe source trace, related initial heap/environment, successful construction
+its safe source trace, related initial heap/environment, explicit environment-kind agreement, successful construction
 and structural placement, and finite final resource bounds. The result operand
 encodes the compact value, the final heap has the exact source representation,
 and earlier input locals retain their values. An application's producer result
@@ -4014,7 +4014,7 @@ the Core execution and returns the source per-object ownership accounting. Its
 resource-adequacy premise bounds the final heaps of source executions; it assumes
 neither a target run nor target safety. Successful whole-syntax compaction and
 lowering, closing-environment interpretations, initial heap validity/ownership and
-finite source resources remain explicit premises.
+finite source resources and input representation-kind agreement remain explicit premises.
 
 Heap resource bounds do not imply that arbitrary dynamic scalar/natural inputs
 fit machine words. `SizedMirLinearValueBounds` states this distinction directly:
@@ -4033,15 +4033,15 @@ lengths. A concrete Core graph has checked compaction, an actual typing derivati
 source execution and the generated-program totality theorem. Negative tests also
 show why static MIR validity alone cannot justify a double free.
 
-These are forward results for the supported straight-line grammar. They do not
-establish backward equivalence, arbitrary conditional or lender lowering, general
+These are forward results for the supported compact grammar. They do not
+establish backward equivalence, arbitrary native conditional or lender lowering, general
 continuation safety, native compiler association, MIR-to-LLVM correctness, physical
 addresses or allocator success. They do not complete the broader 0.6 release gate.
 
 
 ### Generated read-only lends and owned reader results
 
-The branch-free constructor now lowers the existing compact `lend` and
+The constructor also lowers the existing compact `lend` and
 `ownedLend` forms recursively, including beneath applications, releases and other
 lenders. It reuses the source forms already covered by `SizedErasure`: a scalar
 reader performs one indexed read; the owned reader allocates a uniform fresh
@@ -4101,8 +4101,76 @@ totality for independent lengths. This is a stated source graph construction, no
 a claim that the native exporter produced that derived graph.
 
 The program, typed execution and typed totality theorems now cover these additional
-constructors through their structural compilation derivations. Conditional
-branches are still rejected, and successful static MIR validation alone still
+constructors through their structural compilation derivations. The following
+extension covers compact conditional branches. Successful static MIR validation alone still
 does not establish source ownership, index validity or borrow safety. Native
 compiler association, general lender forms, backward equivalence, MIR-to-LLVM,
 physical addresses and allocator failure remain outside this result.
+
+
+### Generated conditional branches and result joins
+
+`SizedMirLinearCompiler` now covers every constructor of the current compact
+`SizedErasure.Term` vocabulary, including `ifLt`. This is still a restricted
+source language, not all Core or native jihoo. Both arms are constructed and
+checked. Each conditional reserves a Boolean comparison local and a typed common
+result local, plus comparison/switch and two result-copy/goto blocks. The two
+recursive fragments occupy disjoint local/block ranges. Only the selected arm
+executes; an instruction-free arm enters its own result-copy block directly.
+
+A shared result can be scalar, natural or pointer-valued. Applications can
+therefore consume a conditional scalar as an allocation fill, a conditional
+natural as a length, or a conditional owner that is later released. Result slots
+are aliases at the compact language boundary, not additional ownership rights.
+Source typing and safe traces still govern ownership and indexed access.
+
+`SizedMirKinds` infers these representation kinds structurally. It retains the
+actual binder order for applications, scalar lenders and owned-result lenders;
+comparison arms add no runtime binder. Owners and borrows share pointer
+representation, without conflating their source permissions. Both conditional
+arms must infer the same kind. `inferKind_correct` proves that compact execution
+has the inferred result kind under `EnvKinds`.
+
+The public execution bridges now require `InputKindsAgree`: kinds obtained from
+initial operand declarations must match the represented source environment.
+This is a real additional premise. `EnvRel` alone relates values to operand
+contents and does not say those contents match local declarations; whole-MIR
+validation checks declarations, not initial runtime contents. The narrow new
+premise justifies typed join writes without assuming full target execution or
+silently assuming that unrelated initial slots are initialized and well typed.
+Machine-width bounds remain separate, as described above.
+
+`SizedMirBranchSteps` constructs the actual comparison assignment and switch,
+and the result assignment and jump, in arbitrary enclosing code. Its local
+lemmas permit input/destination aliases because reads precede writes, while the
+generated compiler reserves fresh slots. `Compiles.simulate` uses the selected
+arm's inference theorem for the result write, composes all three executions, and
+preserves the original input prefix and exact heap relation. The source trace
+split and value-bound proofs now cover both comparison outcomes.
+
+Kernel-checked regressions cover all three result kinds, nested conditionals,
+pure/effectful arm combinations, equality and greater-than false paths, and
+owner aliases over a prior live/dead heap. Full returned values, heap arrays and
+lifecycle observations are compared. Unsafe or over-capacity untaken arms do not
+execute, but both arms still undergo static MIR validation. Mismatched result
+kinds, malformed operands and kind-inconsistent initial environments are tested
+separately from source ownership safety.
+
+`SizedMirBranchCoreExamples` uses the unchanged native-exported
+`SizedCompositionGraph.graph` at root 81, not the previously derived root-72
+graph. Its existing compactor and typing derivation retain the outer index test
+and the inner zero-copy-length test. Source-only capacity and payload bounds
+construct a terminating generated MIR run and the Core ownership accounting.
+A canonical source execution and source determinism discharge resource adequacy.
+Executable examples check empty originals, out-of-range indices, zero-length
+copies and positive unequal copy lengths in both directions.
+
+The native implementation in `compiler/core_lower.jh` also uses a result local
+and branch assignments, but this theorem does not connect its emitted MIR to
+the Lean constructor. Native lowering has its own block order, switch convention,
+erased proof slots, pending release handling and broader layout cases. The
+ordinary-language conditional lowering in `compiler/body.jh` additionally handles
+coercions, unit/never results and arbitrary Boolean conditions. Neither native
+implementation nor native ABI entry is proved here. Backward equivalence,
+general lender forms, MIR-to-LLVM, physical addresses and allocator failure
+remain outside this result, and the broader 0.6 release gate remains open.

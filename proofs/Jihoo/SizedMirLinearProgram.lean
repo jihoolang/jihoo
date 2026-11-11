@@ -1,6 +1,6 @@
 import Jihoo.SizedMirLinearSimulation
 
-/-! Completed scalar-returning programs generated from straight-line compact
+/-! Completed scalar-returning programs generated from structured compact
 syntax. The final validator checks the whole constructed MIR. Resource bounds
 remain explicit, and source typing supplies release safety in the typed bridge. -/
 namespace Jihoo.SizedMir.Linear
@@ -14,7 +14,8 @@ def program (inputTypes : Array Ty) (fragment : Fragment) : Code :=
 
 def lowerProgram (inputTypes : Array Ty) (inputs : List Operand)
     (term : SizedErasure.Term) : Option Fragment := do
-  let fragment ← compile inputs inputTypes.size 1 0 term
+  let kinds ← inputKinds inputTypes inputs
+  let fragment ← compile inputs kinds inputTypes.size 1 0 term
   let code := program inputTypes fragment
   if inputTypes[0]? = some .i64 ∧ inputsValid inputTypes.size inputs = true ∧
       code.locals.size ≤ 512 ∧ code.blocks.size ≤ 512 ∧ valid code = true then
@@ -22,18 +23,23 @@ def lowerProgram (inputTypes : Array Ty) (inputs : List Operand)
   else none
 
 theorem lowerProgram_shape (success : lowerProgram inputTypes inputs term = some fragment) :
-    Compiles inputs inputTypes.size 1 0 term fragment ∧ inputTypes[0]? = some .i64 ∧
+    Compiles inputs ((inputKinds inputTypes inputs).getD []) inputTypes.size 1 0 term fragment ∧ inputTypes[0]? = some .i64 ∧
       InputsBefore inputTypes.size inputs ∧ (program inputTypes fragment).locals.size ≤ 512 ∧
       (program inputTypes fragment).blocks.size ≤ 512 ∧ valid (program inputTypes fragment) = true := by
   unfold lowerProgram at success
-  cases hc : compile inputs inputTypes.size 1 0 term with
-  | none => simp [hc] at success
-  | some result =>
-    simp [hc] at success
-    obtain ⟨guard, same⟩ := success
-    subst result
-    exact ⟨compile_sound hc, guard.1, inputsValid_iff.mp guard.2.1,
-      guard.2.2.1, guard.2.2.2.1, guard.2.2.2.2⟩
+  cases hk : inputKinds inputTypes inputs with
+  | none => simp [hk] at success
+  | some kinds =>
+    simp only [hk, Option.bind_some] at success
+    cases hc : compile inputs kinds inputTypes.size 1 0 term with
+    | none => simp [hc] at success
+    | some result =>
+      simp [hc] at success
+      obtain ⟨guard, same⟩ := success
+      subst result
+      simpa [hk] using And.intro (compile_sound hc)
+        ⟨guard.1, inputsValid_iff.mp guard.2.1,
+          guard.2.2.1, guard.2.2.2.1, guard.2.2.2.2⟩
 
 theorem lowerProgram_valid (success : lowerProgram inputTypes inputs term = some fragment) :
     valid (program inputTypes fragment) = true := (lowerProgram_shape success).2.2.2.2.2
@@ -71,6 +77,7 @@ theorem programFrame_related (related : EnvRel env inputs f) (before : InputsBef
 Only the original input array is supplied; fresh locals are initialized here. -/
 theorem program_run (success : lowerProgram inputTypes inputs term = some fragment)
     (size : inputTypes.size = f.locals.size) (related : EnvRel env inputs f)
+    (kinds : InputKindsAgree inputTypes inputs env)
     (heaps : HeapRel s f.heap) (initial : SizedBufferHeap.Valid s)
     (run : SizedErasure.Eval env term s (.scalar value) events t)
     (safe : SizedBufferHeap.Steps s events t) (bounded : Trace.Bounds t) :
@@ -83,9 +90,12 @@ theorem program_run (success : lowerProgram inputTypes inputs term = some fragme
   have positive : 0 < inputTypes.size := (Array.getElem?_eq_some_iff.mp zero).1
   have inputSize : (program inputTypes fragment).locals.size = (programFrame fragment f).locals.size := by
     simp [program, size]
+  have envKinds : EnvKinds env ((inputKinds inputTypes inputs).getD []) := by
+    rw [kinds]
+    rfl
   have represented := programFrame_related related (by simpa [size] using before) (fragment := fragment)
   obtain ⟨middle, first, block, index, heap, result, middleSize, frame⟩ :=
-    compiled.simulate program_embedded (by simp [program]; omega) inputSize before represented heaps initial run safe bounded
+    compiled.simulate program_embedded (by simp [program]; omega) inputSize before represented envKinds heaps initial run safe bounded
   have ret : (program inputTypes fragment).blocks[middle.block]? = some (returnBlock fragment.result) := by
     rw [block]; exact program_return
   have ty : (program inputTypes fragment).locals[0]? = some .i64 := by
@@ -113,6 +123,7 @@ theorem typed_source_run
     (agree : Agrees ctx owners sourceEnv) (layout : Layout s owners sizes)
     (initial : SizedBufferHeap.Valid s) (owned : Owns s.heap owners)
     (size : inputTypes.size = f.locals.size) (related : EnvRel env inputs f)
+    (kinds : InputKindsAgree inputTypes inputs env)
     (heaps : HeapRel s f.heap)
     (source : SizedCoreExecution.Eval graph sourceEnv root s (.scalar value) events t)
     (bounded : Trace.Bounds t) :
@@ -124,7 +135,7 @@ theorem typed_source_run
   have erased := SizedErasure.compileTarget_correct compacted
   have compact : SizedErasure.Eval env term s (.scalar value) events t :=
     (erased.eval_iff erasedEnv).mp source
-  exact program_run success size related heaps initial compact
+  exact program_run success size related kinds heaps initial compact
     (typed.every_run_safe agree layout initial owned source).1 bounded
 
 /-- Typing and source resource adequacy construct the terminating execution.
@@ -137,6 +148,7 @@ theorem typed_source_total
     (agree : Agrees ctx owners sourceEnv) (layout : Layout s owners sizes)
     (initial : SizedBufferHeap.Valid s) (owned : Owns s.heap owners)
     (size : inputTypes.size = f.locals.size) (related : EnvRel env inputs f)
+    (kinds : InputKindsAgree inputTypes inputs env)
     (heaps : HeapRel s f.heap)
     (resources : ∀ value events t, SizedCoreExecution.Eval graph sourceEnv root s value events t → Trace.Bounds t) :
     ∃ value events t final, SizedCoreExecution.Eval graph sourceEnv root s (.scalar value) events t ∧
@@ -148,7 +160,7 @@ theorem typed_source_total
   cases value <;> simp only [Post] at post
   case scalar value =>
     obtain ⟨final, target, heap, _⟩ := typed_source_run compacted success typed erasedEnv agree layout initial owned
-      size related heaps source (resources _ _ _ source)
+      size related kinds heaps source (resources _ _ _ source)
     exact ⟨value, events, t, final, source, target, heap, account⟩
 
 end Jihoo.SizedMir.Linear

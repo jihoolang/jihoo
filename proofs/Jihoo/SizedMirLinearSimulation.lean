@@ -3,7 +3,7 @@ import Jihoo.SizedMirRead
 import Jihoo.SizedMirTraceBounds
 import Jihoo.SizedMirTranslation
 
-/-! Compositional forward execution of generated straight-line MIR. Source safe
+/-! Compositional forward execution of generated structured MIR. Source safe
 traces justify release and indexed reads; final cumulative bounds justify every
 allocation. Source lease metadata is erased by the physical heap relation. -/
 namespace Jihoo.SizedMir.Linear
@@ -21,16 +21,17 @@ theorem start_eq (block : f.block = target) (index : f.index = 0) : start f targ
   cases f
   simp_all [start]
 
-theorem Compiles.covered (compiled : Compiles inputs l b exit term fragment) : Trace.LinearTerm term := by
+theorem Compiles.covered (compiled : Compiles inputs kinds l b exit term fragment) : Trace.StructuredTerm term := by
   induction compiled with
   | scalar => exact .scalar
   | natural => exact .natural
   | var => exact .var
   | allocate => exact .allocate
-  | app _ _ first last => exact .app first last
+  | app _ _ _ first last => exact .app first last
   | free _ _ ih => exact .free ih
   | lend _ _ _ ih => exact .lend ih
   | ownedLend _ _ _ _ ih => exact .ownedLend ih
+  | ifLt _ _ _ _ _ _ yes no => exact .ifLt yes no
 
 theorem Embedded.allocation
     (placed : Embedded c l b (allocationFragment l b exit length fill))
@@ -58,10 +59,10 @@ theorem lifecycle_append (first last : List SizedBufferHeap.Event) :
 completed code, retaining the lexical environment and exact heap representation.
 No successful MIR run is a premise. -/
 theorem Compiles.simulate
-    (compiled : Compiles inputs l b exit term fragment)
+    (compiled : Compiles inputs kinds l b exit term fragment)
     (placed : Embedded c l b fragment) (out : exit < c.blocks.size)
     (size : c.locals.size = f.locals.size) (before : InputsBefore l inputs)
-    (related : EnvRel env inputs f) (heaps : HeapRel s f.heap)
+    (related : EnvRel env inputs f) (kindsRelated : EnvKinds env kinds) (heaps : HeapRel s f.heap)
     (valid : SizedBufferHeap.Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : SizedBufferHeap.Steps s events t) (bounded : Trace.Bounds t) :
@@ -71,26 +72,26 @@ theorem Compiles.simulate
       final.locals.size = f.locals.size ∧
       (∀ i, i < l → final.locals[i]? = f.locals[i]?) := by
   induction compiled generalizing env f s value events t c with
-  | @scalar v inputs l b exit bound =>
+  | @scalar v inputs kinds l b exit bound =>
     cases run
     refine ⟨start f exit, ?_, rfl, rfl, heaps, ?_, rfl, ?_⟩
     · simpa [entry, blockCost, lifecycle] using (Steps.nil (c := c) (m := .running (start f exit)))
     · simp [pureFragment, operand, constant, toMir, bound]
     · intro i hi; rfl
-  | @natural n inputs l b exit bound =>
+  | @natural n inputs kinds l b exit bound =>
     cases run
     refine ⟨start f exit, ?_, rfl, rfl, heaps, ?_, rfl, ?_⟩
     · simpa [entry, blockCost, lifecycle] using (Steps.nil (c := c) (m := .running (start f exit)))
     · simp [pureFragment, operand, constant, toMir, bound]
     · intro i hi; rfl
-  | @var inputs k op l b exit lookup =>
+  | @var inputs k op kinds l b exit lookup =>
     cases run with
     | var source =>
       refine ⟨start f exit, ?_, rfl, rfl, heaps, ?_, rfl, ?_⟩
       · simpa [entry, blockCost, lifecycle] using (Steps.nil (c := c) (m := .running (start f exit)))
       · simpa [pureFragment] using related.lookup source lookup
       · intro i hi; rfl
-  | @allocate inputs length lengthOp fill fillOp l b exit hn hf =>
+  | @allocate inputs length lengthOp fill fillOp kinds l b exit hn hf =>
     cases run with
     | allocate lengthRun fillRun =>
       rename_i n value
@@ -108,16 +109,17 @@ theorem Compiles.simulate
       · simpa [start, lifecycle, heaps.nextObject] using target
       · rw [heap]; exact heaps.allocate
       · simpa [allocationFragment, toMir, heaps.nextObject] using result
-  | @app inputs l b argument exit body first last firstCompiled lastCompiled firstIH lastIH =>
+  | @app kinds argument argumentKind inputs l b exit body first last argumentKindRun firstCompiled lastCompiled firstIH lastIH =>
     cases run with
     | app firstRun lastRun =>
+      rename_i computed beforeEvents middleState afterEvents
       obtain ⟨firstSafe, lastSafe⟩ := Trace.trace_suffix firstCompiled.covered valid firstRun safe
       have firstPlaced := placed.append_left
       have lastPlaced : Embedded c (l + localCost argument) (b + blockCost argument) last := by
         simpa only [firstCompiled.sizes.1, firstCompiled.sizes.2] using placed.append_right
       have middleExit := lastPlaced.entry_bound lastCompiled out
       obtain ⟨middle, firstSteps, middleBlock, middleIndex, middleHeap, middleValue, middleSize, middleFrame⟩ :=
-        firstIH firstPlaced middleExit size before related heaps valid firstRun firstSafe (bounded.backward lastSafe)
+        firstIH firstPlaced middleExit size before related kindsRelated heaps valid firstRun firstSafe (bounded.backward lastSafe)
       have kept : EnvRel env inputs middle := related.frame before (fun i hi => (middleFrame i hi).symm)
       have newBefore : InputsBefore (l + localCost argument) (first.result :: inputs) := by
         intro op member
@@ -126,13 +128,14 @@ theorem Compiles.simulate
         · exact (before op old).mono (by omega)
       obtain ⟨final, lastSteps, control, index, heap, result, length, frame⟩ :=
         lastIH lastPlaced out (size.trans middleSize.symm) newBefore (kept.cons middleValue)
+          (by simpa [inferKind_correct argumentKindRun kindsRelated firstRun] using kindsRelated.cons (value := computed))
           middleHeap (SizedBufferHeap.steps_valid valid firstSafe) lastRun lastSafe bounded
       rw [start_eq middleBlock middleIndex] at lastSteps
       refine ⟨final, ?_, control, index, heap, result, length.trans middleSize, ?_⟩
       · simpa only [entry_app, lifecycle_append] using steps_trans firstSteps lastSteps
       · intro i hi
         exact (frame i (by omega)).trans (middleFrame i hi)
-  | @free inputs k owner l b exit body last lookup bodyCompiled ih =>
+  | @free inputs k owner kinds l b exit body last lookup bodyCompiled ih =>
     cases run with
     | free source bodyRun =>
       cases safe with
@@ -159,7 +162,7 @@ theorem Compiles.simulate
             exact freedFrame_other (by omega)
           have kept : EnvRel env inputs middle := related.frame before (fun i hi => (middleFrame i hi).symm)
           obtain ⟨final, lastSteps, control, index, heap, result, length, frame⟩ :=
-            ih tailPlaced out (size.trans middleSize.symm) (before.mono (by omega)) kept middleHeap
+            ih tailPlaced out (size.trans middleSize.symm) (before.mono (by omega)) kept kindsRelated middleHeap
               (SizedBufferHeap.step_valid valid (.free live unborrowed)) bodyRun rest bounded
           have middleStart : start middle (entry (b + 1) exit body) = middle := rfl
           rw [middleStart] at lastSteps
@@ -168,7 +171,7 @@ theorem Compiles.simulate
           · intro i hi
             exact (frame i (by omega)).trans (middleFrame i hi)
 
-  | @lend inputs k owner index indexOp l b exit body last lookup lowered bodyCompiled ih =>
+  | @lend inputs k owner index indexOp l kinds b exit body last lookup lowered bodyCompiled ih =>
     cases run with
     | lend source indexRun bodyRun =>
       rename_i objectId i suffix
@@ -206,7 +209,8 @@ theorem Compiles.simulate
         · exact (before _ member).mono (by omega)
       have middleSize : middle.locals.size = f.locals.size := by simp [middle, initial, start]
       obtain ⟨final, lastSteps, control, statement, heap, result, length, frame⟩ :=
-        ih tailPlaced out (size.trans middleSize.symm) bodyBefore bodyEnv heaps.restore
+        ih tailPlaced out (size.trans middleSize.symm) bodyBefore bodyEnv
+          (by simpa [kindOf] using (kindsRelated.cons (value := .scalar _)).cons (value := .owner _)) heaps.restore
           (SizedBufferHeap.steps_valid valid (SizedBufferHeap.read_cycle valid live inside)) bodyRun rest bounded
       have middleStart : start middle (entry (b + 1) exit body) = middle := rfl
       rw [middleStart] at lastSteps
@@ -214,7 +218,7 @@ theorem Compiles.simulate
       · simpa [initial, middle, lifecycle_append, lifecycle] using steps_trans firstSteps lastSteps
       · intro j hj
         exact (frame j (by omega)).trans (middleFrame j hj)
-  | @ownedLend inputs k owner length lengthOp index indexOp l b exit body last
+  | @ownedLend inputs k owner length lengthOp index indexOp l kinds b exit body last
       lookup loweredLength loweredIndex bodyCompiled ih =>
     cases run with
     | ownedLend source indexRun lengthRun bodyRun =>
@@ -285,7 +289,8 @@ theorem Compiles.simulate
         · exact (before _ member).mono (by omega)
       have totalSize := middleSize.trans readSize
       obtain ⟨final, lastSteps, control, statement, heap, result, finalSize, frame⟩ :=
-        ih tailPlaced out (size.trans totalSize.symm) bodyBefore bodyEnv middleHeap
+        ih tailPlaced out (size.trans totalSize.symm) bodyBefore bodyEnv
+          (by simpa [kindOf] using (kindsRelated.cons (value := .owner _)).cons (value := .owner _)) middleHeap
           (SizedOwnedLend.prefix_valid valid live inside) bodyRun rest bounded
       rw [start_eq middleBlock middleIndex] at lastSteps
       refine ⟨final, ?_, control, statement, heap, result, finalSize.trans totalSize, ?_⟩
@@ -294,5 +299,89 @@ theorem Compiles.simulate
           SizedBufferHeap.restore, ScopedLend.restored] using joined
       · intro j hj
         exact (frame j (by omega)).trans (middleFrame j hj)
+  | @ifLt inputs left leftOp right rightOp kinds yes kind no l b yesCode noCode exit
+      loweredLeft loweredRight yesKind noKind yesCompiled noCompiled yesIH noIH =>
+    have yesPlaced := placed.branch_yes
+    have noPlaced : Embedded c (l + 2 + localCost yes) (b + 3 + blockCost yes) noCode := by
+      simpa only [yesCompiled.sizes.1, yesCompiled.sizes.2] using placed.branch_no
+    have adminBound : b + 3 ≤ c.blocks.size := by
+      have h := placed.blockBound
+      simp [branchFragment] at h
+      omega
+    have localBound : l + 2 ≤ f.locals.size := by
+      have h := placed.localBound
+      simp [branchFragment] at h
+      omega
+    have yesExit : b + 1 < c.blocks.size := by omega
+    have noExit : b + 2 < c.blocks.size := by omega
+    have yesEntry := yesPlaced.entry_bound yesCompiled yesExit
+    have noEntry := noPlaced.entry_bound noCompiled noExit
+    cases run with
+    | yes leftRun rightRun lt bodyRun =>
+      rename_i a n
+      let initial := start f b
+      let middle := Branch.decisionFrame initial l (entry (b + 3) (b + 1) yes)
+        (entry (b + 3 + blockCost yes) (b + 2) no) a n
+      have decision := Branch.decision_run (f := initial) placed.branch_decision rfl
+        placed.branch_type.1 (by change l < f.locals.size; omega) yesEntry noEntry
+        (by simpa [initial] using lowerNat_correct leftRun related loweredLeft)
+        (by simpa [initial] using lowerNat_correct rightRun related loweredRight)
+      have middleFrame : ∀ i, i < l → middle.locals[i]? = f.locals[i]? := by
+        intro i hi
+        exact Branch.decisionFrame_other (by omega)
+      have kept := related.frame before (fun i hi => (middleFrame i hi).symm)
+      have middleSize : middle.locals.size = f.locals.size := by simp [middle, initial, start]
+      obtain ⟨bodyEnd, bodySteps, control, index, heap, result, length, frame⟩ :=
+        yesIH yesPlaced yesExit (size.trans middleSize.symm) (before.mono (by omega))
+          kept kindsRelated heaps valid bodyRun safe bounded
+      have middleStart : start middle (entry (b + 3) (b + 1) yes) = middle := by
+        apply start_eq <;> simp [middle, lt]
+      rw [middleStart] at bodySteps
+      have bodyType : c.locals[l + 1]? = some (valueType (toMir value)) := by
+        rw [toMir_valueType, inferKind_correct yesKind kindsRelated bodyRun]
+        exact placed.branch_type.2
+      have bodyBound : l + 1 < bodyEnd.locals.size := by rw [length, middleSize]; omega
+      have joined := Branch.join_run (f := bodyEnd) (by rw [control]; exact placed.branch_yes_join)
+        index bodyType bodyBound out result
+      refine ⟨Branch.joinFrame bodyEnd (l + 1) exit (toMir value), ?_, rfl, rfl, heap,
+        Branch.joinFrame_result bodyBound, ?_, ?_⟩
+      · simpa [initial, middle, entry, blockCost, lt] using
+          steps_trans decision (steps_trans bodySteps joined)
+      · simpa using length.trans middleSize
+      · intro i hi
+        exact (Branch.joinFrame_other (by omega)).trans ((frame i (by omega)).trans (middleFrame i hi))
+    | no leftRun rightRun lt bodyRun =>
+      rename_i a n
+      let initial := start f b
+      let middle := Branch.decisionFrame initial l (entry (b + 3) (b + 1) yes)
+        (entry (b + 3 + blockCost yes) (b + 2) no) a n
+      have decision := Branch.decision_run (f := initial) placed.branch_decision rfl
+        placed.branch_type.1 (by change l < f.locals.size; omega) yesEntry noEntry
+        (by simpa [initial] using lowerNat_correct leftRun related loweredLeft)
+        (by simpa [initial] using lowerNat_correct rightRun related loweredRight)
+      have middleFrame : ∀ i, i < l → middle.locals[i]? = f.locals[i]? := by
+        intro i hi
+        exact Branch.decisionFrame_other (by omega)
+      have kept := related.frame before (fun i hi => (middleFrame i hi).symm)
+      have middleSize : middle.locals.size = f.locals.size := by simp [middle, initial, start]
+      obtain ⟨bodyEnd, bodySteps, control, index, heap, result, length, frame⟩ :=
+        noIH noPlaced noExit (size.trans middleSize.symm) (before.mono (by omega))
+          kept kindsRelated heaps valid bodyRun safe bounded
+      have middleStart : start middle (entry (b + 3 + blockCost yes) (b + 2) no) = middle := by
+        apply start_eq <;> simp [middle, lt]
+      rw [middleStart] at bodySteps
+      have bodyType : c.locals[l + 1]? = some (valueType (toMir value)) := by
+        rw [toMir_valueType, inferKind_correct noKind kindsRelated bodyRun]
+        exact placed.branch_type.2
+      have bodyBound : l + 1 < bodyEnd.locals.size := by rw [length, middleSize]; omega
+      have joined := Branch.join_run (f := bodyEnd) (by rw [control]; exact placed.branch_no_join)
+        index bodyType bodyBound out result
+      refine ⟨Branch.joinFrame bodyEnd (l + 1) exit (toMir value), ?_, rfl, rfl, heap,
+        Branch.joinFrame_result bodyBound, ?_, ?_⟩
+      · simpa [initial, middle, entry, blockCost, lt] using
+          steps_trans decision (steps_trans bodySteps joined)
+      · simpa using length.trans middleSize
+      · intro i hi
+        exact (Branch.joinFrame_other (by omega)).trans ((frame i (by omega)).trans (middleFrame i hi))
 
 end Jihoo.SizedMir.Linear

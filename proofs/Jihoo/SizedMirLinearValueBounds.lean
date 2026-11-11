@@ -32,7 +32,7 @@ theorem PayloadBounded.backward (bounded : PayloadBounded t)
 
 /-- Lowering checks literals and safe reads obtain bounded allocated payloads.
 Final payload bounds propagate backward through every intermediate safe trace. -/
-theorem Compiles.value_bounded (compiled : Compiles inputs l b exit term fragment)
+theorem Compiles.value_bounded (compiled : Compiles inputs kinds l b exit term fragment)
     (bounded : EnvBounded env) (valid : SizedBufferHeap.Valid s)
     (run : SizedErasure.Eval env term s value events t)
     (safe : SizedBufferHeap.Steps s events t) (payloads : PayloadBounded t) :
@@ -44,7 +44,7 @@ theorem Compiles.value_bounded (compiled : Compiles inputs l b exit term fragmen
     cases run with
     | var source => exact bounded _ (List.mem_of_getElem? source)
   | allocate => cases run; trivial
-  | app firstCompiled _ first last =>
+  | app _ firstCompiled _ first last =>
     cases run with
     | app firstRun lastRun =>
       obtain ⟨firstSafe, lastSafe⟩ := Trace.trace_suffix firstCompiled.covered valid firstRun safe
@@ -80,6 +80,11 @@ theorem Compiles.value_bounded (compiled : Compiles inputs l b exit term fragmen
         (value := .owner owner) trivial)
         (SizedBufferHeap.steps_valid valid cycle) body rest payloads
 
+  | ifLt _ _ _ _ _ _ yes no =>
+    cases run with
+    | yes _ _ _ body => exact yes bounded valid body safe payloads
+    | no _ _ _ body => exact no bounded valid body safe payloads
+
 theorem scalar_result_bounded
     (success : lowerProgram inputTypes inputs term = some fragment)
     (bounded : EnvBounded env) (valid : SizedBufferHeap.Valid s)
@@ -92,6 +97,7 @@ theorem scalar_result_bounded
 the modeled nonnegative I64 range as well as executing with the related heap. -/
 theorem bounded_program_run (success : lowerProgram inputTypes inputs term = some fragment)
     (size : inputTypes.size = f.locals.size) (related : EnvRel env inputs f)
+    (kinds : InputKindsAgree inputTypes inputs env)
     (heaps : HeapRel s f.heap) (initial : SizedBufferHeap.Valid s)
     (run : SizedErasure.Eval env term s (.scalar value) events t)
     (safe : SizedBufferHeap.Steps s events t) (heapBounds : Trace.Bounds t)
@@ -103,6 +109,6 @@ theorem bounded_program_run (success : lowerProgram inputTypes inputs term = som
       final.locals.size = (program inputTypes fragment).locals.size ∧
       (∀ i, i < f.locals.size → i ≠ 0 → final.locals[i]? = f.locals[i]?) :=
   ⟨scalar_result_bounded success valueBounds initial run safe heapBounds.payloads,
-    program_run success size related heaps initial run safe heapBounds⟩
+    program_run success size related kinds heaps initial run safe heapBounds⟩
 
 end Jihoo.SizedMir.Linear
