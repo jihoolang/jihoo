@@ -102,12 +102,35 @@ fn snapshot() -> Result(String, String) {
     match check.program(&p, &timer) { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
     if !p.checked { return Err("unchecked arithmetic".to_string()) }
     var found = false
-    var out = "[1,[".to_string()
+    var out = String.new()
     for index in 0..p.fns.len() {
         let f = p.fns[index]
         match f.body { Some(body) => {
-            if found || body.arg_count != 0 || f.sig.params.len() != 0 || f.sig.ret != types.I64 {
-                return Err("expected one closed I64 function".to_string())
+            if found || f.sig.ret != types.I64 || !f.sig.c_abi || f.sig.variadic || f.variadic {
+                return Err("expected one supported I64 function".to_string())
+            }
+            match f.linkage { Export => {}, _ => return Err("unsupported entry linkage".to_string()) }
+            if body.arg_count != f.pass.len() || body.arg_count != f.sig.params.len() || body.locals.len() <= body.arg_count || body.locals[0].ty != types.I64 || body.locals[0].kind != mir.LocalKind.Ret {
+                return Err("entry argument/local mismatch".to_string())
+            }
+            if body.arg_count == 0 {
+                out = "[1,[".to_string()
+            } else {
+                if body.arg_count != 3 || f.sig.params[0] != types.U64 || f.sig.params[1] != types.U64 || f.sig.params[2] != types.I64 {
+                    return Err("expected U64,U64,I64 entry signature".to_string())
+                }
+                for arg in 0..body.arg_count {
+                    if body.locals[arg + 1].ty != f.sig.params[arg] || body.locals[arg + 1].kind != mir.LocalKind.Arg || f.pass[arg] != mir.ParamPass.Value {
+                        return Err("entry argument/local mismatch".to_string())
+                    }
+                }
+                // Slots identify arguments; the complete local table gives their types.
+                out = "[2,[1,2,3],[".to_string()
+            }
+            for local in body.arg_count + 1..body.locals.len() {
+                if body.locals[local].kind == mir.LocalKind.Arg {
+                    return Err("unexpected argument local".to_string())
+                }
             }
             found = true
             if body.locals.len() > 512 || body.blocks.len() > 512 { return Err("MIR size limit".to_string()) }

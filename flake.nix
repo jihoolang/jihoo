@@ -210,6 +210,8 @@
                 ./proofs/EmitMixedInference.lean
                 ./proofs/EmitMixedTelescope.lean
                 ./proofs/EmitMirFixture.lean
+                ./proofs/EmitDynamicMir.lean
+                ./proofs/CheckDynamicMir.lean
                 ./proofs/EmitComposedGraph.lean
                 ./proofs/EmitDependentBufferGraph.lean
                 ./proofs/EmitSizedCompositionGraph.lean
@@ -230,6 +232,7 @@
             cp ${./tests/core_mixed_inference.tsv} tests/core_mixed_inference.tsv
             cp ${./tests/core_preserves/lean-mixed-proof-translation.jhc} tests/core_preserves/lean-mixed-proof-translation.jhc
             cp ${./tests/core_binder_modes.txt} tests/core_binder_modes.txt
+            cp ${./tests/core_dynamic_mir.json} tests/core_dynamic_mir.json
             cp ${./tests/core_mir_single.json} tests/core_mir_single.json
             cp ${./tests/core_composed_graph.json} tests/core_composed_graph.json
             cp ${./tests/core_dependent_index.json} tests/core_dependent_index.json
@@ -259,6 +262,8 @@
                 ./proofs/CheckMixedProof.lean
                 ./proofs/CheckMixedRaw.lean
                 ./proofs/EmitMirFixture.lean
+                ./proofs/EmitDynamicMir.lean
+                ./proofs/CheckDynamicMir.lean
                 ./proofs/CheckMirCaller.lean
                 ./proofs/CheckScalarCaller.lean
                 ./proofs/CheckLinearCaller.lean
@@ -295,6 +300,8 @@
             python3 -O tests/verified_core.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mixed_proof_admission.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_dynamic_mir.py --compiler ${jihoo}/bin/jihoo
+            python3 -O tests/core_dynamic_mir.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_mir_callers.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_scalar_graph.py --compiler ${jihoo}/bin/jihoo

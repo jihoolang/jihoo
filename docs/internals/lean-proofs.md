@@ -3830,3 +3830,44 @@ arbitrary closing n/m/i values, including zero and unequal lengths. It has a
 derived execution, exact scalar result, safe/accounted events and no live final
 buffer. Kernel-checked rejection examples cover zero fuel, erased payload reads,
 an invalid untaken branch, unsupported nodes, invalid references and cycles.
+
+
+### Parametric execution of an actual dynamic Buffer MIR
+
+`DynamicMir` retains one complete 19-local, 11-block MIR graph emitted for
+`core_dependent_index.jhc`, with three runtime arguments. `BoundedMirArguments`
+validates a separate ordered entry signature and constructs a fresh frame.
+Argument slots must be distinct declared scalar locals other than return slot
+zero; values must match their types and bounds. Pointer and address arguments,
+wrong arities, duplicate or missing slots, and out-of-range scalars are rejected.
+The existing closed MIR admission API remains unchanged.
+
+`DynamicMirExecution` proves the actual allocation prefix, the initialization
+loop and both final branches. The loop invariant says exactly the first `k`
+cells contain the input value; remaining cells are uninitialized. The allocation
+contains `n + 1` cells, with the spare cell remaining unread and uninitialized.
+Induction on remaining iterations constructs a terminating relational execution,
+including for lengths beyond the existing closed checker's 10,000-step fuel
+budget. The checker fuel bound is not relaxed. Determinism identifies every
+return with the constructed result, allocation/free events and released heap.
+
+The theorem covers `n ≤ 4095`, `i < 2^64`, and `0 ≤ value < 2^63`. The length
+limit follows the existing abstract allocator's 4096-cell cap; the payload
+restriction follows its Nat-based I64 representation. Successful abstract
+allocation is modeled, not allocation failure or host resource exhaustion.
+
+`DynamicMirCorrespondence` compiles the unchanged source body at node 40 to
+an explicit compact term and proves source, compact and MIR termination for
+the same arguments. All terminating executions return `value` when `i < n`
+and 99 otherwise, with no live final objects. Source and compact event lists
+agree exactly. Across MIR, only the explicit allocation/free projection agrees:
+lease/read events and initialization stores are not asserted to have identical
+traces. Logical length `n` corresponds to the actual `8 * (n + 1)` byte request.
+
+The exporter comparison checks the complete retained graph and ordered argument
+slots. Structural mutations cover entry order, loop bounds, offsets, allocation
+extent, free targets and missing initialization. Native O0/O2 regressions include
+boundary lengths and signed payload cases; negative I64 tests remain implementation
+evidence outside the theorem. The source-to-MIR snapshot association, exporter,
+MIR-to-LLVM and native runtime remain trust boundaries. This is a parametric
+result for one actual compiled program, not a general compiler-correctness theorem.
