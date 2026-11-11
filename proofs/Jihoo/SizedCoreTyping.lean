@@ -1,5 +1,6 @@
 import Jihoo.SizedCoreExecution
 import Jihoo.SizedCorePure
+import Jihoo.SizedBufferFrames
 
 /-! A semantic closing-instance typing judgment for the original sized Core
 fragment. Natural parameters and erased Lt assumptions are interpreted in the
@@ -23,6 +24,17 @@ inductive Typing (g : Graph.Graph) : Context → List Nat → Nat → Result →
   | scalar : Graph.nodeAt g root = .var k → ctx[k]? = some .scalar → Typing g ctx [] root .scalar
   | owner : Graph.nodeAt g root = .var k → ctx[k]? = some (.owner 0) →
       Typing g ctx [n] root (.owner n)
+  | ownedLet : Graph.nodeAt g root = .app function argument →
+      Graph.nodeAt g function = .lam false domain body →
+      Graph.nodeAt g argument = .var k → ctx[k]? = some (.owner slot) →
+      sizes[slot]? = some n → BufferLength g (naturalEnv ctx) domain n →
+      Typing g (transferred ctx slot) sizes body kind → Typing g ctx sizes root kind
+  | framedApp : Graph.nodeAt g root = .app function argument →
+      Graph.nodeAt g function = .lam false domain body → p ≤ sizes.length →
+      BufferLength g (naturalEnv ctx) domain n →
+      Typing g (producer ctx p) (sizes.take p) argument (.owner n) →
+      Typing g (SizedBufferContext.callBody ctx p) (n :: sizes.drop p) body kind →
+      Typing g ctx sizes root kind
   | naturalLet : Graph.nodeAt g root = .app function argument →
       Graph.nodeAt g function = .lam false domain body → Graph.nodeAt g domain = .u64 →
       DependentBufferIndices.Eval g (naturalEnv ctx) argument n →
@@ -50,5 +62,16 @@ inductive Typing (g : Graph.Graph) : Context → List Nat → Nat → Result →
       DependentBufferIndices.Eval g (naturalEnv (.dead :: ctx)) index i →
       BoundEvidence g (proofs (.dead :: ctx)) proof i n →
       Typing g (scalarReturned ctx slot) sizes body kind → Typing g ctx sizes root kind
+
+  | ownedLend : OwnedReadLend g root owner refTy length index proof resultTy ownerTy body →
+      Graph.nodeAt g owner = .var k → ctx[k]? = some (.owner slot) → sizes[slot]? = some n →
+      RefLength g (naturalEnv ctx) refTy n →
+      DependentBufferIndices.Eval g (naturalEnv (.dead :: ctx)) length m →
+      BufferLength g (naturalEnv ctx) resultTy m →
+      BufferLength g (naturalEnv (.dead :: ctx)) ownerTy n →
+      DependentBufferIndices.Eval g (naturalEnv (.dead :: ctx)) index i →
+      BoundEvidence g (proofs (.dead :: ctx)) proof i n →
+      Typing g (ownedReturned ctx slot) (m :: sizes) body kind →
+      Typing g ctx sizes root kind
 
 end Jihoo.SizedCoreTyping

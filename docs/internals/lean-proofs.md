@@ -3746,3 +3746,47 @@ once. With explicit coverage of the initially live heap, the final live objects
 are exactly the result's owners; a scalar program started from the empty heap
 leaves no live buffer. These are generic statements for the admitted sized
 closing-instance fragment, not an inference from balanced native counters.
+
+### Sized composition with retained captures
+
+The same `SizedCoreTyping.Typing` judgment now includes direct owned-variable
+transfer, framed direct application and owned-result Lend. Transfer revokes all
+old aliases of the selected capability while preserving the actual lexical
+environment. A framed application gives its producer a prefix of the owner
+inventory and reserves the rest for the body. The returned owner's exact
+dynamic length must match the lambda annotation. Resource accounting derives
+result/frame disjointness and preservation; an untouched-frame trace is not
+assumed. Captured buffers keep their exact lengths and uniform payloads.
+
+The owned reader has the restricted form `alloc m (index ref i proof)`. Its
+original buffer has length n, and m need not equal n or be nonzero. Matching
+evidence derives the read bound against n. The begin/read/allocate/close prefix
+is proved safe, the fresh result is distinct from the original owner, and both
+capabilities enter the continuation with their actual lengths. Safety,
+determinism, exact result lengths, exactly-once release and final heap accounting
+are proved together with the existing recursive allocation/free/branch rules.
+
+Execution remains plan-free: `Eval.app` evaluates the actual argument and body,
+and determinism applies across different valid static partitions. This is not
+a general theorem about partition inference, arbitrary closures, nested active
+reader Lends, nonuniform buffers, Store or full dependent Pi substitution.
+
+`core_sized_composition.py` checks independent runtime n/m lengths, retained
+captures, zero-length results, nonzero reads and precise ownership/type
+rejections. For m>0 it reads the copied payload rather than merely returning a
+captured scalar. Exact O0 allocation sizes, owner release order and peak live
+ownership are checked; O2 may remove allocations. Both Python modes run these
+native regressions. Native checker/exporter/ABI/lowering association remains
+tested, not proved by these tests.
+
+`SizedCompositionExamples` retains the complete 465-node exported graph with
+original root 85 and type root 8. Its body entry 81 is opened under the explicit
+runtime n/m/i/value bindings. `body_typed` quantifies over arbitrary closing
+n/m/i and exercises both framed application and owned-result Lend in this same
+graph. The three runtime paths include an out-of-range original index, a
+zero-length fresh result, and an observed fresh result. Total accounted
+execution and final empty live heap follow from the generic rules; a direct
+execution construction and determinism also establish the exact mathematical
+scalar result `if i < n then value else 99`. Separate instances exhibit n=7,
+m=2 and n=7,m=0. This opens a stated source body, not a proof of native ABI
+entry, signed-I64 preservation or general dependent Pi typing.
