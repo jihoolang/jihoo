@@ -307,3 +307,5 @@ import Jihoo.CommonDataReferenceDropChecks
 import Jihoo.ReferenceCfgChecks
 
 import Jihoo.ReferenceCallsChecks
+
+import Jihoo.TreeDropCfgChecks
