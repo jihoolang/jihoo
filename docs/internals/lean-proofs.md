@@ -4343,3 +4343,48 @@ This establishes a reusable basis for recursive Tree Drop CFGs, not the Tree
 Drop correspondence itself. It introduces no Tree oracle or size-dependent CFG
 unrolling, and claims neither the production native ABI nor general higher-order
 calls. The production compiler is unchanged.
+
+### Fixed binary Tree Drop CFG
+
+`Jihoo.TreeDropCfg` is a follow-up to #194 at `567c999e`, not an assumption
+that its call semantics have already reached main. `body` is one constant
+six-block function. Its entry loads the root tag and switches to boxed Nil or
+Node; invalid tags are stuck. Nil frees its shell. Node executes pointer
+offsets 1 and 2, loads both reference words and transports their provenance
+with `wordToPointer`, then frees the parent. Two real calls invoke the same
+function on saved left and right pointers, followed by unit return.
+`run stepFuel heap root` has no Image, source Tree, or heap-drop oracle input.
+Native pointer casts, reuse, and whole-compiler correctness remain out of scope.
+
+`tree_prefix` proves all instructions up to the last return for any finite
+`Layout` with `ids.Nodup`, under any suspended continuation list. `walk` is a
+bounded prefix checker over actual `ReferenceCalls.tick`; `walk_sound` produces
+`BoundedPrefix`, whose constructors check every active state's stack depth.
+The stack limit is a proof certificate, not an extra runtime guard in `run`.
+A sufficient bound is initial stack length plus `Image.depth`. Step fuel is
+independent: `total` needs `ticks image + 1`, and `instruction_count` proves
+this is `16 * source.owners.length + 4`. Code size never depends on this witness.
+
+`total` yields the exact unit result, final locals, preorder free events, and
+`Frees`. `heap_correspondence` equates its final heap with #192's heap-level
+`drop` under a separate recursion-depth fuel bound. `destroy_correspondence`
+connects `CommonData.Destroy`, source heap steps, validity and owned frame,
+exact target object effects, identity pairs, and extra boxed Nil accounting
+(`nils.length = source.owners.length + 1`). Objects outside `ids`, including
+already-dead objects and absent indices, are unchanged. Existing
+`CommonDataReference.retained_tree` and `retained_buffer` apply directly to the
+source Destroy and target Frees certificates.
+
+`caller_total` composes the whole subtree with a real return to a suspended
+function-0 continuation; arbitrary caller locals are restored with only unit
+destination 6 updated, using the current heap. `caller_other_local` proves
+all other slots unchanged. This program contains only function 0; this is
+not a claim about an arbitrary surrounding program or native ABI.
+
+`TreeDropCfgChecks` kernel-evaluates boxed Nil (4/3 fuel), an asymmetric
+five-object tree (36/35 fuel), preserved live/dead external objects, arbitrary
+caller sentinels, and independent stack limits. It rejects invalid tags,
+dead/absent/interior/null roots, shared/cyclic/null children, and scalar words
+masquerading as child references. Run `bash proofs/check-tree-drop-cfg.sh` for
+the dedicated warning-free build and axiom audit, or `bash proofs/check.sh`
+for the complete proof and generated-fixture checks.
