@@ -1,3 +1,5 @@
+import Jihoo.CommonDataEnvironmentCompactionChecks
+import Jihoo.CommonDataCoreErasureChecks
 import Jihoo.CommonDataBufferErasureChecks
 import Jihoo.CommonDataErasureChecks
 import Jihoo.CommonDataBufferProducerChecks
@@ -472,3 +474,72 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataBufferErasureChecks.target_run
 #print axioms Jihoo.CommonDataBufferErasureChecks.source_run
 #print axioms Jihoo.CommonDataBufferErasureChecks.target_preserved
+
+-- Compact Core islands and the independent environment square.
+#print axioms Jihoo.CommonDataCoreSupports.Supports.cons
+#print axioms Jihoo.CommonDataCoreSupports.Supports.map
+#print axioms Jihoo.CommonDataCoreSupports.Supports.project
+#print axioms Jihoo.CommonDataCoreSupports.Supports.data_kept
+#print axioms Jihoo.CommonDataCoreSupports.Supports.buffer_kept
+#print axioms Jihoo.CommonDataCoreSupports.position_of_kept
+#print axioms Jihoo.CommonDataCoreSupports.Supports.freshBuffer
+#print axioms Jihoo.CommonDataCoreSupports.Supports.consumeBuffer
+#print axioms Jihoo.CommonDataCoreSupports.Supports.bufferCall
+#print axioms Jihoo.CommonDataCoreSupports.Supports.removeHead
+#print axioms Jihoo.CommonDataCoreSupports.Supports.dataContinuation
+#print axioms Jihoo.CommonDataCoreSupports.Supports.argumentContext
+#print axioms Jihoo.CommonDataCoreSupports.Supports.capturedContext
+#print axioms Jihoo.CommonDataCoreSupports.Supports.continuation
+#print axioms Jihoo.CommonDataCoreSupports.Supports.bindContext
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.of_common
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.scalar
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.owner
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.data
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.enter
+#print axioms Jihoo.CommonDataCoreErasure.Lower.preserves
+#print axioms Jihoo.CommonDataCoreErasure.typing_lowers
+#print axioms Jihoo.CommonDataCoreErasure.typing_preserves
+#print axioms Jihoo.CommonDataCoreErasure.typing_total_accounted
+#print axioms Jihoo.CommonDataCoreErasure.supports_of_closing
+#print axioms Jihoo.CommonDataCoreErasure.closed_total_accounted
+#print axioms Jihoo.CommonDataCoreErasureChecks.producer_case_split_lowers
+#print axioms Jihoo.CommonDataCoreErasureChecks.dynamic_allocate_case_lowers
+#print axioms Jihoo.CommonDataCoreErasureChecks.dynamic_allocate_split_free_lowers
+#print axioms Jihoo.CommonDataCoreErasureChecks.case_effectful_application_lowers
+#print axioms Jihoo.CommonDataCoreErasureChecks.branch_owned_lend_case_preserves
+#print axioms Jihoo.CommonDataCoreErasureChecks.interleaved_bridge
+#print axioms Jihoo.CommonDataCoreErasureChecks.distinct_index_spaces
+#print axioms Jihoo.CommonDataEnvironmentCompaction.core_related
+#print axioms Jihoo.CommonDataEnvironmentCompaction.project_compact
+#print axioms Jihoo.CommonDataEnvironmentCompaction.envRel_canonical
+#print axioms Jihoo.CommonDataEnvironmentCompaction.relational_square
+#print axioms Jihoo.CommonDataEnvironmentCompaction.position_exists
+#print axioms Jihoo.CommonDataEnvironmentCompaction.position_rank
+#print axioms Jihoo.CommonDataEnvironmentCompaction.position_mask
+#print axioms Jihoo.CommonDataEnvironmentCompaction.relational_position_rank
+#print axioms Jihoo.CommonDataEnvironmentCompaction.select_lookup
+#print axioms Jihoo.CommonDataEnvironmentCompaction.select_mask
+#print axioms Jihoo.CommonDataEnvironmentCompaction.support_select
+#print axioms Jihoo.CommonDataEnvironmentCompaction.lookup
+#print axioms Jihoo.CommonDataEnvironmentCompaction.nat_lookup
+#print axioms Jihoo.CommonDataEnvironmentCompaction.scalar_lookup
+#print axioms Jihoo.CommonDataEnvironmentCompaction.buffer_lookup
+#print axioms Jihoo.CommonDataEnvironmentCompaction.data_erased
+#print axioms Jihoo.CommonDataEnvironmentCompaction.ghost_erased
+#print axioms Jihoo.CommonDataEnvironmentCompaction.buffer_retained
+#print axioms Jihoo.CommonDataEnvironmentCompaction.nat_binder
+#print axioms Jihoo.CommonDataEnvironmentCompaction.scalar_binder
+#print axioms Jihoo.CommonDataEnvironmentCompaction.owner_binder
+#print axioms Jihoo.CommonDataEnvironmentCompaction.data_binder
+#print axioms Jihoo.CommonDataEnvironmentCompaction.case_binders
+#print axioms Jihoo.CommonDataEnvironmentCompaction.case_position_rank
+#print axioms Jihoo.CommonDataEnvironmentCompaction.projected_support
+#print axioms Jihoo.CommonDataEnvironmentCompaction.projected_support_compacted
+#print axioms Jihoo.CommonDataEnvironmentCompaction.common_mask_not_core
+#print axioms Jihoo.CommonDataEnvironmentCompaction.data_buffer_counterexample
+#print axioms Jihoo.CommonDataEnvironmentCompactionChecks.mixed_square
+#print axioms Jihoo.CommonDataEnvironmentCompactionChecks.mixed_indices
+#print axioms Jihoo.CommonDataEnvironmentCompactionChecks.stale_owner_alias
+#print axioms Jihoo.CommonDataEnvironmentCompactionChecks.case_two_fields
+#print axioms Jihoo.CommonDataEnvironmentCompactionChecks.kept_ghost
+#print axioms Jihoo.CommonDataCoreErasureChecks.branch_owned_lend_case_total
