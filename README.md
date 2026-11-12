@@ -189,6 +189,10 @@ now computes the common Data/Core target. Structural and typed completeness
 prove success at every sufficiently large fuel; existing closing and ownership
 invariants then give target execution and accounting. This does not prove
 production native compiler refinement or normalization of arbitrary cyclic graphs.
+Exact backward simulation now also gives source/target execution equivalence and
+safety/accounting for every compiled target run under the existing invariants.
+Target execution is independently deterministic; the fixed binary Tree scope
+and CommonData-to-MIR/native proof gaps remain.
 A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
 continuations. A Lean constructor now lowers compact/source allocations into

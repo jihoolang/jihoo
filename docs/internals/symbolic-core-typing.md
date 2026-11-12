@@ -231,3 +231,15 @@ fixtures, checks distinct mask indices, both Case branches, malformed graphs,
 missing/erased slots, a bounded cyclic failure and 64 nested drops with exact
 fuel boundaries. The aggregate and recursive axiom audits include the new
 soundness, completeness, endpoint and regression theorems.
+
+
+The common compiler now also has exact backward simulation: `Lower.backward`
+reconstructs source execution from a target run and the environment bridge,
+including Case entry and full Core islands. `compileTarget_adequate` equates
+source and target executions with identical values, event traces and final
+states. `compile_closed_adequate_accounted` combines sufficient-fuel compilation,
+execution existence, exact adequacy and safety/accounting of every target run
+under the existing closing and ownership assumptions. Target evaluation is
+independently deterministic, without typing or lowering assumptions. These
+results remain limited to fixed binary Tree and the supported Core islands;
+CommonData-to-MIR, native refinement and general dependent Data remain unproved.

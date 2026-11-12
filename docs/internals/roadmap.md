@@ -1438,3 +1438,12 @@ for all sufficiently large fuel. The closing endpoint derives execution and
 accounting under the established environment and ownership invariants. Global
 graph validity, arbitrary cyclic normalization and production native compiler
 refinement remain outside this result.
+
+
+Common erasure now reconstructs source executions from every target execution,
+with exact value, trace and final-state agreement. The compiler endpoint joins
+structural completeness, bidirectional adequacy, execution existence and all-run
+safety/accounting under the established closing and ownership premises. An
+independent target determinism theorem requires no typing or lowering premise.
+The fixed binary Tree restriction, general dependent Data and the common
+Data-to-MIR/native refinement gates remain unchanged.

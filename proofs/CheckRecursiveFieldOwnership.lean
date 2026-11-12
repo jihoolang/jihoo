@@ -1,3 +1,4 @@
+import Jihoo.CommonDataCoreBackwardChecks
 import Jihoo.CommonDataCoreCompilerChecks
 import Jihoo.CommonDataEnvironmentCompactionChecks
 import Jihoo.CommonDataCoreErasureChecks
@@ -571,3 +572,20 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataCoreCompilerChecks.deep_nesting
 #print axioms Jihoo.CommonDataCoreCompilerChecks.deep_insufficient
 #print axioms Jihoo.CommonDataCoreCompilerChecks.typed_dynamic
+
+#print axioms Jihoo.CommonDataCoreErasure.Eval.deterministic
+#print axioms Jihoo.CommonDataCoreErasure.Bridge.enter_backward
+#print axioms Jihoo.CommonDataCoreErasure.Lower.backward
+#print axioms Jihoo.CommonDataCoreErasure.Lower.adequate
+#print axioms Jihoo.CommonDataCoreErasure.compileTarget_adequate
+#print axioms Jihoo.CommonDataCoreErasure.compileTarget_every_run_accounted
+#print axioms Jihoo.CommonDataCoreErasure.compile_closed_adequate_accounted
+#print axioms Jihoo.CommonDataCoreBackwardChecks.ghost_case_compiles
+#print axioms Jihoo.CommonDataCoreBackwardChecks.ghost_bridge
+#print axioms Jihoo.CommonDataCoreBackwardChecks.node_target
+#print axioms Jihoo.CommonDataCoreBackwardChecks.node_source
+#print axioms Jihoo.CommonDataCoreBackwardChecks.nil_source
+#print axioms Jihoo.CommonDataCoreBackwardChecks.dynamic_backward
+#print axioms Jihoo.CommonDataCoreBackwardChecks.scalar_island_source
+#print axioms Jihoo.CommonDataCoreBackwardChecks.owner_compiles
+#print axioms Jihoo.CommonDataCoreBackwardChecks.owner_island_source

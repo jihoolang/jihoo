@@ -293,3 +293,5 @@ import Jihoo.CommonDataCoreErasureChecks
 import Jihoo.CommonDataEnvironmentCompactionChecks
 
 import Jihoo.CommonDataCoreCompilerChecks
+
+import Jihoo.CommonDataCoreBackwardChecks
