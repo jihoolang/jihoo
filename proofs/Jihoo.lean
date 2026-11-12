@@ -311,3 +311,6 @@ import Jihoo.ReferenceCallsChecks
 import Jihoo.TreeDropCfgChecks
 
 import Jihoo.TreeDropCallChecks
+
+import Jihoo.CommonDataCaseCfgChecks
+import Jihoo.CommonDataCaseRelocationChecks
