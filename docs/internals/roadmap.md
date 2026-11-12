@@ -1447,3 +1447,10 @@ safety/accounting under the established closing and ownership premises. An
 independent target determinism theorem requires no typing or lowering premise.
 The fixed binary Tree restriction, general dependent Data and the common
 Data-to-MIR/native refinement gates remain unchanged.
+
+
+The separate [reference-cell CFG model](lean-proofs.md#reference-cell-cfg-scalar-conservativity)
+now conservatively embeds existing bounded scalar MIR executions, including
+all finite prefixes, fuel, events and final heaps. This preserves the SizedMir
+endpoint without changing it. General reference lowering, native pointer encoding,
+function calls, allocator reuse and full CFG/compiler correctness remain open.

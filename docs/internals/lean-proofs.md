@@ -4217,3 +4217,61 @@ is a universal input theorem for one retained native fixture, not a generic
 `core_lower.jh` refinement theorem. The broader native language, arbitrary lender
 forms, machine addresses, allocator failure, MIR-to-LLVM and LLVM remain outside
 its scope. It does not close the 0.6 release gate.
+
+
+### Reference-cell CFG scalar conservativity
+
+`ReferenceCfg` is a separate executable CFG model using `ReferenceHeap` cells.
+`BoundedMir` and all existing `SizedMir` definitions and theorems remain unchanged.
+The extension adds null, provenance-carrying reference words, null tests and
+pointer/word conversion. Dereferencing a pointer loads a scalar or reference word;
+a typed indirect write stores either kind through `ReferenceHeap.store`.
+Reference words occupy abstract i64 storage slots, but are not integer values:
+arithmetic, scalar switch and scalar return reject them. New syntax can mix with
+the existing statements, branches, allocation and release in the same CFG.
+
+`ReferenceCfgEmbedding` defines `ReferenceCfg.Scalar`, which maps values,
+rvalues, statements, blocks, code,
+frames and machines constructor by constructor. Operand, rvalue, write, fetch
+and tick commute with this embedding, including **failure cases**, for arbitrary
+old frames, heaps and code. `step_forward`/`step_reflect` and
+`steps_forward`/`steps_reflect` give both directions of the relational
+correspondence with the identical allocation/free event trace. Reflection
+reconstructs an old execution and its exact embedded final machine, even for an
+arbitrary finite prefix that does not return. `scalar_invariant` says that
+embedded scalar code started in an embedded scalar state never leaves that
+image; scalar-only syntax alone makes no claim about arbitrary reference-valued
+initial states.
+
+`execute_eq` preserves the exact fuel budget, return value, frame, event list,
+heap liveness and initialized/uninitialized cells. Insufficient fuel and stuck
+execution remain `none`. Every statement and terminator, including return, still
+costs one fuel unit. `accepted_execution`, `accepted_all_returns` and
+`accepted_final_heap` transfer existing BoundedMir admission evidence and its
+no-live-final-heap conclusion. Existing SizedMir-generated executions therefore
+transfer via `steps_forward`, without reproving source-to-BoundedMir lowering.
+This is not a source-to-reference compiler or an extension of SizedMir lowering.
+
+The old `Accepted` constraints remain in force on this transferred fragment:
+fuel at most 10000, at most 512 locals and blocks, at most 4096 statements,
+per-allocation positive multiples of 8 no larger than 32768, at most 512 physical
+objects and 4096 cumulative slots. Released objects still consume capacity.
+Scalar payloads are below 2^63 and unsigned arithmetic remains bounded by 2^64.
+Allocation uses the same abstract 8-byte accounting; this is not a reference ABI.
+There is no new admission/validity checker for arbitrary extended programs.
+
+Offset creation permits `index + offset <= cells.size`, including one-past.
+Load and store require strict `< cells.size`, a live object and (for load) an
+initialized cell. Release requires a live base pointer. Null is distinct from an
+uninitialized cell. Dangling references can be transported but cannot be
+successfully dereferenced. The old `ptrCast` still produces only a nonnull
+`.address` tag; it is **not** reinterpreted as an invertible address. Only the
+new provenance word constructor supports pointer round trips, and scalar zero
+or a `.address` tag cannot forge a pointer.
+
+Kernel-checked regressions exercise a complete reference CFG allocation,
+pointer-word store/load round trip, release, exact events, final heap and fuel;
+they also cover null, one-past, dangling transport, non-forgery and the unchanged
+retained scalar fixture. The new theorems join the standard axiom audit.
+Native pointer encoding, layouts, function calls, allocator reuse, recursive
+Tree Drop and full CFG/compiler correctness are separate follow-up milestones.
