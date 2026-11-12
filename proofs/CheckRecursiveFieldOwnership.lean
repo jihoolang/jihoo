@@ -1,3 +1,4 @@
+import Jihoo.CommonDataCoreCompilerChecks
 import Jihoo.CommonDataEnvironmentCompactionChecks
 import Jihoo.CommonDataCoreErasureChecks
 import Jihoo.CommonDataBufferErasureChecks
@@ -543,3 +544,30 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataEnvironmentCompactionChecks.case_two_fields
 #print axioms Jihoo.CommonDataEnvironmentCompactionChecks.kept_ghost
 #print axioms Jihoo.CommonDataCoreErasureChecks.branch_owned_lend_case_total
+
+#print axioms Jihoo.CommonDataCoreErasure.compileTarget_sound
+#print axioms Jihoo.CommonDataCoreErasure.Lower.compile_complete
+#print axioms Jihoo.CommonDataCoreErasure.Lower.compileTarget_complete
+#print axioms Jihoo.CommonDataCoreErasure.typing_compiles
+#print axioms Jihoo.CommonDataCoreErasure.compile_closed_total_accounted
+#print axioms Jihoo.CommonDataCoreCompilerChecks.dynamic_producer
+#print axioms Jihoo.CommonDataCoreCompilerChecks.dynamic_allocation
+#print axioms Jihoo.CommonDataCoreCompilerChecks.owned_lend_case
+#print axioms Jihoo.CommonDataCoreCompilerChecks.different_masks
+#print axioms Jihoo.CommonDataCoreCompilerChecks.core_slot_unavailable
+#print axioms Jihoo.CommonDataCoreCompilerChecks.common_slot_unavailable
+#print axioms Jihoo.CommonDataCoreCompilerChecks.missing_slot
+#print axioms Jihoo.CommonDataCoreCompilerChecks.both_case_branches
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_nil_branch
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_node_branch
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_motive
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_branch_binders
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_case_arity
+#print axioms Jihoo.CommonDataCoreCompilerChecks.bad_constructor
+#print axioms Jihoo.CommonDataCoreCompilerChecks.missing_root
+#print axioms Jihoo.CommonDataCoreCompilerChecks.zero_fuel
+#print axioms Jihoo.CommonDataCoreCompilerChecks.insufficient_fuel
+#print axioms Jihoo.CommonDataCoreCompilerChecks.cycle_exhausts
+#print axioms Jihoo.CommonDataCoreCompilerChecks.deep_nesting
+#print axioms Jihoo.CommonDataCoreCompilerChecks.deep_insufficient
+#print axioms Jihoo.CommonDataCoreCompilerChecks.typed_dynamic
