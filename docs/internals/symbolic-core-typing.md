@@ -13,7 +13,8 @@ already chosen natural numbers.
 
 The supported rules are scalar literals and variables, owned variables,
 allocation, allocation binding, direct owned-variable application, natural
-application, `Free`, `IfLt`, and a read-only scalar-result `Lend`. Every rule
+application, prefix-partitioned direct framed application, `Free`, `IfLt`,
+and scalar-result or fresh-Buffer-result read-only `Lend`. Every rule
 checks the actual graph constructor and relevant annotations. Both alternatives
 of `IfLt` need finite derivations with the same result and resource inventory.
 A branch cannot be admitted merely because one particular input avoids it.
@@ -45,6 +46,25 @@ its concrete identity and invalidates every old lexical alias. A scalar-result
 `Lend` restores the original capability and binds the copied scalar; its reader
 cannot return the borrowed reference. `Free` clears every alias of the consumed
 capability while preserving unrelated lexical positions.
+
+A framed application gives its argument the consumed prefix of the inventory.
+The direct lambda body receives the resulting Buffer and the retained suffix;
+all aliases of the consumed prefix are dead there. Retained owners keep their
+identity through slot renumbering. The body shifts lengths and results once.
+An owned-result reader allocates a fresh Buffer from its indexed read, closes
+the lease, and binds both the original owner and the fresh result. Its body
+shifts lengths and results twice and must consume or return both capabilities.
+The reader remains the existing fresh-allocation shape; this adds neither
+arbitrary readers nor nested active borrowing.
+
+The same full judgment feeds `typing_erases_typed` and `typed_source_total`.
+Their statements are unchanged: structural erasure and source/target totality
+are derived for every constructor, without successful execution or lowering
+as a new premise. `SymbolicCompositionChecks` checks the original exported
+composition graph at arbitrary independent lengths (including an empty result),
+retained and revoked aliases, separate releases, and a common source computation
+that combines both new rules with a Data Case. The graph in that mixed example
+is explicitly constructed; it is not claimed to be a native exporter fixture.
 
 ## Constructed safety and accounting
 
@@ -92,9 +112,9 @@ mismatched symbolic `Lt` indices/lengths, and an invalid unselected branch. They
 also check nested capture-avoiding substitution and every lexical shift.
 All new theorems participate in the elaborated axiom audit.
 
-This judgment is a syntactic **subset** of the existing sized fragment. It does
-not yet include its framed applications or owned-result Lends. The broader
-omissions remain: arbitrary reader bodies and nested active-reader Lends,
+This judgment is a syntactic **subset** of the existing sized fragment, now
+including its prefix-partitioned direct framed applications and restricted
+owned-result Lends. The broader omissions remain: arbitrary reader bodies and nested active-reader Lends,
 nonuniform buffers and `Store`, recursive data/field ownership, `Back`, general
 closures or recursion, full dependent Pi preservation, the rest of Raw typing,
 and an executable symbolic checker. The graph/exporter association, production

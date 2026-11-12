@@ -152,6 +152,10 @@ theorem typing_erases (typing : Typing g ctx sizes root kind)
   | ownedLet shape lam arg lookup _ _ body ih =>
       obtain ⟨eb, hb⟩ := ih (supported.mapOwners.push (by rfl))
       exact ⟨_, .app shape lam (.var arg (supported.retained lookup (by simp [EntrySupports]))) hb⟩
+  | framedApp shape lam _ _ argument body ia ib =>
+      obtain ⟨ea, ha⟩ := ia supported.mapOwners
+      obtain ⟨eb, hb⟩ := ib (supported.mapOwners.push (by rfl))
+      exact ⟨_, .app shape lam ha hb⟩
   | naturalLet shape lam ty arg body ih =>
       obtain ⟨ea, ha⟩ := index_erases arg supported
       obtain ⟨ta, hta⟩ := nat_term_erases ha
@@ -179,5 +183,10 @@ theorem typing_erases (typing : Typing g ctx sizes root kind)
       obtain ⟨ei, hi⟩ := index_erases index (supported.push (bit := true) trivial)
       obtain ⟨eb, hb⟩ := ih ((supported.push (by rfl)).push (by rfl))
       exact ⟨_, .lend shape owner (supported.retained lookup (by simp [EntrySupports])) hi hb⟩
+  | ownedLend shape owner lookup _ _ length _ _ index _ body ih =>
+      obtain ⟨en, hn⟩ := index_erases length (supported.push (bit := true) trivial)
+      obtain ⟨ei, hi⟩ := index_erases index (supported.push (bit := true) trivial)
+      obtain ⟨eb, hb⟩ := ih ((supported.mapOwners.push (by rfl)).push (by rfl))
+      exact ⟨_, .ownedLend shape owner (supported.retained lookup (by simp [EntrySupports])) hn hi hb⟩
 
 end Jihoo.SymbolicCoreCompaction

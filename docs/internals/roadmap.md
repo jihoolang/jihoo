@@ -672,8 +672,9 @@ A [symbolic dependent Buffer judgment](symbolic-core-typing.md) now checks one
 restricted source rule family independently of closing values, including both
 comparison arms and dependent natural-result instantiation. Its closing theorem
 derives the existing sized ownership judgment and constructs safe execution
-with exact resource accounting. This does not cover all prior sized rules or
-full dependent Pi preservation, and the common full-Core blocker remains open.
+with exact resource accounting. Prefix-partitioned direct framed calls and fresh-Buffer-result readers now
+close through the same judgment, including compaction and structural MIR typing.
+This does not establish full dependent Pi preservation, and the common full-Core blocker remains open.
 
 
 The symbolic Buffer judgment is now connected to fixed binary Tree source

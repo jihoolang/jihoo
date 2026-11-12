@@ -57,6 +57,15 @@ def consumed (slot : Nat) (ctx : Context) : Context :=
   mapOwners (fun k => if k = slot then none else some (if slot < k then k-1 else k)) ctx
 def scalarReturned (ctx : Context) (slot : Nat) : Context := push (.owner slot) (push .scalar ctx)
 
+def producer (ctx : Context) (p : Nat) : Context :=
+  mapOwners (fun k => if k < p then some k else none) ctx
+
+def callBody (ctx : Context) (p : Nat) : Context :=
+  push (.owner 0) (mapOwners (fun k => if k < p then none else some (k-p+1)) ctx)
+
+def ownedReturned (ctx : Context) (slot : Nat) : Context :=
+  push (.owner (slot+1)) (fresh ctx)
+
 def natSlots (ctx : Context) (k : Nat) : Prop := ctx[k]? = some .nat
 
 def Entry.Closes (env : Env) : Entry → SizedBufferContext.Entry → Prop
@@ -386,5 +395,50 @@ theorem naturalEnv_scalarReturned (ctx : SizedBufferContext.Context) (slot : Nat
   cases k with
   | zero => rfl
   | succ k => cases k <;> rfl
+
+theorem Closes.producer (h : Closes ctx closed) :
+    Closes (producer ctx p) (SizedBufferContext.producer closed p) := h.mapOwners
+
+theorem Closes.callBody (h : Closes ctx closed) :
+    Closes (callBody ctx p) (SizedBufferContext.callBody closed p) := h.mapOwners.owner
+
+theorem Closes.ownedReturned (h : Closes ctx closed) :
+    Closes (ownedReturned ctx slot) (SizedBufferContext.ownedReturned closed slot) := h.fresh.owner
+
+theorem SizesEval.take (h : SizesEval env sizes ns) (p : Nat) :
+    SizesEval env (sizes.take p) (ns.take p) := by
+  induction h generalizing p with
+  | nil => simpa using (SizesEval.nil (env := env))
+  | cons hab _ ih => cases p with
+    | zero => exact .nil
+    | succ p => exact .cons hab (ih p)
+
+theorem SizesEval.drop (h : SizesEval env sizes ns) (p : Nat) :
+    SizesEval env (sizes.drop p) (ns.drop p) := by
+  induction h generalizing p with
+  | nil => simpa using (SizesEval.nil (env := env))
+  | cons hab tail ih => cases p with
+    | zero => exact .cons hab tail
+    | succ p => exact ih p
+
+theorem naturalEnv_producer (ctx : SizedBufferContext.Context) :
+    SizedBufferContext.naturalEnv (SizedBufferContext.producer ctx p) =
+    SizedBufferContext.naturalEnv ctx := SizedBufferContext.mapOwners_naturalEnv
+
+theorem naturalEnv_callBody (ctx : SizedBufferContext.Context) :
+    SizedBufferContext.naturalEnv (SizedBufferContext.callBody ctx p) =
+    SizedBufferContext.naturalEnv (.dead :: ctx) := by
+  funext k
+  cases k with
+  | zero => rfl
+  | succ k => exact congrFun SizedBufferContext.mapOwners_naturalEnv k
+
+theorem naturalEnv_ownedReturned (ctx : SizedBufferContext.Context) :
+    SizedBufferContext.naturalEnv (SizedBufferContext.ownedReturned ctx slot) =
+    SizedBufferContext.naturalEnv (.dead :: .dead :: ctx) := by
+  funext k
+  cases k with
+  | zero => rfl
+  | succ k => exact congrFun (naturalEnv_fresh ctx) k
 
 end Jihoo.SymbolicCoreContext
