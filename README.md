@@ -370,3 +370,7 @@ server built on the same checking and diagnostics: errors in unsaved
 documents, go to definition and formatting.
 
 Next ([roadmap](docs/internals/roadmap.md)): application-driven library work.
+
+A separate [reference-cell CFG model](docs/internals/lean-proofs.md#reference-cell-cfg-scalar-conservativity)
+preserves bounded scalar MIR execution, fuel, events and final heaps; native
+reference encoding and full compiler correctness remain outside this result.

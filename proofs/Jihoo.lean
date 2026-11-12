@@ -301,3 +301,5 @@ import Jihoo.ReferenceHeapChecks
 import Jihoo.CommonDataReferenceChecks
 
 import Jihoo.ReferenceHeapFrameChecks
+
+import Jihoo.ReferenceCfgChecks
