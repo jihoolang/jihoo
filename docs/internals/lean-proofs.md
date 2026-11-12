@@ -4388,3 +4388,52 @@ dead/absent/interior/null roots, shared/cyclic/null children, and scalar words
 masquerading as child references. Run `bash proofs/check-tree-drop-cfg.sh` for
 the dedicated warning-free build and axiom audit, or `bash proofs/check.sh`
 for the complete proof and generated-fixture checks.
+
+
+### Callable Tree Drop and the common compiler boundary
+
+`Jihoo.TreeDropCall` generalizes #195 at `b6bc674e`. Its executable `body dropId`
+changes both recursive call destinations; `body_zero`, `body_unchanged`, and
+`recursive_destinations` pin its relation to the original CFG. `tree_prefix`
+works in any program satisfying `p[dropId]? = some (body dropId)`, with arbitrary
+suspended callers and surrounding functions. Its instruction and independent
+stack budgets retain the fixed CFG's parent → left → right order.
+
+`compileDrop compiled dropId owner dest bodyEntry` appends an empty call block,
+selecting the owner's operand as the sole argument and using `bodyEntry` as its
+continuation. The new entry is the old body block count. Existing body blocks
+and effective exit overrides are preserved, without renumbering. This is a
+construction rule for `CommonDataCoreErasure.Term.drop owner body`; it does not
+establish a compiler for all common terms. The owner environment index must be
+mapped to an operand by the enclosing compiler. `ownerAt` and `selected` relate
+that environment owner and runtime operand to the same Tree image.
+
+`Site` requires an existing caller, a valid body continuation, a unit destination
+local, and sufficient runtime local space. `enter_owner` derives the call
+transition from those structural conditions and operand selection. `invoke`
+executes the actual caller call, all recursive Drop instructions, and the unit
+return. Caller identity is `s.function`, independent of `dropId`; only the unit
+destination changes. `resume_local` preserves every other caller local, and
+`invoke_effect` gives exact heap retirement with arbitrary external cells
+unchanged. The old continuation stack is restored, not a snapshot of the heap.
+
+`drop_simulation` inverts the common source drop evaluation, derives the source
+Destroy trace under validity and ownership, and composes the proven call prefix
+with **an explicit `BodyIH` obligation**. The enclosing compiler must prove this
+interface at the actual resumed entry in the final program, for each source
+post-Destroy state and target post-Frees heap. Its `Post` relation is supplied by
+the caller of the theorem. This is a conditional compositional simulation, not
+an unconditional successful-body or whole-compiler theorem. Appending a block
+does not claim to preserve failure of malformed old out-of-range jumps.
+
+Source frees and target frees are separate lists. Source-owner pairing and the
+additional boxed Nil equation (`nils = owners + 1`) remain exposed, alongside
+the source Destroy and target Frees evidence. Native pointer casts, reuse,
+production `drop_glue`, and general compiler correctness remain unproved.
+
+`TreeDropCallChecks` kernel-evaluates caller 1 calling Drop 2 between unrelated
+functions 0 and 3, including an asymmetric tree, live scalar local, external
+shared buffer, unit return and continuation, exact/short fuel, insufficient
+stack, and rejection when the unrelocated function is inserted at ID 2.
+`bash proofs/check-tree-drop-call.sh` checks the declarations and dedicated axiom
+audit. Both x86_64 and aarch64 Test jobs run it after `nix flake check`.
