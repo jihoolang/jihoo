@@ -285,3 +285,6 @@ import Jihoo.CommonDataErasure
 import Jihoo.CommonDataErasureChecks
 
 import Jihoo.CommonDataBufferProducerChecks
+
+import Jihoo.CommonDataBufferErasure
+import Jihoo.CommonDataBufferErasureChecks
