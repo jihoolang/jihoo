@@ -43,6 +43,8 @@ jobs:
       # Includes aggregate and recursive Data/Buffer erasure axiom audits.
       - name: nix flake check
         run: nix flake check -L
+      - name: Check callable Tree Drop compiler rule and axiom audit
+        run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-tree-drop-call.sh
       - name: Source isolation checks
         run: python3 scripts/check_nix_sources.py --offline --system ${{ matrix.system }}
       - name: Fusion benchmark checks
