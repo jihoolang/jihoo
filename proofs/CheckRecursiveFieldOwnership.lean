@@ -1,3 +1,4 @@
+import Jihoo.CommonDataErasureChecks
 import Jihoo.CommonDataBufferChecks
 import Jihoo.SymbolicCompositionChecks
 import Jihoo.SymbolicCommonDataChecks
@@ -420,3 +421,17 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataBufferChecks.wrong_size_rejected
 #print axioms Jihoo.CommonDataBufferChecks.delayed_free
 #print axioms Jihoo.CommonDataBufferChecks.second_alias_rejected
+
+-- Structural CommonData ghost-slot erasure; excludes Core producer islands.
+#print axioms Jihoo.CommonDataErasure.Env.lookup
+#print axioms Jihoo.CommonDataErasure.position_injective
+#print axioms Jihoo.CommonDataErasure.Env.bind
+#print axioms Jihoo.CommonDataErasure.Env.enter
+#print axioms Jihoo.CommonDataErasure.Lower.preserves
+#print axioms Jihoo.CommonDataErasure.total_accounted
+#print axioms Jihoo.CommonDataErasureChecks.lowered
+#print axioms Jihoo.CommonDataErasureChecks.typed
+#print axioms Jihoo.CommonDataErasureChecks.compacted
+#print axioms Jihoo.CommonDataErasureChecks.target_exists
+#print axioms Jihoo.CommonDataErasureChecks.source_run
+#print axioms Jihoo.CommonDataErasureChecks.target_run

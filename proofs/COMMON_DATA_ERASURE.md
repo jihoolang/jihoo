@@ -62,17 +62,21 @@ The independent review confirmed the structural/non-circular boundary and binder
 order, and requested the explicit exclusion of scalar Core lets and genuine
 false-mask regressions; both are reflected here.
 
-No existing Typing/SourceRules, aggregate imports, audit manifests, or CI files
-are changed. Follow-up integration should:
+Aggregate imports now include both erasure modules. The central and recursive
+axiom audits cover all six simulation lemmas and six named regressions (12 new
+audit entries). The recursive proof build explicitly builds the erasure checks;
+existing Nix `lean-proofs` and `recursive-field-proofs` checks therefore exercise
+them in the x86_64-linux and aarch64-linux CI matrix.
 
-1. Rebase against the concurrent Buffer-producer typing changes and rerun the
-   targeted module. This implementation does not pattern-match on Typing, so its
-   non-circular totality corollary depends only on the existing public theorem.
-2. Prove a compact Core environment/graph simulation before admitting either
+Existing Typing/SourceRules are unchanged by this integration. Buffer producer
+execution and scalar `bufferLet` remain excluded, including pure I64 lets.
+Production native/MIR refinement is not claimed. Concurrent Buffer-producer
+typing work must preserve these exclusions and rerun these checks after rebasing.
+
+Follow-up work:
+
+1. Prove a compact Core environment/graph simulation before admitting either
    `SizedCoreExecution` island; do not add successful Core execution as a lowering
    premise. Cover arbitrary Buffer producers under the new rules.
-3. Add canonical mask construction and structural lowering totality for a named
+2. Add canonical mask construction and structural lowering totality for a named
    source fragment, then connect to the common Core/native boundary.
-4. Coordinate aggregate imports, recursive axiom audit and CI registration before
-   claiming default-build coverage. Run explicitly with
-   `cd proofs && lake build Jihoo.CommonDataErasureChecks` until then.

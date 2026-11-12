@@ -280,3 +280,6 @@ import Jihoo.SymbolicCommonDataChecks
 import Jihoo.SymbolicCompositionChecks
 
 import Jihoo.CommonDataBufferChecks
+
+import Jihoo.CommonDataErasure
+import Jihoo.CommonDataErasureChecks
