@@ -297,3 +297,7 @@ import Jihoo.CommonDataCoreCompilerChecks
 import Jihoo.CommonDataCoreBackwardChecks
 
 import Jihoo.ReferenceHeapChecks
+
+import Jihoo.CommonDataReferenceChecks
+
+import Jihoo.ReferenceHeapFrameChecks
