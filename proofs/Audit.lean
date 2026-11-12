@@ -3164,3 +3164,23 @@ import Jihoo
 #print axioms Jihoo.CommonDataErasureChecks.target_exists
 #print axioms Jihoo.CommonDataErasureChecks.source_run
 #print axioms Jihoo.CommonDataErasureChecks.target_run
+
+#print axioms Jihoo.CommonData.bufferCall_consumed
+#print axioms Jihoo.CommonData.rel_bufferCall
+#print axioms Jihoo.CommonData.agrees_bufferCall
+#print axioms Jihoo.SymbolicCommonDataContext.bufferCallEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.bufferCallEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.bufferCall
+#print axioms Jihoo.CommonDataBufferProducerChecks.symbolic_producer
+#print axioms Jihoo.CommonDataBufferProducerChecks.symbolic_call
+#print axioms Jihoo.CommonDataBufferProducerChecks.direct_alloc
+#print axioms Jihoo.CommonDataBufferProducerChecks.captured_context
+#print axioms Jihoo.CommonDataBufferProducerChecks.producer_retained_rejected
+#print axioms Jihoo.CommonDataBufferProducerChecks.consumed_alias_rejected
+#print axioms Jihoo.CommonDataBufferProducerChecks.returned_alias_rejected
+#print axioms Jihoo.CommonDataBufferProducerChecks.closing
+#print axioms Jihoo.CommonDataBufferProducerChecks.inventory
+#print axioms Jihoo.CommonDataBufferProducerChecks.all_lengths_total
+#print axioms Jihoo.CommonDataBufferProducerChecks.every_run_accounted
+
+#print axioms Jihoo.CommonDataBufferProducerChecks.delayed_free

@@ -117,6 +117,35 @@ theorem Closes.consumeBuffer (h : Closes ctx closed) :
     Closes (consumeBuffer slot ctx) (CommonData.consumeBuffer slot closed) :=
   ListRel.map h (by intro a b hab; exact consumeBufferEntry_closes hab)
 
+def bufferCallEntry (count p : Nat) : Entry → Entry
+  | .buffer k => if count+p ≤ k then .buffer (k-p+1) else .dead
+  | e => e
+
+def bufferCall (count p : Nat) (ctx : Context) :=
+  Entry.buffer count :: ctx.map (bufferCallEntry count p)
+
+theorem bufferCallEntry_closes (h : Entry.Closes e c) :
+    Entry.Closes (bufferCallEntry count p e) (CommonData.bufferCallEntry count p c) := by
+  cases e <;> cases c <;> simp_all [Entry.Closes, bufferCallEntry, CommonData.bufferCallEntry]
+  rename_i k
+  by_cases bound : count+p ≤ k <;> simp [bound]
+
+theorem bufferCallEntry_env (closed : List ClosedEntry) :
+    naturalEnv (closed.map (CommonData.bufferCallEntry count p)) = naturalEnv closed := by
+  funext k
+  simp only [naturalEnv,SizedBufferContext.naturalEnv,RecursiveBodyProjection.context,
+    List.getElem?_map,Option.map_map]
+  cases h : closed[k]? with
+  | none => rfl
+  | some e =>
+    cases e <;> simp [CommonData.bufferCallEntry,RecursiveBodyProjection.entry]
+    rename_i k
+    by_cases bound : count+p ≤ k <;> simp [bound]
+
+theorem Closes.bufferCall (h : Closes ctx closed) :
+    Closes (bufferCall count p ctx) (CommonData.bufferCall count p closed) :=
+  .cons rfl (ListRel.map h (by intro a b hab; exact bufferCallEntry_closes hab))
+
 def removeEntry : Entry → Entry
   | .data 0 | .buffer 0 => .dead
   | .data (k+1) => .data k

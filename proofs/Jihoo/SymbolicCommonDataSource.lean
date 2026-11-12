@@ -35,6 +35,14 @@ inductive Typing (g : CommonDataSource.Graph) :
       SymbolicCoreTyping.Scalar (CommonDataSourceExecution.sourceCore g) (project count ctx) init →
       Typing g (freshBuffer count ctx) count (shiftSizes (n :: sizes)) body kind →
       Typing g ctx count sizes term kind
+  | bufferApp : CommonDataSource.nodeAt g term = .core (.app fn arg) →
+      CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
+      CommonDataSource.nodeAt g ty = .core (.buffer lengthTy) → p ≤ sizes.length →
+      SymbolicCoreTyping.BufferType (CommonDataSourceExecution.sourceCore g) (project count ctx) ty n →
+      SymbolicCoreTyping.Typing (CommonDataSourceExecution.sourceCore g)
+        (SymbolicCoreContext.producer (project count ctx) p) (sizes.take p) arg (.owner n) →
+      Typing g (bufferCall count p ctx) count (shiftSizes (n :: sizes.drop p)) body kind →
+      Typing g ctx count sizes term kind
   | freeBuffer : CommonDataSource.nodeAt g term = .core (.free owner body) →
       CommonDataSource.nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
       slot < sizes.length →
@@ -111,6 +119,21 @@ theorem Typing.instantiate (typed : Typing g ctx count sizes term kind)
       apply sizes_cons
       apply SizesEval.congr _ (freshBufferEntry_env closed).symm
       exact .cons (by simpa only [naturalEnv_skip] using value) inventory
+  | bufferApp shape fn ty limit annotation arg body ih =>
+    obtain ⟨indexRoot,domain,indexTyped⟩ := annotation
+    obtain ⟨n,value,bound⟩ := indexTyped.total (projection closing)
+    apply CommonDataSourceRules.Typing.bufferApp shape fn ty
+    · simpa only [inventory.length] using limit
+    · exact ⟨indexRoot,by simpa only [CommonDataSourceExecution.sourceCore_eq] using domain,
+        ⟨_,by simpa only [CommonDataSourceExecution.sourceCore_eq] using indexTyped.represents,value⟩⟩
+    · simpa only [CommonDataSourceExecution.sourceCore_eq] using
+        arg.instantiate ((projection closing).producer)
+          ((inventory.take _).congr (by rw [SymbolicCoreContext.naturalEnv_producer, naturalEnv_skip]))
+          (by simpa only [SymbolicCoreContext.ResultEval, SymbolicCoreContext.naturalEnv_producer] using value)
+    · apply ih closing.bufferCall
+      apply sizes_cons
+      apply SizesEval.congr _ (bufferCallEntry_env closed).symm
+      exact .cons (by simpa only [naturalEnv_skip] using value) (inventory.drop _)
   | freeBuffer shape owner lookup bound body ih =>
     apply CommonDataSourceRules.Typing.freeBuffer shape owner (buffer_lookup closing lookup)
     · simpa only [inventory.length] using bound

@@ -687,7 +687,14 @@ the same mixed judgment, retaining Data across allocation and invalidating every
 alias of a released Buffer. A single symbolic Alloc → Case → Free → Data
 derivation closes for every U64 length, with totality and every-run allocation
 accounting over the source evaluator and arbitrary pending parent frames.
-This remains the binary Tree, constant-motive fragment; Store, general dependent Pi, recursive functions, arbitrary readers and
+Prefix-partitioned Buffer applications also accept any typed SizedCore owner
+producer. The producer consumes only its selected Buffer prefix and returns
+exactly one owner; Data and the remaining Buffer frame survive, while all old
+aliases of the consumed prefix are retired. Symbolic lengths shift at the new
+binder and close to the same totality and every-run accounting theorems. Direct
+Alloc remains a supported special case. This remains the binary Tree,
+constant-motive and uniform Buffer fragment with direct calls; Store, general
+dependent Pi, higher-order closures, recursive functions, arbitrary readers and
 full native soundness remain open. See [mixed source typing](symbolic-core-typing.md#mixed-binary-data-source-typing).
 
 1. **Dependent-type stabilization.** Started: pure normalization retains

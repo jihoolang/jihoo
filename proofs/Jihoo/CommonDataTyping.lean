@@ -36,6 +36,16 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
       SizedCoreTyping.ScalarTyped (coreGraph g) (context count ctx) init →
       Typing g (freshBuffer count ctx) count (n :: sizes) body kind →
       Typing g ctx count sizes term kind
+  /-- A direct Buffer application consumes only the selected prefix. -/
+  | bufferApp : nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) →
+      nodeAt g ty = .core (.buffer lengthTy) → p ≤ sizes.length →
+      DependentBufferIndices.BufferLength (coreGraph g)
+        (SizedBufferContext.naturalEnv (context count ctx)) ty n →
+      SizedCoreTyping.Typing (coreGraph g)
+        (SizedBufferContext.producer (context count ctx) p) (sizes.take p) arg (.owner n) →
+      Typing g (bufferCall count p ctx) count (n :: sizes.drop p) body kind →
+      Typing g ctx count sizes term kind
   | freeBuffer : nodeAt g term = .core (.free owner body) →
       nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
       slot < sizes.length →
@@ -85,8 +95,8 @@ inductive Eval (g : Graph) : List Value → Nat → State → Value →
       SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers (.scalar n) before middle →
       Eval g (.scalar n :: env) body ⟨middle,s.cells⟩ result after t →
       Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
-  /-- The runtime evaluates an owner argument independently. Typing restricts
-  this rule to a direct Alloc and checks the body with the common judgment. -/
+  /-- The runtime evaluates an owner argument independently. Typing checks a
+  prefix-partitioned producer and the body with the common judgment. -/
   | allocate : nodeAt g term = .core (.app fn arg) →
       nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .core (.buffer lengthTy) →
       SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers

@@ -138,6 +138,7 @@ never becomes Buffer authority or erased bound evidence.
 | `construct` | Fixed binary constructor from Tree slots 0 and 1 |
 | `bufferLet` | Existing symbolic Buffer derivation with a scalar result, consuming the Buffer suffix; retained Trees survive |
 | `allocate` | Direct `App(Lam(Buffer n, body), Alloc(...))`; preserve all Data and existing Buffers and check `body` recursively |
+| `bufferApp` | Direct Buffer application of an arbitrary typed owner producer; consume the selected Buffer prefix, preserve Data and the remaining Buffer frame, and retire consumed aliases |
 | `freeBuffer` | Direct `Free(owner, body)`; invalidate every alias of the selected Buffer, preserve other capabilities and check `body` recursively |
 | `dataLet` | Direct Tree lambda application consuming all old capabilities before binding the returned Tree |
 | `dataLetSplit` | Direct application consuming selected Tree/Buffer prefixes and preserving the suffix; all consumed aliases are dead |
@@ -177,3 +178,14 @@ The common theorems retain arbitrary pending Case parents in the frame; neither
 safe traces nor successful executions are assumptions of totality. Buffers are
 uniform fill values: Store, arbitrary readers and general native lowering are
 not covered.
+
+
+`CommonDataBufferProducerChecks` extends this boundary to arbitrary typed
+SizedCore owner computations. The fixture consumes two Buffers, releases one
+and returns the other, preserves a third Buffer of a distinct symbolic length,
+then branches on Data. The branches free the returned and retained Buffers in
+different orders. Both consumed aliases (including the returned input's old
+name) are rejected. The old Alloc fixture also checks through prefix zero.
+The symbolic returned and retained lengths shift under the application binder
+and Case binders; source totality and every-run accounting use the unchanged
+evaluator. This adds no higher-order closure or full native verification claim.
