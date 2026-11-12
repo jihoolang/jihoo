@@ -278,3 +278,5 @@ import Jihoo.SymbolicMirStructuralChecks
 import Jihoo.SymbolicCommonDataChecks
 
 import Jihoo.SymbolicCompositionChecks
+
+import Jihoo.CommonDataBufferChecks

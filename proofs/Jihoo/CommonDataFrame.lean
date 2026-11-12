@@ -36,9 +36,11 @@ theorem Eval.lengths_frame (run : Eval g env term s v es t)
   induction run with
   | core _ old => exact sized_lengths_frame old fresh
   | literal _ | empty _ | dataVar _ _ | construct _ _ _ _ _ => rfl
-  | bufferLet _ _ _ old _ ih =>
+  | bufferLet _ _ _ old _ ih | allocate _ _ _ old _ ih =>
     simp only [allocations, List.filterMap_append, List.mem_append, not_or] at fresh
     exact (ih fresh.2).trans (sized_lengths_frame old fresh.1)
+  | freeBuffer _ _ _ _ ih =>
+    exact ih (by simpa [allocations] using fresh)
   | dataLet _ _ _ _ _ first last =>
     simp only [allocations, List.filterMap_append, List.mem_append, not_or] at fresh
     exact (last fresh.2).trans (first fresh.1)
@@ -57,11 +59,15 @@ theorem Eval.cells_frame (run : Eval g env term s v es t)
   | core _ _ | literal _ | empty _ | dataVar _ _ => rfl
   | construct _ _ _ _ _ =>
     simp only [allocations, List.filterMap_cons, List.filterMap_nil, List.mem_cons, List.not_mem_nil, or_false] at fresh
-    simp [allocate, put, fresh]
-  | bufferLet _ _ _ _ _ ih =>
+    simp [CommonData.allocate, put, fresh]
+  | bufferLet _ _ _ _ _ ih | allocate _ _ _ _ _ ih =>
     apply ih
     · exact fun h => fresh (by simp only [allocations, List.filterMap_append, List.mem_append]; exact Or.inr h)
     · exact fun h => kept (by simp only [released, List.filterMap_append, List.mem_append]; exact Or.inr h)
+  | freeBuffer _ _ _ _ ih =>
+    apply ih
+    · simpa [allocations] using fresh
+    · exact fun h => kept (by simp only [released, List.filterMap_cons, List.mem_cons]; exact Or.inr h)
   | dataLet _ _ _ _ _ first last =>
     have fa : x ∉ allocations _ := fun h => fresh (by simp only [allocations, List.filterMap_append, List.mem_append]; exact Or.inl h)
     have fb : x ∉ allocations _ := fun h => fresh (by simp only [allocations, List.filterMap_append, List.mem_append]; exact Or.inr h)

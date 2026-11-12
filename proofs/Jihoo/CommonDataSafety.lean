@@ -101,7 +101,7 @@ theorem Typing.total_accounted (typed : Typing g ctx count sizes term kind)
         have arranged : Owns s.buffers.heap (left.owners ++ right.owners ++ frame) := by
           simpa [caps, footprint, Capability.owners, List.append_assoc] using owned
         have fresh := allocate_safe (s := s.recursive) (payload := 0) valid lrep rrep arranged
-        refine ⟨.data (some s.buffers.heap.nextObject), _, allocate s (root left) (root right),
+        refine ⟨.data (some s.buffers.heap.nextObject), _, CommonData.allocate s (root left) (root right),
           .construct shape leftVar (data_lookup agreement leftSlot rfl)
             rightVar (data_lookup agreement rightSlot rfl), .cons .alloc .nil,
           fresh.1, .node s.buffers.heap.nextObject left right, rfl, fresh.2.1, fresh.2.2, ?_⟩
@@ -129,6 +129,78 @@ theorem Typing.total_accounted (typed : Typing g ctx count sizes term kind)
     apply combined.permute
     simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers,List.append_nil]
     exact List.perm_append_comm
+  | @allocate _ _ _ _ _ _ count ctx n _ _ _ _ shape lam ty annotation alloc len init body ih =>
+    have projected := project_agrees agreement
+    simp only [List.length_map] at projected
+    rw [length] at projected
+    obtain ⟨fill,initial⟩ := init.total projected
+    have lengthRun := len.transport (fun _ _ h => projected.nats_transport h)
+    have step : SizedBufferHeap.Step s.buffers (.alloc s.buffers.heap.nextObject n fill)
+        (SizedBufferHeap.allocate s.buffers n fill) := .alloc
+    have bufferOwned : Owns s.buffers.heap owners := by
+      apply OwnedApplicationFrame.owns_right (xs := footprint (trees.map Capability.data))
+      simpa [caps,RecursiveCaseBody.footprint_append,footprint_buffers] using
+        OwnedApplicationFrame.owns_left owned
+    have freshOwned := SizedBufferHeap.allocate_owns (n := n) (v := fill) valid owned
+    have kept : Owns (SizedBufferHeap.allocate s.buffers n fill).heap
+        (footprint (caps trees (s.buffers.heap.nextObject :: owners)) ++ frame) := by
+      apply owns_permute freshOwned
+      simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers]
+      simpa [List.append_assoc] using
+        (List.perm_append_comm (l₁ := [s.buffers.heap.nextObject])
+          (l₂ := footprint (trees.map Capability.data))).append_right (owners ++ frame)
+    have fs : Fields s.cells (caps trees (s.buffers.heap.nextObject :: owners)) := by
+      intro c member
+      cases c with
+      | buffer _ => trivial
+      | data tree =>
+        apply fields (.data tree)
+        simpa [caps] using member
+    obtain ⟨v,es,t,run,steps,vt,post⟩ := ih (owners := s.buffers.heap.nextObject :: owners)
+      (s := ⟨SizedBufferHeap.allocate s.buffers n fill,s.cells⟩) length
+      (by simpa [length] using agrees_freshBuffer agreement)
+      (layout.allocate valid bufferOwned) (SizedBufferHeap.step_valid valid step) kept fs
+    have first : Account [] [s.buffers.heap.nextObject] [.alloc s.buffers.heap.nextObject fill] := by
+      intro x; simp [released, allocations]
+    have arranged := post.permute (show (footprint (caps trees (s.buffers.heap.nextObject :: owners))).Perm
+        ([s.buffers.heap.nextObject] ++ footprint (caps trees owners)) from by
+      simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers]
+      simp)
+    refine ⟨v,_,t,.allocate shape lam ty
+      (.allocate (by simp [core_at,alloc,projectNode]) lengthRun initial) run,
+      .cons (SizedBufferHeap.step_project step) steps,vt,?_⟩
+    simpa [SizedBufferHeap.Event.project] using AccountedPost.compose first arranged
+  | freeBuffer shape owner selected bound body ih =>
+    obtain ⟨x,rest,selection⟩ := select_total (xs := owners) (by rw [layout.length]; exact bound)
+    obtain ⟨value,lookup,y,cap,rfl⟩ := agreement.lookup selected
+    obtain ⟨_,slotLookup⟩ := caps_buffer cap
+    have eq : x = y := Option.some.inj ((LinearCoreCallers.Select.lookup_selected selection).symm.trans
+      (by simpa [length] using slotLookup))
+    subst y
+    have framed := select_frame selection (footprint (trees.map Capability.data)) frame
+    have arranged : Owns s.buffers.heap (footprint (trees.map Capability.data) ++ (owners ++ frame)) := by
+      simpa [caps,RecursiveCaseBody.footprint_append,footprint_buffers,List.append_assoc] using owned
+    have step : SizedBufferHeap.Step s.buffers (.free x) (SizedBufferHeap.release s.buffers x) :=
+      .free (arranged.live x framed.member) (arranged.leaseFree x framed.member)
+    have kept := SizedBufferHeap.release_owns arranged framed
+    have fs : Fields s.cells (caps trees rest) := by
+      intro c member
+      cases c with
+      | buffer _ => trivial
+      | data tree => apply fields (.data tree); simpa [caps] using member
+    obtain ⟨v,es,t,run,steps,vt,post⟩ := ih (owners := rest)
+      (s := ⟨SizedBufferHeap.release s.buffers x,s.cells⟩) length
+      (by simpa [length] using agrees_consumeBuffer agreement selection)
+      (layout.consumed selection) (SizedBufferHeap.step_valid valid step)
+      (by simpa [caps,RecursiveCaseBody.footprint_append,footprint_buffers,List.append_assoc] using kept) fs
+    have account {output : List Nat} (h : Account (footprint (caps trees rest)) output es) :
+        Account (footprint (caps trees owners)) output (.free x :: es) := by
+      intro z; have eq := h z; have count := selection.count z
+      simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers,
+        List.count_append,released,allocations,List.filterMap_cons,List.count_cons] at eq ⊢
+      split <;> simp_all <;> omega
+    refine ⟨v,_,t,.freeBuffer shape owner lookup run,.cons (SizedBufferHeap.step_project step) steps,vt,?_⟩
+    exact post.map_account (fun h => account h)
   | dataLet shape lam domain arg body argIH bodyIH =>
     obtain ⟨value, before, middle, first, steps, vm, post⟩ :=
       argIH length agreement layout valid owned fields

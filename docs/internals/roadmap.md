@@ -682,8 +682,12 @@ rules through value-independent mixed contexts. Arbitrary suitable closings
 derive the existing concrete source typing, actual source execution totality,
 and safe steps, final heap validity and resource accounting for every run.
 Case field binding and split application preserve lexical index shifts and
-retire consumed aliases. This remains the constant-motive, scalar Buffer-result
-fragment; general dependent Pi, recursive functions, arbitrary readers and
+retire consumed aliases. Direct uniform Buffer Alloc/Free now recurse through
+the same mixed judgment, retaining Data across allocation and invalidating every
+alias of a released Buffer. A single symbolic Alloc → Case → Free → Data
+derivation closes for every U64 length, with totality and every-run allocation
+accounting over the source evaluator and arbitrary pending parent frames.
+This remains the binary Tree, constant-motive fragment; Store, general dependent Pi, recursive functions, arbitrary readers and
 full native soundness remain open. See [mixed source typing](symbolic-core-typing.md#mixed-binary-data-source-typing).
 
 1. **Dependent-type stabilization.** Started: pure normalization retains

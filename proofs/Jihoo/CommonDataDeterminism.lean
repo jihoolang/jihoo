@@ -21,7 +21,7 @@ theorem Eval.deterministic (a : Eval g env term s v es t)
     cases b <;> simp_all
   | construct shape leftVar left rightVar right =>
     cases b <;> simp_all
-  | bufferLet shape lam ty first second ih =>
+  | bufferLet shape lam ty first second ih | allocate shape lam ty first second ih =>
     cases b <;> simp_all
     rename_i otherFirst otherSecond
     obtain ⟨eq, rfl, rfl⟩ := first.deterministic otherFirst
@@ -35,6 +35,9 @@ theorem Eval.deterministic (a : Eval g env term s v es t)
     cases eq
     obtain ⟨rfl,rfl,rfl⟩ := bodyIH otherSecond
     exact ⟨rfl,rfl,rfl⟩
+  | freeBuffer shape owner lookup body ih =>
+    cases b <;> simp_all
+    exact ih (by assumption)
   | drop shape owner lookup destroyed branch ih =>
     cases b <;> simp_all
     rename_i otherDestroyed otherBranch

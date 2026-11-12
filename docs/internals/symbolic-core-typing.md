@@ -137,12 +137,16 @@ never becomes Buffer authority or erased bound evidence.
 | `dataVar` | The sole Tree capability at slot 0 |
 | `construct` | Fixed binary constructor from Tree slots 0 and 1 |
 | `bufferLet` | Existing symbolic Buffer derivation with a scalar result, consuming the Buffer suffix; retained Trees survive |
+| `allocate` | Direct `App(Lam(Buffer n, body), Alloc(...))`; preserve all Data and existing Buffers and check `body` recursively |
+| `freeBuffer` | Direct `Free(owner, body)`; invalidate every alias of the selected Buffer, preserve other capabilities and check `body` recursively |
 | `dataLet` | Direct Tree lambda application consuming all old capabilities before binding the returned Tree |
 | `dataLetSplit` | Direct application consuming selected Tree/Buffer prefixes and preserving the suffix; all consumed aliases are dead |
 | `drop` | Consume the head Tree and shift capability slots without removing lexical positions |
 | `caseTree` | Fixed binary Tree, constant scalar/Data motive, both branches checked; node fields occupy lexical slots `[right, left]` and retire all parent aliases |
 
-The split continuation shifts saved length expressions by one lexical binder.
+Allocation inserts its Buffer after the Data prefix and shifts all length
+expressions by one lexical binder. Free removes the selected Buffer length and
+keeps lexical positions, including dead aliases. The split continuation shifts saved length expressions by one lexical binder.
 The node branch shifts every length by two. Argument contexts, empty branches
 and drops do not shift lexical indices. Closing proves those transformations
 commute with the existing concrete contexts, including the length of the used
@@ -162,3 +166,14 @@ wrong motives/branch results. The scalar-result Buffer family includes its
 restricted read-only `Lend`, not arbitrary readers. General dependent Pi,
 recursive functions, dependent motives, production-checker refinement and
 native compiler soundness remain outside these theorems.
+
+`CommonDataBufferChecks` checks one symbolic Alloc → Case → Free → Data
+program at every U64 length and derives total execution and accounting for every
+run. A second program reserves the Buffer across a split application whose
+argument performs Case and Drop, then frees it in the continuation. Further
+checks select a nonfirst Buffer, retain both Data fields, revoke duplicate
+aliases and reject an allocation whose annotation has a different length.
+The common theorems retain arbitrary pending Case parents in the frame; neither
+safe traces nor successful executions are assumptions of totality. Buffers are
+uniform fill values: Store, arbitrary readers and general native lowering are
+not covered.

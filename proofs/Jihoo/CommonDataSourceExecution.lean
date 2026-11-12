@@ -49,6 +49,16 @@ inductive Eval (g : CommonDataSource.Graph) : List Value → Nat → CommonData.
       SizedCoreExecution.Eval (sourceCore g) (environment env) arg s.buffers (.scalar n) before middle →
       Eval g (.scalar n :: env) body ⟨middle,s.cells⟩ result after t →
       Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  | allocate : CommonDataSource.nodeAt g term = .core (.app fn arg) →
+      CommonDataSource.nodeAt g fn = .core (.lam false ty body) → CommonDataSource.nodeAt g ty = .core (.buffer lengthTy) →
+      SizedCoreExecution.Eval (sourceCore g) (environment env) arg s.buffers
+        (.owner x) before middle →
+      Eval g (.buffer x :: env) body ⟨middle,s.cells⟩ result after t →
+      Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  | freeBuffer : CommonDataSource.nodeAt g term = .core (.free owner body) →
+      CommonDataSource.nodeAt g owner = .core (.var index) → env[index]? = some (.buffer x) →
+      Eval g env body ⟨SizedBufferHeap.release s.buffers x,s.cells⟩ result events t →
+      Eval g env term s result (.free x :: events) t
   | dataLet : CommonDataSource.nodeAt g term = .core (.app fn arg) →
       CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
       CommonDataSource.nodeAt g ty = .ind 0 [] →
@@ -90,6 +100,9 @@ theorem Eval.to_common (run : Eval g env term s v es t) :
   | construct h l li r ri =>
     exact .construct (by simp [CommonDataSourceRules.adapted_at,h,CommonDataSourceRules.adaptNode,CommonDataSource.adaptNode]) (core_shape l) li (core_shape r) ri
   | bufferLet h fn ty arg body ih => exact .bufferLet (core_shape h) (core_shape fn) (core_shape ty) (by simpa only [sourceCore_eq] using arg) ih
+  | allocate h fn ty arg body ih =>
+    exact .allocate (core_shape h) (core_shape fn) (core_shape ty) (by simpa only [sourceCore_eq] using arg) ih
+  | freeBuffer h owner lookup body ih => exact .freeBuffer (core_shape h) (core_shape owner) lookup ih
   | dataLet h fn ty arg body ia ib => exact .dataLet (core_shape h) (core_shape fn) (ind_shape ty) ia ib
   | drop h owner lookup destroyed body ih =>
     exact .drop (by simp [CommonDataSourceRules.adapted_at,h,CommonDataSourceRules.adaptNode,CommonDataSource.adaptNode]) (core_shape owner) lookup destroyed ih
@@ -132,6 +145,17 @@ theorem reflect (typed : CommonDataSourceRules.Typing g ctx count sizes term kin
     have ht := core_shape ty
     cases run <;> simp_all
     exact .bufferLet shape fn ty (by simpa only [sourceCore_eq] using (by assumption : SizedCoreExecution.Eval _ _ _ _ _ _ _)) (ih (by assumption))
+  | allocate shape fn ty annotation alloc len init body ih =>
+    have h := core_shape shape
+    have hf := core_shape fn
+    have ht := core_shape ty
+    cases run <;> simp_all
+    exact .allocate shape fn ty (by simpa only [sourceCore_eq] using (by assumption : SizedCoreExecution.Eval _ _ _ _ _ _ _)) (ih (by assumption))
+  | freeBuffer shape owner lookup bound body ih =>
+    have h := core_shape shape
+    have ho := core_shape owner
+    cases run <;> simp_all
+    exact .freeBuffer shape owner (by assumption) (ih (by assumption))
   | dataLet shape fn ty arg body ia ib =>
     have h := core_shape shape
     have hf := core_shape fn

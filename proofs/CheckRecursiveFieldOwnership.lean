@@ -1,3 +1,4 @@
+import Jihoo.CommonDataBufferChecks
 import Jihoo.SymbolicCompositionChecks
 import Jihoo.SymbolicCommonDataChecks
 import Jihoo.CommonDataSourceExecutionChecks
@@ -403,3 +404,19 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.SymbolicCoreContext.naturalEnv_callBody
 #print axioms Jihoo.SymbolicCoreContext.naturalEnv_ownedReturned
 #print axioms Jihoo.SymbolicCompositionChecks.common_case_total
+
+#print axioms Jihoo.CommonData.agrees_freshBuffer
+#print axioms Jihoo.CommonData.agrees_consumeBuffer
+#print axioms Jihoo.CommonData.consumeBuffer_alias
+#print axioms Jihoo.CommonData.consumeBuffer_data
+#print axioms Jihoo.CommonData.select_frame
+#print axioms Jihoo.CommonDataBufferChecks.symbolic_lifecycle
+#print axioms Jihoo.CommonDataBufferChecks.all_lengths
+#print axioms Jihoo.CommonDataBufferChecks.aliases_and_survivors
+#print axioms Jihoo.CommonDataBufferChecks.all_lengths_total
+#print axioms Jihoo.CommonDataBufferChecks.every_run_accounted
+#print axioms Jihoo.CommonDataBufferChecks.selected_buffer
+#print axioms Jihoo.CommonDataBufferChecks.consumed_alias_rejected
+#print axioms Jihoo.CommonDataBufferChecks.wrong_size_rejected
+#print axioms Jihoo.CommonDataBufferChecks.delayed_free
+#print axioms Jihoo.CommonDataBufferChecks.second_alias_rejected
