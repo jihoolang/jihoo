@@ -1,3 +1,4 @@
+import Jihoo.CommonDataBufferErasureChecks
 import Jihoo.CommonDataErasureChecks
 import Jihoo.CommonDataBufferProducerChecks
 import Jihoo.SymbolicCompositionChecks
@@ -455,3 +456,19 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataBufferProducerChecks.every_run_accounted
 
 #print axioms Jihoo.CommonDataBufferProducerChecks.delayed_free
+
+-- Scalar bindings and direct constant-length Buffer erasure.
+#print axioms Jihoo.CommonDataBufferErasure.core_shape
+#print axioms Jihoo.CommonDataBufferErasure.core_lookup
+#print axioms Jihoo.CommonDataBufferErasure.ScalarLower.preserves
+#print axioms Jihoo.CommonDataBufferErasure.ScalarLower.run
+#print axioms Jihoo.CommonDataBufferErasure.natural_value
+#print axioms Jihoo.CommonDataBufferErasure.Lower.preserves
+#print axioms Jihoo.CommonDataBufferErasure.total_accounted
+#print axioms Jihoo.CommonDataBufferErasureChecks.lowered
+#print axioms Jihoo.CommonDataBufferErasureChecks.typed
+#print axioms Jihoo.CommonDataBufferErasureChecks.compacted
+#print axioms Jihoo.CommonDataBufferErasureChecks.total
+#print axioms Jihoo.CommonDataBufferErasureChecks.target_run
+#print axioms Jihoo.CommonDataBufferErasureChecks.source_run
+#print axioms Jihoo.CommonDataBufferErasureChecks.target_preserved
