@@ -101,3 +101,44 @@ and an executable symbolic checker. The graph/exporter association, production
 checker, native lowering, MIR-to-LLVM, physical addresses and allocation failure
 remain outside this result. Existing erasure and generated-MIR theorems can
 consume the instantiated sized judgment under their own stated premises.
+
+## Mixed binary Data source typing
+
+`SymbolicCommonDataSource.Typing` connects the same symbolic Buffer rules to
+`CommonDataSourceRules.Typing`. Its separate mixed context has natural markers
+without values, scalars, Data and Buffer capability slots, ghosts and dead
+slots. `SymbolicCommonDataContext` reuses `SymbolicCoreContext` for the Buffer
+projection and closes into `RecursiveBodyProjection.context`; Data authority
+never becomes Buffer authority or erased bound evidence.
+
+| Source rule | Actual supported behavior |
+| --- | --- |
+| `literal`, `empty` | Scalar literal or empty Tree, with no owned inventory |
+| `dataVar` | The sole Tree capability at slot 0 |
+| `construct` | Fixed binary constructor from Tree slots 0 and 1 |
+| `bufferLet` | Existing symbolic Buffer derivation with a scalar result, consuming the Buffer suffix; retained Trees survive |
+| `dataLet` | Direct Tree lambda application consuming all old capabilities before binding the returned Tree |
+| `dataLetSplit` | Direct application consuming selected Tree/Buffer prefixes and preserving the suffix; all consumed aliases are dead |
+| `drop` | Consume the head Tree and shift capability slots without removing lexical positions |
+| `caseTree` | Fixed binary Tree, constant scalar/Data motive, both branches checked; node fields occupy lexical slots `[right, left]` and retire all parent aliases |
+
+The split continuation shifts saved length expressions by one lexical binder.
+The node branch shifts every length by two. Argument contexts, empty branches
+and drops do not shift lexical indices. Closing proves those transformations
+commute with the existing concrete contexts, including the length of the used
+Buffer prefix.
+
+`Typing.instantiate` derives the existing concrete source judgment at **every**
+suitable closing and evaluated initial inventory. No execution is a premise.
+`Typing.total_accounted` constructs an actual `CommonDataSourceExecution.Eval`;
+`Typing.every_run_accounted` gives safe heap steps, final heap validity and
+`AccountedPost` for every such execution. Both retain the established initial
+layout, ownership, field-store and frame assumptions.
+
+Lean regressions use open lengths in Case and split applications, including
+distinct used/saved natural parameters and zero/nonzero closing sizes. They
+reject unshifted or missing natural indices, consumed Data/Buffer aliases and
+wrong motives/branch results. The scalar-result Buffer family includes its
+restricted read-only `Lend`, not arbitrary readers. General dependent Pi,
+recursive functions, dependent motives, production-checker refinement and
+native compiler soundness remain outside these theorems.

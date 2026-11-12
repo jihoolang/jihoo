@@ -675,6 +675,16 @@ derives the existing sized ownership judgment and constructs safe execution
 with exact resource accounting. This does not cover all prior sized rules or
 full dependent Pi preservation, and the common full-Core blocker remains open.
 
+
+The symbolic Buffer judgment is now connected to fixed binary Tree source
+rules through value-independent mixed contexts. Arbitrary suitable closings
+derive the existing concrete source typing, actual source execution totality,
+and safe steps, final heap validity and resource accounting for every run.
+Case field binding and split application preserve lexical index shifts and
+retire consumed aliases. This remains the constant-motive, scalar Buffer-result
+fragment; general dependent Pi, recursive functions, arbitrary readers and
+full native soundness remain open. See [mixed source typing](symbolic-core-typing.md#mixed-binary-data-source-typing).
+
 1. **Dependent-type stabilization.** Started: pure normalization retains
    dependent elimination and view motives on symbolic branches, while runtime
    lowering still distributes data cases. The core examples and preservation

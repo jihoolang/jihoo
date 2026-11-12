@@ -1,3 +1,4 @@
+import Jihoo.SymbolicCommonDataChecks
 import Jihoo.CommonDataSourceExecutionChecks
 import Jihoo.RecursiveCaseBodyExamples
 
@@ -326,3 +327,49 @@ import Jihoo.RecursiveCaseBodyExamples
 #print axioms Jihoo.CommonDataSourceExecutionChecks.recursive_drop_source
 #print axioms Jihoo.CommonDataSourceExecutionChecks.nested_accounted
 #print axioms Jihoo.CommonDataSourceExecutionChecks.source_exists
+
+#print axioms Jihoo.SymbolicCommonDataContext.project_entry
+#print axioms Jihoo.SymbolicCommonDataContext.projection
+#print axioms Jihoo.SymbolicCommonDataContext.naturalEnv_skip
+#print axioms Jihoo.SymbolicCommonDataContext.data_lookup
+#print axioms Jihoo.SymbolicCommonDataContext.removeEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.removeEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.retireAll_closes
+#print axioms Jihoo.SymbolicCommonDataContext.retireAll_env
+#print axioms Jihoo.SymbolicCommonDataContext.argumentEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.argumentEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.capturedEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.capturedEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.retainedEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.retainedEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.retireEntry_closes
+#print axioms Jihoo.SymbolicCommonDataContext.retireEntry_env
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.removeHead
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.dataContinuation
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.argumentContext
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.capturedContext
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.continuation
+#print axioms Jihoo.SymbolicCommonDataContext.Closes.bindContext
+#print axioms Jihoo.SymbolicCommonDataSource.Typing.instantiate
+#print axioms Jihoo.SymbolicCommonDataSource.Typing.total_accounted
+#print axioms Jihoo.SymbolicCommonDataSource.Typing.every_run_accounted
+#print axioms Jihoo.SymbolicCommonDataChecks.case_open
+#print axioms Jihoo.SymbolicCommonDataChecks.case_all_lengths
+#print axioms Jihoo.SymbolicCommonDataChecks.case_two_closings
+#print axioms Jihoo.SymbolicCommonDataChecks.split_open
+#print axioms Jihoo.SymbolicCommonDataChecks.split_all_lengths
+#print axioms Jihoo.SymbolicCommonDataChecks.context_transitions
+#print axioms Jihoo.SymbolicCommonDataChecks.case_wrong_index
+#print axioms Jihoo.SymbolicCommonDataChecks.split_wrong_index
+#print axioms Jihoo.SymbolicCommonDataChecks.parent_aliases
+#print axioms Jihoo.SymbolicCommonDataChecks.split_aliases
+#print axioms Jihoo.SymbolicCommonDataChecks.parent_use_rejected
+#print axioms Jihoo.SymbolicCommonDataChecks.consumed_data_rejected
+#print axioms Jihoo.SymbolicCommonDataChecks.consumed_buffer_rejected
+#print axioms Jihoo.SymbolicCommonDataChecks.computed_nil
+#print axioms Jihoo.SymbolicCommonDataChecks.distinct_split_open
+#print axioms Jihoo.SymbolicCommonDataChecks.distinct_split_lengths
+#print axioms Jihoo.SymbolicCommonDataChecks.distinct_split_zero_nonzero
+#print axioms Jihoo.SymbolicCommonDataChecks.wrong_motive_rejected
+#print axioms Jihoo.SymbolicCommonDataChecks.wrong_branch_rejected
+#print axioms Jihoo.SymbolicCommonDataChecks.missing_index_rejected
