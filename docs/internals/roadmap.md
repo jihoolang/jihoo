@@ -1428,3 +1428,13 @@ into a linear formal parameter in that same judgment. All old aliases are
 invalidated, unlike the aliases intentionally retained by Lend. This closes a
 concrete missing application rule, not dependent owned substitution or the
 remaining common-Core/lowering gates.
+
+
+The [executable common erasure compiler](symbolic-core-typing.md#executable-common-erasure-compiler)
+now covers the entire existing common `Lower` grammar, including full supported
+SizedErasure argument islands and both Case branches. Soundness and structural
+completeness connect computation to `Lower`; symbolic typing yields success
+for all sufficiently large fuel. The closing endpoint derives execution and
+accounting under the established environment and ownership invariants. Global
+graph validity, arbitrary cyclic normalization and production native compiler
+refinement remain outside this result.

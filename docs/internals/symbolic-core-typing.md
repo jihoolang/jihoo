@@ -189,3 +189,45 @@ name) are rejected. The old Alloc fixture also checks through prefix zero.
 The symbolic returned and retained lengths shift under the application binder
 and Case binders; source totality and every-run accounting use the unchanged
 evaluator. This adds no higher-order closure or full native verification claim.
+
+
+## Executable common erasure compiler
+
+`CommonDataCoreErasure.compileTarget g fuel slots mask root` computes an
+`Option Term` from the graph and two lexical masks. It accepts no typing,
+`Lower`, or execution proof and uses no `Classical.choose`. Its internal
+`compile` returns a structural certificate alongside the computed term;
+`compileTarget_sound` proves every successful result satisfies `Lower`.
+
+All existing lowering constructors remain supported: scalar and owner
+applications reuse the existing SizedErasure compiler (including dynamic
+allocation, branching, read-lend and owned-lend); Data applications, Drop,
+explicit Buffer Free, literals, variables, constructors and both Case branches
+are traversed directly. Common slots retain Data; the Core mask erases it.
+Data binders extend the masks by `(true, false)`, scalar/owner binders by
+`(true, true)`, and Case inserts two `(true, false)` binders.
+
+`Lower.compileTarget_complete` fixes the target of each finite derivation and
+proves that **every** fuel above a structural bound computes that target. The
+existing SizedErasure completeness lemmas provide the corresponding result for
+Core islands, natural operands and scalar operands. `typing_compiles` derives
+successful compilation from symbolic typing and the existing `Supports`
+relation, without assuming compiler success. `compile_closed_total_accounted`
+combines this with the existing closing, evaluated size inventory, environment
+compaction, tree count, value agreement, Buffer layout, valid heap, ownership
+and field-store assumptions to construct target execution and accounting.
+
+Zero or insufficient traversal fuel, unsupported visited shapes, malformed
+Case motives/branches and unavailable required slots produce `none`. This is
+not a whole-graph validator: unrelated nodes and annotations ignored by `Lower`
+are not validated. A global graph-validity gate would require an additional
+premise for the existing unrestricted `Lower` completeness statement. Finite
+fuel bounds traversal even on cycles; eventual successful compilation is
+claimed only for finite lowering derivations, not arbitrary cyclic graphs.
+The model remains separate from production native compiler refinement.
+
+`CommonDataCoreCompilerChecks` computes dynamic producer and owned-lend/Case
+fixtures, checks distinct mask indices, both Case branches, malformed graphs,
+missing/erased slots, a bounded cyclic failure and 64 nested drops with exact
+fuel boundaries. The aggregate and recursive axiom audits include the new
+soundness, completeness, endpoint and regression theorems.

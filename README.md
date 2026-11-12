@@ -184,6 +184,11 @@ It also connects to fixed binary Tree source typing through symbolic mixed
 contexts, deriving actual source totality and all-run safety/accounting at every
 suitable closing. It does not cover all sized rules or close the common full-Core
 typing gap.
+An [executable common erasure compiler](docs/internals/symbolic-core-typing.md#executable-common-erasure-compiler)
+now computes the common Data/Core target. Structural and typed completeness
+prove success at every sufficiently large fuel; existing closing and ownership
+invariants then give target execution and accounting. This does not prove
+production native compiler refinement or normalization of arbitrary cyclic graphs.
 A relocatable MIR allocation/fill fragment now proves initialization and framing
 inside enclosing programs with existing heap objects, with separately proved
 continuations. A Lean constructor now lowers compact/source allocations into
