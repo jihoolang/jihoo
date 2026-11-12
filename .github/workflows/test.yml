@@ -67,3 +67,5 @@ jobs:
           name: compile-${{ matrix.system }}
           path: out/compile
           if-no-files-found: ignore
+      - name: Check Tree constructor prefixes, relocation and axiom audits
+        run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-tree-create-relocation.sh

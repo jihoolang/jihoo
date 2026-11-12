@@ -18,3 +18,5 @@ jobs:
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-data-reference-drop.sh
       - name: Check fixed binary Tree Drop CFG and axiom audit
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-tree-drop-cfg.sh
+      - name: Check Tree constructor prefixes, relocation and axiom audits
+        run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-tree-create-relocation.sh
