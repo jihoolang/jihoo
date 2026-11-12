@@ -51,6 +51,12 @@ inductive Typing (g : Graph.Graph) : Context → Sizes → Nat → Result → Pr
       sizes[slot]? = some n → BufferType g ctx domain n →
       Typing g (transferred ctx slot) (sizes.map shift) body (kind.rename Nat.succ) →
       Typing g ctx sizes root kind
+  | framedApp : Graph.nodeAt g root = .app function argument →
+      Graph.nodeAt g function = .lam false domain body → p ≤ sizes.length →
+      BufferType g ctx domain n →
+      Typing g (producer ctx p) (sizes.take p) argument (.owner n) →
+      Typing g (callBody ctx p) ((n :: sizes.drop p).map shift) body (kind.rename Nat.succ) →
+      Typing g ctx sizes root kind
   | naturalLet : Graph.nodeAt g root = .app function argument →
       Graph.nodeAt g function = .lam false domain body → Graph.nodeAt g domain = .u64 →
       Index g ctx argument a →
@@ -77,6 +83,15 @@ inductive Typing (g : Graph.Graph) : Context → Sizes → Nat → Result → Pr
       Index g (push .dead ctx) index (shift i) →
       Evidence g (push .dead ctx) proof (shift i) (shift n) →
       Typing g (scalarReturned ctx slot) (sizes.map (fun e => shift (shift e))) body
+        ((kind.rename Nat.succ).rename Nat.succ) → Typing g ctx sizes root kind
+
+  | ownedLend : SizedCoreExecution.OwnedReadLend g root owner refTy length index proof resultTy ownerTy body →
+      Graph.nodeAt g owner = .var k → ctx[k]? = some (.owner slot) → sizes[slot]? = some n →
+      RefType g ctx refTy n → Index g (push .dead ctx) length (shift m) →
+      BufferType g ctx resultTy m → BufferType g (push .dead ctx) ownerTy (shift n) →
+      Index g (push .dead ctx) index (shift i) →
+      Evidence g (push .dead ctx) proof (shift i) (shift n) →
+      Typing g (ownedReturned ctx slot) ((m :: sizes).map (fun e => shift (shift e))) body
         ((kind.rename Nat.succ).rename Nat.succ) → Typing g ctx sizes root kind
 
 end Jihoo.SymbolicCoreTyping

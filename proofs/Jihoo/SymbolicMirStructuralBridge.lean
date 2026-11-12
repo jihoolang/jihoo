@@ -127,18 +127,23 @@ theorem typing_erases_typed (typing : Typing g ctx sizes root kind)
   | owner shape lookup => exact ⟨_, .var shape (maskOK.retained lookup (by simp [EntrySupports])),
       .var (kinds _ _ _ lookup rfl)⟩
   | ownedLet shape lam arg lookup _ _ body ih =>
-      obtain ⟨eb, hb, tb⟩ := ih (maskOK.mapOwners.push rfl)
+      obtain ⟨eb, hb, tb⟩ := ih (maskOK.mapOwners.push (by rfl))
         (kinds.mapOwners.push (newKind := .pointer) (by simp [entryKind]))
       exact ⟨_, .app shape lam (.var arg (maskOK.retained lookup (by simp [EntrySupports]))) hb,
         .app (.var (kinds _ _ _ lookup rfl)) (by simpa using tb)⟩
+  | framedApp shape lam _ _ argument body ia ib =>
+      obtain ⟨ea, ha, ta⟩ := ia maskOK.mapOwners kinds.mapOwners
+      obtain ⟨eb, hb, tb⟩ := ib (maskOK.mapOwners.push (by rfl))
+        (kinds.mapOwners.push (newKind := .pointer) (by simp [entryKind]))
+      exact ⟨_, .app shape lam ha hb, .app (show Typed ks ea .pointer from ta) (by simpa only [resultKind_rename] using tb)⟩
   | naturalLet shape lam ty arg body ih =>
       obtain ⟨_, ta, _, _, ha, hta⟩ := Index.typed arg maskOK kinds
-      obtain ⟨tb, hb, htb⟩ := ih (maskOK.push rfl) (kinds.push (newKind := .natural) (by simp [entryKind]))
+      obtain ⟨tb, hb, htb⟩ := ih (maskOK.push (by rfl)) (kinds.push (newKind := .natural) (by simp [entryKind]))
       exact ⟨_, .app shape lam ha hb, by simpa using Typed.app hta htb⟩
   | allocate shape lam _ alloc length init body ih =>
       obtain ⟨en, _, hn, tn, _, _⟩ := Index.typed length maskOK kinds
       obtain ⟨ev, hv, tv⟩ := Scalar.typed init maskOK kinds
-      obtain ⟨eb, hb, tb⟩ := ih (maskOK.mapOwners.push rfl)
+      obtain ⟨eb, hb, tb⟩ := ih (maskOK.mapOwners.push (by rfl))
         (kinds.mapOwners.push (newKind := .pointer) (by simp [entryKind]))
       exact ⟨_, .app shape lam (.allocate alloc hn hv) hb,
         .app (.allocate tn tv) (by simpa using tb)⟩
@@ -153,16 +158,26 @@ theorem typing_erases_typed (typing : Typing g ctx sizes root kind)
   | branch shape left right yes no iy ino =>
       obtain ⟨el, _, hl, tl, _, _⟩ := Index.typed left maskOK kinds
       obtain ⟨er, _, hr, tr, _, _⟩ := Index.typed right maskOK kinds
-      obtain ⟨ey, hy, ty⟩ := iy (maskOK.push rfl) kinds.proof
+      obtain ⟨ey, hy, ty⟩ := iy (maskOK.push (by rfl)) kinds.proof
       obtain ⟨en, hn, tn⟩ := ino maskOK kinds
       exact ⟨_, .branch shape hl hr hy hn, .ifLt tl tr (by simpa using ty) tn⟩
   | lend shape owner lookup _ _ _ index _ body ih =>
       obtain ⟨ei, _, hi, ti, _, _⟩ := Index.typed index (maskOK.push (bit := true) trivial)
         (kinds.push (newKind := .pointer) (by simp [entryKind]))
-      obtain ⟨eb, hb, tb⟩ := ih ((maskOK.push (entry := .scalar) rfl).push rfl)
+      obtain ⟨eb, hb, tb⟩ := ih ((maskOK.push (entry := .scalar) rfl).push (by rfl))
         ((kinds.push (newKind := .scalar) (by simp [entryKind])).push (newKind := .pointer) (by simp [entryKind]))
       exact ⟨_, .lend shape owner (maskOK.retained lookup (by simp [EntrySupports])) hi hb,
         .lend (kinds _ _ _ lookup rfl) ti (by simpa using tb)⟩
+  | ownedLend shape owner lookup _ _ length _ _ index _ body ih =>
+      obtain ⟨en, _, hn, tn, _, _⟩ := Index.typed length (maskOK.push (bit := true) trivial)
+        (kinds.push (newKind := .pointer) (by simp [entryKind]))
+      obtain ⟨ei, _, hi, ti, _, _⟩ := Index.typed index (maskOK.push (bit := true) trivial)
+        (kinds.push (newKind := .pointer) (by simp [entryKind]))
+      obtain ⟨eb, hb, tb⟩ := ih ((maskOK.mapOwners.push (by rfl)).push (by rfl))
+        ((kinds.mapOwners.push (newKind := .pointer) (by simp [entryKind])).push
+          (newKind := .pointer) (by simp [entryKind]))
+      exact ⟨_, .ownedLend shape owner (maskOK.retained lookup (by simp [EntrySupports])) hn hi hb,
+        .ownedLend (kinds _ _ _ lookup rfl) tn ti (by simpa using tb)⟩
 
 /-- The same fixed compact term is produced by every sufficient compactor fuel,
 and structurally lowers for every local/block base and exit. -/

@@ -73,6 +73,15 @@ theorem Typing.instantiate (typed : Typing g ctx sizes root kind)
       apply ih closing.transferred
       · simpa only [naturalEnv_transferred, shiftSizes, shiftResult] using inventory.shift (value := SizedBufferContext.Entry.dead)
       · simpa only [naturalEnv_transferred, shiftSizes, shiftResult] using result.shift (value := SizedBufferContext.Entry.dead)
+  | framedApp shape lam bound annotation argument body ia ib =>
+      obtain ⟨n, length, _⟩ := annotation.choose_spec.2.total closing
+      apply SizedCoreTyping.Typing.framedApp shape lam
+        (by simpa only [← inventory.length] using bound) (annotation.instantiate length)
+      · exact ia closing.producer ((inventory.take _).congr (naturalEnv_producer closed).symm)
+          (by simpa only [ResultEval, naturalEnv_producer] using length)
+      · apply ib closing.callBody
+        · simpa only [naturalEnv_callBody, shiftSizes] using (SizesEval.cons length (inventory.drop _)).shift (value := SizedBufferContext.Entry.dead)
+        · simpa only [naturalEnv_callBody, shiftResult] using result.shift (value := SizedBufferContext.Entry.dead)
   | naturalLet shape lam domain argument body ih =>
       obtain ⟨n, value, bound⟩ := argument.total closing
       exact .naturalLet shape lam domain (argument.instantiate value)
@@ -114,6 +123,18 @@ theorem Typing.instantiate (typed : Typing g ctx sizes root kind)
       · exact evidence.instantiate closing.dead iv shiftedLength
       · exact ih closing.scalarReturned (by simpa [shiftSizes, List.map_map, Function.comp_def, SizedBufferContext.scalarReturned] using inventory.shift.shift)
           result.shift.shift
+  | ownedLend shape varShape lookup size refTy length resultTy ownerTy index evidence body ih =>
+      obtain ⟨n, found, nv⟩ := inventory.lookup size
+      obtain ⟨m, mv, _⟩ := resultTy.choose_spec.2.total closing
+      obtain ⟨i, iv, _⟩ := index.total closing.dead
+      apply SizedCoreTyping.Typing.ownedLend shape varShape (closing.owner_lookup lookup) found
+        (refTy.instantiate nv) (length.instantiate (index_shift mv)) (resultTy.instantiate mv)
+        (ownerTy.instantiate (index_shift nv)) (index.instantiate iv)
+        (evidence.instantiate closing.dead iv (index_shift nv))
+      apply ih closing.ownedReturned
+      · simpa only [naturalEnv_ownedReturned, shiftSizes, List.map_map, Function.comp_def] using
+          (SizesEval.cons mv inventory).shift.shift (value := SizedBufferContext.Entry.dead)
+      · simpa only [naturalEnv_ownedReturned, shiftResult] using result.shift.shift (value := SizedBufferContext.Entry.dead)
 
 /-- Output interpretation is constructed, not an assumption of the final
 safety theorem. Initial resource lengths are supplied by the input inventory. -/
@@ -133,6 +154,12 @@ theorem Typing.result_total (typed : Typing g ctx sizes root kind)
       refine ⟨resultKind, ?_⟩
       apply ResultEval.unshift (value := SizedBufferContext.Entry.dead)
       simpa only [naturalEnv_transferred, shiftResult] using result
+  | framedApp shape lam bound annotation argument body ia ib =>
+      obtain ⟨n, nv, _⟩ := annotation.choose_spec.2.total closing
+      obtain ⟨rk, result⟩ := ib closing.callBody
+        (((SizesEval.cons nv (inventory.drop _)).shift (value := SizedBufferContext.Entry.dead)).congr
+          (naturalEnv_callBody closed).symm)
+      exact ⟨rk, ResultEval.unshift (by simpa only [naturalEnv_callBody, shiftResult] using result)⟩
   | naturalLet shape lam domain argument body ih =>
       obtain ⟨n, value, bound⟩ := argument.total closing
       obtain ⟨resultKind, result⟩ := ih (closing.nat bound) inventory.shift
@@ -157,6 +184,15 @@ theorem Typing.result_total (typed : Typing g ctx sizes root kind)
       obtain ⟨resultKind, result⟩ := ih closing.scalarReturned
         (by simpa [shiftSizes, List.map_map, Function.comp_def, SizedBufferContext.scalarReturned] using inventory.shift.shift)
       exact ⟨resultKind, result.unshift.unshift⟩
+  | ownedLend shape varShape lookup size refTy length resultTy ownerTy index evidence body ih =>
+      obtain ⟨m, mv, _⟩ := resultTy.choose_spec.2.total closing
+      obtain ⟨rk, result⟩ := ih closing.ownedReturned
+        (by simpa only [naturalEnv_ownedReturned, shiftSizes, List.map_map, Function.comp_def] using
+          (SizesEval.cons mv inventory).shift.shift (value := SizedBufferContext.Entry.dead))
+      refine ⟨rk, ?_⟩
+      apply ResultEval.unshift (value := SizedBufferContext.Entry.dead)
+      apply ResultEval.unshift (value := SizedBufferContext.Entry.dead)
+      simpa only [naturalEnv_ownedReturned, shiftResult] using result
 
 /-- A value-independent derivation constructs a terminating source execution,
 its safe primitive steps, exact ownership accounting, and the interpreted

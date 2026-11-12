@@ -7,7 +7,7 @@ case "$actual" in
   "Lean (version $expected,"*) ;;
   *) printf 'Expected Lean %s; got %s\n' "$expected" "$actual" >&2; exit 1 ;;
 esac
-lake build Jihoo.CommonDataSourceExecutionChecks Jihoo.SymbolicCommonDataChecks --wfail
+lake build Jihoo.CommonDataSourceExecutionChecks Jihoo.SymbolicCommonDataChecks Jihoo.SymbolicCompositionChecks --wfail
 report=$(mktemp)
 generated=$(mktemp)
 trap 'rm -f "$report" "$generated"' EXIT
@@ -20,8 +20,8 @@ with open(sys.argv[1], encoding="utf-8") as audit:
     report = audit.read()
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-if len(entries) + len(closed) != 360:
-    raise SystemExit("Expected 360 elaborated theorem audits")
+if len(entries) + len(closed) != 388:
+    raise SystemExit("Expected 388 elaborated theorem audits")
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - {
         "propext", "Quot.sound", "Classical.choice"

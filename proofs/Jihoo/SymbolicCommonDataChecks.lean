@@ -124,8 +124,7 @@ theorem consumed_buffer_rejected : ¬ SymbolicCoreTyping.Typing
   generalize he : SymbolicCoreContext.Result.owner (.var 5) = result at h
   cases h <;> simp_all [project,projectEntry,capturedContext,capturedEntry,mixed]
   all_goals subst_vars
-  rename_i read _
-  cases read <;> simp_all
+  all_goals rename_i read _; cases read <;> simp_all
 
 /-- All the old non-Buffer rules remain constructively usable. -/
 theorem computed_nil : Typing CommonDataSourceRulesChecks.nodes [.data 0] 1 [] 24 .data :=

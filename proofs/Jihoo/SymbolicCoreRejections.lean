@@ -11,12 +11,18 @@ private theorem readLend_not_var
     Graph.nodeAt g root ≠ .var k := by
   cases h <;> simp_all
 
+private theorem ownedReadLend_not_var
+    (h : SizedCoreExecution.OwnedReadLend g root owner refTy length index proof resultTy ownerTy body) :
+    Graph.nodeAt g root ≠ .var k := by
+  cases h <;> simp_all
+
 /-- A dead lexical name cannot acquire either scalar or owner authority. -/
 theorem dead_var_rejected (shape : Graph.nodeAt g root = .var k)
     (dead : ctx[k]? = some .dead) : ¬ Typing g ctx sizes root kind := by
   intro typed
   cases typed <;> try simp_all
   case lend => exact readLend_not_var ‹_› shape
+  case ownedLend => exact ownedReadLend_not_var ‹_› shape
 
 /-- Both old aliases are rejected after transferring the selected capability. -/
 theorem transferred_aliases_rejected
