@@ -4275,3 +4275,71 @@ they also cover null, one-past, dangling transport, non-forgery and the unchange
 retained scalar fixture. The new theorems join the standard axiom audit.
 Native pointer encoding, layouts, function calls, allocator reuse, recursive
 Tree Drop and full CFG/compiler correctness are separate follow-up milestones.
+
+### Direct call/return over reference CFGs
+
+`Jihoo.ReferenceCalls` adds a separate first-order call machine without changing
+`ReferenceCfg`, `BoundedMir`, or their existing embeddings. Its stable API is:
+
+- `Call`: `function : Nat`, `arguments : Array Operand`,
+  `destination : Place`, `continuation : Nat`.
+- `Exit`: `.call call` or `.retUnit`.
+- `Code`: `base : ReferenceCfg.Code`, `exits : Array (Option Exit)`.
+- `Function`: `code : Code`, `parameters : Array Nat`; `Program := Array Function`.
+- `State`: `function : Nat`, `frame : ReferenceCfg.Frame`,
+  `stack : List Continuation`. A continuation stores caller function, continuation
+  block, locals, and unit destination. It contains no heap.
+- `tick program state`, `execute fuel program state`, and `stackDepth state`.
+  `Outcome` contains a reference-CFG `Value`, the full final `State`, and events.
+
+At the exact terminator position, `exits[block]?.join` replaces the base
+terminator entirely. Missing overrides run the original CFG transition.
+Overrides cannot skip statements or rescue an invalid instruction position.
+A convenient call/return block therefore has a base `.ret` placeholder and a
+matching override. `retUnit` produces unit without reading local slot zero.
+Ordinary `.ret` retains the old i64 return behavior at top level; it is rejected
+when a caller awaits unit. Internal scalar returns and higher-order dispatch
+are not provided.
+
+Call entry evaluates all operands in the caller, creates fresh callee locals,
+and binds arguments to ordered, distinct parameter slots using existing typed
+local writes. The argument count must match. References, including null and
+provenance words, keep their identity. A call requires an existing callee,
+a valid caller continuation block, and an existing non-dereferenced unit
+destination. The callee may recurse using the same function index; code size
+does not depend on input data. Invalid callee code can become stuck normally;
+this API is not a global validity/admission checker.
+
+The sole shared heap lives in the active frame. Return restores caller locals
+and its continuation with the callee's current heap, then writes unit to the
+saved destination. `enter_stack_heap`/`enter_depth` prove heap preservation and
+one pushed continuation; `leave_stack_heap`/`leave_depth` prove preservation of
+the current heap and one popped continuation. No implicit destructor runs at
+call or return. The abstract heap retains its existing access and release checks.
+
+Execution fuel decreases once for each statement or terminator, including each
+call and return. It is never reset per function and is not a stack bound.
+`Step` supplies independent relational rules, `tick_sound`/`tick_complete` relate
+the executable transition, `Step.deterministic` proves determinism, and
+`execute_sound` gives the complete event trace.
+
+`embedCode`, `embedProgram`, `embedState`, `embedMachine`, and `embedOutcome`
+embed the old call-free model. `tick_embed` and `execute_embed` give exact Option
+equalities for arbitrary old code, states, and fuel, preserving failures as well
+as returned values, events, locals, control positions, and every heap cell.
+`step_embed`/`step_reflect` and `steps_embed`/`steps_reflect` also preserve and
+reflect arbitrary finite execution prefixes. `execute_scalar` composes this with
+`ReferenceCfg.Scalar.execute_eq`, so the existing BoundedMir embedding survives.
+
+`ReferenceCallsChecks` checks a fixed four-block recursive chain release: two
+nodes require 17 fuel, yield exactly two frees, and return with an empty stack;
+16 fuel fails. A separate caller sees a callee's heap write and restored locals.
+Negative checks cover arity/type/slot errors, unknown functions, invalid
+continuations/destinations, uninitialized arguments, duplicate parameter slots,
+internal scalar returns, and malformed override positions. Existing reference
+cycle success and insufficient-fuel cases are retained.
+
+This establishes a reusable basis for recursive Tree Drop CFGs, not the Tree
+Drop correspondence itself. It introduces no Tree oracle or size-dependent CFG
+unrolling, and claims neither the production native ABI nor general higher-order
+calls. The production compiler is unchanged.
