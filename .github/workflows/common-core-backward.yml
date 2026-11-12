@@ -13,4 +13,4 @@ jobs:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
       - name: Check backward simulation and dedicated axiom audit
-        run: nix develop --command bash proofs/check-common-core-backward.sh
+        run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-core-backward.sh
