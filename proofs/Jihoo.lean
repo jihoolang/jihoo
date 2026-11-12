@@ -274,3 +274,5 @@ import Jihoo.SizedMirStructuralChecks
 import Jihoo.SymbolicMirStructuralBridge
 import Jihoo.SymbolicMirLoweringTotality
 import Jihoo.SymbolicMirStructuralChecks
+
+import Jihoo.SymbolicCommonDataChecks
