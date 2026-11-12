@@ -151,6 +151,12 @@ theorem reflect (typed : CommonDataSourceRules.Typing g ctx count sizes term kin
     have ht := core_shape ty
     cases run <;> simp_all
     exact .allocate shape fn ty (by simpa only [sourceCore_eq] using (by assumption : SizedCoreExecution.Eval _ _ _ _ _ _ _)) (ih (by assumption))
+  | bufferApp shape fn ty limit annotation arg body ih =>
+    have h := core_shape shape
+    have hf := core_shape fn
+    have ht := core_shape ty
+    cases run <;> simp_all
+    exact .allocate shape fn ty (by simpa only [sourceCore_eq] using (by assumption : SizedCoreExecution.Eval _ _ _ _ _ _ _)) (ih (by assumption))
   | freeBuffer shape owner lookup bound body ih =>
     have h := core_shape shape
     have ho := core_shape owner

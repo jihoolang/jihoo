@@ -113,4 +113,43 @@ theorem select_frame (selected : LinearHeapPrograms.Select owners slot x rest)
   | nil => simpa using right
   | cons y ys ih => simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using LinearHeapPrograms.Select.there ih
 
+/-- Retire the consumed Buffer prefix while preserving every Data slot. The
+returned owner occupies the first Buffer slot and a new lexical binder. -/
+def bufferCallEntry (count p : Nat) : Entry → Entry
+  | .buffer k => if count + p ≤ k then .buffer (k-p+1) else .dead
+  | e => e
+
+def bufferCall (count p : Nat) (ctx : List Entry) :=
+  Entry.buffer count :: ctx.map (bufferCallEntry count p)
+
+theorem bufferCall_consumed (h : k < count+p) :
+    bufferCallEntry count p (.buffer k) = .dead := by
+  simp [bufferCallEntry, show ¬ count+p ≤ k by omega]
+
+theorem rel_bufferCall (h : Rel (caps trees owners) e v) :
+    Rel (caps trees (x :: owners.drop p)) (bufferCallEntry trees.length p e) v := by
+  cases e with
+  | buffer k =>
+    by_cases bound : trees.length+p ≤ k
+    · obtain ⟨y,lookup,eq⟩ := h
+      obtain ⟨_,lookup⟩ := caps_buffer lookup
+      simp only [bufferCallEntry,bound,ite_true]
+      refine ⟨y, ?_, eq⟩
+      apply buffer_in_caps (by omega)
+      simpa [show k-p+1-trees.length = (k-trees.length-p)+1 by omega,
+        List.getElem?_drop, show p+(k-trees.length-p) = k-trees.length by omega] using lookup
+    · simp [bufferCallEntry,bound,Rel]
+  | data k =>
+    obtain ⟨tree,lookup,eq⟩ := h
+    exact ⟨tree,data_in_caps (caps_data lookup),eq⟩
+  | nat _ | scalar | ghost | dead => exact h
+
+theorem agrees_bufferCall (h : Agrees (caps trees owners) ctx env) :
+    Agrees (caps trees (x :: owners.drop p))
+      (bufferCall trees.length p ctx) (.buffer x :: env) := by
+  refine .cons ⟨x,buffer_in_caps (by omega) (by simp),rfl⟩ ?_
+  induction h with
+  | nil => exact .nil
+  | cons head tail ih => exact .cons (rel_bufferCall head) ih
+
 end Jihoo.CommonData

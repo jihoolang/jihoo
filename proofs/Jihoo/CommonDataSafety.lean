@@ -170,6 +170,67 @@ theorem Typing.total_accounted (typed : Typing g ctx count sizes term kind)
       (.allocate (by simp [core_at,alloc,projectNode]) lengthRun initial) run,
       .cons (SizedBufferHeap.step_project step) steps,vt,?_⟩
     simpa [SizedBufferHeap.Event.project] using AccountedPost.compose first arranged
+  | @bufferApp term fn arg ty body lengthTy p count ctx n kind sizes shape lam tyShape limit annotation producer consumer ih =>
+    have projected := project_agrees agreement
+    simp only [List.length_map] at projected
+    rw [length] at projected
+    have argAgree := projected.producer (p := p)
+    have bufferOwned : Owns s.buffers.heap owners := by
+      apply OwnedApplicationFrame.owns_right (xs := footprint (trees.map Capability.data))
+      simpa [caps,RecursiveCaseBody.footprint_append,footprint_buffers] using
+        OwnedApplicationFrame.owns_left owned
+    have arranged : Owns s.buffers.heap
+        (owners.take p ++ (footprint (caps trees (owners.drop p)) ++ frame)) := by
+      apply owns_permute owned
+      have perm : (footprint (trees.map Capability.data) ++ owners).Perm
+          (owners.take p ++ (footprint (trees.map Capability.data) ++ owners.drop p)) := by
+        have eq : footprint (trees.map Capability.data) ++ owners =
+            (footprint (trees.map Capability.data) ++ owners.take p) ++ owners.drop p := by
+          rw [List.append_assoc, List.take_append_drop]
+        rw [eq]
+        simpa only [List.append_assoc] using
+          (List.perm_append_comm (l₁ := footprint (trees.map Capability.data))
+            (l₂ := owners.take p)).append_right (owners.drop p)
+      simpa only [caps,RecursiveCaseBody.footprint_append,footprint_buffers,List.append_assoc]
+        using perm.append_right frame
+    obtain ⟨result,before,middle,first,steps,vm,post,account⟩ :=
+      producer.total_accounted argAgree layout.take valid (OwnedApplicationFrame.owns_left arranged)
+    cases result <;> simp only [SizedCoreTyping.Post] at post
+    case owner x =>
+      have kept := OwnedApplicationFrame.recombine valid arranged
+        (SizedBufferHeap.steps_project steps) post.1 first.lease_frame account
+      have fs : Fields s.cells (caps trees (x :: owners.drop p)) := by
+        intro c member
+        cases c with
+        | buffer _ => trivial
+        | data tree =>
+          apply fields (.data tree)
+          simp only [caps, List.mem_append, List.mem_map] at member ⊢
+          rcases member with ⟨y,hy,eq⟩ | ⟨y,hy,eq⟩
+          · exact Or.inl ⟨y,hy,eq⟩
+          · cases eq
+      obtain ⟨v,after,t,second,tail,vt,final⟩ :=
+        ih (owners := x :: owners.drop p) (s := ⟨middle,s.cells⟩) length
+          (by simpa [length] using agrees_bufferCall (p := p) agreement)
+          (layout.recombine valid bufferOwned steps post.2) vm
+          (by
+            apply owns_permute kept
+            simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers]
+            simpa [List.append_assoc] using
+              (List.perm_append_comm (l₁ := [x])
+                (l₂ := footprint (trees.map Capability.data))).append_right (owners.drop p ++ frame)) fs
+      have last := final.permute (show (footprint (caps trees (x :: owners.drop p))).Perm
+          ([x] ++ footprint (caps trees (owners.drop p))) from by
+        simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers]
+        simp)
+      have firstAccount : Account (owners.take p) [x] (before.map SizedBufferHeap.Event.project) := account
+      refine ⟨v,_,t,.allocate shape lam tyShape first second,
+        steps_append (SizedBufferHeap.steps_project steps) tail,vt,?_⟩
+      apply (AccountedPost.compose firstAccount last).permute
+      simp only [caps,RecursiveCaseBody.footprint_append,footprint_buffers]
+      have perm := (List.perm_append_comm (l₁ := owners.take p)
+        (l₂ := footprint (trees.map Capability.data))).append_right (owners.drop p)
+      simpa [List.append_assoc] using perm
   | freeBuffer shape owner selected bound body ih =>
     obtain ⟨x,rest,selection⟩ := select_total (xs := owners) (by rw [layout.length]; exact bound)
     obtain ⟨value,lookup,y,cap,rfl⟩ := agreement.lookup selected

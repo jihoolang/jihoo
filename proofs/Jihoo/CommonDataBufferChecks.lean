@@ -121,6 +121,28 @@ theorem second_alias_rejected : ¬ CommonDataSourceRules.Typing selectedNodes
     cases lookup
   all_goals simp_all
 
+private theorem allocation_length
+    (typed : SizedCoreTyping.Typing g ctx sizes term (.owner n))
+    (nodeShape : ScopedLend.Graph.nodeAt g term = .alloc len init) :
+    DependentBufferIndices.Eval g (SizedBufferContext.naturalEnv ctx) len n := by
+  cases typed with
+  | owner h _ => cases nodeShape.symm.trans h
+  | ownedLet h _ _ _ _ _ _ => cases nodeShape.symm.trans h
+  | framedApp h _ _ _ _ _ => cases nodeShape.symm.trans h
+  | naturalLet h _ _ _ _ => cases nodeShape.symm.trans h
+  | allocate h _ _ _ _ _ _ => cases nodeShape.symm.trans h
+  | allocation h length _ =>
+    cases nodeShape.symm.trans h
+    exact length
+  | free h _ _ _ _ => cases nodeShape.symm.trans h
+  | branch h _ _ _ _ => cases nodeShape.symm.trans h
+  | lend h _ _ _ _ _ _ _ _ =>
+    cases h with
+    | intro root _ _ _ _ _ _ => cases nodeShape.symm.trans root
+  | ownedLend h _ _ _ _ _ _ _ _ _ _ =>
+    cases h with
+    | intro root _ _ _ _ _ _ => cases nodeShape.symm.trans root
+
 def wrongSize : CommonDataSource.Graph := #[
   .core (.natural 1),.core (.natural 2),.core (.buffer 1),.core (.integer 0),
   .core (.alloc 0 3),.con 0 0 [],.core (.var 0),.core (.free 6 5),
@@ -148,6 +170,25 @@ theorem wrong_size_rejected : ¬ CommonDataSourceRules.Typing wrongSize [] 0 [] 
       .literal (by rw [← CommonDataSourceExecution.sourceCore_eq]; simp [CommonDataSourceExecution.sourceCore,CommonDataSourceExecution.coreNode,ScopedLend.Graph.nodeAt,wrongSize]) (by decide)
     have a := annotation.unique two
     have b := len.deterministic one
+    omega
+  case bufferApp lam ty annotation limit producer appShape body =>
+    cases ht.symm.trans appShape
+    cases hf.symm.trans lam
+    have two : DependentBufferIndices.BufferLength
+        (CommonData.coreGraph (CommonDataSourceRules.graph wrongSize))
+        (SizedBufferContext.naturalEnv (RecursiveBodyProjection.context 0 [])) 2 2 :=
+      ⟨1,by rw [← CommonDataSourceExecution.sourceCore_eq]; simp [CommonDataSourceExecution.sourceCore,CommonDataSourceExecution.coreNode,ScopedLend.Graph.nodeAt,wrongSize],
+        .literal (by rw [← CommonDataSourceExecution.sourceCore_eq]; simp [CommonDataSourceExecution.sourceCore,CommonDataSourceExecution.coreNode,ScopedLend.Graph.nodeAt,wrongSize]) (by decide)⟩
+    have one : DependentBufferIndices.Eval
+        (CommonData.coreGraph (CommonDataSourceRules.graph wrongSize))
+        (SizedBufferContext.naturalEnv (RecursiveBodyProjection.context 0 [])) 0 1 :=
+      .literal (by rw [← CommonDataSourceExecution.sourceCore_eq]; simp [CommonDataSourceExecution.sourceCore,CommonDataSourceExecution.coreNode,ScopedLend.Graph.nodeAt,wrongSize]) (by decide)
+    have a := annotation.unique two
+    have allocShape : ScopedLend.Graph.nodeAt
+        (CommonData.coreGraph (CommonDataSourceRules.graph wrongSize)) 4 = .alloc 0 3 := by
+      rw [← CommonDataSourceExecution.sourceCore_eq]
+      simp [CommonDataSourceExecution.sourceCore,CommonDataSourceExecution.coreNode,ScopedLend.Graph.nodeAt,wrongSize]
+    have b := (allocation_length producer allocShape).deterministic one
     omega
   all_goals simp_all
 

@@ -66,6 +66,16 @@ inductive Typing (g : CommonDataSource.Graph) :
       SizedCoreTyping.ScalarTyped (CommonData.coreGraph (graph g)) (context count ctx) init →
       Typing g (CommonData.freshBuffer count ctx) count (n :: sizes) body kind →
       Typing g ctx count sizes term kind
+  /-- A direct Buffer application consumes only the selected prefix. -/
+  | bufferApp : CommonDataSource.nodeAt g term = .core (.app fn arg) →
+      CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
+      CommonDataSource.nodeAt g ty = .core (.buffer lengthTy) → p ≤ sizes.length →
+      DependentBufferIndices.BufferLength (CommonData.coreGraph (graph g))
+        (SizedBufferContext.naturalEnv (context count ctx)) ty n →
+      SizedCoreTyping.Typing (CommonData.coreGraph (graph g))
+        (SizedBufferContext.producer (context count ctx) p) (sizes.take p) arg (.owner n) →
+      Typing g (CommonData.bufferCall count p ctx) count (n :: sizes.drop p) body kind →
+      Typing g ctx count sizes term kind
   | freeBuffer : CommonDataSource.nodeAt g term = .core (.free owner body) →
       CommonDataSource.nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
       slot < sizes.length →
@@ -121,6 +131,8 @@ theorem Typing.elaborate (typed : Typing g ctx count sizes term kind) :
   | allocate shape fn ty annotation alloc len init body ih =>
     exact .allocate (core_shape shape) (core_shape fn) (core_shape ty) annotation
       (core_shape alloc) len init ih
+  | bufferApp shape fn ty limit annotation arg body ih =>
+    exact .bufferApp (core_shape shape) (core_shape fn) (core_shape ty) limit annotation arg ih
   | freeBuffer shape owner lookup bound body ih =>
     exact .freeBuffer (core_shape shape) (core_shape owner) lookup bound ih
   | dataLet shape fn ty arg body ia ib =>

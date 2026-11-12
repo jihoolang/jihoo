@@ -49,3 +49,24 @@ logical accounting of empty capabilities, native layout/address reuse and
 full-language ownership remain outside this theorem. Allocation-accounting
 assumptions and conditional leak-freedom limits remain those of
 [common accounting](COMMON_DATA_ACCOUNTING.md).
+
+
+## Buffer producer/consumer applications
+
+`bufferApp` selects a prefix of the Buffer inventory for any
+`SizedCoreTyping.Typing ... (.owner n)` producer. It preserves all Data
+capabilities and the remaining Buffer frame, then checks the common consumer
+with the returned Buffer prepended. `bufferCall` retains lexical positions,
+invalidates every old consumed alias and preserves retained aliases. The runtime
+uses the existing `Eval.allocate` rule; there is no new evaluator or assumed
+post-state. SizedCore totality, lease framing and exact allocation accounting
+establish one returned owner, and the common induction composes the consumer.
+
+The symbolic source rule shifts both the returned length and retained lengths
+under the binder. Closing and the independent source evaluator correspondence
+feed the existing totality and every-run accounting results. Checks cover a
+producer which frees one Buffer and returns another, a retained third Buffer,
+Data Case with release in both arms, all suitable symbolic lengths, consumed
+and retained-alias rejection, and the old direct Alloc graph through prefix zero.
+Only uniform Buffers and direct calls are covered; higher-order closure and
+full native compiler verification are not claimed.
