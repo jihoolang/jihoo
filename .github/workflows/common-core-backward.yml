@@ -1,0 +1,16 @@
+name: Common Core backward proofs
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backward-proofs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Check backward simulation and dedicated axiom audit
+        run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-core-backward.sh
