@@ -1,7 +1,7 @@
 import Jihoo.SymbolicCommonDataContext
 
 /-! Symbolic source typing for the fixed binary Tree, constant motive and
-scalar Buffer-result fragment. Closing produces the established source rules
+recursive uniform Buffer lifecycle fragment. Closing produces the established source rules
 and their actual execution, without an execution premise. -/
 namespace Jihoo.SymbolicCommonDataSource
 open SymbolicCommonDataContext
@@ -25,6 +25,20 @@ inductive Typing (g : CommonDataSource.Graph) :
       CommonDataSource.nodeAt g ty = .core .i64 →
       SymbolicCoreTyping.Typing (CommonDataSourceExecution.sourceCore g) (project count ctx) sizes arg .scalar →
       Typing g (continuation count ctx) count [] body kind →
+      Typing g ctx count sizes term kind
+  | allocate : CommonDataSource.nodeAt g term = .core (.app fn arg) →
+      CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
+      CommonDataSource.nodeAt g ty = .core (.buffer lengthTy) →
+      SymbolicCoreTyping.BufferType (CommonDataSourceExecution.sourceCore g) (project count ctx) ty n →
+      CommonDataSource.nodeAt g arg = .core (.alloc len init) →
+      SymbolicCoreTyping.Index (CommonDataSourceExecution.sourceCore g) (project count ctx) len n →
+      SymbolicCoreTyping.Scalar (CommonDataSourceExecution.sourceCore g) (project count ctx) init →
+      Typing g (freshBuffer count ctx) count (shiftSizes (n :: sizes)) body kind →
+      Typing g ctx count sizes term kind
+  | freeBuffer : CommonDataSource.nodeAt g term = .core (.free owner body) →
+      CommonDataSource.nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
+      slot < sizes.length →
+      Typing g (consumeBuffer (count+slot) ctx) count (sizes.eraseIdx slot) body kind →
       Typing g ctx count sizes term kind
   | dataLet : CommonDataSource.nodeAt g term = .core (.app fn arg) →
       CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
@@ -84,6 +98,24 @@ theorem Typing.instantiate (typed : Typing g ctx count sizes term kind)
         arg.instantiate (resultKind := .scalar) (projection closing)
           (inventory.congr (naturalEnv_skip closed).symm) trivial
     · exact ih closing.continuation .nil
+  | allocate shape fn ty annotation alloc len init body ih =>
+    obtain ⟨n,value,bound⟩ := len.total (projection closing)
+    obtain ⟨indexRoot,domain,indexTyped⟩ := annotation
+    apply CommonDataSourceRules.Typing.allocate shape fn ty
+    · exact ⟨indexRoot,by simpa only [CommonDataSourceExecution.sourceCore_eq] using domain,
+        ⟨_,by simpa only [CommonDataSourceExecution.sourceCore_eq] using indexTyped.represents,value⟩⟩
+    · exact alloc
+    · exact ⟨_,by simpa only [CommonDataSourceExecution.sourceCore_eq] using len.represents,value⟩
+    · simpa only [CommonDataSourceExecution.sourceCore_eq] using init.instantiate (projection closing)
+    · apply ih closing.freshBuffer
+      apply sizes_cons
+      apply SizesEval.congr _ (freshBufferEntry_env closed).symm
+      exact .cons (by simpa only [naturalEnv_skip] using value) inventory
+  | freeBuffer shape owner lookup bound body ih =>
+    apply CommonDataSourceRules.Typing.freeBuffer shape owner (buffer_lookup closing lookup)
+    · simpa only [inventory.length] using bound
+    · apply ih closing.consumeBuffer
+      exact (inventory.eraseIdx _).congr (consumeBufferEntry_env closed).symm
   | dataLet shape fn ty arg body ia ib =>
     exact .dataLet shape fn ty (ia closing inventory) (ib closing.dataContinuation .nil)
   | dataLetSplit counts sizes shape fn ty arg body ia ib =>

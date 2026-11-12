@@ -1,8 +1,9 @@
 import Jihoo.CommonDataDestroy
 import Jihoo.CommonDataPartition
+import Jihoo.CommonDataBufferContext
 
 /-! One closing-instance judgment for binary data reconstruction and existing
-scalar Buffer Core and store-driven binary Drop. No dependent motives are admitted. -/
+scalar Buffer Core, recursive Buffer allocation/release, and binary Drop. No dependent motives are admitted. -/
 namespace Jihoo.CommonData
 open RecursiveFieldRuntime RecursiveLexicalFields RecursiveBodyProjection
 
@@ -23,6 +24,22 @@ inductive Typing (g : Graph) : List Entry → Nat → List Nat → Nat → Resul
       nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .core .i64 →
       SizedCoreTyping.Typing (coreGraph g) (context count ctx) sizes arg .scalar →
       Typing g (continuation count ctx) count [] body kind →
+      Typing g ctx count sizes term kind
+  | allocate : nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) →
+      nodeAt g ty = .core (.buffer lengthTy) →
+      DependentBufferIndices.BufferLength (coreGraph g)
+        (SizedBufferContext.naturalEnv (context count ctx)) ty n →
+      nodeAt g arg = .core (.alloc len init) →
+      DependentBufferIndices.Eval (coreGraph g)
+        (SizedBufferContext.naturalEnv (context count ctx)) len n →
+      SizedCoreTyping.ScalarTyped (coreGraph g) (context count ctx) init →
+      Typing g (freshBuffer count ctx) count (n :: sizes) body kind →
+      Typing g ctx count sizes term kind
+  | freeBuffer : nodeAt g term = .core (.free owner body) →
+      nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
+      slot < sizes.length →
+      Typing g (consumeBuffer (count+slot) ctx) count (sizes.eraseIdx slot) body kind →
       Typing g ctx count sizes term kind
   | dataLet : nodeAt g term = .core (.app fn arg) →
       nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
@@ -68,6 +85,18 @@ inductive Eval (g : Graph) : List Value → Nat → State → Value →
       SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers (.scalar n) before middle →
       Eval g (.scalar n :: env) body ⟨middle,s.cells⟩ result after t →
       Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  /-- The runtime evaluates an owner argument independently. Typing restricts
+  this rule to a direct Alloc and checks the body with the common judgment. -/
+  | allocate : nodeAt g term = .core (.app fn arg) →
+      nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .core (.buffer lengthTy) →
+      SizedCoreExecution.Eval (coreGraph g) (environment env) arg s.buffers
+        (.owner x) before middle →
+      Eval g (.buffer x :: env) body ⟨middle,s.cells⟩ result after t →
+      Eval g env term s result (before.map SizedBufferHeap.Event.project ++ after) t
+  | freeBuffer : nodeAt g term = .core (.free owner body) →
+      nodeAt g owner = .core (.var index) → env[index]? = some (.buffer x) →
+      Eval g env body ⟨SizedBufferHeap.release s.buffers x,s.cells⟩ result events t →
+      Eval g env term s result (.free x :: events) t
   | dataLet : nodeAt g term = .core (.app fn arg) →
       nodeAt g fn = .core (.lam false ty body) → nodeAt g ty = .ind 0 [] →
       Eval g env arg s (.data ref) before middle →

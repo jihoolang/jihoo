@@ -61,6 +61,62 @@ theorem data_lookup {k : Nat} {ctx : Context} {closed : List ClosedEntry} (h : C
   obtain ⟨e, lookup, rel⟩ := h.lookup found
   cases e <;> simp_all [Entry.Closes]
 
+theorem buffer_lookup {k : Nat} {ctx : Context} {closed : List ClosedEntry}
+    (h : Closes ctx closed) (found : ctx[k]? = some (Entry.buffer slot)) :
+    closed[k]? = some (RecursiveLexicalFields.Entry.buffer slot) := by
+  obtain ⟨e, lookup, rel⟩ := h.lookup found
+  cases e <;> simp_all [Entry.Closes]
+
+def freshBufferEntry : Entry → Entry
+  | .buffer k => .buffer (k+1)
+  | e => e
+
+def consumeBufferEntry (slot : Nat) : Entry → Entry
+  | .buffer k => if k = slot then .dead else .buffer (if slot < k then k-1 else k)
+  | e => e
+
+def freshBuffer (count : Nat) (ctx : Context) := Entry.buffer count :: ctx.map freshBufferEntry
+def consumeBuffer (slot : Nat) (ctx : Context) := ctx.map (consumeBufferEntry slot)
+
+theorem freshBufferEntry_closes (h : Entry.Closes e c) :
+    Entry.Closes (freshBufferEntry e) (CommonData.freshBufferEntry c) := by
+  cases e <;> cases c <;> simp_all [Entry.Closes, freshBufferEntry, CommonData.freshBufferEntry]
+
+theorem consumeBufferEntry_closes (h : Entry.Closes e c) :
+    Entry.Closes (consumeBufferEntry slot e) (CommonData.consumeBufferEntry slot c) := by
+  cases e <;> cases c <;> simp_all [Entry.Closes, consumeBufferEntry, CommonData.consumeBufferEntry]
+  rename_i k
+  by_cases eq : k = slot <;> simp [eq]
+
+theorem freshBufferEntry_env (closed : List ClosedEntry) :
+    naturalEnv (closed.map CommonData.freshBufferEntry) = naturalEnv closed := by
+  funext k
+  simp only [naturalEnv,SizedBufferContext.naturalEnv,RecursiveBodyProjection.context,
+    List.getElem?_map,Option.map_map]
+  cases h : closed[k]? with
+  | none => rfl
+  | some e => cases e <;> simp [CommonData.freshBufferEntry,RecursiveBodyProjection.entry]
+
+theorem consumeBufferEntry_env (closed : List ClosedEntry) :
+    naturalEnv (closed.map (CommonData.consumeBufferEntry slot)) = naturalEnv closed := by
+  funext k
+  simp only [naturalEnv,SizedBufferContext.naturalEnv,RecursiveBodyProjection.context,
+    List.getElem?_map,Option.map_map]
+  cases h : closed[k]? with
+  | none => rfl
+  | some e =>
+    cases e <;> simp [CommonData.consumeBufferEntry,RecursiveBodyProjection.entry]
+    rename_i k
+    by_cases eq : k = slot <;> simp [eq]
+
+theorem Closes.freshBuffer (h : Closes ctx closed) :
+    Closes (freshBuffer count ctx) (CommonData.freshBuffer count closed) :=
+  .cons rfl (ListRel.map h (by intro a b hab; exact freshBufferEntry_closes hab))
+
+theorem Closes.consumeBuffer (h : Closes ctx closed) :
+    Closes (consumeBuffer slot ctx) (CommonData.consumeBuffer slot closed) :=
+  ListRel.map h (by intro a b hab; exact consumeBufferEntry_closes hab)
+
 def removeEntry : Entry → Entry
   | .data 0 | .buffer 0 => .dead
   | .data (k+1) => .data k

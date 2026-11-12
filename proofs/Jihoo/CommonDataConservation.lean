@@ -20,6 +20,14 @@ def AccountedPost (kind : Result) (s : State) (v : Value) (frame input : List Na
   | .data => ∃ tree, v = .data (root tree) ∧ Represents s.cells tree ∧
       Owns s.buffers.heap (tree.owners ++ frame) ∧ Account input tree.owners events
 
+theorem AccountedPost.map_account (post : AccountedPost kind s v frame input events)
+    (change : ∀ {output}, Account input output events → Account input' output events') :
+    AccountedPost kind s v frame input' events' := by
+  cases kind with
+  | scalar => exact ⟨post.1,post.2.1,change post.2.2⟩
+  | data => obtain ⟨tree,eq,rep,owned,account⟩ := post
+            exact ⟨tree,eq,rep,owned,change account⟩
+
 theorem AccountedPost.toPost (h : AccountedPost kind s v frame input events) : Post kind s v frame := by
   cases kind with
   | scalar => exact ⟨h.1,h.2.1⟩

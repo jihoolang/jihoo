@@ -86,11 +86,13 @@ theorem aliases_retired : dataContinuation [.data 0,.data 0,.buffer 1,.nat 3,.sc
 private theorem application_domain (typed : Typing g ctx count sizes term kind)
     (shape : nodeAt g term = .core (.app fn arg)) :
     ∃ ty body, nodeAt g fn = .core (.lam false ty body) ∧
-      (nodeAt g ty = .core .i64 ∨ nodeAt g ty = .ind 0 []) := by
+      (nodeAt g ty = .core .i64 ∨ nodeAt g ty = .ind 0 [] ∨
+        ∃ len, nodeAt g ty = .core (.buffer len)) := by
   cases typed <;> simp_all
   all_goals first
     | exact ⟨_,_,by assumption,Or.inl (by assumption)⟩
-    | exact ⟨_,_,by assumption,Or.inr (by assumption)⟩
+    | exact ⟨_,_,by assumption,Or.inr (Or.inl (by assumption))⟩
+    | exact ⟨_,_,by assumption,Or.inr (Or.inr ⟨_,by assumption⟩)⟩
 
 theorem erased_lambda_rejected : ¬ Typing graph [.data 0] 1 [] 19 .data := by
   intro typed

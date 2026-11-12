@@ -55,6 +55,22 @@ inductive Typing (g : CommonDataSource.Graph) :
       SizedCoreTyping.Typing (CommonData.coreGraph (graph g)) (context count ctx) sizes arg .scalar →
       Typing g (continuation count ctx) count [] body kind →
       Typing g ctx count sizes term kind
+  | allocate : CommonDataSource.nodeAt g term = .core (.app fn arg) →
+      CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
+      CommonDataSource.nodeAt g ty = .core (.buffer lengthTy) →
+      DependentBufferIndices.BufferLength (CommonData.coreGraph (graph g))
+        (SizedBufferContext.naturalEnv (context count ctx)) ty n →
+      CommonDataSource.nodeAt g arg = .core (.alloc len init) →
+      DependentBufferIndices.Eval (CommonData.coreGraph (graph g))
+        (SizedBufferContext.naturalEnv (context count ctx)) len n →
+      SizedCoreTyping.ScalarTyped (CommonData.coreGraph (graph g)) (context count ctx) init →
+      Typing g (CommonData.freshBuffer count ctx) count (n :: sizes) body kind →
+      Typing g ctx count sizes term kind
+  | freeBuffer : CommonDataSource.nodeAt g term = .core (.free owner body) →
+      CommonDataSource.nodeAt g owner = .core (.var index) → ctx[index]? = some (.buffer (count+slot)) →
+      slot < sizes.length →
+      Typing g (CommonData.consumeBuffer (count+slot) ctx) count (sizes.eraseIdx slot) body kind →
+      Typing g ctx count sizes term kind
   | dataLet : CommonDataSource.nodeAt g term = .core (.app fn arg) →
       CommonDataSource.nodeAt g fn = .core (.lam false ty body) →
       CommonDataSource.nodeAt g ty = .ind 0 [] →
@@ -102,6 +118,11 @@ theorem Typing.elaborate (typed : Typing g ctx count sizes term kind) :
       (core_shape left) li (core_shape right) ri
   | bufferLet shape fn ty arg body ih =>
     exact .bufferLet (core_shape shape) (core_shape fn) (core_shape ty) arg ih
+  | allocate shape fn ty annotation alloc len init body ih =>
+    exact .allocate (core_shape shape) (core_shape fn) (core_shape ty) annotation
+      (core_shape alloc) len init ih
+  | freeBuffer shape owner lookup bound body ih =>
+    exact .freeBuffer (core_shape shape) (core_shape owner) lookup bound ih
   | dataLet shape fn ty arg body ia ib =>
     exact .dataLet (core_shape shape) (core_shape fn) (ind_shape ty) ia ib
   | dataLetSplit counts sizes shape fn ty arg body ia ib =>
