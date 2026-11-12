@@ -3150,3 +3150,17 @@ import Jihoo
 #print axioms Jihoo.SymbolicCoreContext.naturalEnv_callBody
 #print axioms Jihoo.SymbolicCoreContext.naturalEnv_ownedReturned
 #print axioms Jihoo.SymbolicCompositionChecks.common_case_total
+
+-- Structural CommonData ghost-slot erasure; excludes Core producer islands.
+#print axioms Jihoo.CommonDataErasure.Env.lookup
+#print axioms Jihoo.CommonDataErasure.position_injective
+#print axioms Jihoo.CommonDataErasure.Env.bind
+#print axioms Jihoo.CommonDataErasure.Env.enter
+#print axioms Jihoo.CommonDataErasure.Lower.preserves
+#print axioms Jihoo.CommonDataErasure.total_accounted
+#print axioms Jihoo.CommonDataErasureChecks.lowered
+#print axioms Jihoo.CommonDataErasureChecks.typed
+#print axioms Jihoo.CommonDataErasureChecks.compacted
+#print axioms Jihoo.CommonDataErasureChecks.target_exists
+#print axioms Jihoo.CommonDataErasureChecks.source_run
+#print axioms Jihoo.CommonDataErasureChecks.target_run
