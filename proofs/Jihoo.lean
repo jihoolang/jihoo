@@ -266,3 +266,11 @@ import Jihoo.SymbolicCoreCompactionChecks
 
 import Jihoo.CommonDataSourceExecution
 import Jihoo.CommonDataSourceExecutionChecks
+
+import Jihoo.SizedMirStructuralTotality
+import Jihoo.SizedMirStructuralBudgets
+import Jihoo.SizedMirStructuralValidity
+import Jihoo.SizedMirStructuralChecks
+import Jihoo.SymbolicMirStructuralBridge
+import Jihoo.SymbolicMirLoweringTotality
+import Jihoo.SymbolicMirStructuralChecks
