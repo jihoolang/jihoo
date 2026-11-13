@@ -96,21 +96,40 @@ theorem boxed_nil_prefix :
       (nilOut q 0 3 heap locals saved) :=
   (TreeCreateRelocation.nil_total rfl (placement false) rfl (by decide) (by constructor <;> decide) source).1
 
-/-- Nil preserves the entire pre-existing inventory and extends it with a
-fresh box. This invokes the context theorem, not just the raw allocator. -/
+/-- Nil retains a nonempty lexical context, including duplicate Tree aliases,
+Buffer, scalar and natural bindings. Move the alias at result slot 8 to slot 5:
+unlike Node, Nil consumes no aliases, so every old binding must survive. -/
 theorem nil_boundary :
     Prefix (program false) 3 (stateAt 0 4 heap locals saved) [.alloc 6 8]
       (nilOut q 0 3 heap locals saved) ∧
     CommonContext [.nil 6, image, .nil 4] [(4,0)] [2] [] [] [10]
-      [.data 0] [.data none] [8] source (nilOut q 0 3 heap locals saved).frame := by
-  have h : CommonContext [image, .nil 4] [(4,0)] [2] [] [] [10] [] [] [] source
-      (stateAt 0 4 heap locals saved).frame :=
-    ⟨⟨initial.valid, .nil, .nil, initial.resources, initial.owned, initial.separated, initial.shells⟩,
-      initial.bufferSizes⟩
-  exact nil_prefix_context (q := q) (fn := 0) (start := 4) (work := 1) (cont := 3)
+      [.data 0, .data 1, .data 1, .data 2, .buffer 3, .scalar, .nat 9]
+      (.data none :: env) [8, 5, 5, 1, 0, 7, 10] source
+      (nilOut q 0 3 heap locals saved).frame ∧
+    (nilOut q 0 3 heap locals saved).frame.locals[0]? = some (some (.pointer 0 0)) ∧
+    (nilOut q 0 3 heap locals saved).frame.locals[7]? = some (some (.i64 77)) ∧
+    (nilOut q 0 3 heap locals saved).frame.locals[10]? = some (some (.u64 9)) ∧
+    (nilOut q 0 3 heap locals saved).frame.heap.toList.take heap.size = heap.toList ∧
+    (nilOut q 0 3 heap locals saved).frame.heap[10]? = none ∧
+    (nilOut q 0 3 heap locals saved).stack = saved := by
+  have h : CommonContext [image, .nil 4] [(4,0)] [2] [] [] [10]
+      ctx env [5, 5, 1, 0, 7, 10] source (stateAt 0 4 heap locals saved).frame := by
+    refine ⟨⟨initial.valid, initial.agreement, ?_, initial.resources,
+      initial.owned, initial.separated, initial.shells⟩, initial.bufferSizes⟩
+    exact .cons ⟨_, rfl, rfl⟩ (.cons ⟨_, rfl, rfl⟩
+      (.cons ⟨_, rfl, rfl⟩ (.cons ⟨_, _, rfl, rfl⟩ (.cons ⟨_, rfl⟩ (.cons rfl .nil)))))
+  have fresh : Preserved (ctx.map (CommonData.capturedEntry 0 2 0))
+      [5, 5, 1, 0, 7, 10] [q.result] := by
+    intro k e slot _ hs _
+    have member := List.mem_of_getElem? hs
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+    simp only [List.mem_singleton, q]
+    omega
+  have boundary := nil_prefix_context (q := q) (fn := 0) (start := 4) (work := 1) (cont := 3)
     (H := heap) (vs := locals) (ks := saved) (p := program false) (f := body false)
-    h rfl (placement false) rfl (by decide) (by constructor <;> decide)
-    (by intro k e slot he; simp at he) (by decide)
+    h rfl (placement false) rfl (by decide) (by constructor <;> decide) fresh (by decide)
+  exact ⟨boundary.1, boundary.2, by decide, by decide, by decide,
+    by decide, by decide, by decide⟩
 
 def graph : CommonData.Graph := #[.core (.var 0), .core (.var 2), .construct 0 1]
 theorem typed_constructor : CommonData.Typing graph ctx 2 [] 2 .data :=
