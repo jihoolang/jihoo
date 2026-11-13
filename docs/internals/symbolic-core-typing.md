@@ -1,5 +1,9 @@
 # Symbolic dependent Buffer typing
 
+Release scope: the [smaller 0.6 plan](0.6-release-notes.md) includes these
+restricted results without claiming general soundness. References below to
+0.6 proof gates mean the original, deferred research goals.
+
 This proof connects a value-independent source judgment to the existing sized
 Core ownership semantics. It is a step toward the [common typing blocker](0.6-proof-status.md), not completion of the 0.6 soundness gate.
 

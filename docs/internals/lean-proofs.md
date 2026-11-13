@@ -1,5 +1,9 @@
 # Lean proof boundary
 
+Release scope: the [smaller 0.6 plan](0.6-release-notes.md) includes these
+restricted results without claiming general soundness. References below to
+0.6 proof gates mean the original, deferred research goals.
+
 The mechanized work toward 0.6 includes arithmetic evidence, an index-dependent
 calculus with value lets and conversion, finite scoping, and a logical interpretation
 of that calculus. These are separate declarative specifications inspired by the

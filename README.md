@@ -117,8 +117,8 @@ both machines.
 natural equality/order proofs from local evidence and explicit lemma hints.
 It has fixed search limits and erases to the same runtime code as explicit proofs.
 
-Work toward 0.6 starts with dependent-type stabilization, before mechanized
-soundness. Pure normalization now retains dependent motives on symbolic
+0.6 is scoped as a feature, library and stabilization release; the original
+broad soundness goal remains future research ([release notes](docs/internals/0.6-release-notes.md)). Pure normalization now retains dependent motives on symbolic
 branches, so the core preservation regressions have no expected failures.
 Sum conversion also respects proof irrelevance when ordering nested terms.
 Source elaboration infers unsigned literal arithmetic from either operand and
@@ -206,8 +206,9 @@ a parametric execution theorem for the same four-argument fixture and exact
 source/generated/native heap and allocation-lifecycle correspondence. More
 general lender forms and a generic native-lowering theorem remain outside the result.
 These do not establish full kernel or compiler soundness.
-These are stabilization steps, not a completed or formally verified 0.6 release
-([roadmap](docs/internals/roadmap.md#6-verification-05)).
+These are implemented features and scoped proof results for the smaller 0.6
+release plan, not full compiler verification or an announcement of a published
+release ([roadmap](docs/internals/roadmap.md#6-verification-05)).
 
 The compiler uses its own threads: it elaborates, infers borrow effects and
 checks borrows one function per thread, the costliest first, and emits
