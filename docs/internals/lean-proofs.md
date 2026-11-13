@@ -4437,3 +4437,26 @@ shared buffer, unit return and continuation, exact/short fuel, insufficient
 stack, and rejection when the unrelocated function is inserted at ID 2.
 `bash proofs/check-tree-drop-call.sh` checks the declarations and dedicated axiom
 audit. Both x86_64 and aarch64 Test jobs run it after `nix flake check`.
+
+### Common resource contexts at callable Drop boundaries
+
+`CommonDataTargetContext.lean` connects the common and symbolic typing contexts
+to direct target locals and boxed heap resources. Lexical aliases name unique
+inventory slots; consumed aliases become dead while their stale locals remain.
+Joint separation includes extra boxed Nil objects, retained Buffers, pending
+Case parents, and external frames.
+
+`typed_drop_prefix` and `symbolic_drop_prefix` construct source destruction and
+the actual relocated `TreeDropCall.invoke` prefix. They return the continuation's
+source typing and resource context after `removeHead`, without `BodyIH`, an
+arbitrary postcondition, or a successful body-run premise. The unit destination
+is excluded from surviving active locals, and other direct operands retain their
+values. The target heap effect preserves every external object exactly.
+
+Binder and static partition laws transport target bindings. The Case opening law
+binds preloaded child locals, retires parent aliases, and retains pending shell
+authority even when child pointers later become stale. These are extension
+interfaces, not full branch/application lowering. Scalar value equality, native
+representation refinement, and whole-body/compiler correctness are not claimed.
+Run `bash proofs/check-common-data-target-context.sh` for the dedicated kernel
+checks and axiom audit; the same checks are included in the aggregate proof suite.

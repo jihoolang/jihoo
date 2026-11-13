@@ -47,20 +47,20 @@ Run the dedicated checks from `proofs` with `./check-tree-create-relocation.sh`.
 It pins the repository's Lean version, rejects warnings, and checks all 51 constructor and relocation
 audit entries against Lean's standard logical-axiom allowlist. The swapped-child
 fixture explicitly proves `Safe` and `Placement`, as well as checking execution.
-The shared audit registers the same 51 entries and totals 3444 on main
-`1dda9513`. Both architecture Test jobs and Common Core backward proofs run the
-dedicated check. #197/#198 branches and worktrees remain unchanged.
+The shared audit registers the same 51 entries. Both architecture Test jobs and
+Common Core backward proofs run the dedicated check alongside the Case check.
 
-## Integration order and audit registration
+## Integration and audit registration
 
-This candidate is based directly on main `1dda9513`, plus the isolated constructor
-commit `4cab93bd`; it has no dependency on #197 or #198. Keep #197 pending its
-existing approval. Any merge order must preserve the union of imports, audit
-entries and CI steps, then rerun the complete and dedicated checks on that exact
-combined tree. Never resolve the audit count by choosing one side: baseline
-3393 + this candidate 51 = 3444; with #197 (+45) = 3489; with #198 (+61) = 3505;
-with both = 3550. Recompute unique `#print axioms` entries if either PR changes.
-These counts are registration arithmetic, not claims of a validated combined
-#197/#198 tree. Shared `Jihoo.lean`, `Audit.lean`, `check.sh`, and workflow append
-conflicts need explicit union resolution. No merge is authorized by passing this
-candidate alone.
+PR #199 now incorporates main `f0eacaa3051c5f9caaed3a403846515ba8a55465`,
+including the merged target-context (#197) and Case CFG/relocation (#198) proofs.
+The integration preserves the exact union of imports, audit entries and CI steps.
+All proof modules from both parents are unchanged.
+
+The shared audit contains **3550 unique entries**: baseline 3393, target context
+45, Case CFG/relocation 61, and Tree constructor/relocation 51 (25 + 26).
+The 245 shared imports are also unique and form the exact union of both parents.
+`check.sh` requires 3550 elaborated audit results and accepts only `propext`,
+`Classical.choice`, and `Quot.sound`. Run the complete and dedicated checks on
+this combined tree; registration counts alone are not proof-validation evidence.
+Passing checks does not authorize merging the PR.
