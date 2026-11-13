@@ -1,4 +1,9 @@
-# Design: verification (0.5) and mathematics (0.6)
+# Design: verification and future mathematics libraries
+
+This page retains the historical verifier design and broader library goals.
+The [smaller 0.6 release scope](0.6-release-notes.md) does not complete the
+original imported-induction/loop-`ensures` goal or general soundness/lowering
+proofs; those remain future work.
 
 The replacement direction is a [native dependent core](dependent-core.md):
 check the program and its proofs together, then erase and lower those
@@ -24,7 +29,8 @@ that its functions meet their contracts. A proof costs nothing at run time:
 it is checked and then erased, and a check that is proved is removed, so a
 verified program is faster than the same program unverified.
 
-jihoo 0.6 makes proofs importable libraries over the native core: lemmas
+The original 0.6 library goal, retained as future work, is importable proofs
+over the native core: lemmas
 about integers, sequences and the program's own data, proved by induction
 and used in program specifications. Mathematics beyond what programs need
 grows from there through the same core's types and proofs, erased before

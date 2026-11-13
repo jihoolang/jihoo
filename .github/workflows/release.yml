@@ -55,6 +55,17 @@ jobs:
             echo "ref=refs/tags/$RELEASE_TAG" >> "$GITHUB_OUTPUT"
             echo "TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
           fi
+      # Keep the test harness from this workflow revision, even when testing
+      # a candidate/tag that predates the test. No libraries come from it.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-harness
+          sparse-checkout: tests/release_dependent_package.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: stage dependent-package harness
+        run: cp .release-harness/tests/release_dependent_package.py "$RUNNER_TEMP/release_dependent_package.py"
       - uses: actions/checkout@v7
         with:
           ref: ${{ steps.source.outputs.ref }}
@@ -160,6 +171,44 @@ jobs:
                   cmp expected.out freestanding.out
                 '\'' smoke "$compiler" "$expected" "$loader"
             ' smoke "$smoke/$name/bin/jihoo" "$EXPECTED_VERSION" "$loader"
+      - name: smoke-test dependent consumers from the archive
+        timeout-minutes: 20
+        run: |
+          name="jihoo-$TAG-${{ matrix.arch }}-linux"
+          sha256sum -c "$name.tar.gz.sha256"
+          smoke=$(mktemp -d)
+          trap 'rm -rf "$smoke"' EXIT
+          tar -xzf "$name.tar.gz" -C "$smoke"
+          # Raw system-loader archive: imported proofs, false-proof rejection,
+          # and binary-only missing-library controls, with no backend available.
+          env -i HOME="$smoke" PATH=/usr/bin:/bin python3 \
+            "$RUNNER_TEMP/release_dependent_package.py" "$smoke/$name/bin/jihoo"
+          # Native execution needs a glibc compatible with pinned Nix LLVM.
+          # Patch only a disposable second extraction; keep the tested/uploaded
+          # archive and the system-loader extraction byte-for-byte unchanged.
+          mkdir "$smoke/native"
+          tar -xzf "$name.tar.gz" -C "$smoke/native"
+          # shellcheck disable=SC2016
+          runtime=$(nix eval --raw --impure --expr '
+            let f = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+            in f.inputs.nixpkgs.legacyPackages.${builtins.currentSystem}.glibc.outPath')
+          loader="$runtime/lib/$(basename '${{ matrix.loader }}')"
+          nix shell --inputs-from . nixpkgs#patchelf -c patchelf \
+            --set-interpreter "$loader" "$smoke/native/$name/bin/jihoo"
+          # No JIHOO_PATH: both native positives and missing-bundle negatives
+          # must discover modules relative to the raw executable itself.
+          # shellcheck disable=SC2016
+          nix shell --inputs-from . nixpkgs#python3 \
+            nixpkgs#llvmPackages_21.clang nixpkgs#llvmPackages_21.lld \
+            nixpkgs#llvmPackages_21.llvm.dev -c bash -euo pipefail -c '
+              env -i HOME="$3" PATH="$PATH" \
+                JIHOO_CC="$(command -v clang)" \
+                JIHOO_LD="$(command -v ld.lld)" \
+                JIHOO_LLVM="$(llvm-config --libdir)/libLLVM-21.so" \
+                python3 "$1" "$2" --native
+            ' smoke "$RUNNER_TEMP/release_dependent_package.py" \
+              "$smoke/native/$name/bin/jihoo" "$smoke"
+          sha256sum -c "$name.tar.gz.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
