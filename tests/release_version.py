@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline release-version regressions; no release, tag, push or network access."""
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ REAL_GIT = shutil.which('git')
 
 
 class ReleaseVersion(unittest.TestCase):
+    fixture_version = None
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix='jihoo-release-test-')
         self.addCleanup(temp.cleanup)
@@ -26,6 +29,27 @@ class ReleaseVersion(unittest.TestCase):
             target = self.repo / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
+        if self.fixture_version is not None:
+            # Simulate an already-bumped checkout without running a release or
+            # changing the repository's actual version or bootstrap seed.
+            substitutions = {
+                'flake.nix': (r'^      version = "[0-9.]+";$',
+                              f'      version = "{self.fixture_version}";'),
+                'compiler/main.jh': (r'^const VERSION = "[0-9.]+"$',
+                                     f'const VERSION = "{self.fixture_version}"'),
+                PAGE: (r'v[0-9]+\.[0-9]+\.[0-9]+', f'v{self.fixture_version}'),
+            }
+            for name, (pattern, replacement) in substitutions.items():
+                path = self.repo / name
+                content, count = re.subn(pattern, replacement, path.read_text(), flags=re.M)
+                self.assertGreater(count, 0, name)
+                path.write_text(content)
+        self.current_version = next(
+            line.split('"')[1] for line in (self.repo / 'compiler/main.jh').read_text().splitlines()
+            if line.startswith('const VERSION = '))
+        major, minor, patch = map(int, self.current_version.split('.'))
+        self.next_version = f'{major}.{minor}.{patch + 1}'
+        self.later_version = f'{major}.{minor}.{patch + 2}'
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
         self.env.update(PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
@@ -70,10 +94,11 @@ if sys.argv[1:3] == ['run', 'list']:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout.strip()
 
-    def update(self, version='1.23.456'):
+    def update(self, version=None):
+        version = self.next_version if version is None else version
         return self.run_command('bash', 'scripts/bump-version.sh', 'release', version)
 
-    def assert_failure_unchanged(self, expected, version='1.23.456'):
+    def assert_failure_unchanged(self, expected, version=None):
         before = {name: (self.repo / name).read_bytes() if (self.repo / name).exists()
                   else None for name in FILES}
         head = self.git('rev-parse', 'HEAD')
@@ -91,7 +116,7 @@ if sys.argv[1:3] == ['run', 'list']:
             self.assertNotIn(action, calls)
 
     def test_versions_and_release_commit(self):
-        for version in ['1.23.456', 'v2.0.0']:
+        for version in [self.next_version, 'v' + self.later_version]:
             with self.subTest(version=version):
                 before = {name: (self.repo / name).read_text() for name in FILES}
                 old = next(line.split('"')[1] for line in before['compiler/main.jh'].splitlines()
@@ -112,19 +137,19 @@ if sys.argv[1:3] == ['run', 'list']:
                 self.assertEqual(self.git('tag'), '')  # annotated tag command is stubbed
 
     def test_invalid_or_unchanged_version(self):
-        for version, error in [('bad', 'bad version'), ('0.5.0', 'already')]:
+        for version, error in [('bad', 'bad version'), (self.current_version, 'already')]:
             with self.subTest(version=version):
                 self.assert_failure_unchanged(error, version)
 
     def test_malformed_inputs(self):
         cases = [
             ('flake.nix', '', 'package version'),
-            ('flake.nix', '      version = "0.5.0";\n' * 2, 'package version'),
+            ('flake.nix', f'      version = "{self.current_version}";\n' * 2, 'package version'),
             ('compiler/main.jh', '', 'compiler VERSION'),
-            ('compiler/main.jh', 'const VERSION = "0.5.0"\n' * 2, 'compiler VERSION'),
-            ('compiler/main.jh', 'const VERSION = "9.0.0"\n', 'compiler VERSION'),
+            ('compiler/main.jh', f'const VERSION = "{self.current_version}"\n' * 2, 'compiler VERSION'),
+            ('compiler/main.jh', f'const VERSION = "{self.next_version}"\n', 'compiler VERSION'),
             (PAGE, '', 'missing release references'),
-            (PAGE, 'releases/download/v0.5.0/jihoo-v0.5.0-', 'missing release references'),
+            (PAGE, f'releases/download/v{self.current_version}/jihoo-v{self.current_version}-', 'missing release references'),
         ]
         for name, content, error in cases:
             with self.subTest(name=name, content=content):
@@ -158,6 +183,11 @@ if sys.argv[1:3] == ['run', 'list']:
         self.assert_failure_unchanged('working tree has changes')
         self.git('add', 'compiler/main.jh')
         self.assert_failure_unchanged('working tree has changes')
+
+
+class ReleaseVersionAfterBump(ReleaseVersion):
+    """Run the entire suite against a simulated 0.6.0 checkout as well."""
+    fixture_version = '0.6.0'
 
 
 if __name__ == '__main__':
