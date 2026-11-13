@@ -1,8 +1,8 @@
 # Tree constructor common-context extension
 
-Based on main `5780afe9` (PRs #197–#199). The extension imports the common
-resource boundary from #197 and the independently relocated constructor
-correctness theorem from #199; it does not change shared integration files.
+Integrated with main `b5ed6688` (PRs #197–#200), preserving the Case entry
+context registrations from #200. The extension imports the common resource
+boundary from #197 and independently relocated constructor correctness from #199.
 
 `TreeCreateContext.node_prefix_context` derives source/target child operands,
 child layouts, joint ownership and target separation from `CommonContext`.
@@ -40,7 +40,8 @@ correctness, reuse semantics, or whole-program correctness is claimed.
 The Node fixture instantiates the theorem with swapped operands/destinations,
 a nonempty child, boxed Nil, duplicate child aliases in overwritten locals,
 a retained Buffer with size 2, live scalar/natural locals and a suspended stack.
-Nil also instantiates its full context theorem. Rejection tests cover a live
+Nil also instantiates its full context theorem with retained scalar/natural
+lexical bindings and checks the resulting values and suspended stack. Rejection tests cover a live
 scalar clobber and duplicate boxed-Nil target authority. A typed source fixture
 proves the source constructor execution.
 
@@ -48,11 +49,11 @@ Run `bash proofs/check-tree-create-context.sh`: builds with `--wfail` and audits
 all 21 public theorems; only propext, Quot.sound and Classical.choice are allowed.
 No `sorry`, `admit`, custom axiom or native_decide is used.
 
-## Later integration
+## Aggregate integration
 
-Add imports to `proofs/Jihoo.lean`, copy the 21 audit entries into
-`proofs/Audit.lean`, and increase `proofs/check.sh`'s expected audit count from
-3550 to 3571 (adjust to the actual integrated base if other work lands first).
-Alternatively CI can invoke the dedicated script. Shared Audit.lean, Jihoo.lean,
-check.sh and workflows are untouched here. Until integration, the default proof
-suite does not exercise this extension; run the dedicated script explicitly.
+`proofs/Jihoo.lean` imports the context module and its regression checks.
+`proofs/Audit.lean` preserves all 3568 audits from main and adds the 21 Tree
+context entries, for 3589 aggregate audits. `proofs/check.sh` enforces that count
+and the standard-axiom allowlist. The default Nix `lean-proofs` check runs this
+aggregate suite; both Test architecture jobs and Common Core backward proofs
+also invoke the dedicated Tree context script.
