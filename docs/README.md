@@ -78,4 +78,5 @@ same on GitHub.
 - [Core representation bridge](internals/core-bridge.md)
 - [Self-hosting](internals/self-hosting.md)
 - [Testing](internals/testing.md)
+- [Graph-certificate Lean dependency build](internals/ci-graph-lean-build.md)
 - [Roadmap](internals/roadmap.md)
