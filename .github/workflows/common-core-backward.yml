@@ -26,3 +26,5 @@ jobs:
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-data-case-entry-context.sh
       - name: Check Tree constructor common context and axiom audit
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-tree-create-context.sh
+      - name: Check conditional common Case composition and register safety audits
+        run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-case-composition.sh

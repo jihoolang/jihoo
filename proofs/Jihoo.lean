@@ -323,3 +323,20 @@ import Jihoo.CommonDataCaseEntryContextChecks
 
 import Jihoo.TreeCreateContext
 import Jihoo.TreeCreateContextChecks
+
+import Jihoo.CommonCompositionContract
+import Jihoo.CommonCompositionContractChecks
+
+import Jihoo.CommonDataCaseRelocatedContext
+import Jihoo.CommonDataCaseRelocatedContextChecks
+
+import Jihoo.CommonDataBranchFinish
+import Jihoo.CommonDataBranchFinishChecks
+
+import Jihoo.CommonDataRestrictedComposition
+import Jihoo.CommonDataRestrictedCompositionChecks
+
+import Jihoo.CommonDataCaseRegisterSafety
+import Jihoo.CommonDataCaseRegisterSafetyChecks
+
+import Jihoo.CommonCaseIntegration
