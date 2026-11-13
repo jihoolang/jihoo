@@ -46,7 +46,7 @@ a Drop call or claim that a Case is compiled as such a call.
   separately, but transferring this context theorem through relocation remains
   an integration obligation.
 
-## Checks and later integration
+## Checks and integration
 
 Run from `proofs/`, with the pinned Lean toolchain:
 
@@ -62,8 +62,12 @@ A subsequent child Drop retains the pending shell after its child dies.
 Negative proofs reject scalar/unit local collisions and overlapping target
 resources; alias retirement is checked explicitly.
 
-No changes are made to `Audit.lean`, `Jihoo.lean`, `check.sh`, or workflows.
-Later integration should import the extension/checks into the shared root,
-include these 18 declarations in the aggregate axiom audit and update its exact
-count, and wire the dedicated audit into CI. No full branch or native correctness
-claim follows from these checks.
+The shared `Jihoo.lean` root imports the extension and checks. All 18 dedicated
+audit declarations are also registered in `Audit.lean`, bringing the aggregate
+total to 3,568. `check.sh` enforces that exact total.
+`check-common-data-case-entry-context.sh` builds the checks with warnings as errors
+and validates all 18 dedicated audit results against the standard logical axioms.
+Both the dedicated backward-proof workflow and the two-architecture Test workflow
+run this check, preserving the existing registrations. The Nix aggregate proof
+check includes the new modules through its existing `proofs/Jihoo` source set.
+No full branch or native correctness claim follows from these checks.
