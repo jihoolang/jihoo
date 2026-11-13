@@ -45,6 +45,8 @@ jobs:
         run: nix flake check -L
       - name: Check callable Tree Drop compiler rule and axiom audit
         run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-tree-drop-call.sh
+      - name: Check common target context and Drop prefix preservation
+        run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-common-data-target-context.sh
       - name: Source isolation checks
         run: python3 scripts/check_nix_sources.py --offline --system ${{ matrix.system }}
       - name: Fusion benchmark checks

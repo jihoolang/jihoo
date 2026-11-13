@@ -312,5 +312,6 @@ import Jihoo.TreeDropCfgChecks
 
 import Jihoo.TreeDropCallChecks
 
+import Jihoo.CommonDataTargetContextChecks
 import Jihoo.CommonDataCaseCfgChecks
 import Jihoo.CommonDataCaseRelocationChecks
