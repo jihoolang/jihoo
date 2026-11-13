@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-for check in common-composition-contract common-data-case-relocated-context common-data-branch-finish common-data-restricted-composition common-data-case-register-safety literal-finish; do
+for check in common-composition-contract common-data-case-relocated-context common-data-branch-finish common-data-restricted-composition common-data-case-register-safety literal-finish case-consumption; do
   bash "check-${check}.sh"
 done
 lake build Jihoo --wfail
