@@ -39,6 +39,7 @@ jobs:
         run: |
           python3 tests/bootstrap_seed.py
           python3 tests/bootstrap_seed_update.py
+          python3 tests/release_version.py
       - uses: cachix/install-nix-action@v31
       # Includes aggregate and recursive Data/Buffer erasure axiom audits.
       - name: nix flake check
