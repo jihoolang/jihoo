@@ -93,6 +93,46 @@ def position(text, offset, utf8):
     return {"line": line, "character": units}
 
 
+def dependent_diagnostics(client, path, utf8):
+    """Check proof edits in one live document, including non-ASCII columns."""
+    document = uri(path)
+    valid = ("#![dependent_core]\n"
+             "fn same(n: u64) -> Eq(n, n) { refl(n) }\n"
+             "fn bound() -> Lt(0, 1) { /* 가😀 */ decide_lt(0, 1) }\n"
+             "export fn value() -> i64 { 0 }\n")
+    client.notify("textDocument/didOpen", {"textDocument": {
+        "uri": document, "languageId": "jihoo", "version": 1, "text": valid}})
+    diagnostics = client.diagnostics(document)
+    assert diagnostics == [], diagnostics
+
+    # A false closed proof, then a valid proof of the wrong proposition.
+    cases = [
+        (valid.replace("decide_lt(0, 1)", "decide_lt(1, 1)"),
+         "decide_lt(1, 1)", "decide-lt needs a true closed inequality"),
+        (valid.replace("refl(n)", "refl(0)"),
+         "fn same(n: u64) -> Eq(n, n) { refl(0) }", "type mismatch"),
+    ]
+    for version, (source, expression, message) in enumerate(cases, 2):
+        client.notify("textDocument/didChange", {"textDocument": {
+            "uri": document, "version": version}, "contentChanges": [{"text": source}]})
+        diagnostics = client.diagnostics(document)
+        assert len(diagnostics) == 1, diagnostics
+        diagnostic = diagnostics[0]
+        assert diagnostic["severity"] == 1 and message in diagnostic["message"], diagnostic
+        offset = source.encode().index(expression.encode())
+        assert diagnostic["range"] == {
+            "start": position(source, offset, utf8),
+            "end": position(source, offset + len(expression.encode()), utf8)}, diagnostic
+
+    client.notify("textDocument/didChange", {"textDocument": {
+        "uri": document, "version": 4}, "contentChanges": [{"text": valid}]})
+    diagnostics = client.diagnostics(document)
+    assert diagnostics == [], diagnostics
+    client.notify("textDocument/didClose", {"textDocument": {"uri": document}})
+    diagnostics = client.diagnostics(document)
+    assert diagnostics == [], diagnostics
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", type=Path, default=ROOT / "out/jihoo")
@@ -199,6 +239,8 @@ def main():
             related = diagnostic["relatedInformation"]
             assert related[0]["location"]["uri"] == uri(ROOT / "lib/std/thread.jh"), related
             assert "in the instance" in related[1]["message"], related
+
+            dependent_diagnostics(client, directory / "proofs.jh", utf8)
 
             error = client.request_error("textDocument/hover", {
                 "textDocument": {"uri": uri(main_file)}, "position": {"line": 0, "character": 0}})
