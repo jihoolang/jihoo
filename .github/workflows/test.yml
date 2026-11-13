@@ -75,3 +75,5 @@ jobs:
         run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-common-data-case.sh
       - name: Check executed Case entry context and axiom audit
         run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-common-data-case-entry-context.sh
+      - name: Check Tree constructor common context and axiom audit
+        run: nix develop .#checks.${{ matrix.system }}.lean-proofs --command bash proofs/check-tree-create-context.sh

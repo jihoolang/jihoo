@@ -320,3 +320,6 @@ import Jihoo.CommonDataCaseRelocationChecks
 
 import Jihoo.CommonDataCaseEntryContext
 import Jihoo.CommonDataCaseEntryContextChecks
+
+import Jihoo.TreeCreateContext
+import Jihoo.TreeCreateContextChecks

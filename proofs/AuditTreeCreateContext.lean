@@ -1,0 +1,22 @@
+import Jihoo.TreeCreateContextChecks
+#print axioms Jihoo.TreeCreateContext.Binding.transport
+#print axioms Jihoo.TreeCreateContext.Bindings.transport
+#print axioms Jihoo.TreeCreateContext.node_frame_local
+#print axioms Jihoo.TreeCreateContext.operands
+#print axioms Jihoo.TreeCreateContext.node_prefix_context
+#print axioms Jihoo.TreeCreateContext.nil_prefix_context
+#print axioms Jihoo.TreeCreateContext.typing_construct
+#print axioms Jihoo.TreeCreateContext.source_construct
+#print axioms Jihoo.TreeCreateContext.Checks.initial
+#print axioms Jihoo.TreeCreateContext.Checks.placement
+#print axioms Jihoo.TreeCreateContext.Checks.safe
+#print axioms Jihoo.TreeCreateContext.Checks.preserved
+#print axioms Jihoo.TreeCreateContext.Checks.swapped_boundary
+#print axioms Jihoo.TreeCreateContext.Checks.alias_consumption
+#print axioms Jihoo.TreeCreateContext.Checks.live_locals_and_stack
+#print axioms Jihoo.TreeCreateContext.Checks.scalar_clobber_rejected
+#print axioms Jihoo.TreeCreateContext.Checks.boxed_nil_alias_rejected
+#print axioms Jihoo.TreeCreateContext.Checks.boxed_nil_prefix
+#print axioms Jihoo.TreeCreateContext.Checks.nil_boundary
+#print axioms Jihoo.TreeCreateContext.Checks.typed_constructor
+#print axioms Jihoo.TreeCreateContext.Checks.source_execution
