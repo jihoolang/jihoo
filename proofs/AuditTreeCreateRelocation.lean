@@ -1,0 +1,27 @@
+import Jihoo.TreeCreateRelocationChecks
+#print axioms Jihoo.TreeCreateRelocation.Checks.swapped_placement
+#print axioms Jihoo.TreeCreateRelocation.Checks.swapped_safe
+#print axioms Jihoo.TreeCreateRelocation.nil_prefix
+#print axioms Jihoo.TreeCreateRelocation.node_prefix
+#print axioms Jihoo.TreeCreateRelocation.locals_preserved
+#print axioms Jihoo.TreeCreateRelocation.nil_locals_preserved
+#print axioms Jihoo.TreeCreateRelocation.node_result_pointer
+#print axioms Jihoo.TreeCreateRelocation.nil_result_pointer
+#print axioms Jihoo.TreeCreateRelocation.stack_preserved
+#print axioms Jihoo.TreeCreateRelocation.heap_preserved
+#print axioms Jihoo.TreeCreateRelocation.nil_total
+#print axioms Jihoo.TreeCreateRelocation.node_total
+#print axioms Jihoo.TreeCreateRelocation.nil_retained
+#print axioms Jihoo.TreeCreateRelocation.node_retained
+#print axioms Jihoo.TreeCreateRelocation.node_fuel
+#print axioms Jihoo.TreeCreateRelocation.nil_fuel
+#print axioms Jihoo.TreeCreateRelocation.Checks.swapped_children
+#print axioms Jihoo.TreeCreateRelocation.Checks.scratch_sources
+#print axioms Jihoo.TreeCreateRelocation.Checks.relocated_nil
+#print axioms Jihoo.TreeCreateRelocation.Checks.equal_sources
+#print axioms Jihoo.TreeCreateRelocation.Checks.dangling_children
+#print axioms Jihoo.TreeCreateRelocation.Checks.null_child
+#print axioms Jihoo.TreeCreateRelocation.Checks.missing_child_rejected
+#print axioms Jihoo.TreeCreateRelocation.Checks.object_budget_rejected
+#print axioms Jihoo.TreeCreateRelocation.Checks.cell_budget_rejected
+#print axioms Jihoo.TreeCreateRelocation.Checks.call_does_not_bind_children

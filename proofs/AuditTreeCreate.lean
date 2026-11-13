@@ -1,0 +1,26 @@
+import Jihoo.TreeCreateChecks
+#print axioms Jihoo.TreeCreateCfg.walk_sound
+#print axioms Jihoo.TreeCreateCfg.Prefix.execute
+#print axioms Jihoo.TreeCreateCfg.Prefix.short_fuel
+#print axioms Jihoo.TreeCreateCfg.Prefix.steps
+#print axioms Jihoo.TreeCreateCfg.Prefix.take
+#print axioms Jihoo.TreeCreateCfg.nil_prefix
+#print axioms Jihoo.TreeCreateCfg.node_prefix
+#print axioms Jihoo.TreeCreateCfg.nil_total
+#print axioms Jihoo.TreeCreateCfg.node_total
+#print axioms Jihoo.TreeCreateCfg.nil_retained
+#print axioms Jihoo.TreeCreateCfg.node_retained
+#print axioms Jihoo.TreeCreateCfg.nil_result_pointer
+#print axioms Jihoo.TreeCreateCfg.node_result_pointer
+#print axioms Jihoo.TreeCreateCfg.nil_stack
+#print axioms Jihoo.TreeCreateCfg.node_stack
+#print axioms Jihoo.TreeCreateCfg.nil_locals
+#print axioms Jihoo.TreeCreateCfg.node_locals
+#print axioms Jihoo.TreeCreateCfg.operand_scratch_disjoint
+#print axioms Jihoo.TreeCreateCfg.allocation_accounting
+#print axioms Jihoo.TreeCreateCfg.Checks.nil_run
+#print axioms Jihoo.TreeCreateCfg.Checks.node_run
+#print axioms Jihoo.TreeCreateCfg.Checks.object_budget_rejected
+#print axioms Jihoo.TreeCreateCfg.Checks.word_budget_rejected
+#print axioms Jihoo.TreeCreateCfg.Checks.missing_children_rejected
+#print axioms Jihoo.TreeCreateCfg.Checks.aliased_children_transport
