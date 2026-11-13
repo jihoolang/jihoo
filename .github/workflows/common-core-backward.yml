@@ -22,3 +22,5 @@ jobs:
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-tree-create-relocation.sh
       - name: Check independent Case CFG entry, relocation and axiom audit
         run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-data-case.sh
+      - name: Check executed Case entry context and axiom audit
+        run: nix develop .#checks.x86_64-linux.lean-proofs --command bash proofs/check-common-data-case-entry-context.sh

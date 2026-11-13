@@ -317,3 +317,6 @@ import Jihoo.TreeCreateRelocationChecks
 import Jihoo.CommonDataTargetContextChecks
 import Jihoo.CommonDataCaseCfgChecks
 import Jihoo.CommonDataCaseRelocationChecks
+
+import Jihoo.CommonDataCaseEntryContext
+import Jihoo.CommonDataCaseEntryContextChecks
