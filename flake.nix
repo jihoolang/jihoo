@@ -320,7 +320,39 @@
             chmod -R u+w source
             cd source
             export JIHOO_PATH=$PWD/lib
-            (cd proofs && lake build --wfail)
+            # Build the validators' imports, not the aggregate proof/example root.
+            # lean-proofs still builds all of Jihoo and performs the axiom audit.
+            # Include the two native-generated proof harness dependencies too.
+            (cd proofs && lake build --wfail \
+              Jihoo.BoundedMirExamples \
+              Jihoo.CheckedApplicationSpine \
+              Jihoo.CheckedCoreNormalizationCodec \
+              Jihoo.CheckedCorePrincipal \
+              Jihoo.CheckedFirstOrderApplication \
+              Jihoo.CheckedLinearEvidence \
+              Jihoo.CheckedLinearNormalization \
+              Jihoo.CheckedPropositionalEvidence \
+              Jihoo.DynamicMirCorrespondence \
+              Jihoo.DynamicMirSnapshot \
+              Jihoo.GraphCertificateJson \
+              Jihoo.GraphCertificateReplay \
+              Jihoo.HeadNormalizationCodec \
+              Jihoo.InitializationCalls \
+              Jihoo.InitializationStore \
+              Jihoo.LinearCoreCallers \
+              Jihoo.MirCallerValidation \
+              Jihoo.MirFixtureAdmission \
+              Jihoo.MixedProofAdmission \
+              Jihoo.MixedRawAdmission \
+              Jihoo.NativeCompositionMirCorrespondence \
+              Jihoo.NativeCompositionMirSnapshot \
+              Jihoo.ScalarCoreCallers \
+              Jihoo.ScopedLendGraph \
+              Jihoo.TypeIndexNormalizationCodec \
+              Jihoo.TypedBetaReplayCodec \
+              Jihoo.TypingEvidence \
+              Jihoo.TypingInput \
+              Jihoo.VerifiedCore)
             python3 tests/core_initialization_proof.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_initialization_proof.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
