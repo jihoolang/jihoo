@@ -340,3 +340,16 @@ import Jihoo.CommonDataCaseRegisterSafety
 import Jihoo.CommonDataCaseRegisterSafetyChecks
 
 import Jihoo.CommonCaseIntegration
+
+import Jihoo.CommonLiteralBody
+import Jihoo.CommonLiteralBodyChecks
+import Jihoo.CommonDataInstalledFinish
+import Jihoo.CommonDataInstalledFinishChecks
+import Jihoo.CommonLiteralFinishChecks
+
+import Jihoo.CommonCaseChildConsumption
+import Jihoo.CommonCaseChildConsumptionChecks
+import Jihoo.CommonCaseChildTransfer
+import Jihoo.CommonCaseChildTransferChecks
+import Jihoo.CommonCaseSourceConsumption
+import Jihoo.CommonCaseSourceConsumptionChecks

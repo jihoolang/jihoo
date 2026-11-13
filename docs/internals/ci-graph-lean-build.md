@@ -49,3 +49,19 @@ The local rootless Nix runtime failed to spawn Lean processes with `resource
 exhausted (error code: 12, not enough memory)` at its default settings and with
 two-CPU affinity. A validation-only `LEAN_NUM_THREADS=2` override was used for the
 successful integration run; it is not part of the proposed flake change.
+
+## Integration after Case proofs
+
+The optimization is integrated with main
+`4847866b88358332a5b5735ab4b63a4448db48ee` (#204). The original measurement above
+is retained as historical evidence, not a new timing claim. All 29 graph targets
+and their 153-module dependency closure are byte-identical to the previously
+validated optimization. All 91 Python command lines (35 optimized invocations),
+aggregate `lean-proofs`, workflows, source filesets, and source-isolation script
+remain unchanged relative to this main. Fresh source-isolation evaluation passed
+all 12 mutations on both supported systems. A clean aggregate build passed all
+381 jobs, 3,732 axiom audits, and the generated-fixture comparisons. This local
+check used `LEAN_NUM_THREADS=2`; it is not a CI configuration change. The full
+graph suite was not repeated locally after integration because its dependency
+closure and invocation sequence are unchanged. Fresh exact-head hosted CI is
+still required before merging.
