@@ -70,6 +70,7 @@ same on GitHub.
 - [Core specification](internals/core-spec.md)
 - [Lean proof boundary](internals/lean-proofs.md)
 - [Checked MIR entry and adequacy](internals/mir-entry-adequacy.md)
+- [0.6 release notes](internals/0.6-release-notes.md)
 - [0.6 proof status](internals/0.6-proof-status.md)
 - [Symbolic dependent Buffer typing](internals/symbolic-core-typing.md)
 - [Symbolic typing through checked MIR entry](internals/symbolic-mir-entry.md)

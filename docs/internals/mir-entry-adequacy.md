@@ -1,5 +1,9 @@
 # Checked MIR entry and execution adequacy
 
+Release scope: the [smaller 0.6 plan](0.6-release-notes.md) includes these
+restricted results without claiming general soundness. References below to
+0.6 proof gates mean the original, deferred research goals.
+
 This result connects the existing restricted sized-Core typing and erasure
 pipeline to an actual checked entry frame for generated Lean MIR. It also states
 what every finite execution prefix and every returned execution guarantees.

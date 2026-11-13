@@ -660,11 +660,23 @@ until the core replaces it. 0.5.0 requires:
    normal forms ill-typed, fixed, and branches without a motive. The latter is
    addressed by the first 0.6 stabilization step below.
 
-For 0.6, complete and stabilize the dependent-type kernel first, then
-mechanize its soundness, starting from that specification:
+#### Revised 0.6 scope and future soundness work
+
+0.6 is scoped as a feature, library and stabilization release. It includes the
+implemented dependent-source ergonomics, proof libraries and bounded automation
+listed in section 7, with the restricted Lean results documented below. It does
+not claim full Core soundness or compiler verification. See the
+[0.6 release notes](0.6-release-notes.md) for the release boundary.
+
+The original plan was to complete and stabilize the dependent-type kernel and
+then mechanize its soundness from the specification. That broad proof goal is
+**deferred to future research, not completed or removed**. The detailed proof
+work below records progress against that original goal, not gates for the
+smaller 0.6 release. Production-checker implementation refinement is not being
+added as a prerequisite to the original specified-rule goal.
 
 The [current gap assessment](0.6-proof-status.md) identifies the principal
-remaining blocker: a common specified typing-to-runtime ownership theorem.
+remaining research blocker: a common specified typing-to-runtime ownership theorem.
 Scoped metatheorems and passing implementation tests must not be added together
 and reported as full-language soundness.
 
@@ -1033,6 +1045,14 @@ sizes are listed in the design.
 
 ### 7. Proofs as a library (0.6)
 
+The smaller 0.6 scope is the implemented library and source features below,
+with their existing regression coverage and explicit proof boundaries. Release
+readiness requires the applicable compiler, library, erasure, self-hosting and
+documentation checks to pass on the release candidate; this scope decision is
+not evidence that those checks have run or that a release has been published.
+The original imported-induction/loop-`ensures` completion criterion is retained
+at the end of this section as future work.
+
 Bounded `auto()` now constructs ordinary Eq/Lt evidence from visible local facts
 and explicit hints, including imported induction lemmas. Generated terms are
 checked against their original goal before use; no kernel inference rule changes.
@@ -1200,6 +1220,9 @@ identity. Regression modules reuse helper/type/constructor names, preserve opaqu
 APIs, and reject visibility bypasses through induction or discarded binders.
 These improvements do not themselves constitute a soundness proof.
 
+#### Future library and specification goals
+
+The following retains the original broader plan beyond the smaller 0.6 scope.
 Proof libraries target the [native dependent core](dependent-core.md).
 Users prove properties of integers, sequences and their own data by
 induction (`sum(xs[0..i])` and the like), import those lemmas and use them
@@ -1216,7 +1239,7 @@ as libraries of the same core terms.
    explicit resource limits and measurements using
    [resource reports](../reference/command-line.md#compile-time-resource-reports).
 
-Completion: a program proves a loop's `ensures` with a lemma by induction,
+Original completion criterion (deferred, not achieved): a program proves a loop's `ensures` with a lemma by induction,
 from imported library code, and the checked program is erased and lowered
 from the same core. Rejection cases for the kernel, proof libraries and
 erasure run in this repository's suites.
