@@ -1,5 +1,9 @@
 # Symbolic typing through checked MIR entry
 
+Release scope: the [smaller 0.6 plan](0.6-release-notes.md) includes these
+restricted results without claiming general soundness. References below to
+0.6 proof gates mean the original, deferred research goals.
+
 This layer connects the constructor-driven [symbolic Buffer typing judgment](symbolic-core-typing.md)
 to [checked entry and execution adequacy](mir-entry-adequacy.md). It keeps the
 source graph unchanged and uses the existing computed ghost-slot compactor and

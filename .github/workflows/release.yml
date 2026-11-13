@@ -1,13 +1,6 @@
-# Builds the compiler of a tag with Nix on x86_64 and aarch64 Linux and
-# attaches it to the tag's GitHub release, as
-# jihoo-<tag>-<arch>-linux.tar.gz: bin/jihoo and its standard library in
-# share/jihoo/lib. The binary uses the system's dynamic loader, so it runs
-# outside Nix with glibc and LLVM 21 (libLLVM-21.so, clang, ld.lld); the
-# flake bootstraps the compiler from the newest of these (`jihoo-seed`).
-#
-# Pushing a tag `v*` releases it; for an older tag, run the workflow by hand
-# with that tag. An archive already released is never replaced: flake.nix
-# pins the seed's hash.
+# Package and smoke-test both native Linux archives before publishing either.
+# Archives require glibc and LLVM 21 (libLLVM-21.so, clang, ld.lld).
+# Existing release assets are never replaced: flake.nix pins the seed's hash.
 name: Release
 
 on:
@@ -16,15 +9,22 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "The tag to build and release"
-        required: true
+        description: "Existing release tag (leave empty for candidate smoke testing)"
+        required: false
+      candidate_sha:
+        description: "Full 40-character candidate commit SHA; smoke-only, no tag needed"
+        required: false
+      publish:
+        description: "Publish after both architectures pass (existing assets are never replaced)"
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    name: build (${{ matrix.arch }})
+    name: build and smoke (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -37,30 +37,206 @@ jobs:
             loader: /lib/ld-linux-aarch64.so.1
     runs-on: ${{ matrix.runner }}
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      PUBLISH: ${{ inputs.publish }}
     steps:
+      - name: select immutable candidate or explicit tag
+        id: source
+        run: |
+          if [[ -n "$CANDIDATE_SHA" ]]; then
+            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+            [[ -z "$RELEASE_TAG" && "$PUBLISH" != true ]]
+            [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            echo "ref=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+            echo "TAG=candidate-$CANDIDATE_SHA" >> "$GITHUB_ENV"
+          else
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+            echo "ref=refs/tags/$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          fi
+      # Keep the test harness from this workflow revision, even when testing
+      # a candidate/tag that predates the test. No libraries come from it.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-harness
+          sparse-checkout: tests/release_dependent_package.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: stage dependent-package harness
+        run: cp .release-harness/tests/release_dependent_package.py "$RUNNER_TEMP/release_dependent_package.py"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.ref }}
+          persist-credentials: false
+      - name: verify checked-out candidate
+        run: |
+          source_sha=$(git rev-parse HEAD)
+          echo "Testing source commit $source_sha"
+          if [[ -n "$CANDIDATE_SHA" ]]; then
+            test "$source_sha" = "$CANDIDATE_SHA"
+          fi
       - uses: cachix/install-nix-action@v31
+      - name: select expected version
+        run: |
+          if [[ -n "$CANDIDATE_SHA" ]]; then
+            version=$(nix eval --raw .#jihoo.version)
+          else
+            version=${RELEASE_TAG#v}
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          echo "EXPECTED_VERSION=$version" >> "$GITHUB_ENV"
       - name: nix build
         run: nix build -L .#jihoo
       - name: package
         run: |
-          name=jihoo-$TAG-${{ matrix.arch }}-linux
-          mkdir -p $name/bin $name/share/jihoo
+          name="jihoo-$TAG-${{ matrix.arch }}-linux"
+          mkdir -p "$name/bin" "$name/share/jihoo"
           # The compiler itself, not the Nix wrapper that sets its paths.
-          install -m755 result/bin/.jihoo-wrapped $name/bin/jihoo
-          nix shell nixpkgs#patchelf -c patchelf \
-            --set-interpreter ${{ matrix.loader }} --remove-rpath $name/bin/jihoo
-          cp -r result/share/jihoo/lib $name/share/jihoo/lib
-          chmod -R u+w $name
-          cp LICENSE README.md $name/
-          tar -czf $name.tar.gz $name
-          sha256sum $name.tar.gz > $name.tar.gz.sha256
-      - name: upload
+          install -m755 result/bin/.jihoo-wrapped "$name/bin/jihoo"
+          nix shell --inputs-from . nixpkgs#patchelf -c patchelf \
+            --set-interpreter '${{ matrix.loader }}' --remove-rpath "$name/bin/jihoo"
+          cp -r result/share/jihoo/lib "$name/share/jihoo/lib"
+          chmod -R u+w "$name"
+          cp LICENSE README.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: smoke-test the archive
+        timeout-minutes: 10
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 ||
-            gh release create "$TAG" --verify-tag --title "jihoo $TAG" --notes "jihoo $TAG" || true
-          gh release upload "$TAG" jihoo-$TAG-${{ matrix.arch }}-linux.tar.gz*
+          # Test the system loader and bundled modules first. Code generation
+          # then uses the pinned Nix runtime: its LLVM can require a newer glibc
+          # than Ubuntu. This does not certify a distribution LLVM installation.
+          name="jihoo-$TAG-${{ matrix.arch }}-linux"
+          sha256sum -c "$name.tar.gz.sha256"
+          smoke=$(mktemp -d)
+          trap 'rm -rf "$smoke"' EXIT
+          tar -xzf "$name.tar.gz" -C "$smoke"
+          mkdir "$smoke/work"
+          cd "$smoke/work"
+          cat > hello.jh <<'JIHOO'
+          import std.libc
+          fn main() {
+              println("Hello, jihoo!")
+          }
+          JIHOO
+          cat > freestanding.jh <<'JIHOO'
+          #![freestanding]
+          fn main() {
+              println("Hello, jihoo!")
+          }
+          JIHOO
+          # shellcheck disable=SC2016
+          env -i HOME="$PWD" PATH=/usr/bin:/bin /bin/bash -euo pipefail -c '
+            test "$("$1" --version)" = "jihoo $2"
+            "$1" check hello.jh
+          ' smoke "$smoke/$name/bin/jihoo" "$EXPECTED_VERSION"
+          # shellcheck disable=SC2016
+          runtime=$(nix eval --raw --impure --expr '
+            let f = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+            in f.inputs.nixpkgs.legacyPackages.${builtins.currentSystem}.glibc.outPath')
+          loader="$runtime/lib/$(basename '${{ matrix.loader }}')"
+          test -x "$loader"
+          # The shell is resolved from the source flake, but the test's cwd
+          # and source files are outside it. The first check has no path overrides.
+          # Variables in the quoted scripts expand in their child shells.
+          # shellcheck disable=SC2016
+          nix shell --inputs-from "$GITHUB_WORKSPACE" \
+            nixpkgs#llvmPackages_21.clang nixpkgs#llvmPackages_21.lld \
+            nixpkgs#llvmPackages_21.llvm.dev -c bash -euo pipefail -c '
+              compiler=$1
+              expected=$2
+              loader=$3
+              # Explicit loader changes executable discovery; use only shipped modules.
+              env -i HOME="$PWD" PATH="$PATH" \
+                JIHOO_PATH="$(dirname "$compiler")/../share/jihoo/lib" \
+                JIHOO_CC="$(command -v clang)" \
+                JIHOO_LD="$(command -v ld.lld)" \
+                JIHOO_LLVM="$(llvm-config --libdir)/libLLVM-21.so" \
+                bash -euo pipefail -c '\''
+                  compiler=$1
+                  loader=$3
+                  run_compiler() { "$loader" "$compiler" "$@"; }
+                  test "$("$compiler" --version)" = "jihoo $2"
+                  "$compiler" check hello.jh
+                  run_compiler run hello.jh > run.out
+                  printf "Hello, jihoo!\n" > expected.out
+                  cmp expected.out run.out
+                  run_compiler build hello.jh -o hello
+                  ./hello > build.out
+                  cmp expected.out build.out
+                  run_compiler build freestanding.jh -o freestanding
+                  ./freestanding > freestanding.out
+                  cmp expected.out freestanding.out
+                '\'' smoke "$compiler" "$expected" "$loader"
+            ' smoke "$smoke/$name/bin/jihoo" "$EXPECTED_VERSION" "$loader"
+      - name: smoke-test dependent consumers from the archive
+        timeout-minutes: 20
+        run: |
+          name="jihoo-$TAG-${{ matrix.arch }}-linux"
+          sha256sum -c "$name.tar.gz.sha256"
+          smoke=$(mktemp -d)
+          trap 'rm -rf "$smoke"' EXIT
+          tar -xzf "$name.tar.gz" -C "$smoke"
+          # Raw system-loader archive: imported proofs, false-proof rejection,
+          # and binary-only missing-library controls, with no backend available.
+          env -i HOME="$smoke" PATH=/usr/bin:/bin python3 \
+            "$RUNNER_TEMP/release_dependent_package.py" "$smoke/$name/bin/jihoo"
+          # Native execution needs a glibc compatible with pinned Nix LLVM.
+          # Patch only a disposable second extraction; keep the tested/uploaded
+          # archive and the system-loader extraction byte-for-byte unchanged.
+          mkdir "$smoke/native"
+          tar -xzf "$name.tar.gz" -C "$smoke/native"
+          # shellcheck disable=SC2016
+          runtime=$(nix eval --raw --impure --expr '
+            let f = builtins.getFlake (builtins.getEnv "GITHUB_WORKSPACE");
+            in f.inputs.nixpkgs.legacyPackages.${builtins.currentSystem}.glibc.outPath')
+          loader="$runtime/lib/$(basename '${{ matrix.loader }}')"
+          nix shell --inputs-from . nixpkgs#patchelf -c patchelf \
+            --set-interpreter "$loader" "$smoke/native/$name/bin/jihoo"
+          # No JIHOO_PATH: both native positives and missing-bundle negatives
+          # must discover modules relative to the raw executable itself.
+          # shellcheck disable=SC2016
+          nix shell --inputs-from . nixpkgs#python3 \
+            nixpkgs#llvmPackages_21.clang nixpkgs#llvmPackages_21.lld \
+            nixpkgs#llvmPackages_21.llvm.dev -c bash -euo pipefail -c '
+              env -i HOME="$3" PATH="$PATH" \
+                JIHOO_CC="$(command -v clang)" \
+                JIHOO_LD="$(command -v ld.lld)" \
+                JIHOO_LLVM="$(llvm-config --libdir)/libLLVM-21.so" \
+                python3 "$1" "$2" --native
+            ' smoke "$RUNNER_TEMP/release_dependent_package.py" \
+              "$smoke/native/$name/bin/jihoo" "$smoke"
+          sha256sum -c "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: jihoo-*.tar.gz*
+          if-no-files-found: error
+
+  publish:
+    # A failed/skipped matrix member prevents any release upload.
+    needs: build
+    if: >-
+      (github.event_name == 'push' && github.ref_type == 'tag') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish && inputs.tag != '' && inputs.candidate_sha == '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+      - name: upload tested archives
+        run: |
+          sha256sum -c jihoo-*.tar.gz.sha256
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "jihoo $TAG" --notes "jihoo $TAG"
+          # Deliberately no --clobber: seed archives are immutable.
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" jihoo-*.tar.gz*

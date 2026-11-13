@@ -4,8 +4,8 @@
 #   scripts/bump-version.sh release 0.1.2   # on main: bump, commit, tag, push, wait for binaries
 #   scripts/bump-version.sh seed 0.1.2      # vendor and pin the released seed archives
 #
-# `release` sets `version` in flake.nix and the download link in the getting
-# started page, commits "Release <version>", tags v<version>, pushes both and
+# `release` sets the package and compiler versions and the download link in
+# the getting started page, commits "Release <version>", tags v<version>, pushes both and
 # waits for .github/workflows/release.yml to attach the x86_64 and aarch64
 # archives. `seed` verifies both released archives against their published
 # checksums, replaces bootstrap/'s copies, and updates flake.nix's seed version
@@ -45,14 +45,26 @@ release() {
     exit 1
   fi
 
+  # Validate every input before editing any file. In particular, a missing or
+  # duplicated compiler VERSION must not leave a partially bumped checkout.
   old=$(sed -n 's/^      version = "\(.*\)";$/\1/p' flake.nix)
-  [ -n "$old" ] || { echo "no version in flake.nix" >&2; exit 1; }
-  sed -i "s/^      version = \"$old\";$/      version = \"$version\";/" flake.nix
+  [[ $old =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    { echo "expected one package version in flake.nix" >&2; exit 1; }
+  compiler_version=$(sed -n 's/^const VERSION = "\(.*\)"$/\1/p' compiler/main.jh)
+  [ "$compiler_version" = "$old" ] ||
+    { echo "expected one compiler VERSION matching package version $old" >&2; exit 1; }
+  [ "$version" != "$old" ] || { echo "version is already $version" >&2; exit 1; }
+  page=site/src/content/docs/start/getting-started.md
+  grep -Eq 'releases/download/v[0-9.]+/jihoo-v[0-9.]+-' "$page" &&
+    grep -Eq 'jihoo-v[0-9.]+-x86_64-linux/bin' "$page" ||
+    { echo "missing release references in $page" >&2; exit 1; }
+
+  sed -i "s/^      version = \".*\";$/      version = \"$version\";/" flake.nix
+  sed -i "s/^const VERSION = \".*\"$/const VERSION = \"$version\"/" compiler/main.jh
   sed -i "s|releases/download/v[0-9.]*/jihoo-v[0-9.]*-|releases/download/$tag/jihoo-$tag-|g; \
-          s|jihoo-v[0-9.]*-x86_64-linux/bin|jihoo-$tag-x86_64-linux/bin|g" \
-    site/src/content/docs/start/getting-started.md
-  git add flake.nix site/src/content/docs/start/getting-started.md
-  git commit -q -m "Release $version" -m "Version $old becomes $version in flake.nix, and the getting started page downloads $tag."
+          s|jihoo-v[0-9.]*-x86_64-linux/bin|jihoo-$tag-x86_64-linux/bin|g" "$page"
+  git add flake.nix compiler/main.jh "$page"
+  git commit -q -m "Release $version" -m "Version $old becomes $version in flake.nix and compiler/main.jh, and the getting started page downloads $tag."
   git tag -a "$tag" -m "jihoo $tag"
   git push origin main "$tag"
 
