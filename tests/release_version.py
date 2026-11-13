@@ -127,7 +127,8 @@ if sys.argv[1:3] == ['run', 'list']:
                 expected = {
                     'flake.nix': before['flake.nix'].replace(f'\n      version = "{old}";', f'\n      version = "{new}";'),
                     'compiler/main.jh': before['compiler/main.jh'].replace(f'const VERSION = "{old}"', f'const VERSION = "{new}"'),
-                    PAGE: before[PAGE].replace(f'v{old}', f'v{new}'),
+                    # Published downloads can lag the compiler during release preparation.
+                    PAGE: re.sub(r'v[0-9]+\.[0-9]+\.[0-9]+', f'v{new}', before[PAGE]),
                 }
                 for name in FILES:
                     self.assertEqual((self.repo / name).read_text(), expected[name])
