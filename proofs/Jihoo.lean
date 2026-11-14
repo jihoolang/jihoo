@@ -406,3 +406,8 @@ import Jihoo.NativeReplacementTransform
 import Jihoo.NativeReplacementTransformExamples
 import Jihoo.NativeDefinitions
 import Jihoo.NativeDefinitionsExamples
+
+import Jihoo.NativeBranchExamples
+import Jihoo.NativeBranchMetatheoryExamples
+
+import Jihoo.NativeBranchReductionExamples

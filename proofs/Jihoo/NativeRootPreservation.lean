@@ -60,6 +60,51 @@ theorem HasType.ghostProofPack {Γ : Context} {mode : Bool} {p a q T : Term}
     .node .app (.cons predicates (.cons (.symm (.witnessPack p a q)) .nil))
   exact hq.convert (.trans application hconv)
 
+
+theorem HasType.ghostIfLtTrue {Γ : Context} {mode : Bool} {m n : Nat} {yes no T : Term}
+    (h : HasType Γ mode (.ifLt (.natural m) (.natural n) yes no) T) (holds : m < n) :
+    HasType Γ true (yes.subst (single (.decide (.natural m) (.natural n)))) T := by
+  obtain ⟨B,ha,hb,hy,hn,hconv⟩ := h.ifLtView
+  have evidence : HasType Γ true (.decide (.natural m) (.natural n)) (.lt (.natural m) (.natural n)) :=
+    .decide ha.naturalView.1 hb.naturalView.1 holds
+  have instantiated := hy.ghostInstantiate evidence
+  rw [Term.shift_subst_single] at instantiated
+  exact instantiated.convert hconv
+
+theorem HasType.ghostIfLtFalse {Γ : Context} {mode : Bool} {a b yes no T : Term}
+    (h : HasType Γ mode (.ifLt a b yes no) T) : HasType Γ true no T := by
+  obtain ⟨B,ha,hb,hy,hn,hconv⟩ := h.ifLtView
+  exact hn.ghost.convert hconv
+
+theorem HasType.ghostIfEqTrue {Γ : Context} {mode : Bool} {m n : Nat} {yes no T : Term}
+    (h : HasType Γ mode (.ifEq (.natural m) (.natural n) yes no) T) (holds : m = n) :
+    HasType Γ true (yes.subst (single (.refl (.natural m)))) T := by
+  subst n
+  obtain ⟨B,ha,hb,hy,hn,hconv⟩ := h.ifEqView
+  have evidence : HasType Γ true (.refl (.natural m)) (.eq (.natural m) (.natural m)) :=
+    .refl (.natural ha.naturalView.1)
+  have instantiated := hy.ghostInstantiate evidence
+  rw [Term.shift_subst_single] at instantiated
+  exact instantiated.convert hconv
+
+theorem HasType.ghostIfEqFalse {Γ : Context} {mode : Bool} {a b yes no T : Term}
+    (h : HasType Γ mode (.ifEq a b yes no) T) : HasType Γ true no T := by
+  obtain ⟨B,ha,hb,hy,hn,hconv⟩ := h.ifEqView
+  exact hn.ghost.convert hconv
+
+
+
+/-- Equality conversion cannot change a reflexivity proof into unequal indices:
+real Eq injectivity supplies conversion between the predicate arguments. -/
+theorem HasType.ghostTransportRefl {Γ : Context} {mode : Bool} {f a p T : Term}
+    (h : HasType Γ mode (.transport f (.refl a) p) T) : HasType Γ true p T := by
+  obtain ⟨u,v,hf,he,hp,hconv⟩ := h.transportView
+  obtain ⟨au,av⟩ := he.reflView.2.eq_injective
+  have uv : Conversion.Conv u v := .trans (.symm au) av
+  have application : Conversion.Conv (.app f u) (.app f v) :=
+    .node .app (.cons (.refl _) (.cons uv .nil))
+  exact hp.convert (.trans application hconv)
+
 namespace Conversion
 
 /-- Every contraction actually returned by the executable full-syntax
@@ -67,6 +112,7 @@ normalizer preserves an independently derived original type in ghost mode. -/
 theorem contract_ghost_preservation {Γ : Context} {mode : Bool} {t u T : Term}
     (typed : HasType Γ mode t T) (h : contract t = some u) : HasType Γ true u T := by
   fun_cases contract t <;> simp_all [contract]
+  all_goals try (split at h <;> simp_all <;> try (exact False.elim (by omega)))
   all_goals try (rcases h with ⟨hbound,h⟩)
   all_goals try subst u
   all_goals first
@@ -76,6 +122,11 @@ theorem contract_ghost_preservation {Γ : Context} {mode : Bool} {t u T : Term}
     | exact typed.ghostRead (by assumption)
     | exact typed.ghostWitnessPack
     | exact typed.ghostProofPack
+    | exact typed.ghostIfLtTrue (by omega)
+    | exact typed.ghostIfLtFalse
+    | exact typed.ghostIfEqTrue (by omega)
+    | exact typed.ghostIfEqFalse
+    | exact typed.ghostTransportRefl
     | exact False.elim typed.deref_unavailable
     | exact False.elim typed.borrow_unavailable
 

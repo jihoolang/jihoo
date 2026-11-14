@@ -4560,3 +4560,12 @@ and a regression rejecting a forged ghost flag on an erased runtime value.
 The source differential suite now retains 660 actual binder-transform calls.
 Native source refinement, the remaining operator rules and runtime ownership
 connections are still explicit obligations.
+
+Evidence-binding IfLt/IfEq and Absurd now belong to the same proved judgment,
+checker, ghost substitution, preservation and type uniqueness results. Checked
+negative shift prevents branch evidence from escaping through the inferred
+result type. Literal branch reduction substitutes the appropriate Decide/Refl
+evidence, and reflexive Transport also reduces. Parallel confluence and the
+executable normalizer proofs include these computations. The native suite
+retains 65 source fixtures, including proof-dependent Transport conversion and
+branch-normalized type arguments, plus 31 additional admission checks.

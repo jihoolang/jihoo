@@ -43,6 +43,9 @@ theorem HasType.ghost (h : HasType ctx mode t T) : HasType ctx true t T := by
   | pack hp ha hq ihp iha ihq => exact .pack ihp iha ihq
   | witness hs ih => exact .witness ih
   | proof hs ih => exact .proof ih
+  | ifLt ha hb hy hn iha ihb ihy ihn => exact .ifLt iha ihb ihy ihn
+  | ifEq ha hb hy hn iha ihb ihy ihn => exact .ifEq iha ihb ihy ihn
+  | absurd hT hp allowed ihT ihp => exact .absurd ihT ihp (Or.inl rfl)
   | convert ht conv ih => exact .convert ih conv
 
 /-- Variable inversion retains readability through arbitrary type conversion. -/
@@ -112,6 +115,28 @@ private theorem scoped_binder {depth : Nat} {op : Op} {A B : Term}
           simpa only [h1] using hB
       | succ i => simp at ht
 
+
+private theorem scoped_branch {depth : Nat} {op : Op} {a b yes no : Term}
+    (h0 : op.binders 0 = 0) (h1 : op.binders 1 = 0)
+    (h2 : op.binders 2 = 1) (h3 : op.binders 3 = 0)
+    (ha : a.Scoped depth) (hb : b.Scoped depth)
+    (hy : yes.Scoped (depth+1)) (hn : no.Scoped depth) :
+    (Term.node op [a,b,yes,no]).Scoped depth := by
+  apply Term.Scoped.node
+  intro i t ht
+  cases i with
+  | zero => simpa [h0] using (Option.some.inj ht ▸ ha)
+  | succ i =>
+      cases i with
+      | zero => simpa [h1] using (Option.some.inj ht ▸ hb)
+      | succ i =>
+          cases i with
+          | zero => simpa [h2] using (Option.some.inj ht ▸ hy)
+          | succ i =>
+              cases i with
+              | zero => simpa [h3] using (Option.some.inj ht ▸ hn)
+              | succ i => simp at ht
+
 @[simp] theorem natural_scoped (depth n : Nat) : (Term.natural n).Scoped depth :=
   scoped_node (by intro i; rfl) (by simp)
 
@@ -125,6 +150,8 @@ theorem HasType.term_scoped (h : HasType ctx mode t T) : t.Scoped ctx.length := 
   | var hx readable => exact .var (lookup_bound hx)
   | pi hA hB ihA ihB => exact scoped_binder rfl rfl ihA ihB
   | lam hA hb ihA ihb => exact scoped_binder rfl rfl ihA ihb
+  | ifLt ha hb hy hn iha ihb ihy ihn => exact scoped_branch rfl rfl rfl rfl iha ihb ihy ihn
+  | ifEq ha hb hy hn iha ihb ihy ihn => exact scoped_branch rfl rfl rfl rfl iha ihb ihy ihn
   | elements size bound hs ih => exact scoped_node (by intro i; rfl) ih
   | convert ht conv ih => exact ih
   | _ =>

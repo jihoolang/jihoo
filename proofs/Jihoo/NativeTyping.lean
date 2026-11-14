@@ -36,6 +36,9 @@ namespace Term
 @[match_pattern] abbrev pack (p a q : Term) : Term := .node .pack [p, a, q]
 @[match_pattern] abbrev witness (s : Term) : Term := .node .witness [s]
 @[match_pattern] abbrev proof (s : Term) : Term := .node .proof [s]
+@[match_pattern] abbrev ifLt (a b yes no : Term) : Term := .node .ifLt [a, b, yes, no]
+@[match_pattern] abbrev ifEq (a b yes no : Term) : Term := .node .ifEq [a, b, yes, no]
+@[match_pattern] abbrev absurd (T p : Term) : Term := .node .absurd [T, p]
 end Term
 
 inductive SortTag where
@@ -121,6 +124,22 @@ def applicationAllowed (ghost : Bool) (domain argument : Term) : Prop :=
     (firstOrderKind domain = true ∧
       ∃ normal, Conversion.Conv argument normal ∧ plain normal = true)
 
+/-- No conversion of this type is a function type. Code-mode absurd
+elimination retains this native representation restriction. -/
+def nonFunction (T : Term) : Prop :=
+  ∀ (e : Bool) (A B : Term), ¬ Conversion.Conv T (.pi e A B)
+
+/-- Ghost elimination is closed under arbitrary type substitution. Executable
+checking additionally enforces the native nonfunction gate in both modes. -/
+def absurdAllowed (ghost : Bool) (T : Term) : Prop := ghost = true ∨ nonFunction T
+
+/-- A conservative executable nonfunction certificate from a rigid known type
+head. Neutral and computed heads outside this list reject. -/
+def nonFunctionHead : Term → Bool
+  | .var _ => true
+  | .univ _ | .prop | .u64 | .i64 | .array _ | .lt _ _ | .eq _ _ | .refine _ => true
+  | _ => false
+
 mutual
   /-- A domain must actually infer a sort; arbitrary annotations are not assumed
   to be types. This definition is independent of the executable checker. -/
@@ -181,6 +200,14 @@ mutual
         HasType ctx true q (.app p a) → HasType ctx ghost (.pack p a q) (.refine p)
     | witness : HasType ctx ghost s (.refine p) → HasType ctx ghost (.witness s) .u64
     | proof : HasType ctx true s (.refine p) → HasType ctx ghost (.proof s) (.app p (.witness s))
+    | ifLt : HasType ctx ghost a .u64 → HasType ctx ghost b .u64 →
+        HasType (⟨.lt a b, true⟩ :: ctx) ghost yes (B.rename Nat.succ) →
+        HasType ctx ghost no B → HasType ctx ghost (.ifLt a b yes no) B
+    | ifEq : HasType ctx ghost a .u64 → HasType ctx ghost b .u64 →
+        HasType (⟨.eq a b, true⟩ :: ctx) ghost yes (B.rename Nat.succ) →
+        HasType ctx ghost no B → HasType ctx ghost (.ifEq a b yes no) B
+    | absurd {s : SortTag} : HasType ctx true T s.term → HasType ctx true p (.lt i (.natural 0)) →
+        absurdAllowed ghost T → HasType ctx ghost (.absurd T p) T
     | convert : HasType ctx ghost t A → Conversion.Conv A B → HasType ctx ghost t B
 end
 

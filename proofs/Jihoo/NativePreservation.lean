@@ -19,6 +19,18 @@ inductive RootStep : Term → Term → Prop where
   | derefBorrow (a : Term) : RootStep (.node .deref [.node .borrow [a]]) a
   | borrowDeref (a : Term) : RootStep (.node .borrow [.node .deref [a]]) a
 
+  | ifLtTrue (m n : Nat) (yes no : Term) : m < n →
+      RootStep (.ifLt (.natural m) (.natural n) yes no)
+        (yes.subst (single (.decide (.natural m) (.natural n))))
+  | ifLtFalse (m n : Nat) (yes no : Term) : n ≤ m →
+      RootStep (.ifLt (.natural m) (.natural n) yes no) no
+  | ifEqTrue (n : Nat) (yes no : Term) :
+      RootStep (.ifEq (.natural n) (.natural n) yes no) (yes.subst (single (.refl (.natural n))))
+  | ifEqFalse (m n : Nat) (yes no : Term) : m ≠ n →
+      RootStep (.ifEq (.natural m) (.natural n) yes no) no
+
+  | transportRefl (f a p : Term) : RootStep (.transport f (.refl a) p) p
+
 inductive ListStep : List Term → List Term → Prop where
   | head : Step a b → ListStep (a :: xs) (b :: xs)
   | tail : ListStep xs ys → ListStep (a :: xs) (a :: ys)
@@ -65,6 +77,11 @@ theorem Step.nodeView {op : Op} {xs : List Term} {u : Term}
   | proofPack p a q => exact .inl (.proofPack p a _)
   | derefBorrow a => exact .inl (.derefBorrow _)
   | borrowDeref a => exact .inl (.borrowDeref _)
+  | ifLtTrue m n yes no bound => exact .inl (.ifLtTrue m n yes no bound)
+  | ifLtFalse m n yes no bound => exact .inl (.ifLtFalse m n yes _ bound)
+  | ifEqTrue n yes no => exact .inl (.ifEqTrue n yes no)
+  | ifEqFalse m n yes no apart => exact .inl (.ifEqFalse m n yes _ apart)
+  | transportRefl f a p => exact .inl (.transportRefl f a _)
   | node op pre post step => exact .inr ⟨_,rfl,ListStep.context pre post step⟩
 
 theorem Step.natural_impossible {n : Nat} {u : Term} (h : Step (.natural n) u) : False := by
@@ -83,6 +100,11 @@ theorem RootStep.ghostPreservation {Γ : Context} {mode : Bool} {t u T : Term}
   | proofPack => exact typed.ghostProofPack
   | derefBorrow => exact False.elim typed.deref_unavailable
   | borrowDeref => exact False.elim typed.borrow_unavailable
+  | ifLtTrue m n yes no bound => exact typed.ghostIfLtTrue bound
+  | ifLtFalse => exact typed.ghostIfLtFalse
+  | ifEqTrue => exact typed.ghostIfEqTrue rfl
+  | ifEqFalse => exact typed.ghostIfEqFalse
+  | transportRefl => exact typed.ghostTransportRefl
 
 end Jihoo.NativeKernel.Reduction
 
@@ -438,7 +460,7 @@ private theorem preservation_mutual :
     | transport hf he hp ihf ihe ihp =>
         first | intro u outer | rename_i u outer
         rcases outer.nodeView with root | ⟨ys,rfl,children⟩
-        · cases root
+        · exact root.ghostPreservation (HasType.transport (ghost := true) hf he hp)
         · cases children with
           | head step =>
               exact .convert (.transport (ihf _ step) he.ghost
@@ -502,6 +524,61 @@ private theorem preservation_mutual :
                 (congr2 .app (.refl _) (congr1 .witness (.symm step.conversion)))
           | tail children =>
               cases children
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · exact root.ghostPreservation (.ifLt ha hb hy hn)
+        · cases children with
+          | head step =>
+              exact .ifLt (iha _ step) hb.ghost
+                (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                  (congr2 .lt step.conversion (.refl _)) true)) hn.ghost
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .ifLt ha.ghost (ihb _ step)
+                    (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                      (congr2 .lt (.refl _) step.conversion) true)) hn.ghost
+              | tail children =>
+                  cases children with
+                  | head step => exact .ifLt ha.ghost hb.ghost (ihy _ step) hn.ghost
+                  | tail children =>
+                      cases children with
+                      | head step => exact .ifLt ha.ghost hb.ghost hy.ghost (ihn _ step)
+                      | tail children => cases children
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · exact root.ghostPreservation (.ifEq ha hb hy hn)
+        · cases children with
+          | head step =>
+              exact .ifEq (iha _ step) hb.ghost
+                (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                  (congr2 .eq step.conversion (.refl _)) true)) hn.ghost
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .ifEq ha.ghost (ihb _ step)
+                    (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                      (congr2 .eq (.refl _) step.conversion) true)) hn.ghost
+              | tail children =>
+                  cases children with
+                  | head step => exact .ifEq ha.ghost hb.ghost (ihy _ step) hn.ghost
+                  | tail children =>
+                      cases children with
+                      | head step => exact .ifEq ha.ghost hb.ghost hy.ghost (ihn _ step)
+                      | tail children => cases children
+    | absurd hT hp allowed ihT ihp =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .convert (.absurd (ihT _ step) hp.ghost (Or.inl rfl)) (.symm step.conversion)
+          | tail children =>
+              cases children with
+              | head step => exact .absurd hT.ghost (ihp _ step) (Or.inl rfl)
+              | tail children => cases children
     | convert ht hc ih =>
         first | intro u outer | rename_i u outer
         exact .convert (ih _ outer) hc
@@ -842,7 +919,7 @@ private theorem preservation_mutual :
     | transport hf he hp ihf ihe ihp =>
         first | intro u outer | rename_i u outer
         rcases outer.nodeView with root | ⟨ys,rfl,children⟩
-        · cases root
+        · exact root.ghostPreservation (HasType.transport (ghost := true) hf he hp)
         · cases children with
           | head step =>
               exact .convert (.transport (ihf _ step) he.ghost
@@ -906,6 +983,61 @@ private theorem preservation_mutual :
                 (congr2 .app (.refl _) (congr1 .witness (.symm step.conversion)))
           | tail children =>
               cases children
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · exact root.ghostPreservation (.ifLt ha hb hy hn)
+        · cases children with
+          | head step =>
+              exact .ifLt (iha _ step) hb.ghost
+                (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                  (congr2 .lt step.conversion (.refl _)) true)) hn.ghost
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .ifLt ha.ghost (ihb _ step)
+                    (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                      (congr2 .lt (.refl _) step.conversion) true)) hn.ghost
+              | tail children =>
+                  cases children with
+                  | head step => exact .ifLt ha.ghost hb.ghost (ihy _ step) hn.ghost
+                  | tail children =>
+                      cases children with
+                      | head step => exact .ifLt ha.ghost hb.ghost hy.ghost (ihn _ step)
+                      | tail children => cases children
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · exact root.ghostPreservation (.ifEq ha hb hy hn)
+        · cases children with
+          | head step =>
+              exact .ifEq (iha _ step) hb.ghost
+                (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                  (congr2 .eq step.conversion (.refl _)) true)) hn.ghost
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .ifEq ha.ghost (ihb _ step)
+                    (hy.ghostContextConversion ((Ghost.ContextConversion.refl _).extend
+                      (congr2 .eq (.refl _) step.conversion) true)) hn.ghost
+              | tail children =>
+                  cases children with
+                  | head step => exact .ifEq ha.ghost hb.ghost (ihy _ step) hn.ghost
+                  | tail children =>
+                      cases children with
+                      | head step => exact .ifEq ha.ghost hb.ghost hy.ghost (ihn _ step)
+                      | tail children => cases children
+    | absurd hT hp allowed ihT ihp =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .convert (.absurd (ihT _ step) hp.ghost (Or.inl rfl)) (.symm step.conversion)
+          | tail children =>
+              cases children with
+              | head step => exact .absurd hT.ghost (ihp _ step) (Or.inl rfl)
+              | tail children => cases children
     | convert ht hc ih =>
         first | intro u outer | rename_i u outer
         exact .convert (ih _ outer) hc

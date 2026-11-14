@@ -72,7 +72,49 @@ CASES.update({
     'owned-allocation-gap': Case('(def value (Buffer 2) (alloc 2 (int 0)))', admitted=False),
     'owned-consumption-gap': Case('(def value (pi b (Buffer 1) U64) '
                                   '(lam b (Buffer 1) (free b 7)))', admitted=False),
-    'branch-gap': Case('(def value U64 (if-eq 0 0 p 7 8))', admitted=False),
+    'branch-eq': Case('(def value U64 (if-eq 0 0 p 7 8))'),
+    'branch-lt-bounds': Case(
+        '(def value (pi n U64 I64) (lam n U64 '
+        '(if-lt n 2 p (index (array (int 7) (int 9)) n p) (int -1))))',
+        mode='code-require'),
+    'branch-dependent-result': Case(
+        '(def value (pi n U64 (Eq n n)) '
+        '(lam n U64 (if-eq n 0 p (refl n) (refl n))))'),
+    'branch-true-conversion': Case('(def value (Eq (if-eq 0 0 p 7 8) 7) (refl 7))'),
+    'branch-false-conversion': Case('(def value (Eq (if-lt 3 2 p 7 8) 8) (refl 8))'),
+    'branch-type-argument': Case(
+        f'(def value I64 (app {IDENTITY} (if-eq 0 0 p I64 U64) (int 7)))',
+        mode='code-require'),
+    'transport-proof-dependent-type': Case(
+        '(def value (pi F (pi0 p (Eq 7 7) Prop) '
+        '(pi0 q (app F (refl 7)) (app F (transport (lam n U64 (Eq n n)) (refl 7) (refl 7))))) '
+        '(lam F (pi0 p (Eq 7 7) Prop) (lam0 q (app F (refl 7)) q)))'),
+    'branch-type-mismatch': Case('(def value U64 (if-eq 0 0 p 7 (int -1)))',
+                                  native=False, admitted=False, diagnostic=b'type mismatch'),
+    'branch-proof-used-as-data': Case('(def value U64 (if-eq 0 0 p p 7))',
+                                      native=False, admitted=False, diagnostic=b'erased'),
+    'branch-scope-escape': Case(
+        '(def value (pi F (pi0 p (Eq 0 0) (Type 0)) '
+        '(pi f (pi0 p (Eq 0 0) (app F p)) U64)) '
+        '(lam F (pi0 p (Eq 0 0) (Type 0)) '
+        '(lam f (pi0 p (Eq 0 0) (app F p)) (if-eq 0 0 p (app f p) 7))))',
+        native=False, admitted=False, diagnostic=b'escapes'),
+    'absurd-impossible-context': Case(
+        '(def value (pi0 p (Lt 0 0) U64) (lam0 p (Lt 0 0) (absurd U64 p)))',
+        mode='code-require'),
+    'absurd-polymorphic-target': Case(
+        '(def value (pi A (Type 0) (pi0 p (Lt 0 0) A)) '
+        '(lam A (Type 0) (lam0 p (Lt 0 0) (absurd A p))))'),
+    'absurd-function-rejected': Case(
+        '(def value (pi0 p (Lt 0 0) (pi x U64 U64)) '
+        '(lam0 p (Lt 0 0) (absurd (pi x U64 U64) p)))',
+        native=False, admitted=False, diagnostic=b'function'),
+    'absurd-fake-proof': Case('(def value U64 (absurd U64 (refl 0)))',
+                               native=False, admitted=False, diagnostic=b'absurd needs evidence'),
+    'absurd-neutral-application-gap': Case(
+        '(def value (pi F (pi n U64 (Type 0)) (pi0 p (Lt 0 0) (app F 0))) '
+        '(lam F (pi n U64 (Type 0)) (lam0 p (Lt 0 0) (absurd (app F 0) p))))',
+        admitted=False),
     'fold-gap': Case('(def value I64 (fold 2 (int 0) '
                       '(lam i U64 (lam0 p (Lt i 2) (lam acc I64 acc)))))', admitted=False),
 })

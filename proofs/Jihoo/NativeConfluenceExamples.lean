@@ -1,4 +1,5 @@
 import Jihoo.NativeConfluence
+import Jihoo.NativeNormalization
 
 /-! Parametric critical-overlap regressions. These cover root/context forks,
 including inverse borrow projections, rather than relying on finite reductions
@@ -84,5 +85,83 @@ namespace Jihoo.NativeKernel.Conversion.Examples
     e = e' ∧ ListRel Conv [A,B,C] [A',B',C'] := by
   obtain ⟨he, hs⟩ := h.rigid_node_injective rfl rfl
   exact ⟨Op.pi.inj he, hs⟩
+
+theorem ifLt_true_context_fork (bound : m < n) (h : Par yes yes') :
+    Par (.ifLt (.natural m) (.natural n) yes no)
+      (yes'.subst (single (.decide (.natural m) (.natural n)))) ∧
+    Par (.ifLt (.natural m) (.natural n) yes no) (.ifLt (.natural m) (.natural n) yes' no) ∧
+    Par (.ifLt (.natural m) (.natural n) yes' no)
+      (yes'.subst (single (.decide (.natural m) (.natural n)))) := by
+  refine ⟨.ifLtTrue m n no bound h, ?_, .ifLtTrue m n no bound (.refl _)⟩
+  exact .node .ifLt (.cons (.refl _) (.cons (.refl _) (.cons h (.cons (.refl _) .nil))))
+
+theorem ifLt_false_context_fork (bound : n ≤ m) (h : Par no no') :
+    Par (.ifLt (.natural m) (.natural n) yes no) no' ∧
+    Par (.ifLt (.natural m) (.natural n) yes no) (.ifLt (.natural m) (.natural n) yes no') ∧
+    Par (.ifLt (.natural m) (.natural n) yes no') no' := by
+  refine ⟨.ifLtFalse m n yes bound h, ?_, .ifLtFalse m n yes bound (.refl _)⟩
+  exact .node .ifLt (.cons (.refl _) (.cons (.refl _) (.cons (.refl _) (.cons h .nil))))
+
+theorem ifEq_true_context_fork (h : Par yes yes') :
+    Par (.ifEq (.natural n) (.natural n) yes no) (yes'.subst (single (.refl (.natural n)))) ∧
+    Par (.ifEq (.natural n) (.natural n) yes no) (.ifEq (.natural n) (.natural n) yes' no) ∧
+    Par (.ifEq (.natural n) (.natural n) yes' no) (yes'.subst (single (.refl (.natural n)))) := by
+  refine ⟨.ifEqTrue n no h, ?_, .ifEqTrue n no (.refl _)⟩
+  exact .node .ifEq (.cons (.refl _) (.cons (.refl _) (.cons h (.cons (.refl _) .nil))))
+
+theorem ifEq_false_context_fork (apart : m ≠ n) (h : Par no no') :
+    Par (.ifEq (.natural m) (.natural n) yes no) no' ∧
+    Par (.ifEq (.natural m) (.natural n) yes no) (.ifEq (.natural m) (.natural n) yes no') ∧
+    Par (.ifEq (.natural m) (.natural n) yes no') no' := by
+  refine ⟨.ifEqFalse m n yes apart h, ?_, .ifEqFalse m n yes apart (.refl _)⟩
+  exact .node .ifEq (.cons (.refl _) (.cons (.refl _) (.cons (.refl _) (.cons h .nil))))
+
+theorem transport_context_fork (h : Par p q) :
+    Par (.transport f (.refl a) p) q ∧
+    Par (.transport f (.refl a) p) (.transport f (.refl a) q) ∧
+    Par (.transport f (.refl a) q) q := by
+  refine ⟨.transportRefl f a h, ?_, .transportRefl f a (.refl _)⟩
+  exact .node .transport (.cons (.refl _) (.cons (.refl _) (.cons h .nil)))
+
+private def branchCapture : Term :=
+  .lam false .u64
+    (.ifLt (.natural 0) (.natural 1)
+      (.lam false .u64 (.refl (.var 2))) (.lam false .u64 (.refl (.var 1))))
+
+private def captureResult : Term := .lam false .u64 (.lam false .u64 (.refl (.var 1)))
+
+/-- Removing conditional evidence beneath a value lambda must retain the outer
+value variable and must not capture it as the returned function's argument. -/
+theorem branch_lambda_capture : normalize 12 branchCapture = captureResult := by cbv
+
+theorem branch_lambda_capture_forward : Reduction.Steps branchCapture captureResult := by
+  simpa only [branch_lambda_capture] using normalize_steps 12 branchCapture
+
+theorem equality_inserts_reflexivity :
+    normalize 8 (.ifEq (.natural 7) (.natural 7) (.var 0) (.refl (.natural 7))) =
+      .refl (.natural 7) := by cbv
+
+theorem inequality_inserts_decision :
+    normalize 8 (.ifLt (.natural 0) (.natural 1) (.var 0) (.decide (.natural 0) (.natural 1))) =
+      .decide (.natural 0) (.natural 1) := by cbv
+
+theorem false_equality_preserves_free_variable :
+    normalize 8 (.ifEq (.natural 0) (.natural 1) (.var 1) (.var 0)) = .var 0 := by cbv
+
+theorem false_inequality_preserves_free_variable :
+    normalize 8 (.ifLt (.natural 1) (.natural 0) (.var 1) (.var 0)) = .var 0 := by cbv
+
+theorem nested_conditional_evidence : normalize 12
+    (.ifEq (.natural 0) (.natural 0)
+      (.ifLt (.natural 0) (.natural 1) (.var 1) (.var 0)) (.refl (.natural 0))) =
+      .refl (.natural 0) := by cbv
+
+theorem equality_proof_drives_transport : normalize 12
+    (.ifEq (.natural 4) (.natural 4)
+      (.transport (.lam false .u64 (.eq (.var 0) (.var 0))) (.var 0) (.refl (.natural 4)))
+      (.refl (.natural 4))) = .refl (.natural 4) := by cbv
+
+theorem malformed_conditional_neutral :
+    contract (.node .ifLt [.natural 0,.natural 1,.natural 7]) = none := by cbv
 
 end Jihoo.NativeKernel.Conversion.Examples

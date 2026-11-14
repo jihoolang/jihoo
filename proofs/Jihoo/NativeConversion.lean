@@ -28,6 +28,19 @@ inductive Conv : Term → Term → Prop where
   | derefBorrow (a : Term) : Conv (.node .deref [.node .borrow [a]]) a
   | borrowDeref (a : Term) : Conv (.node .borrow [.node .deref [a]]) a
 
+  | transportRefl (f a p : Term) :
+      Conv (.node .transport [f, .node .refl [a], p]) p
+  | ifLtTrue (m n : Nat) (yes no : Term) : m < n →
+      Conv (.node .ifLt [.node (.natural m) [], .node (.natural n) [], yes, no])
+        (yes.subst (single (.node .decide [.node (.natural m) [], .node (.natural n) []])))
+  | ifLtFalse (m n : Nat) (yes no : Term) : n ≤ m →
+      Conv (.node .ifLt [.node (.natural m) [], .node (.natural n) [], yes, no]) no
+  | ifEqTrue (n : Nat) (yes no : Term) :
+      Conv (.node .ifEq [.node (.natural n) [], .node (.natural n) [], yes, no])
+        (yes.subst (single (.node .refl [.node (.natural n) []])))
+  | ifEqFalse (m n : Nat) (yes no : Term) : m ≠ n →
+      Conv (.node .ifEq [.node (.natural m) [], .node (.natural n) [], yes, no]) no
+
 @[simp] theorem renameArgs_elements (count : Nat) (ρ : Nat → Nat) (offset : Nat) (xs : List Term) :
     renameArgs (.elements count) ρ offset xs = xs.map (Term.rename ρ) := by
   induction xs generalizing offset with
@@ -70,6 +83,21 @@ theorem Conv.renaming {a b : Term} (h : Conv a b) (ρ : Nat → Nat) :
       simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using Conv.derefBorrow (a.rename ρ)
   | borrowDeref a =>
       simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using Conv.borrowDeref (a.rename ρ)
+  | transportRefl f a p =>
+      simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
+        Conv.transportRefl (f.rename ρ) (a.rename ρ) (p.rename ρ)
+  | ifLtTrue m n yes no bound =>
+      simpa [Term.rename, renameArgs, Op.binders, liftRenaming, Term.rename_instantiate] using
+        Conv.ifLtTrue m n (yes.rename (Indexed.liftRenaming ρ)) (no.rename ρ) bound
+  | ifLtFalse m n yes no bound =>
+      simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
+        Conv.ifLtFalse m n (yes.rename (Indexed.liftRenaming ρ)) (no.rename ρ) bound
+  | ifEqTrue n yes no =>
+      simpa [Term.rename, renameArgs, Op.binders, liftRenaming, Term.rename_instantiate] using
+        Conv.ifEqTrue n (yes.rename (Indexed.liftRenaming ρ)) (no.rename ρ)
+  | ifEqFalse m n yes no apart =>
+      simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
+        Conv.ifEqFalse m n (yes.rename (Indexed.liftRenaming ρ)) (no.rename ρ) apart
   | nil => simp [renameArgs]; exact .nil
   | cons _ _ ih₁ ih₂ =>
       rename_i op offset ρ
@@ -106,6 +134,21 @@ theorem Conv.substitution {a b : Term} (h : Conv a b) (σ : Nat → Term) :
       simpa [Term.subst, substArgs, Op.binders, liftSub] using Conv.derefBorrow (a.subst σ)
   | borrowDeref a =>
       simpa [Term.subst, substArgs, Op.binders, liftSub] using Conv.borrowDeref (a.subst σ)
+  | transportRefl f a p =>
+      simpa [Term.subst, substArgs, Op.binders, liftSub] using
+        Conv.transportRefl (f.subst σ) (a.subst σ) (p.subst σ)
+  | ifLtTrue m n yes no bound =>
+      simpa [Term.subst, substArgs, Op.binders, liftSub, Term.subst_instantiate] using
+        Conv.ifLtTrue m n (yes.subst (liftSubOne σ)) (no.subst σ) bound
+  | ifLtFalse m n yes no bound =>
+      simpa [Term.subst, substArgs, Op.binders, liftSub] using
+        Conv.ifLtFalse m n (yes.subst (liftSubOne σ)) (no.subst σ) bound
+  | ifEqTrue n yes no =>
+      simpa [Term.subst, substArgs, Op.binders, liftSub, Term.subst_instantiate] using
+        Conv.ifEqTrue n (yes.subst (liftSubOne σ)) (no.subst σ)
+  | ifEqFalse m n yes no apart =>
+      simpa [Term.subst, substArgs, Op.binders, liftSub] using
+        Conv.ifEqFalse m n (yes.subst (liftSubOne σ)) (no.subst σ) apart
   | nil => simp [substArgs]; exact .nil
   | cons _ _ ih₁ ih₂ =>
       rename_i op offset σ
@@ -142,6 +185,17 @@ def contract : Term → Option Term
   | .node .proof [.node .pack [_, _, q]] => some q
   | .node .deref [.node .borrow [a]] => some a
   | .node .borrow [.node .deref [a]] => some a
+  | .node .transport [_f, .node .refl [_a], p] => some p
+  | .node .ifLt [.node (.natural m) [], .node (.natural n) [], yes, no] =>
+      if m < n then
+        let evidence := .node .decide [.node (.natural m) [], .node (.natural n) []]
+        if substitutionSafe yes evidence then some (yes.subst (single evidence)) else none
+      else some no
+  | .node .ifEq [.node (.natural m) [], .node (.natural n) [], yes, no] =>
+      if m = n then
+        let evidence := .node .refl [.node (.natural m) []]
+        if substitutionSafe yes evidence then some (yes.subst (single evidence)) else none
+      else some no
   | _ => none
 
 /-- Bounded residual normalization; every recursive call decreases fuel. -/
@@ -167,6 +221,7 @@ theorem children_sound (t : Term) (f : Term → Term) (h : ∀ t, Conv t (f t)) 
 
 theorem contract_sound {t u : Term} (h : contract t = some u) : Conv t u := by
   fun_cases contract t <;> simp_all [contract]
+  all_goals try (split at h <;> simp_all <;> try (exact False.elim (by omega)))
   all_goals try (rcases h with ⟨hbound, h⟩)
   all_goals try subst u
   all_goals first
@@ -178,6 +233,11 @@ theorem contract_sound {t u : Term} (h : contract t = some u) : Conv t u := by
     | exact .proofPack _ _ _
     | exact .derefBorrow _
     | exact .borrowDeref _
+    | exact .transportRefl _ _ _
+    | exact .ifLtTrue _ _ _ _ (by omega)
+    | exact .ifLtFalse _ _ _ _ (by omega)
+    | exact .ifEqTrue _ _ _
+    | exact .ifEqFalse _ _ _ _ (by assumption)
 
 theorem normalize_sound (fuel : Nat) (t : Term) : Conv t (normalize fuel t) := by
   induction fuel generalizing t with

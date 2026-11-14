@@ -24,10 +24,10 @@ theorem nested_capture : normalize 8
     .node (.lam false) [u64, .var 1] := by native_conversion_example
 
 theorem conditional_binder_capture : normalize 8
-    (.node .ifEq [lit 0, lit 0,
+    (.node .ifEq [.var 1, .var 1,
       .node .app [.node (.lam false) [u64,
         .node (.lam false) [u64, .node .refl [.var 1]]], .var 0], lit 7]) =
-    .node .ifEq [lit 0, lit 0, .node (.lam false) [u64, .node .refl [.var 1]], lit 7] := by
+    .node .ifEq [.var 1, .var 1, .node (.lam false) [u64, .node .refl [.var 1]], lit 7] := by
   native_conversion_example
 
 theorem witness_pack : normalize 4

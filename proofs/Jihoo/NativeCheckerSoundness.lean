@@ -1,4 +1,5 @@
 import Jihoo.NativeChecker
+import Jihoo.NativeConfluence
 
 /-! Acceptance soundness of the universe-aware data-input native-tree checker.
 The mutually inductive declarative rules precede and do not refer to inference.
@@ -44,6 +45,30 @@ theorem applicationOK_sound {fuel : Nat} {ghost : Bool} {A a : Term}
           have hs : firstOrderKind A = true ∧ plain (Conversion.normalize fuel a) = true := by
             simpa [applicationOK, hk] using h
           exact Or.inr (Or.inr ⟨hs.1, _, Conversion.normalize_sound fuel a, hs.2⟩)
+
+/-- A rigid canonical nonfunction head cannot become a Pi by conversion. -/
+theorem nonFunctionHead_sound {T : Term} (h : nonFunctionHead T = true) : nonFunction T := by
+  intro e A B converted
+  fun_cases nonFunctionHead T <;> simp_all only [nonFunctionHead, Bool.false_eq_true]
+  all_goals first
+    | exact Conversion.Conv.variable_node_separate rfl converted
+    | exact Conversion.Conv.rigid_disjoint rfl rfl (by intro same; cases same) converted
+
+theorem nonFunction_of_conversion {A B : Term} (conv : Conversion.Conv A B)
+    (h : nonFunction B) : nonFunction A :=
+  fun e X Y converted => h e X Y (.trans (.symm conv) converted)
+
+/-- Successful evidence-binder removal proves exact reweakening, including
+when the result is a function type with its own binders. -/
+theorem branch_type_reweakens {Y B : Term}
+    (h : PartialRenaming.shift (-1) 0 Y = some B) : B.rename Nat.succ = Y := by
+  have shifted := PartialRenaming.shift_negative_reweakens (delta := -1) (by decide) h
+  change B.rename (PartialRenaming.raiseIndex 0 1) = Y at shifted
+  have raised : PartialRenaming.raiseIndex 0 1 = Nat.succ := by
+    funext x
+    simp [PartialRenaming.raiseIndex]
+  rw [raised] at shifted
+  exact shifted
 
 private theorem sound_mutual (fuel : Nat) :
     (∀ ctx ghost t T, infer fuel ctx ghost t = some T → HasType ctx ghost t T) ∧
@@ -298,7 +323,71 @@ private theorem sound_mutual (fuel : Nat) :
             cases h
             exact .proof (he ctx true s _ hs)
           · contradiction
-        case h_31 => contradiction
+        case h_31 =>
+          rename_i a b yes no
+          split at h
+          · rename_i hab
+            split at h
+            · rename_i Y hy
+              split at h
+              · rename_i B lowered
+                split at h
+                · rename_i hn
+                  cases h
+                  have hyes := he (⟨.lt a b, true⟩ :: ctx) ghost yes Y hy
+                  rw [← branch_type_reweakens lowered] at hyes
+                  exact .ifLt (hc ctx ghost a _ hab.1) (hc ctx ghost b _ hab.2)
+                    hyes (hc ctx ghost no _ hn)
+                · contradiction
+              · contradiction
+            · contradiction
+          · contradiction
+        case h_32 =>
+          rename_i a b yes no
+          split at h
+          · rename_i hab
+            split at h
+            · rename_i Y hy
+              split at h
+              · rename_i B lowered
+                split at h
+                · rename_i hn
+                  cases h
+                  have hyes := he (⟨.eq a b, true⟩ :: ctx) ghost yes Y hy
+                  rw [← branch_type_reweakens lowered] at hyes
+                  exact .ifEq (hc ctx ghost a _ hab.1) (hc ctx ghost b _ hab.2)
+                    hyes (hc ctx ghost no _ hn)
+                · contradiction
+              · contradiction
+            · contradiction
+          · contradiction
+        case h_33 =>
+          rename_i U p
+          split at h
+          · rename_i V hU
+            split at h
+            · rename_i s hs
+              split at h
+              · rename_i hhead
+                split at h
+                · rename_i i n hp
+                  split at h
+                  · rename_i hz
+                    cases h
+                    have typed := he ctx true T V hU
+                    rw [SortTag.ofTerm_sound hs] at typed
+                    have evidence := he ctx true p (.lt i n) hp
+                    have bound : Conversion.Conv (.lt i n) (.lt i (.natural 0)) :=
+                      .node .lt (.cons (.refl _) (.cons (Conversion.equal_sound hz) .nil))
+                    exact .absurd typed (evidence.convert bound)
+                      (Or.inr (nonFunction_of_conversion (Conversion.normalize_sound fuel T)
+                        (nonFunctionHead_sound hhead)))
+                  · contradiction
+                · contradiction
+              · contradiction
+            · contradiction
+          · contradiction
+        case h_34 => contradiction
       · intro ctx e A s h
         simp only [binder] at h
         split at h

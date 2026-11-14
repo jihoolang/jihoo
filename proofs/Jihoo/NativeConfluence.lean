@@ -21,6 +21,17 @@ inductive Par : Term → Term → Prop where
   | derefBorrow : Par a a' → Par (.node .deref [.node .borrow [a]]) a'
   | borrowDeref : Par a a' → Par (.node .borrow [.node .deref [a]]) a'
 
+  | transportRefl (f a : Term) : Par p p' → Par (.transport f (.refl a) p) p'
+  | ifLtTrue (m n : Nat) (no : Term) : m < n → Par yes yes' →
+      Par (.ifLt (.natural m) (.natural n) yes no)
+        (yes'.subst (single (.decide (.natural m) (.natural n))))
+  | ifLtFalse (m n : Nat) (yes : Term) : n ≤ m → Par no no' →
+      Par (.ifLt (.natural m) (.natural n) yes no) no'
+  | ifEqTrue (n : Nat) (no : Term) : Par yes yes' →
+      Par (.ifEq (.natural n) (.natural n) yes no) (yes'.subst (single (.refl (.natural n))))
+  | ifEqFalse (m n : Nat) (yes : Term) : m ≠ n → Par no no' →
+      Par (.ifEq (.natural m) (.natural n) yes no) no'
+
  theorem Par.refl (t : Term) : Par t t := by
   induction t using Term.rec (motive_2 := fun xs => ListRel Par xs xs) with
   | var x => exact .var x
@@ -55,6 +66,21 @@ inductive Par : Term → Term → Prop where
       simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using Par.derefBorrow (ih ρ)
   | borrowDeref _ ih =>
       simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using Par.borrowDeref (ih ρ)
+  | transportRefl f a _ ih =>
+      simp only [Term.rename, renameArgs, Op.binders, liftRenaming]
+      exact .transportRefl (f.rename ρ) (a.rename ρ) (ih ρ)
+  | ifLtTrue m n no bound _ ih =>
+      simp only [Term.rename, renameArgs, Op.binders, liftRenaming, Term.rename_instantiate]
+      exact .ifLtTrue m n (no.rename ρ) bound (ih (Indexed.liftRenaming ρ))
+  | ifLtFalse m n yes bound _ ih =>
+      simp only [Term.rename, renameArgs, Op.binders, liftRenaming]
+      exact .ifLtFalse m n (yes.rename (Indexed.liftRenaming ρ)) bound (ih ρ)
+  | ifEqTrue n no _ ih =>
+      simp only [Term.rename, renameArgs, Op.binders, liftRenaming, Term.rename_instantiate]
+      exact .ifEqTrue n (no.rename ρ) (ih (Indexed.liftRenaming ρ))
+  | ifEqFalse m n yes apart _ ih =>
+      simp only [Term.rename, renameArgs, Op.binders, liftRenaming]
+      exact .ifEqFalse m n (yes.rename (Indexed.liftRenaming ρ)) apart (ih ρ)
   | nil => simp [renameArgs]; exact .nil
   | cons _ _ ih₁ ih₂ =>
       rename_i op offset ρ
@@ -99,6 +125,21 @@ private theorem lift_par {σ τ : Nat → Term} (h : ∀ x, Par (σ x) (τ x)) (
       simpa [Term.subst, substArgs, Op.binders, liftSub] using Par.derefBorrow (ih hσ)
   | borrowDeref _ ih =>
       simpa [Term.subst, substArgs, Op.binders, liftSub] using Par.borrowDeref (ih hσ)
+  | transportRefl f a _ ih =>
+      simp only [Term.subst, substArgs, Op.binders, liftSub]
+      exact .transportRefl (f.subst σ) (a.subst σ) (ih hσ)
+  | ifLtTrue m n no bound _ ih =>
+      simp only [Term.subst, substArgs, Op.binders, liftSub, Term.subst_instantiate]
+      exact .ifLtTrue m n (no.subst σ) bound (ih (lift_par hσ 1))
+  | ifLtFalse m n yes bound _ ih =>
+      simp only [Term.subst, substArgs, Op.binders, liftSub]
+      exact .ifLtFalse m n (yes.subst (liftSubOne σ)) bound (ih hσ)
+  | ifEqTrue n no _ ih =>
+      simp only [Term.subst, substArgs, Op.binders, liftSub, Term.subst_instantiate]
+      exact .ifEqTrue n (no.subst σ) (ih (lift_par hσ 1))
+  | ifEqFalse m n yes apart _ ih =>
+      simp only [Term.subst, substArgs, Op.binders, liftSub]
+      exact .ifEqFalse m n (yes.subst (liftSubOne σ)) apart (ih hσ)
   | nil => simp [substArgs]; exact .nil
   | cons _ _ ih₁ ih₂ =>
       rename_i op offset σ τ hσ
@@ -126,6 +167,17 @@ inductive Root : Term → Term → Prop where
   | proofPack : Par q q' → Root (.proof (.pack p a q)) q'
   | derefBorrow : Par a a' → Root (.node .deref [.node .borrow [a]]) a'
   | borrowDeref : Par a a' → Root (.node .borrow [.node .deref [a]]) a'
+
+  | transportRefl (f a : Term) : Par p p' → Root (.transport f (.refl a) p) p'
+  | ifLtTrue (m n : Nat) (no : Term) : m < n → Par yes yes' →
+      Root (.ifLt (.natural m) (.natural n) yes no)
+        (yes'.subst (single (.decide (.natural m) (.natural n))))
+  | ifLtFalse (m n : Nat) (yes : Term) : n ≤ m → Par no no' →
+      Root (.ifLt (.natural m) (.natural n) yes no) no'
+  | ifEqTrue (n : Nat) (no : Term) : Par yes yes' →
+      Root (.ifEq (.natural n) (.natural n) yes no) (yes'.subst (single (.refl (.natural n))))
+  | ifEqFalse (m n : Nat) (yes : Term) : m ≠ n → Par no no' →
+      Root (.ifEq (.natural m) (.natural n) yes no) no'
 
 theorem Root.parallel (h : Root t u) : Par t u := by
   cases h <;> constructor <;> assumption
@@ -159,6 +211,13 @@ private theorem ListRel.three (h : ListRel R [a,b,c] ys) :
       | cons hb hs =>
           cases hs with
           | cons hc hs => cases hs; exact ⟨_, _, _, rfl, ha, hb, hc⟩
+
+private theorem ListRel.four (h : ListRel R [a,b,c,d] ys) :
+    ∃ a' b' c' d', ys = [a',b',c',d'] ∧ R a a' ∧ R b b' ∧ R c c' ∧ R d d' := by
+  cases h with
+  | cons ha hs =>
+      obtain ⟨b',c',d',rfl,hb,hc,hd⟩ := hs.three
+      exact ⟨_,_,_,_,rfl,ha,hb,hc,hd⟩
 
 private theorem Par.lam_inv (h : Par (.lam e A body) t) :
     ∃ A' body', t = .lam e A' body' ∧ Par A A' ∧ Par body body' := by
@@ -314,6 +373,70 @@ private theorem Root.join (hr : Root t u)
               exact da _ _ haU (.node .borrow (.cons hbV .nil))
       | borrowDeref haV => exact da _ _ haU haV
 
+  | @transportRefl p pU f a hpU =>
+      have dp := ih p (by simp; omega)
+      cases hv with
+      | node op hsV =>
+          obtain ⟨fV,eV,pV,rfl,_,heV,hpV⟩ := hsV.three
+          cases heV with
+          | node op hsRefl =>
+              obtain ⟨aV,rfl,_⟩ := hsRefl.one
+              obtain ⟨w,huw,hvw⟩ := dp _ _ hpU hpV
+              exact ⟨w,huw,.transportRefl fV aV hvw⟩
+      | transportRefl f a hpV => exact dp _ _ hpU hpV
+  | @ifLtTrue yes yesU m n no bound hyU =>
+      have dy := ih yes (by simp; omega)
+      cases hv with
+      | node op hsV =>
+          obtain ⟨aV,bV,yesV,noV,rfl,haV,hbV,hyV,_⟩ := hsV.four
+          have ea := haV.natural_inv
+          have eb := hbV.natural_inv
+          subst aV; subst bV
+          obtain ⟨w,huw,hvw⟩ := dy _ _ hyU hyV
+          exact ⟨_, huw.instantiate (.refl _), .ifLtTrue m n noV bound hvw⟩
+      | ifLtTrue m n no boundV hyV =>
+          obtain ⟨w,huw,hvw⟩ := dy _ _ hyU hyV
+          exact ⟨_, huw.instantiate (.refl _), hvw.instantiate (.refl _)⟩
+      | ifLtFalse m n yes reverse hnV => exact False.elim (by omega)
+  | @ifLtFalse no noU m n yes bound hnU =>
+      have dn := ih no (by simp; omega)
+      cases hv with
+      | node op hsV =>
+          obtain ⟨aV,bV,yesV,noV,rfl,haV,hbV,_,hnV⟩ := hsV.four
+          have ea := haV.natural_inv
+          have eb := hbV.natural_inv
+          subst aV; subst bV
+          obtain ⟨w,huw,hvw⟩ := dn _ _ hnU hnV
+          exact ⟨w,huw,.ifLtFalse m n yesV bound hvw⟩
+      | ifLtTrue m n no forward hyV => exact False.elim (by omega)
+      | ifLtFalse m n yes boundV hnV => exact dn _ _ hnU hnV
+  | @ifEqTrue yes yesU n no hyU =>
+      have dy := ih yes (by simp; omega)
+      cases hv with
+      | node op hsV =>
+          obtain ⟨aV,bV,yesV,noV,rfl,haV,hbV,hyV,_⟩ := hsV.four
+          have ea := haV.natural_inv
+          have eb := hbV.natural_inv
+          subst aV; subst bV
+          obtain ⟨w,huw,hvw⟩ := dy _ _ hyU hyV
+          exact ⟨_,huw.instantiate (.refl _),.ifEqTrue n noV hvw⟩
+      | ifEqTrue n no hyV =>
+          obtain ⟨w,huw,hvw⟩ := dy _ _ hyU hyV
+          exact ⟨_,huw.instantiate (.refl _),hvw.instantiate (.refl _)⟩
+      | ifEqFalse m n yes apart hnV => exact False.elim (apart rfl)
+  | @ifEqFalse no noU m n yes apart hnU =>
+      have dn := ih no (by simp; omega)
+      cases hv with
+      | node op hsV =>
+          obtain ⟨aV,bV,yesV,noV,rfl,haV,hbV,_,hnV⟩ := hsV.four
+          have ea := haV.natural_inv
+          have eb := hbV.natural_inv
+          subst aV; subst bV
+          obtain ⟨w,huw,hvw⟩ := dn _ _ hnU hnV
+          exact ⟨w,huw,.ifEqFalse m n yesV apart hvw⟩
+      | ifEqTrue n no hyV => exact False.elim (apart rfl)
+      | ifEqFalse m n yes apartV hnV => exact dn _ _ hnU hnV
+
 /-- Full diamond property, including the two overlapping borrow/deref
 cancellations. Strong induction exposes every strict source subterm. -/
 theorem Par.diamond (hu : Par t u) (hv : Par t v) : ∃ w, Par u w ∧ Par v w := by
@@ -441,6 +564,11 @@ theorem Conv.church_rosser (h : Conv t u) : Join t u := by
   | proofPack p a q => exact ⟨_, .single (.proofPack (.refl q)), .refl⟩
   | derefBorrow a => exact ⟨_, .single (.derefBorrow (.refl a)), .refl⟩
   | borrowDeref a => exact ⟨_, .single (.borrowDeref (.refl a)), .refl⟩
+  | transportRefl f a p => exact ⟨_,.single (.transportRefl f a (.refl p)),.refl⟩
+  | ifLtTrue m n yes no bound => exact ⟨_,.single (.ifLtTrue m n no bound (.refl yes)),.refl⟩
+  | ifLtFalse m n yes no bound => exact ⟨_,.single (.ifLtFalse m n yes bound (.refl no)),.refl⟩
+  | ifEqTrue n yes no => exact ⟨_,.single (.ifEqTrue n no (.refl yes)),.refl⟩
+  | ifEqFalse m n yes no apart => exact ⟨_,.single (.ifEqFalse m n yes apart (.refl no)),.refl⟩
   | nil => exact .nil
   | cons _ _ ih₁ ih₂ => exact .cons ih₁ ih₂
 
@@ -460,6 +588,14 @@ theorem Par.conv (h : Par t u) : Conv t u := by
   | proofPack _ ih => exact .trans (.proofPack _ _ _) ih
   | derefBorrow _ ih => exact .trans (.derefBorrow _) ih
   | borrowDeref _ ih => exact .trans (.borrowDeref _) ih
+  | transportRefl f a _ ih => exact .trans (.transportRefl f a _) ih
+  | ifLtTrue m n no bound _ ih =>
+      exact .trans (.ifLtTrue m n _ no bound)
+        (ih.substitution (single (.decide (.natural m) (.natural n))))
+  | ifLtFalse m n yes bound _ ih => exact .trans (.ifLtFalse m n yes _ bound) ih
+  | ifEqTrue n no _ ih =>
+      exact .trans (.ifEqTrue n _ no) (ih.substitution (single (.refl (.natural n))))
+  | ifEqFalse m n yes apart _ ih => exact .trans (.ifEqFalse m n yes _ apart) ih
   | nil => exact .nil
   | cons _ _ ih₁ ih₂ => exact .cons ih₁ ih₂
 
@@ -471,7 +607,7 @@ theorem Star.conv (h : Star t u) : Conv t u := by
 /-- Exactly the operators whose outer node cannot be contracted by a root
 rule. This definition covers the entire Op vocabulary, including runtime forms. -/
 def rigid : Op → Bool
-  | .app | .uadd | .usub | .index | .witness | .proof | .deref | .borrow => false
+  | .app | .uadd | .usub | .index | .witness | .proof | .deref | .borrow | .ifLt | .ifEq | .transport => false
   | _ => true
 
 private theorem Par.rigid_inv {op : Op} (hr : rigid op = true) (h : Par (.node op xs) t) :

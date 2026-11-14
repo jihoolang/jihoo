@@ -19,6 +19,18 @@ inductive Step : Term → Term → Prop where
   | proofPack (p a q : Term) : Step (.node .proof [.node .pack [p,a,q]]) q
   | derefBorrow (a : Term) : Step (.node .deref [.node .borrow [a]]) a
   | borrowDeref (a : Term) : Step (.node .borrow [.node .deref [a]]) a
+  | transportRefl (f a p : Term) :
+      Step (.node .transport [f, .node .refl [a], p]) p
+  | ifLtTrue (m n : Nat) (yes no : Term) : m < n →
+      Step (.node .ifLt [.node (.natural m) [], .node (.natural n) [], yes, no])
+        (yes.subst (single (.node .decide [.node (.natural m) [], .node (.natural n) []])))
+  | ifLtFalse (m n : Nat) (yes no : Term) : n ≤ m →
+      Step (.node .ifLt [.node (.natural m) [], .node (.natural n) [], yes, no]) no
+  | ifEqTrue (n : Nat) (yes no : Term) :
+      Step (.node .ifEq [.node (.natural n) [], .node (.natural n) [], yes, no])
+        (yes.subst (single (.node .refl [.node (.natural n) []])))
+  | ifEqFalse (m n : Nat) (yes no : Term) : m ≠ n →
+      Step (.node .ifEq [.node (.natural m) [], .node (.natural n) [], yes, no]) no
   | node (op : Op) (pre post : List Term) : Step a b →
       Step (.node op (pre ++ a :: post)) (.node op (pre ++ b :: post))
 
@@ -43,6 +55,11 @@ theorem Step.conversion {t u : Term} (h : Step t u) : Conversion.Conv t u := by
   | proofPack p a q => exact .proofPack p a q
   | derefBorrow a => exact .derefBorrow a
   | borrowDeref a => exact .borrowDeref a
+  | transportRefl f a p => exact .transportRefl f a p
+  | ifLtTrue m n yes no bound => exact .ifLtTrue m n yes no bound
+  | ifLtFalse m n yes no bound => exact .ifLtFalse m n yes no bound
+  | ifEqTrue n yes no => exact .ifEqTrue n yes no
+  | ifEqFalse m n yes no apart => exact .ifEqFalse m n yes no apart
   | node op pre post _ ih => exact .node op (list_replace pre post ih)
 
 inductive Steps : Term → Term → Prop where
@@ -73,6 +90,7 @@ open Reduction (Step Steps)
 
 theorem contract_step {t u : Term} (h : contract t = some u) : Step t u := by
   fun_cases contract t <;> simp_all [contract]
+  all_goals try (split at h <;> simp_all <;> try (exact False.elim (by omega)))
   all_goals try (rcases h with ⟨hbound, h⟩)
   all_goals try subst u
   all_goals first
@@ -84,6 +102,11 @@ theorem contract_step {t u : Term} (h : contract t = some u) : Step t u := by
     | exact .proofPack _ _ _
     | exact .derefBorrow _
     | exact .borrowDeref _
+    | exact .transportRefl _ _ _
+    | exact .ifLtTrue _ _ _ _ (by omega)
+    | exact .ifLtFalse _ _ _ _ (by omega)
+    | exact .ifEqTrue _ _ _
+    | exact .ifEqFalse _ _ _ _ (by assumption)
 
 private theorem children_prefix (op : Op) (f : Term → Term)
     (h : ∀ t, Steps t (f t)) (xs pre : List Term) :

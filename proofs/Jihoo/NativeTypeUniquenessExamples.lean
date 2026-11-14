@@ -65,4 +65,33 @@ private def predicate : Term := .lam false .u64 (.eq (.var 0) (.var 0))
     Checker.infer_sound (fuel := 16) (by cbv)
   exact accepted.refinement_predicate_unique h
 
+theorem conditional_scalar_type_unique :
+    ¬ HasType [] true (.ifLt (.natural 0) (.natural 1) (.natural 7) (.natural 9)) .i64 := by
+  intro forged
+  have accepted : HasType [] false (.ifLt (.natural 0) (.natural 1) (.natural 7) (.natural 9)) .u64 :=
+    Checker.infer_sound (fuel := 12) (by cbv)
+  exact accepted.no_scalar_confusion forged
+
+theorem conditional_function_type_unique
+    (h : HasType [] true
+      (.ifEq (.natural 0) (.natural 0) (.lam false .u64 (.var 0)) (.lam false .u64 (.var 0)))
+      (.pi e A B)) : e = false ∧ Conv .u64 A ∧ Conv .u64 B := by
+  have accepted : HasType [] false
+      (.ifEq (.natural 0) (.natural 0) (.lam false .u64 (.var 0)) (.lam false .u64 (.var 0)))
+      (.pi false .u64 .u64) := Checker.infer_sound (fuel := 16) (by cbv)
+  have unique := h.function_unique accepted
+  exact ⟨unique.1, .symm unique.2.1, .symm unique.2.2⟩
+
+theorem absurd_target_type_unique
+    (h : HasType [⟨.lt (.natural 0) (.natural 0), true⟩] true (.absurd .u64 (.var 0)) T) :
+    Conv .u64 T := by
+  exact Checker.infer_unique (fuel := 12) (mode := false) (by cbv) h
+
+theorem absurd_universe_ceiling_preserved
+    (h : HasType [⟨.lt (.natural 0) (.natural 0), true⟩] true (.absurd (.univ 31) (.var 0)) (.univ n)) :
+    n = 31 := by
+  have accepted : HasType [⟨.lt (.natural 0) (.natural 0), true⟩] false
+      (.absurd (.univ 31) (.var 0)) (.univ 31) := Checker.infer_sound (fuel := 12) (by cbv)
+  exact h.universe_level_unique accepted
+
 end Jihoo.NativeKernel.TypeUniquenessExamples

@@ -51,12 +51,17 @@ include:
 - Verified conversion at comparisons and type-head exposure, normalized Decide
   operands, and the conservative native first-order gate for code type arguments.
   Unknown inductive-family representation is rejected by that gate.
+- Evidence-binding IfLt/IfEq branches and Absurd. The true branch's inferred
+  result is lowered with checked binder removal, so evidence cannot escape its
+  scope. Executable Absurd enforces the native non-function result restriction;
+  neutral application heads remain conservatively rejected.
 
 `NativeConversion` proves renaming/substitution closure and soundness of the
 bounded executable converter. It traverses every native child, even when that
 operator has no typing rule yet. Root computation covers beta, bounded
-addition/subtraction, local reads, refinement projections and borrow/deref
-projections. `NativeNormalization` independently defines forward computation
+addition/subtraction, local reads, refinement and borrow/deref projections,
+literal IfLt/IfEq selection with evidence substitution, and Transport along
+reflexivity. `NativeNormalization` independently defines forward computation
 and proves the exact computed result is reachable. Bounded residuals need not
 be normal forms, and a failed comparison is inconclusive.
 
@@ -114,8 +119,9 @@ vector lengths 0, 1 and 3: **162 exact byte comparisons**.
 `tests/core_native_kernel_correspondence.py` retains actual sources, full
 snapshots, hashes and labelled synthetic mutations. Its native cases include
 universes, high impredicative Prop, polymorphism in both modes, erased indices,
-transport/refinement projections and arithmetic evidence. Unsupported ownership,
-branch and fold rules remain explicit admitted-native/rejected-Lean fixtures.
+transport/refinement projections, evidence-binding branches, absurdity and
+arithmetic evidence. Unsupported ownership and fold rules remain explicit
+admitted-native/rejected-Lean fixtures.
 Native code rejection of erased proof variables is also checked.
 
 The production shift/substitute/rewrite routines are also exercised directly
@@ -137,8 +143,8 @@ are discharged, rather than replaced with more passing fixtures:
    preservation of mode and representation restrictions.
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
-3. The remaining typing/computation rules: evidence-binding branches, folds/loops,
-   absurdity, globals, checked inductive/data family environments and elimination.
+3. The remaining typing/computation rules: folds/loops, globals, checked
+   inductive/data family environments and elimination.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.

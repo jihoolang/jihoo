@@ -1,4 +1,5 @@
 import Jihoo.NativeTyping
+import Jihoo.NativePartialRenaming
 
 /-! Data-input executable checking on the complete native constructor syntax.
 Type comparison uses verified bounded conversion. Global/family
@@ -130,6 +131,39 @@ mutual
           match expose fuel (infer fuel ctx true s) with
           | some (.refine p) => some (.app p (.witness s))
           | _ => none
+      | .ifLt a b yes no =>
+          if accepts fuel (infer fuel ctx ghost a) .u64 = true ∧
+              accepts fuel (infer fuel ctx ghost b) .u64 = true then
+            match expose fuel (infer fuel (⟨.lt a b, true⟩ :: ctx) ghost yes) with
+            | some Y =>
+                match PartialRenaming.shift (-1) 0 Y with
+                | some B => if accepts fuel (infer fuel ctx ghost no) B then some B else none
+                | none => none
+            | none => none
+          else none
+      | .ifEq a b yes no =>
+          if accepts fuel (infer fuel ctx ghost a) .u64 = true ∧
+              accepts fuel (infer fuel ctx ghost b) .u64 = true then
+            match expose fuel (infer fuel (⟨.eq a b, true⟩ :: ctx) ghost yes) with
+            | some Y =>
+                match PartialRenaming.shift (-1) 0 Y with
+                | some B => if accepts fuel (infer fuel ctx ghost no) B then some B else none
+                | none => none
+            | none => none
+          else none
+      | .absurd T p =>
+          match expose fuel (infer fuel ctx true T) with
+          | some U =>
+              match SortTag.ofTerm U with
+              | some _ =>
+                  if nonFunctionHead (Conversion.normalize fuel T) then
+                    match expose fuel (infer fuel ctx true p) with
+                    | some (.lt _i n) =>
+                        if Conversion.equal fuel n (.natural 0) then some T else none
+                    | _ => none
+                  else none
+              | none => none
+          | none => none
       | _ => none
 
   /-- Infer the domain sort and enforce Core.binder's pure binder policy. -/

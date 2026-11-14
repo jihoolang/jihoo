@@ -156,6 +156,17 @@ private theorem context_mutual :
     | proof hs ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .proof (ih Δ hctx)
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .ifLt (iha Δ hctx) (ihb Δ hctx)
+          (ihy _ (hctx.extend (.refl _) true)) (ihn Δ hctx)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .ifEq (iha Δ hctx) (ihb Δ hctx)
+          (ihy _ (hctx.extend (.refl _) true)) (ihn Δ hctx)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .absurd (ihT Δ hctx) (ihp Δ hctx) (Or.inl rfl)
     | convert ht hc ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .convert (ih Δ hctx) hc
@@ -259,6 +270,17 @@ private theorem context_mutual :
     | proof hs ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .proof (ih Δ hctx)
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .ifLt (iha Δ hctx) (ihb Δ hctx)
+          (ihy _ (hctx.extend (.refl _) true)) (ihn Δ hctx)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .ifEq (iha Δ hctx) (ihb Δ hctx)
+          (ihy _ (hctx.extend (.refl _) true)) (ihn Δ hctx)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .absurd (ihT Δ hctx) (ihp Δ hctx) (Or.inl rfl)
     | convert ht hc ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .convert (ih Δ hctx) hc

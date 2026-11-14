@@ -252,6 +252,26 @@ private theorem ghost_renaming_mutual :
         simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
           HasType.proof (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_hs Δ ρ hρ)
 
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using
+          HasType.ifLt (by simpa [Term.rename,renameArgs] using iha Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihb Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using ihy _ _ (hρ.lift _ true))
+            (ihn Δ ρ hρ)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using
+          HasType.ifEq (by simpa [Term.rename,renameArgs] using iha Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihb Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using ihy _ _ (hρ.lift _ true))
+            (ihn Δ ρ hρ)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.absurd (by simpa using ihT Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihp Δ ρ hρ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ ρ hρ | rename_i Δ ρ hρ
         exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ)
@@ -431,6 +451,26 @@ private theorem ghost_renaming_mutual :
         simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
           HasType.proof (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_hs Δ ρ hρ)
 
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using
+          HasType.ifLt (by simpa [Term.rename,renameArgs] using iha Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihb Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using ihy _ _ (hρ.lift _ true))
+            (ihn Δ ρ hρ)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using
+          HasType.ifEq (by simpa [Term.rename,renameArgs] using iha Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihb Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming,Indexed.liftRenaming,Term.rename_comp] using ihy _ _ (hρ.lift _ true))
+            (ihn Δ ρ hρ)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.absurd (by simpa using ihT Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihp Δ ρ hρ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ ρ hρ | rename_i Δ ρ hρ
         exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ)
@@ -664,6 +704,26 @@ private theorem ghost_substitution_mutual :
         simpa [Term.subst, substArgs, Op.binders, liftSub] using
           HasType.proof (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_hs Δ σ hσ)
 
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using
+          HasType.ifLt (by simpa [Term.subst,substArgs] using iha Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihb Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using ihy _ _ (hσ.lift _ true))
+            (ihn Δ σ hσ)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using
+          HasType.ifEq (by simpa [Term.subst,substArgs] using iha Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihb Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using ihy _ _ (hσ.lift _ true))
+            (ihn Δ σ hσ)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.absurd (by simpa using ihT Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihp Δ σ hσ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ σ hσ | rename_i Δ σ hσ
         exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ)
@@ -843,6 +903,26 @@ private theorem ghost_substitution_mutual :
         simpa [Term.subst, substArgs, Op.binders, liftSub] using
           HasType.proof (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_hs Δ σ hσ)
 
+    | ifLt ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using
+          HasType.ifLt (by simpa [Term.subst,substArgs] using iha Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihb Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using ihy _ _ (hσ.lift _ true))
+            (ihn Δ σ hσ)
+    | ifEq ha hb hy hn iha ihb ihy ihn =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using
+          HasType.ifEq (by simpa [Term.subst,substArgs] using iha Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihb Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub,shift_subst_lift] using ihy _ _ (hσ.lift _ true))
+            (ihn Δ σ hσ)
+    | absurd hT hp allowed ihT ihp =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.absurd (by simpa using ihT Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihp Δ σ hσ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ σ hσ | rename_i Δ σ hσ
         exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ)

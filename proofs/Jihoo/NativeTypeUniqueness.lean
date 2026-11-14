@@ -29,6 +29,8 @@ private def TypeView (Γ : Context) (mode : Bool) : Term → Term → Prop
   | .strict _ b, T => ∃ B, HasType Γ mode b B ∧ Conv B T
   | .transport f e _, T => ∃ a b, HasType Γ true e (.eq a b) ∧ Conv (.app f b) T
   | .proof s, T => ∃ p, HasType Γ true s (.refine p) ∧ Conv (.app p (.witness s)) T
+  | .ifLt _ _ _ no, T | .ifEq _ _ _ no, T => ∃ B, HasType Γ mode no B ∧ Conv B T
+  | .absurd U _, T => Conv U T
   | _, _ => False
 
 private theorem TypeView.convert (h : TypeView Γ mode t A) (hc : Conv A B) :
@@ -53,6 +55,8 @@ private theorem HasType.typeView (h : HasType Γ mode t T) : TypeView Γ mode t 
   case strict ha hb _ _ => exact ⟨_,hb,.refl _⟩
   case transport hf he hp _ _ _ => exact ⟨_,_,he,.refl _⟩
   case proof hs _ => exact ⟨_,hs,.refl _⟩
+  case ifLt ha hb hy hn _ _ _ _ => exact ⟨_,hn,.refl _⟩
+  case ifEq ha hb hy hn _ _ _ _ => exact ⟨_,hn,.refl _⟩
   case convert ht conv ih => exact ih.convert conv
 
  theorem HasType.unique (ht : HasType Γ mode t A) (hu : HasType Γ mode' t B) : Conv A B := by
@@ -116,6 +120,18 @@ private theorem HasType.typeView (h : HasType Γ mode t T) : TypeView Γ mode t 
           have predicates := ih s (by simp; omega) Γ true true _ _ hp hq
           exact .trans (.symm hc)
             (.trans (.node .app (.cons predicates.refine_injective (.cons (.refl _) .nil))) hd)
+        case case31 =>
+          rename_i a b yes no
+          obtain ⟨X,hX,hc⟩ := hv
+          obtain ⟨Y,hY,hd⟩ := hw
+          have branches := ih no (by simp; omega) Γ mode mode' X Y hX hY
+          exact .trans (.symm hc) (.trans branches hd)
+        case case32 =>
+          rename_i a b yes no
+          obtain ⟨X,hX,hc⟩ := hv
+          obtain ⟨Y,hY,hd⟩ := hw
+          have branches := ih no (by simp; omega) Γ mode mode' X Y hX hY
+          exact .trans (.symm hc) (.trans branches hd)
   exact aux t Γ mode mode' A B ht hu
 
 /-- The sort assigned to a binder domain is unique. -/
