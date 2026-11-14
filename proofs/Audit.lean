@@ -3874,3 +3874,12 @@ end Jihoo.CommonDataCaseRegisterSafetyChecks
 #print axioms Jihoo.CommonCaseSourceConsumption.Checks.closed_connection
 #print axioms Jihoo.CommonCaseSourceConsumption.Checks.unconsumed_literal_rejected
 #print axioms Jihoo.CommonCaseSourceConsumption.Checks.node_run_unique
+
+#print axioms Jihoo.KernelChecker.infer_zero
+#print axioms Jihoo.KernelChecker.isType_zero
+#print axioms Jihoo.KernelChecker.lookup_sound
+#print axioms Jihoo.KernelChecker.infer_sound
+#print axioms Jihoo.KernelChecker.isType_sound
+#print axioms Jihoo.KernelChecker.infer_instantiate
+#print axioms Jihoo.KernelChecker.Examples.dependent_application
+#print axioms Jihoo.KernelChecker.Examples.nested_capture

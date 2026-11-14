@@ -300,6 +300,7 @@
                 ./proofs/CheckScalarCaller.lean
                 ./proofs/CheckLinearCaller.lean
                 ./proofs/CheckScopedLend.lean
+                ./proofs/CheckKernelInference.lean
                 ./proofs/CheckTyping.lean
                 ./proofs/CheckBetaReplay.lean
                 ./proofs/CheckEvidence.lean
@@ -339,6 +340,7 @@
               Jihoo.HeadNormalizationCodec \
               Jihoo.InitializationCalls \
               Jihoo.InitializationStore \
+              Jihoo.KernelChecker \
               Jihoo.LinearCoreCallers \
               Jihoo.MirCallerValidation \
               Jihoo.MirFixtureAdmission \
@@ -357,6 +359,7 @@
             python3 -O tests/core_initialization_proof.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_kernel_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo
