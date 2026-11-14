@@ -49,9 +49,9 @@ CASES = {
                          '(lam i U64 (array (int 7) (int 9))))', True, True),
     'erased-global-argument': ('(def saved (Eq 7 7) (refl 7)) '
                               '(def value U64 (app (lam0 p (Eq 7 7) 7) saved))', True, True),
-    'generic-quantity-boundary': ('(def identity (pi A (Type 0) (pi x A A)) '
+    'generic-context-replay': ('(def identity (pi A (Type 0) (pi x A A)) '
                                  '(lam A (Type 0) (lam x A x))) '
-                                 '(def value U64 (app identity U64 7))', True, False),
+                                 '(def value U64 (app identity U64 7))', True, True),
     'self-reference': ('(def value U64 value)', False, False),
     'forward-reference': ('(def first U64 second) (def second U64 7)', False, False),
     'wrong-global-type': ('(def first U64 7) (def value I64 first)', False, False),

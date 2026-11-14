@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Actual native owned iterations checked by the unified declaration gate.
 
-The retained count is the original bound in all callback annotations. A single
-unknown-callee profile remains explicit: signature-driven quantity replay must
-replace that boundary before admitting it. No loop unrolling or native heap
-refinement theorem is supplied by this regression runner.
+The retained count is the original bound in all callback annotations. Unknown
+step callees use actual context-indexed signature replay. No loop unrolling or
+native heap refinement theorem is supplied by this regression runner.
 """
 from __future__ import annotations
 import argparse
@@ -164,11 +163,11 @@ CASES = {'fold-buffer-store': ('(def value (Buffer 2) (fold 2 (alloc 2 (int 0)) 
                                         False,
                                         False,
                                         b'loop body that touches memory'),
- 'unknown-step-call-boundary': ('(def value (pi f (pi b (Buffer 2) (Buffer 2)) (Buffer 2)) (lam f '
+ 'unknown-step-call-replayed': ('(def value (pi f (pi b (Buffer 2) (Buffer 2)) (Buffer 2)) (lam f '
                                 '(pi b (Buffer 2) (Buffer 2)) (fold 2 (alloc 2 (int 0)) (lam i U64 '
                                 '(lam0 p (Lt i 2) (lam a (Buffer 2) (app f a)))))))',
                                 True,
-                                False,
+                                True,
                                 None),
  'outer-owner-consumed-before-loop': ('(def value (pi b (Buffer 2) (Buffer 2)) (lam b (Buffer 2) '
                                       '(free b (loop 2 (lam k U64 (Buffer 2)) (alloc 2 (int 0)) '
@@ -213,8 +212,7 @@ def run(compiler, checker, output, proofs, exporter=None):
         if native:
             Program.read(result.stdout)
             retained[name] = result.stdout
-            checks.append(check(name, result.stdout, admitted, 'actual Core.check' if admitted else
-                                'actual Core accepted; explicit unknown-callee quantity boundary'))
+            checks.append(check(name, result.stdout, admitted, 'actual Core.check'))
 
     def append(program, tag, fields=(), refs=()):
         index = len(program.nodes)
@@ -269,7 +267,7 @@ def run(compiler, checker, output, proofs, exporter=None):
     checks.append(check('synthetic-empty', b'', False, 'synthetic'))
     (output / 'manifest.json').write_text(json.dumps({
         'claim': 'regression evidence; native heap execution and source refinement remain separate',
-        'unknown_call_plan': 'derive runtime argument/erasure/partial-result quantities from the actual checked function signature and typed local context',
+        'unknown_call_policy': 'actual context-indexed signature replay derives runtime erasures and protects owner-consuming partial calls',
         'core_sha256': hashlib.sha256((ROOT / 'compiler/core.jh').read_bytes()).hexdigest(),
         'exporter_sha256': hashlib.sha256((ROOT / 'compiler/core_native_snapshot.jh').read_bytes()).hexdigest(),
         'cases': observations, 'checks': checks}, indent=2) + '\n')

@@ -3,6 +3,8 @@ import Jihoo.NativeEnvironmentExtension
 import Jihoo.NativeOwnership
 import Jihoo.NativeFamilyEnvironment
 import Jihoo.NativeEnvironmentCaseQuantity
+import Jihoo.NativeRelevantFields
+import Jihoo.NativeContextQuantity
 
 /-! Resource projection derived from the actual checked family table.
 Constructors retain exactly their relevant fields; family binder annotations
@@ -11,13 +13,6 @@ the projected control tree and does not assert a native heap semantics. -/
 namespace Jihoo.NativeKernel.EnvironmentQuantity
 
 open Environment
-
-def relevantFields (data : Bool) : List Field → List Term → Option (List Term)
-  | [], [] => some []
-  | field :: fields, argument :: arguments => do
-      let rest ← relevantFields data fields arguments
-      pure (if data && !field.erased then argument :: rest else rest)
-  | _, _ => none
 
 def ordinary : Op → Bool
   | .global _ | .ind _ _ | .con _ _ _ | .elim _ _ | .caseOf _ _ | .view _ _ _ | .lend | .lam _ => false
@@ -218,25 +213,19 @@ theorem skeleton_sound (h : skeleton fuel env term = some projected) : Skeleton 
             · exact caseSkeleton_sound (fun _ _ h => ih h) h
 
 def check (fuel : Nat) (env : Environment) (term : Term) : Bool :=
-  match skeleton fuel env term with
-  | none => false
-  | some projected => EnvironmentCaseQuantity.checkClosed fuel
-      (EnvironmentCaseQuantity.compileTable env) projected
+  Environment.ContextQuantity.checkResource fuel env term
 
-/-- Every resource table entry has the exact lookup in the same environment.
-The control certificate uses the existing finite Control demand semantics. -/
+/-- A resource certificate retains the exact authentic environment prefix
+where checking occurred. Extension preserves its table and typed signature
+meaning; it need not rerun an executable checker or assume its completeness. -/
 def Safe (env : Environment) (term : Term) : Prop :=
-  ∃ projected table, Skeleton env term projected ∧
-    EnvironmentCaseQuantity.TableValid env table ∧
-    EnvironmentCaseQuantity.ClosedSafe table projected
+  ∃ origin, Environment.Extends origin env ∧
+    Environment.ContextQuantity.ResourceSafe origin term ∧
+    EnvironmentCaseQuantity.TableValid env (EnvironmentCaseQuantity.compileTable origin)
 
-theorem check_sound (h : check fuel env term = true) : Safe env term := by
-  cases projected : skeleton fuel env term with
-  | none => simp [check, projected] at h
-  | some result =>
-      exact ⟨result, EnvironmentCaseQuantity.compileTable env, skeleton_sound projected,
-        EnvironmentCaseQuantity.compileTable_valid,
-        EnvironmentCaseQuantity.checkClosed_sound (by simpa only [check, projected] using h)⟩
+theorem check_sound (h : check fuel env term = true) : Safe env term :=
+  ⟨env, Environment.Extends.refl _, Environment.ContextQuantity.checkResource_sound h,
+    EnvironmentCaseQuantity.compileTable_valid⟩
 
 theorem Skeleton.extend (extension : Environment.Extends before after)
     (projected : Skeleton before source target) : Skeleton after source target := by
@@ -254,7 +243,7 @@ theorem Skeleton.extend (extension : Environment.Extends before after)
   | cons head tail ih iht => exact .cons ih iht
 
 theorem Safe.extend (extension : Environment.Extends before after) (safe : Safe before term) : Safe after term := by
-  obtain ⟨target, table, projected, valid, closed⟩ := safe
-  exact ⟨target, table, projected.extend extension, valid.extend extension, closed⟩
+  obtain ⟨origin, prior, checked, table⟩ := safe
+  exact ⟨origin,prior.trans extension,checked,table.extend extension⟩
 
 end Jihoo.NativeKernel.EnvironmentQuantity

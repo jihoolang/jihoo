@@ -197,6 +197,8 @@ Buffer/ref operations, Back/Give/Take, owned iteration and data elimination
 with Case/Drop and borrowed View, with code quantities derived from
 checked type and family metadata. It uses the proved bounded
 environment-indexed delta/ACU converter.
+Its resource gate derives abstract representation kinds from checked contexts
+and replays each call's actual dependent signature and erasure flags.
 The same typing checker unfolds checked global definitions during comparison
 and inferred-type exposure. Its acceptance soundness is unconditional; checked
 history derives the closed, transparent environment used for Church–Rosser,

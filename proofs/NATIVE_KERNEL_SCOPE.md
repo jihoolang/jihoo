@@ -428,10 +428,10 @@ No preservation of arbitrary symmetric conversion representatives is asserted.
 
 The delta source suite checks 19 actual programs and 22 exact-byte comparisons
 and mutations, binding checked version-6 metadata and before/after arenas to the
-same original root and unchanged prefix. It retains a genuine native-accepted
-generic-quantity gap: authentic abstract kind/representation contexts and
-unknown-callee signature replay are still needed. Parser/export/IO execution
-refinement, all native equations and universe consistency remain open.
+same original root and unchanged prefix. Generic identity now passes the same
+unified gate through authenticated context kinds and signature replay.
+Parser/export/IO execution refinement, the full code closing/substitution
+fundamental theorem, all native equations and universe consistency remain open.
 
 Owned Fold/Loop, data Elim/Case/Drop and generic owned Ref/Borrow/Deref now
 extend that same checker and all its ghost metatheory. The exact iteration
@@ -484,8 +484,9 @@ provides a computed normal form for runtime kind safety.
 convert under the current ACU theory to Buffer, Ref, Pi, Back or a boxed family.
 The proof uses raw Boolean forward invariants and genuine Church–Rosser; it
 does not assume symmetric preservation of plainness or typing. Seven regressions
-include the explicit failure of reverse-beta plainness invariance. Authentic
-abstract kinds and typed-index representation interpretations remain work.
+include the explicit failure of reverse-beta plainness invariance. The context
+interpretation below additionally handles authenticated abstract kinds and
+representations with arbitrary genuinely typed U64 indices.
 
 
 `NativeEnvironmentDeltaCAPIExamples` exercises the installed same-judgment
@@ -545,3 +546,34 @@ including authentic global aliases and unformed raw proposition representatives.
 False closed equality and order atoms are excluded throughout that grammar.
 This is a dependent source fundamental theorem for the stated grammar, not a
 fundamental lemma for arbitrary universe-polymorphic terms or native resources.
+
+
+The default `NativeEnvironmentQuantity.check` now uses `NativeContextQuantity`
+inside the existing unified program admission path. Binders are reconstructed
+by the same checker from the empty context; normalized lookup types determine
+first-order kinds and resource modes. Calls replay their actual dependent Pi
+signatures, argument checks, erasures and result substitutions. Runtime arguments
+execute once outside consumed leading-lambda scopes; computed callee syntax is
+retained and accounted once. Owner-consuming partial calls require a rigid
+nonfunction result or an authenticated abstract type spine such as `A` or `F n`.
+An unclassified variable is never assumed to have a scalar representation.
+
+`PlainIndices` retains exact lambda/branch contexts and arbitrary ghost-typed
+U64 holes. Actual delta/ACU forward preservation, checked-world common reducts
+and typed inversion separate these representations from ownership/reference/Pi
+heads. There is no arbitrary quotient-step typing or valid-literal canonicity
+assumption. Kind arguments passing the real closed checker/application gate
+realize their kind, including neutral/computed families. Under the explicit
+checked closing interpretation, unrestricted binders stay nonowning and emitted
+abstract call results are Pi-separated in every later checked world.
+
+The resource certificate retains its actual checked origin environment, finite
+control/local-scope evidence, and family-table validity in the current prefix.
+Prefix transport uses those facts rather than assuming that rerunning a bounded
+checker is complete or monotone. These theorems concern projected Control
+execution/demand. Uniformly deriving the complete closing interpretation from
+all dependent runtime calls, full code/resource substitution, native heap and
+loan lifetime semantics, and actual source execution refinement remain open.
+The updated delta and owned-loop source suites now admit generic identity and
+unknown owned-step callees through that same boundary while retaining their
+source negatives and synthetic mutation checks.
