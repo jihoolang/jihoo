@@ -1,0 +1,2 @@
+; Ghost beta substitution may expose a function result behind a neutral type.
+(def value (pi0 p (Lt 0 0) (Eq (app (lam A (Type 0) (lam0 q (Lt 0 0) (absurd A q))) (pi n U64 U64) p 0) (app (lam A (Type 0) (lam0 q (Lt 0 0) (absurd A q))) (pi n U64 U64) p 0))) (lam0 p (Lt 0 0) (refl (app (lam A (Type 0) (lam0 q (Lt 0 0) (absurd A q))) (pi n U64 U64) p 0))))

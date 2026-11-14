@@ -190,12 +190,14 @@ Its selected conversion theory has Church–Rosser,
 type uniqueness and contextual ghost preservation, including its executable
 normalizer. Direct arena transformations also have semantic and budget proofs.
 Actual native snapshots and all constructor encodings
-are tested against these definitions. Full native implementation refinement,
-inductive-family rules and ownership connections remain open.
-An ordered transparent-global checker also proves each interpreted declaration's
-formation, body typing and closure, bound to exact whole-program graph bytes.
-A separate affine canonicalizer has semantic soundness/completeness and preserves
-the original type and mode; integration into full conversion remains open.
+are tested against these definitions. Ordered checked globals and recomputed
+inductive signatures are bound to exact whole-program graph bytes. The unified
+environment checker adds dependent constructors, proposition elimination,
+Buffer/ref operations and Back/Give/Take, with code quantities derived from
+checked type and family metadata. It uses the proved bounded full-term ACU
+converter, whose actual forward reduction has Church–Rosser and injectivity.
+The remaining operators, generalized preservation/consistency, native source
+refinement and runtime heap/loan correspondence remain open.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
 A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)

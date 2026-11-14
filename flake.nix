@@ -304,6 +304,11 @@
                 ./proofs/CheckNativeInference.lean
                 ./proofs/CheckNativeProgram.lean
                 ./proofs/CheckNativeAffine.lean
+                ./proofs/CheckNativeQuantity.lean
+                ./proofs/CheckNativeFamilies.lean
+                ./proofs/CheckNativeOwnership.lean
+                ./proofs/CheckNativeUnifiedProgram.lean
+                ./proofs/CheckNativeACUNormalizer.lean
                 ./proofs/CheckNativeTransforms.lean
                 ./proofs/EmitNativeSchema.lean
                 ./proofs/EmitNativeWireNodes.lean
@@ -355,6 +360,11 @@
               Jihoo.NativeDefinitions \
               Jihoo.NativeProgramAdmission \
               Jihoo.NativeAffineSum \
+              Jihoo.NativeQuantityAtoms \
+              Jihoo.NativeFamilyAdmission \
+              Jihoo.NativeOwnershipAdmission \
+              Jihoo.NativeUnifiedAdmission \
+              Jihoo.NativeACUBoundedNormalizer \
               Jihoo.NativePartialRenaming \
               Jihoo.NativeCompositionMirCorrespondence \
               Jihoo.NativeCompositionMirSnapshot \
@@ -373,6 +383,12 @@
             python3 tests/core_native_kernel_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_program_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_affine_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_quantity_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_family_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_ownership_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_unified_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_back_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_acu_normalizer_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo

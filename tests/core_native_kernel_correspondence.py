@@ -111,10 +111,15 @@ CASES.update({
         native=False, admitted=False, diagnostic=b'function'),
     'absurd-fake-proof': Case('(def value U64 (absurd U64 (refl 0)))',
                                native=False, admitted=False, diagnostic=b'absurd needs evidence'),
-    'absurd-neutral-application-gap': Case(
+    'absurd-neutral-application-ghost': Case(
+        '(def value (pi F (pi n U64 (Type 0)) (pi0 p (Lt 0 0) (app F 0))) '
+        '(lam F (pi n U64 (Type 0)) (lam0 p (Lt 0 0) (absurd (app F 0) p))))'),
+    'absurd-neutral-application-code-gap': Case(
         '(def value (pi F (pi n U64 (Type 0)) (pi0 p (Lt 0 0) (app F 0))) '
         '(lam F (pi n U64 (Type 0)) (lam0 p (Lt 0 0) (absurd (app F 0) p))))',
-        admitted=False),
+        mode='code-require', admitted=False),
+    'ghost-absurd-function-result': Case(
+        (ROOT / 'tests/core_preserves/ghost-absurd-function-result.jhc').read_text()),
     'fold-i64': Case(
         '(def value I64 (fold 2 (int 0) (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (add acc (int 1)))))))',
         mode='code-require'),
@@ -403,7 +408,7 @@ def run(compiler, checker, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', default='jihoo')
-    parser.add_argument('--checker', default='lake env lean -DwarningAsError=true --run CheckNativeInference.lean')
+    parser.add_argument('--checker', default='lake env lean -M 4096 -j 1 -DwarningAsError=true --run CheckNativeInference.lean')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if args.output:

@@ -1,0 +1,177 @@
+// Observations of the real Core.runtime_uses over retained full native arenas.
+// Every row keeps the entire graph, exact context references/erasure flags,
+// queried de Bruijn variable, native status/count, and comparison policy.
+import core
+import diag
+import core_native_snapshot
+
+fn add(inout c: core.Core, sink term: core.Term) -> Result(u32, String) {
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(id) => Ok(id)
+        Err(e) => Err(e.msg.clone())
+    }
+}
+
+fn emit(inout c: core.Core, label: str, policy: str, root: u32, v: u32,
+    ctx: [core.Binding]) {
+    let (accepted, count) = match c.runtime_uses(root, v, ctx, []) {
+        Ok(count) => (true, count)
+        Err(_) => (false, 0)
+    }
+    print(label)
+    print("\t")
+    print(policy)
+    print("\t")
+    print(v)
+    print("\t")
+    var first = true
+    for binding in ctx {
+        if !first { print(",") }
+        first = false
+        print(binding.ty)
+        print(if binding.erased { ":1" } else { ":0" })
+    }
+    print("\t")
+    if accepted { print("ok:"); print(count) } else { print("reject") }
+    print("\t")
+    println(core_native_snapshot.arena(c, true, root, root))
+}
+
+fn run() -> Result((), String) {
+    var c = core.Core.new()
+    let v0 = add(&c, core.Term.Var(0))?
+    let v1 = add(&c, core.Term.Var(1))?
+    let v3 = add(&c, core.Term.Var(3))?
+    let nat0 = add(&c, core.Term.Natural(0))?
+    let i64ty = add(&c, core.Term.I64)?
+    let u64ty = add(&c, core.Term.U64)?
+    let lt = add(&c, core.Term.Lt(nat0, nat0))?
+    let buf = add(&c, core.Term.Buffer(nat0))?
+    let integer = add(&c, core.Term.Integer(0))?
+    let ctx = [core.Binding { ty: i64ty, erased: false }, core.Binding { ty: buf, erased: false }]
+    emit(&c, "var-owner", "equal", v0, 0, ctx)
+    emit(&c, "literal", "equal", nat0, 0, ctx)
+    let double = add(&c, core.Term.Strict(v0, v0))?
+    emit(&c, "double-use", "equal", double, 0, ctx)
+    let free = add(&c, core.Term.Free(v0, integer))?
+    emit(&c, "free-once", "equal", free, 0, ctx)
+    let proof = add(&c, core.Term.Proof(v0))?
+    emit(&c, "evidence-erased", "equal", proof, 0, ctx)
+    let pack = add(&c, core.Term.Pack(v0, v1, v0))?
+    emit(&c, "pack-runtime-mask", "equal", pack, 0, ctx)
+    let store = add(&c, core.Term.Store(v0, nat0, integer, v0))?
+    emit(&c, "store-proof-erased", "equal", store, 0, ctx)
+    let yes = v1
+    let balanced = add(&c, core.Term.IfEq(nat0, nat0, yes, v0))?
+    emit(&c, "balanced-if-eq", "equal", balanced, 0, ctx)
+    let unbalanced = add(&c, core.Term.IfLt(nat0, nat0, yes, nat0))?
+    emit(&c, "unbalanced-if-lt", "equal", unbalanced, 0, ctx)
+    let erasedBad = add(&c, core.Term.IfEq(nat0, nat0, v0, nat0))?
+    emit(&c, "invalid-local-erased", "local-gap", erasedBad, 0, ctx)
+    let id = add(&c, core.Term.Lam(false, buf, v0))?
+    emit(&c, "closed-owned-id", "equal", id, 0, ctx)
+    let leak = add(&c, core.Term.Lam(false, buf, nat0))?
+    emit(&c, "invalid-local-leak", "local-gap", leak, 0, ctx)
+    let duplicate = add(&c, core.Term.Lam(false, buf, double))?
+    emit(&c, "invalid-local-duplicate", "local-gap", duplicate, 0, ctx)
+    let capture = add(&c, core.Term.Lam(false, i64ty, v1))?
+    emit(&c, "closure-capture", "equal", capture, 0, ctx)
+    let returnedFree = add(&c, core.Term.Free(v0, v1))?
+    let inner = add(&c, core.Term.Lam(false, buf, returnedFree))?
+    let continuation = add(&c, core.Term.Lam(false, i64ty, inner))?
+    let load = add(&c, core.Term.Load(v0, nat0, v0, continuation))?
+    emit(&c, "load-returned-buffer-once", "equal", load, 0, ctx)
+    let leakingInner = add(&c, core.Term.Lam(false, buf, nat0))?
+    let leakingCont = add(&c, core.Term.Lam(false, i64ty, leakingInner))?
+    let leakingLoad = add(&c, core.Term.Load(v0, nat0, lt, leakingCont))?
+    emit(&c, "load-local-leak", "local-gap", leakingLoad, 0, ctx)
+    let externalFree = add(&c, core.Term.Free(v0, v3))?
+    let externalInner = add(&c, core.Term.Lam(false, buf, externalFree))?
+    let externalCont = add(&c, core.Term.Lam(false, i64ty, externalInner))?
+    let externalLoad = add(&c, core.Term.Load(v0, nat0, lt, externalCont))?
+    emit(&c, "load-continuation-captures-once", "equal", externalLoad, 1, ctx)
+    let take = add(&c, core.Term.Take(v0, continuation))?
+    emit(&c, "take-continuation-once", "equal", take, 0, ctx)
+    let giveErased = add(&c, core.Term.Give(true, v0, v0, v0))?
+    emit(&c, "give-erased-result", "equal", giveErased, 0, ctx)
+    let give = add(&c, core.Term.Give(false, v0, v0, v0))?
+    emit(&c, "give-runtime-result", "equal", give, 0, ctx)
+    let acc = add(&c, core.Term.Lam(false, buf, v0))?
+    let evidence = add(&c, core.Term.Lam(true, lt, acc))?
+    let body = add(&c, core.Term.Lam(false, u64ty, evidence))?
+    let fold = add(&c, core.Term.Fold(nat0, v0, body))?
+    emit(&c, "fold-owned-accumulator-no-capture", "equal", fold, 0, ctx)
+    let loopTerm = add(&c, core.Term.Loop(nat0, v0, v0, body))?
+    emit(&c, "loop-motive-erased", "equal", loopTerm, 0, ctx)
+    let capturedAcc = add(&c, core.Term.Lam(false, i64ty, v3))?
+    let capturedEvidence = add(&c, core.Term.Lam(true, lt, capturedAcc))?
+    let capturedBody = add(&c, core.Term.Lam(false, u64ty, capturedEvidence))?
+    let capturedFold = add(&c, core.Term.Fold(nat0, integer, capturedBody))?
+    emit(&c, "loop-outer-capture", "equal", capturedFold, 0, ctx)
+    let borrow = add(&c, core.Term.Borrow(v0))?
+    emit(&c, "borrow-erases-owner-demand", "equal", borrow, 0, ctx)
+    let absurd = add(&c, core.Term.Absurd(v0, v0))?
+    emit(&c, "absurd-erased", "equal", absurd, 0, ctx)
+    var elements = Vec(u32).new()
+    elements.push(v0)
+    elements.push(v0)
+    let array = add(&c, core.Term.Elements(elements))?
+    emit(&c, "elements-sequential", "equal", array, 0, ctx)
+    let app = add(&c, core.Term.App(id, v0))?
+    emit(&c, "known-owned-identity", "equal", app, 0, ctx)
+    let scalarId = add(&c, core.Term.Lam(false, u64ty, v0))?
+    let scalarCall = add(&c, core.Term.App(scalarId, nat0))?
+    emit(&c, "known-scalar-identity", "equal", scalarCall, 0, ctx)
+    let sum = add(&c, core.Term.UAdd(v1, v0))?
+    let second = add(&c, core.Term.Lam(false, u64ty, sum))?
+    let addTwo = add(&c, core.Term.Lam(false, u64ty, second))?
+    let addFirst = add(&c, core.Term.App(addTwo, nat0))?
+    let addCall = add(&c, core.Term.App(addFirst, nat0))?
+    emit(&c, "whole-two-argument-spine", "equal", addCall, 0, ctx)
+    let ownerMotive = add(&c, core.Term.Lam(false, buf, buf))?
+    let paired = add(&c, core.Term.Give(false, ownerMotive, v1, v0))?
+    let ownerSecond = add(&c, core.Term.Lam(false, buf, paired))?
+    let ownerFirst = add(&c, core.Term.Lam(false, buf, ownerSecond))?
+    let ownerFirstCall = add(&c, core.Term.App(ownerFirst, v1))?
+    let ownerCall = add(&c, core.Term.App(ownerFirstCall, v0))?
+    let ownerCtx = [core.Binding { ty: buf, erased: false }, core.Binding { ty: buf, erased: false }]
+    emit(&c, "two-linear-parameters-first-owner", "equal", ownerCall, 0, ownerCtx)
+    emit(&c, "two-linear-parameters-second-owner", "equal", ownerCall, 1, ownerCtx)
+    let duplicateFirst = add(&c, core.Term.App(ownerFirst, v0))?
+    let duplicateCall = add(&c, core.Term.App(duplicateFirst, v0))?
+    emit(&c, "two-argument-duplicate-owner", "equal", duplicateCall, 0, ownerCtx)
+    let erasedLam = add(&c, core.Term.Lam(true, u64ty, nat0))?
+    let erasedCall = add(&c, core.Term.App(erasedLam, v0))?
+    emit(&c, "known-call-erased-argument-mask", "equal", erasedCall, 0, ctx)
+    let erasedUse = add(&c, core.Term.UAdd(v0, nat0))?
+    let erasedBadLam = add(&c, core.Term.Lam(true, u64ty, erasedUse))?
+    let erasedBadCall = add(&c, core.Term.App(erasedBadLam, nat0))?
+    emit(&c, "known-call-invalid-erased-local", "local-gap", erasedBadCall, 0, ctx)
+    let alloc = add(&c, core.Term.Alloc(nat0, integer))?
+    let leakyOwner = add(&c, core.Term.Lam(false, buf, alloc))?
+    let leakyCall = add(&c, core.Term.App(leakyOwner, v0))?
+    emit(&c, "known-call-invalid-linear-leak", "local-gap", leakyCall, 0, ctx)
+    let copied = add(&c, core.Term.Give(false, ownerMotive, v0, v0))?
+    let copiedOwner = add(&c, core.Term.Lam(false, buf, copied))?
+    let copiedCall = add(&c, core.Term.App(copiedOwner, v0))?
+    emit(&c, "known-call-invalid-linear-duplicate", "local-gap", copiedCall, 0, ctx)
+    emit(&c, "partial-call-without-owned-use", "unsupported", addFirst, 0, ctx)
+    let partial = duplicateFirst
+    emit(&c, "partial-call-owned-capture", "equal", partial, 0, ctx)
+    let nestedCall = add(&c, core.Term.App(scalarId, scalarCall))?
+    emit(&c, "known-call-nested-argument", "equal", nestedCall, 0, ctx)
+    let functionTy = add(&c, core.Term.Pi(false, u64ty, u64ty))?
+    let functionVar = add(&c, core.Term.Var(2))?
+    let unknownCall = add(&c, core.Term.App(functionVar, nat0))?
+    let unknownCtx = [core.Binding { ty: functionTy, erased: false },
+        core.Binding { ty: i64ty, erased: false }, core.Binding { ty: buf, erased: false }]
+    emit(&c, "unknown-callee-needs-signature", "unsupported", unknownCall, 0, unknownCtx)
+    Ok(())
+}
+
+fn main() -> i32 {
+    match run() {
+        Ok(_) => 0
+        Err(message) => { eprintln(message); 1 }
+    }
+}

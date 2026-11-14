@@ -1,0 +1,145 @@
+// Actual pure Core.normal observations for affine Var/Natural/UAdd graphs.
+// These are algorithm comparisons, not typing certificates or source proofs.
+import core
+import core_native_snapshot
+import diag
+
+fn add(inout c: core.Core, sink term: core.Term) -> Result(u32, String) {
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(id) => Ok(id)
+        Err(e) => Err(e.msg.clone())
+    }
+}
+
+fn combine(inout c: core.Core, leaves: [u32], group: i64) -> Result(u32, String) {
+    if leaves.len == 0 { return add(&c, core.Term.Natural(0)) }
+    if leaves.len == 1 { return Ok(leaves[0]) }
+    if group == 2 {
+        let half = leaves.len / 2
+        let left = combine(&c, leaves[..half], group)?
+        let right = combine(&c, leaves[half..], group)?
+        return add(&c, core.Term.UAdd(left, right))
+    }
+    var result = if group == 0 { leaves[0] } else { leaves[leaves.len - 1] }
+    for i in 1..leaves.len {
+        result = if group == 0 { add(&c, core.Term.UAdd(result, leaves[i]))? }
+        else { add(&c, core.Term.UAdd(leaves[leaves.len - 1 - i], result))? }
+    }
+    Ok(result)
+}
+
+fn observe(inout c: core.Core, root: u32, key: i64) -> Result((), String) {
+    let before = core_native_snapshot.arena(c, true, root, root)
+    let normal = match c.normal(root, core.DEPTH) {
+        Ok(root) => root
+        Err(e) => return Err(e.msg.clone())
+    }
+    print(key)
+    print("\t")
+    print(before)
+    print("\t")
+    println(core_native_snapshot.arena(c, true, root, normal))
+    Ok(())
+}
+
+fn one(atom_count: i64, literal_count: i64, group: i64, key: i64) -> Result((), String) {
+    var c = core.Core.new()
+    let v0 = add(&c, core.Term.Var(0))?
+    let v1 = add(&c, core.Term.Var(1))?
+    let v2 = add(&c, core.Term.Var(2))?
+    let v3 = add(&c, core.Term.Var(3))?
+    let v4 = add(&c, core.Term.Var(4))?
+    let v5 = add(&c, core.Term.Var(5))?
+    let v7 = add(&c, core.Term.Var(7))?
+    let v8 = add(&c, core.Term.Var(8))?
+    let scalar = add(&c, core.Term.U64)?
+    let arr = add(&c, core.Term.Array(v3))?
+    let app = add(&c, core.Term.App(v5, v2))?
+    let lam = add(&c, core.Term.Lam(false, scalar, v0))?
+    let dependent = add(&c, core.Term.Array(v0))?
+    let pi = add(&c, core.Term.Pi(true, scalar, dependent))?
+    let refine = add(&c, core.Term.Refine(v4))?
+    let buffer = add(&c, core.Term.Buffer(v1))?
+    let q = add(&c, core.Term.Refl(v2))?
+    let packed = add(&c, core.Term.Pack(v7, v2, q))?
+    let index = add(&c, core.Term.Index(v8, v1, q))?
+    let integer = add(&c, core.Term.Integer(-7))?
+    var element_values = Vec(u32).new()
+    element_values.push(v4)
+    element_values.push(v1)
+    let elements = add(&c, core.Term.Elements(element_values))?
+    let atoms = [arr, app, lam, pi, refine, buffer, packed, index, integer, elements]
+    let literals = [0 as u64, 1, 2, 18446744073709551615, 18446744073709551615]
+    var leaves = Vec(u32).new()
+    for i in 0..atom_count { leaves.push(atoms[i]) }
+    for i in 0..literal_count { leaves.push(add(&c, core.Term.Natural(literals[i]))?) }
+    let root = combine(&c, leaves.as_slice(), group)?
+    observe(&c, root, key)
+}
+
+fn special(which: i64, key: i64) -> Result((), String) {
+    var c = core.Core.new()
+    let v0 = add(&c, core.Term.Var(0))?
+    let v1 = add(&c, core.Term.Var(1))?
+    let v2 = add(&c, core.Term.Var(2))?
+    let v3 = add(&c, core.Term.Var(3))?
+    let v7 = add(&c, core.Term.Var(7))?
+    let scalar = add(&c, core.Term.U64)?
+    let zero = add(&c, core.Term.Natural(0))?
+    let arr = add(&c, core.Term.Array(v3))?
+    let app = add(&c, core.Term.App(v3, v1))?
+    let sum = add(&c, core.Term.UAdd(app, arr))?
+    let root = if which == 0 {
+        let inner = add(&c, core.Term.UAdd(v2, v0))?
+        let lam = add(&c, core.Term.Lam(true, scalar, inner))?
+        add(&c, core.Term.Pi(false, sum, lam))?
+    } else if which == 1 {
+        let lam = add(&c, core.Term.Lam(false, scalar, v0))?
+        let hidden = add(&c, core.Term.UAdd(lam, zero))?
+        add(&c, core.Term.App(hidden, sum))?
+    } else if which == 2 {
+        let pack = add(&c, core.Term.Pack(v7, sum, v1))?
+        let hidden = add(&c, core.Term.UAdd(pack, zero))?
+        add(&c, core.Term.Proof(hidden))?
+    } else if which == 3 {
+        let borrow = add(&c, core.Term.Borrow(sum))?
+        let hidden = add(&c, core.Term.UAdd(borrow, zero))?
+        add(&c, core.Term.Deref(hidden))?
+    } else if which == 4 {
+        var element_values = Vec(u32).new()
+        element_values.push(arr)
+        element_values.push(app)
+        let elements = add(&c, core.Term.Elements(element_values))?
+        let hidden = add(&c, core.Term.UAdd(elements, zero))?
+        let index = add(&c, core.Term.Natural(1))?
+        add(&c, core.Term.Index(hidden, index, v0))?
+    } else {
+        // Core.compare masks this proof field; the verified untyped comparator
+        // retains it. This row records the resulting layout boundary explicitly.
+        let p2 = add(&c, core.Term.Pack(v7, v2, v2))?
+        let p1 = add(&c, core.Term.Pack(v7, v2, v1))?
+        add(&c, core.Term.UAdd(p2, p1))?
+    }
+    observe(&c, root, key)
+}
+
+fn run() -> Result((), String) {
+    var key: i64 = 0
+    for atoms in 0..11 {
+        for literals in 0..6 {
+            for group in 0..3 {
+                one(atoms, literals, group, key)?
+                key += 1
+            }
+        }
+    }
+    for which in 0..6 { special(which, key)?; key += 1 }
+    Ok(())
+}
+
+fn main() -> i32 {
+    match run() {
+        Ok(_) => 0
+        Err(message) => { eprintln(message); 1 }
+    }
+}

@@ -53,8 +53,9 @@ include:
   Unknown inductive-family representation is rejected by that gate.
 - Evidence-binding IfLt/IfEq branches and Absurd. The true branch's inferred
   result is lowered with checked binder removal, so evidence cannot escape its
-  scope. Executable Absurd enforces the native non-function result restriction;
-  neutral application heads remain conservatively rejected.
+  scope. Executable code Absurd enforces the native non-function result
+  restriction; code neutral application heads remain conservatively rejected.
+  Ghost function results are admitted and remain stable under type substitution.
 - I64 Fold and dependent Loop with Prop or Type0 motives, including scalar and
   refinement accumulators and genuine Nat induction using its induction
   hypothesis. The exact three-binder telescopes have proved renaming/substitution
@@ -136,14 +137,79 @@ constant and balanced oversized ghost constants with valid U64 leaves. Equality
 is sound and complete for all U64-valued valuations over mathematical naturals;
 the U128 collector bound, renaming/substitution compatibility and idempotence are
 proved. `NativeAffineTyping` proves exact-original-type preservation in the same
-input mode. This standalone canonicalizer does not yet extend the current Conv
-relation or checker. Runtime folding refusal for oversized constants is explicit;
+input mode. Its equations now embed into full `ACU.Conv`, which is used by the unified
+environment checker. The earlier pure checker retains its selected converter. Runtime folding refusal for oversized constants is explicit;
 the typing theorem does not establish runtime overflow or evaluation behavior.
 
 `NativeIrrelevanceBoundary` proves why native proof-irrelevant comparison cannot
 be inserted as an unconditional untyped Pack equation: together with Proof
 congruence and projection it would equate all raw terms. A faithful integration
 requires formation-aware irrelevance.
+
+`NativeFamilyEnvironment` independently checks raw constructor telescopes and
+computes their signatures and layouts. Its soundness includes strict positivity,
+closed and well-formed telescopes, checked U64 indices, normalized domain/result
+formation, unchanged leading parameters, and recursive-field erasure policy.
+The mixed program checker interleaves families at their recorded global boundary;
+each accepted family has an actual earlier checked program history. It scans
+original Pi/Ind structure before normalization. Earlier-family fields, buffers
+and family term introduction/elimination are handled by the unified layer below.
+
+`NativeFamilyWire` / `NativeFamilyAdmission` bind those results to exact version-6
+bytes containing all definition roots, raw constructor roots, metadata and the
+complete shared graph. No external signatures or computed layout bits enter
+admission. All definition and constructor occurrences share the pre-expansion
+budget. Acceptance derives the independent mixed program judgment and positivity,
+closure and arity of every stored raw constructor type.
+
+`NativeQuantity` projects the complete constructor vocabulary into the proved
+resource-control semantics. It enforces balanced branches, exact local linear
+use, erased locals, closure restrictions, repeat-body capture restrictions and
+once-only continuations. Known syntactic lambda spines visit relevant arguments
+once outside the consumed scopes and the body under its complete telescope.
+Successful checks imply exact completed use, at-most-once prefix use and erased
+unreachability in projected traces. Full-native renaming and Var/Borrow(Var)
+substitution commute with the concrete projection, including dependent-reader
+opening and continuation aliasing. A fresh query checks local scopes even when
+the outer owner list is empty. The standalone projection takes outer owner/erased lists; `NativeOwnership`
+and the unified admission layer derive them from actual types and checked family
+metadata. Unknown call signatures, unresolved binder domains and alias-sensitive
+Lend remain rejected. Native heap execution and u32 counter equivalence remain
+separate obligations.
+
+`NativeACU` explicitly extends conversion by UAdd associativity, commutativity
+and zero, with full binding-aware renaming/substitution. `NativeACUAffine` derives
+affine canonical forms through actual finite ACU and bounded literal-add
+equations, without oversized invalid literals or semantic-reflection assumptions.
+The separate pure `Theory` has a genuine full-syntax bag characterization,
+rigid/Pi injectivity and forward Church–Rosser. Its forward reduction eliminates
+zero without arbitrary unit insertion. This does not yet prove Church–Rosser or
+injectivity for the combined relation at that stage. `NativeACUFullConfluence` and
+`NativeACUForwardConfluence` now prove full `ACU.Conv` injectivity and an actual
+common finite forward `MixedRed` reduct, including beta and every legacy
+observing contraction. Zero is only eliminated; no reverse legacy contraction
+is introduced. The original pure checker retains its established converter;
+the unified checker uses the concrete bounded full-ACU normalizer/comparator in
+all conversion, head-exposure and representation-policy slots.
+The arithmetic extension additionally has a proved bag characterization,
+natural/rigid/Pi injectivity and independent forward Church–Rosser. Valid literal
+addition is included, while invalid oversized literals remain distinct atoms.
+The proof-only unit expansion is handled symbolically; it is not the executable
+native normalizer. Full beta/observation transport and contextual composition are supplied by the
+subsequent transport, parallel and forward-confluence modules.
+`NativeACULegacyTransport` now constructs forward mixed reductions transporting
+every non-add legacy root across arithmetic equivalence, including hidden
+lambda/elements/pack/borrow/reflexivity heads and dependent branch substitution.
+This supplies root transport; full contextual parallel rewriting and actual combined
+Church–Rosser are supplied by the subsequent full and forward confluence modules.
+
+`NativeResourceSyntax` proves the actual Buffer/ref operation telescopes commute
+with binding transformations, including checked Load-result binder removal.
+`NativeOwnership` derives owner and erased positions from the concrete context,
+proves agreement with weakened lookup annotations, and connects checks directly
+to lookup-based trace accounting. Closed checking uses depth zero and empty
+outer position lists. This removes caller-supplied resource lists at that gate;
+resource typing and closed declaration admission are supplied by the unified layer.
 
 ## Actual native correspondence tests
 
@@ -162,7 +228,7 @@ snapshots, hashes and labelled synthetic mutations. Its native cases include
 universes, high impredicative Prop, polymorphism in both modes, erased indices,
 transport/refinement projections, evidence-binding branches, absurdity,
 arithmetic evidence, scalar iteration, refinement iteration and Nat induction.
-There are 87 source fixtures and 31 additional checks. Owned accumulators and
+There are 89 source fixtures and 31 additional checks. Owned accumulators and
 effectful iteration bodies remain explicit admitted-native/rejected-Lean fixtures.
 Native code rejection of erased proof variables is also checked.
 
@@ -181,6 +247,13 @@ Core API opaque-proof case and 14 labelled mutations. The affine suite compares
 groupings, including oversized constants; five mutations check rejection of
 wrong results, prefix changes, unsupported atoms and incomplete coverage.
 
+The family suite checks 20 actual source programs and 18 labelled mutations.
+Quantity observations retain each complete arena, context references/erasure
+flags and queried variable: 31 count/rejection agreements, seven deliberately
+stricter invalid-local-scope checks and two explicit call boundaries. Six
+mutations test its comparison adapter. Bare native runtime_uses does not itself
+validate all local scopes, so the stricter cases are not equivalence claims.
+
 ## Completion obligations
 
 The full native kernel is verified only when the following remaining obligations
@@ -192,13 +265,14 @@ are discharged, rather than replaced with more passing fixtures:
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
 3. The remaining typing/computation rules: owned/effectful folds and loops,
-   native opaque global inference, checked inductive/data family environments
-   and elimination.
+   native opaque-global behavior, data elimination, Case/View/Drop and Lend.
+   Checked family environments, dependent constructors, proposition elimination,
+   Buffer/ref and Back/Give/Take already share the unified judgment.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.
-5. Integration of the standalone affine results into full conversion, all other
-   native equations and typed proof-irrelevant comparison, and refinement of native graph operations,
+5. The remaining native conversion equations and formation-aware
+   proof-irrelevant comparison, and refinement of native graph operations,
    normalization/comparison, inference,
    family declaration and whole-program checking by their actual implementation
    semantics. A Lean port or syntactic interface audit alone does not discharge it.
@@ -214,14 +288,75 @@ With Lean 4.34.1 and the native development toolchain:
 ```sh
 cd proofs
 bash check.sh
-lake env lean -DwarningAsError=true CheckNativeInference.lean
+../scripts/proof-limits.sh lake env lean -M 4096 -j 1 -DwarningAsError=true CheckNativeInference.lean
 cd ..
-python3 tests/core_native_kernel_correspondence.py --output out/native-kernel-correspondence
-python3 tests/core_native_program_correspondence.py --output out/native-program-correspondence
-python3 tests/core_native_affine_correspondence.py --output out/native-affine-correspondence
+scripts/proof-limits.sh python3 tests/core_native_kernel_correspondence.py --output out/native-kernel-correspondence
+scripts/proof-limits.sh python3 tests/core_native_program_correspondence.py --output out/native-program-correspondence
+scripts/proof-limits.sh python3 tests/core_native_affine_correspondence.py --output out/native-affine-correspondence
+scripts/proof-limits.sh python3 tests/core_native_family_correspondence.py --output out/native-family-correspondence
+scripts/proof-limits.sh python3 tests/core_native_quantity_correspondence.py --output out/native-quantity-correspondence
+scripts/proof-limits.sh python3 tests/core_native_ownership_correspondence.py --output out/native-ownership-correspondence
+scripts/proof-limits.sh python3 tests/core_native_unified_correspondence.py --output out/native-unified-correspondence
+scripts/proof-limits.sh python3 tests/core_native_back_correspondence.py --output out/native-back-correspondence
+scripts/proof-limits.sh python3 tests/core_native_acu_normalizer_correspondence.py --output out/native-acu-normalizer-correspondence
 ```
 
 The aggregate imports the native modules and examples; every public theorem is
 included in the exact-count axiom audit. The graph-certificates flake check
 builds the admission dependencies and runs the actual native correspondence
 suite, including the exhaustive schema/serialization checks.
+
+
+## Unified typed environments and resource admission
+
+`NativeKernelEnvironment` holds syntax-only global/family records shared by
+signature checking and the environment-indexed kernel. `NativeEnvironmentTyping`
+and its concrete checker use one mutual judgment for all earlier pure rules,
+Global, Ind, dependent Con, proposition Elim, Buffer allocation/store/free/load,
+Ref formation, ghost Borrow/Deref, borrowed Index and Back/Give/Take. Acceptance soundness,
+actual-term arity/scope and environment-extension transport are proved. This is
+a genuine extension of the earlier calculus; its old metatheorems are not
+silently asserted for the added rules.
+
+`NativeOwnershipAdmission` derives declaration mode from the inferred sort and
+requires the closed quantity gate for code, independent of the observation flag.
+All leading function lambdas share one telescope, matching Core.uses_function;
+callbacks open the exact prefix and reclose any remaining function. This admits
+owner-before-index functions while preserving real closure-capture rejection.
+The source suite checks 22 programs and 21 exact-byte comparisons/mutations.
+
+`NativeUnifiedFamilies`, `NativeUnifiedProgram` and `NativeUnifiedAdmission`
+remove the earlier pure-prefix restriction. Ordinary fields, earlier families,
+dependent Buffer fields and family/resource-valued globals use the same unified
+checker. Independent history, recomputed positivity/parameters/layout, exact
+bytes, authenticated resource projection and environment/formal-signature scope
+invariants are proved. The native loan/case/view/drop operators and general unified
+substitution/preservation/uniqueness remain completion work.
+The integrated source suite checks 49 mixed programs and 41 exact-byte checks,
+including dependent Buffer fields, earlier flat/boxed families, constructor-valued
+globals, resource leaks/duplication and malformed unused graph nodes.
+
+`NativeACUBoundedNormalizer` supplies a concrete full-Term NormalizerKit, with
+compact arbitrary-atom collection/sorting and balanced valid constant leaves.
+Both actual ACU conversion soundness and exact finite forward output reachability
+are proved. It preserves Option failure at fuel/work/depth limits and retains
+all proof and Strict children. Of 204 actual Core.normal comparisons, 202 match
+exactly; selected array-read and proof-slot-ordering boundaries are explicit,
+and all outputs pass the proved comparator. Eight mutations reject.
+
+The native runtime-only function-result guards had a real ghost preservation
+bug: both added ghost Load/Absurd fixtures checked successfully but their beta
+normal forms were rejected. Core now applies those capture guards only to code;
+the model's executable ghost policies agree. Actual Core unit tests and all 18
+preservation fixtures pass after the fix. This does not by itself discharge the
+remaining source-semantics refinement or full-calculus consistency obligations.
+
+`NativeEnvironmentConversion` connects every unified conversion and head-exposure
+slot to actual `ACU.Conv` and `ACU.Bounded.kit`. Its code representation gates
+conservatively reject unresolved Global aliases; ghost embedding of the earlier
+pure judgment is proved without casting code policies from a smaller conversion
+relation. Back/Give/Take include owned and erased results, dependent motives,
+checked two-binder result removal and metadata-derived ownership. Their suite
+checks 37 actual source fixtures and 28 exact-byte checks. The aggregate axiom
+audit currently covers 5,312 declarations using only Lean's standard logical
+axioms, with warnings treated as errors.

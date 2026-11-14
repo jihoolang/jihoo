@@ -4576,10 +4576,10 @@ telescopes commute with renaming and substitution. Contextual preservation
 covers changed dependent counts/motives at the original result type; conversion
 does not unroll loops. Examples include an induction step that consumes its
 induction hypothesis and refinement iteration whose accumulator type changes
-with the index. The native suite now contains 87 source fixtures. Owned
+with the index. The native suite now contains 89 source fixtures. Owned
 accumulators and explicit memory operations in iteration bodies remain outside
 the executable checker's conservative pure profile. The aggregate audit checks
-4,646 theorem dependencies without admitted proofs or extra axioms.
+5,312 theorem dependencies without admitted proofs or extra axioms.
 
 ### Ordered global environments and affine canonical forms
 
@@ -4606,8 +4606,9 @@ assignments under mathematical-natural semantics, with no modular wrap; emitted
 literal bounds, U128 collector bounds, idempotence and compatibility with
 renaming/substitution are proved. `NativeAffineTyping` preserves the exact
 original type in the same mode, including code-variable readability and
-unreduced target types. The module is separate from the existing Conv relation
-and does not claim runtime evaluation or overflow safety. Five observation
+unreduced target types. These standalone equations now embed into full ACU conversion, used by the
+unified environment checker; this does not claim runtime evaluation or overflow
+safety. Five observation
 mutations verify that incorrect results, graph changes and missing coverage
 are rejected.
 
@@ -4615,3 +4616,119 @@ are rejected.
 irrelevance with Proof congruence and projection would collapse every raw term.
 Native proof-irrelevant comparison therefore still needs a formation-aware
 integration; it is not assumed by the current conversion metatheory.
+
+### Checked family signatures, concrete resource projection and ACU
+
+`NativeFamilyEnvironment` checks every raw constructor telescope and computes
+its signature and boxing information. Proved consequences include strict
+positivity, closed/well-formed source types, typed U64 indices, normalized field
+formation, unchanged leading parameters and recursive-field erasure constraints.
+Its mixed scheduler follows each family's actual global boundary and records
+an earlier checked program history. Version-6 admission binds the independent
+program judgment and constructor safety to exact bytes, all roots and the full
+arena, with one aggregate expansion budget. The differential suite checks 20
+actual source programs and 18 mutations. Earlier-family fields, buffers and
+family term typing remain explicit gaps at this signature stage.
+
+`NativeQuantity` concretely projects every supported native runtime position
+into the existing resource-control semantics. Its local linear/erased scopes,
+balanced branches, closure restrictions, loops and once-only continuations have
+completed/prefix accounting theorems. Known complete lambda spines visit each
+relevant argument once outside the consumed scopes; their body is checked under
+all those scopes. Actual full-Term renaming and Var/Borrow(Var) substitution
+commute with the projection, including reader removal and continuation aliases.
+The fresh-sentinel check also validates locals in a closed outer context. This
+remains resource projection semantics: authentic outer ownership contexts,
+Buffer typing, general call signatures, alias-sensitive Lend, native heap
+execution and machine counter bounds require further integration. Forty actual
+runtime-use observations retain full graphs and contexts; 31 agree exactly,
+seven expose stronger local checks and two retain explicit call gaps. Six
+mutations verify the observation adapter.
+
+`NativeACU` and `NativeACUAffine` provide explicit associativity/commutativity/zero
+conversion and actual affine canonical derivations using valid literal leaves.
+Pure full-syntax ACU has a proved bag characterization, rigid/Pi injectivity and
+forward Church–Rosser with zero elimination. The combined legacy beta/arithmetic
+and observation extension has full substitution closure, Church–Rosser and
+injectivity, proved by the subsequent parallel/forward construction.
+The separate arithmetic quotient also has constructive completeness,
+natural/rigid/Pi injectivity and forward Church–Rosser, including bounded literal
+addition and explicit treatment of invalid oversized payloads. Its mathematical
+unit expansion is handled through symbolic length laws; the large-literal
+regression does not allocate a list with one element per natural unit. This is
+an independent proof reduction, not the production normalizer. The subsequent transport/parallel modules prove the required transport of
+legacy beta and observing roots across this quotient and combined confluence.
+Constructive root transport is now supplied by `NativeACULegacyTransport`: every
+non-add legacy computation can move across arithmetic equivalence through actual
+forward mixed reductions. Hidden computational heads, literal recovery and
+capture-safe instantiation are included; contextual parallel rewriting and full
+mixed Church–Rosser are still required.
+
+`NativeResourceSyntax` records Buffer/ref operations and the exact Load telescope,
+with renaming/substitution and checked result-lowering proofs. `NativeOwnership`
+derives concrete owner/erased positions from the context and relates their modes
+to actual weakened lookups. Its trace results take lookup premises directly.
+The closed gate uses authentic depth zero and empty outer lists, preparing
+resource declaration admission without externally supplied ownership metadata.
+
+Local proof/compiler processes now use `scripts/proof-limits.sh`: jobs serialize
+across agents and execute in a separate cgroup with a 6 GiB job limit and 8 GiB
+aggregate limit. Lean compilation uses 4 GiB and one thread. The normal proof
+check enters that guard automatically when a user systemd manager is available;
+CI sandboxes retain the per-Lean limits.
+
+
+### Unified environments, code resource gates and full ACU conversion
+
+The syntax-only `NativeKernelEnvironment` records are shared by checked
+signatures and a single environment-indexed mutual typing judgment. Its concrete
+checker covers all previous pure rules, globals, families, dependent constructor
+arguments, proposition elimination and nine Buffer/ref rule branches. Soundness,
+term well-formedness/scoping and preserved-lookup environment extension are
+proved. Closed declaration admission derives its mode from type formation and
+authenticates the resource gate without a caller-selected owner list.
+
+`NativeUnifiedProgram` checks mixed prefixes with that same checker, admitting
+earlier families, dependent Buffer fields and family/resource-valued globals.
+Its independent history and exact version-6 admission establish positive checked
+signatures, mode-derived body typing, quantities and concrete environment and
+formal-signature scope invariants. Generalized substitution, type uniqueness,
+preservation, the remaining operators and consistency still require proofs.
+
+The completed ACU transport/parallel construction proves actual finite forward
+Church–Rosser for `ACU.Conv`, plus rigid/Pi/scalar/array/equality/refinement
+injectivity. No reverse beta or arbitrary unit insertion is hidden in the
+forward conclusion. A compact bounded full-Term normalizer/comparator has both
+conversion soundness and independent exact output reachability. Its 204 native
+observations retain two explicit read/proof-order boundaries; eight mutations
+reject. All conversion, head-exposure and policy slots of the same environment-indexed
+checker now use actual ACU conversion and the bounded concrete kit. Unresolved
+Global aliases are conservatively rejected by runtime representation gates.
+
+The full leading-lambda resource telescope now matches Core.uses_function,
+including owned parameters before later scalar parameters. Twenty-two actual
+source cases and 21 byte checks validate the closed resource admission, while
+real effect-separated captures and partial owned applications still reject.
+
+Mechanization exposed a native ghost preservation failure: an abstract result
+type passed the continuation gate, but beta substitution could reveal a function
+and make its normal form fail rechecking. Runtime-only function-result guards in
+Load/Take/Lend/Absurd and data elimination now respect ghost positions. Both new
+Load/Absurd preservation fixtures, all 18 preservation regressions and 61 actual
+Core unit tests pass; runtime capture guards remain active.
+
+Back/Give/Take now extend that same unified judgment, checker and soundness
+proof, including dependent and erased results, boxed owners and checked result
+binder removal. Thirty-seven actual source fixtures and 28 exact-byte checks
+validate the integrated gate. The original pure judgment embeds in ghost mode;
+its smaller-conversion runtime policies are not silently cast into full ACU.
+The broader unified program suite passes 49 actual source fixtures and 41
+exact-byte checks, including dependent Buffer constructors, earlier boxed/flat
+families, resource-valued globals and independent ownership/type/graph mutations.
+
+All local proof/compiler jobs run through `scripts/proof-limits.sh`: a shared
+lock serializes them, separate cgroups cap each complete job at 6 GiB and the
+aggregate at 8 GiB, and Lean runs with one thread and a 4 GiB allocation cap.
+The wrapper is independent of the terminal's cgroup and reapplies limits after
+reboot. Native regression commands inside CI retain their existing sandbox;
+local invocations must use the wrapper.

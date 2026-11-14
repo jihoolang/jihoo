@@ -86,7 +86,7 @@ def run(compiler, checker, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', default='jihoo')
-    parser.add_argument('--checker', default='lake env lean -DwarningAsError=true --run CheckNativeAffine.lean')
+    parser.add_argument('--checker', default='lake env lean -M 4096 -j 1 -DwarningAsError=true --run CheckNativeAffine.lean')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if args.output:

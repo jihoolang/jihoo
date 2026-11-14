@@ -1,4 +1,5 @@
 import Jihoo.NativeAdmission
+import Jihoo.NativeKernelEnvironment
 
 /-! Checked closed declarations derive their body mode from the declared type's
 sort, as Core.extend does. An externally recorded observation mode is not an
@@ -13,10 +14,7 @@ def bodyMode : SortTag → Bool
   | .prop => true
   | .type _ => false
 
-structure Definition where
-  type : Term
-  value : Term
-  deriving Repr
+abbrev Definition := Environment.GlobalDeclaration
 
 /-- Independent formation and body typing, with a mode computed from the sort. -/
 def Valid (d : Definition) : Prop :=

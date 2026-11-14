@@ -165,7 +165,7 @@ mutual
           | some U =>
               match SortTag.ofTerm U with
               | some _ =>
-                  if nonFunctionHead (Conversion.normalize fuel T) then
+                  if ghost || nonFunctionHead (Conversion.normalize fuel T) then
                     match expose fuel (infer fuel ctx true p) with
                     | some (.lt _i n) =>
                         if Conversion.equal fuel n (.natural 0) then some T else none

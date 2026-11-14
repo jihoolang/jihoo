@@ -143,6 +143,39 @@ pub fn program_snapshot(source: str) -> Result(String, String) {
     Ok(program_arena(c))
 }
 
+// Version 6 retains the raw family declarations in addition to definitions.
+// Positivity/signatures/layout are recomputed by the receiving checker.
+pub fn family_program_arena(c: core.Core) -> String {
+    var out = String.new()
+    token(&out, 6)
+    token(&out, c.definitions.len() as u64)
+    for definition in c.definitions {
+        token(&out, definition.ty as u64)
+        token(&out, definition.value as u64)
+    }
+    token(&out, c.families.len() as u64)
+    for family in c.families {
+        token(&out, if family.data { 1 } else { 0 })
+        token(&out, family.params as u64)
+        token(&out, family.arity as u64)
+        token(&out, family.globals as u64)
+        token(&out, family.constructors.len() as u64)
+        for constructor in family.constructors { token(&out, constructor.ty as u64) }
+    }
+    token(&out, c.nodes.len() as u64)
+    for n in c.nodes { write_node(&out, n.term) }
+    out
+}
+
+pub fn family_program_snapshot(source: str) -> Result(String, String) {
+    var c = match core_parse.parse(source, 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    Ok(family_program_arena(c))
+}
+
 pub fn snapshot(source: str, mode: str) -> Result(String, String) {
     let ghost = mode == "infer" || mode == "require"
     if !ghost && mode != "code-infer" && mode != "code-require" {

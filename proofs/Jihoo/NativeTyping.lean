@@ -132,7 +132,7 @@ def nonFunction (T : Term) : Prop :=
   ∀ (e : Bool) (A B : Term), ¬ Conversion.Conv T (.pi e A B)
 
 /-- Ghost elimination is closed under arbitrary type substitution. Executable
-checking additionally enforces the native nonfunction gate in both modes. -/
+code retains the native nonfunction result restriction. -/
 def absurdAllowed (ghost : Bool) (T : Term) : Prop := ghost = true ∨ nonFunction T
 
 /-- A conservative executable nonfunction certificate from a rigid known type

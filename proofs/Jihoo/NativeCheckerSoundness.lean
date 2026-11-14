@@ -58,6 +58,16 @@ theorem nonFunction_of_conversion {A B : Term} (conv : Conversion.Conv A B)
     (h : nonFunction B) : nonFunction A :=
   fun e X Y converted => h e X Y (.trans (.symm conv) converted)
 
+/-- Runtime continuation results remain nonfunctions; ghost substitution may
+expose arbitrary type heads without introducing runtime captures. -/
+theorem nonFunctionGate_sound
+    (h : (ghost || nonFunctionHead (Conversion.normalize fuel result)) = true) :
+    ghost = true ∨ nonFunction result := by
+  rcases Bool.or_eq_true_iff.mp h with erased | rigid
+  · exact Or.inl erased
+  · exact Or.inr (nonFunction_of_conversion (Conversion.normalize_sound fuel result)
+      (nonFunctionHead_sound rigid))
+
 /-- Successful evidence-binder removal proves exact reweakening, including
 when the result is a function type with its own binders. -/
 theorem branch_type_reweakens {Y B : Term}
@@ -394,8 +404,7 @@ private theorem sound_mutual (fuel : Nat) :
                     have bound : Conversion.Conv (.lt i n) (.lt i (.natural 0)) :=
                       .node .lt (.cons (.refl _) (.cons (Conversion.equal_sound hz) .nil))
                     exact .absurd typed (evidence.convert bound)
-                      (Or.inr (nonFunction_of_conversion (Conversion.normalize_sound fuel T)
-                        (nonFunctionHead_sound hhead)))
+                      (nonFunctionGate_sound hhead)
                   · contradiction
                 · contradiction
               · contradiction

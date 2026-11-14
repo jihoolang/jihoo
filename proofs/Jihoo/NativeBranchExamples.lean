@@ -76,8 +76,8 @@ theorem absurd_nontype_rejected : infer 16 impossible false (.absurd (.natural 7
 theorem absurd_function_result_rejected : infer 24 impossible false
     (.absurd (.pi false .u64 .u64) (.var 0)) = none := by cbv
 
-theorem absurd_function_ghost_check_rejected : infer 24 impossible true
-    (.absurd (.pi false .u64 .u64) (.var 0)) = none := by cbv
+theorem absurd_function_ghost_check_accepted : infer 24 impossible true
+    (.absurd (.pi false .u64 .u64) (.var 0)) = some (.pi false .u64 .u64) := by cbv
 
 /-- Proven variable rigidity admits the native neutral-type case. -/
 theorem absurd_neutral_type_accepted : infer 24

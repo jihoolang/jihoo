@@ -2364,7 +2364,7 @@ impl Core {
                 }
                 let result = self.normal(result, depth - 1)?
                 let result = self.shift(result, -2, 0, depth - 1)?
-                self.not_function(k, result, depth - 1)?
+                if !ghost { self.not_function(k, result, depth - 1)? }
                 return Ok(result)
             }
             Free(b, rest) => {
@@ -2444,7 +2444,7 @@ impl Core {
                         "take's type depends on neither the owner nor its result"
                     ))
                 }
-                self.not_function(k, rest, depth - 1)?
+                if !ghost { self.not_function(k, rest, depth - 1)? }
                 return Ok(rest)
             }
             // In types and evidence, which never run, nothing is lent. In code,
@@ -2519,7 +2519,7 @@ impl Core {
                         }
                         let result = self.normal(result, depth - 1)?
                         let result = self.shift(result, -1, 0, depth - 1)?
-                        self.not_function(g, result, depth - 1)?
+                        if !ghost { self.not_function(g, result, depth - 1)? }
                         return Ok(result)
                     }
                     None => {}
@@ -2551,7 +2551,7 @@ impl Core {
                 }
                 let result = self.normal(result, depth - 1)?
                 let result = self.shift(result, -2, 0, depth - 1)?
-                self.not_function(g, result, depth - 1)?
+                if !ghost { self.not_function(g, result, depth - 1)? }
                 return Ok(result)
             }
             View(recursion, f, t, cases, x) => {
@@ -2631,7 +2631,7 @@ impl Core {
             Absurd(t, p) => {
                 let sort = self.infer(t, ctx, true, depth - 1)?
                 self.sort(sort, depth - 1)?
-                self.not_function(t, t, depth - 1)?
+                if !ghost { self.not_function(t, t, depth - 1)? }
                 let evidence = self.infer(p, ctx, true, depth - 1)?
                 let evidence = self.normal(evidence, depth - 1)?
                 let Lt(_, n) = self.term(evidence) else {
@@ -2962,9 +2962,11 @@ impl Core {
         Ok(true)
     }
 
-    // A continuation that receives owned values (a load's, a lend's, a
+    // A runtime continuation that receives owned values (a load's, a lend's, a
     // case's) runs once with the arguments it is given: if its result were
     // a function, it could hold those values and run any number of times.
+    // Ghost continuations do not run and must remain stable when type
+    // substitution exposes a function behind a neutral type.
     fn not_function(inout self, at: u32, ty: u32, depth: u32) -> Result((), diag.Diag) {
         let t = self.normal(ty, depth)?
         match self.term(t) {
@@ -3546,7 +3548,7 @@ impl Core {
         var result = p
         for j in params..xs.len() { result = self.add(Term.App(result, xs[j]), sp)? }
         let result = self.add(Term.App(result, x), sp)?
-        if !proof {
+        if !proof && !ghost {
             if applied { self.erased_function(p, result, depth - 1)? }
             else { self.not_function(p, result, depth - 1)? }
         }
