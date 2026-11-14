@@ -4579,4 +4579,39 @@ induction hypothesis and refinement iteration whose accumulator type changes
 with the index. The native suite now contains 87 source fixtures. Owned
 accumulators and explicit memory operations in iteration bodies remain outside
 the executable checker's conservative pure profile. The aggregate audit checks
-4,439 theorem dependencies without admitted proofs or extra axioms.
+4,646 theorem dependencies without admitted proofs or extra axioms.
+
+### Ordered global environments and affine canonical forms
+
+`NativeGlobalEnvironment` checks declarations oldest first, expanding annotation
+and body against their checked prefix before deriving the declaration's mode
+from its sort. Its independent expansion judgment and sequential-validity
+relation establish closed, well-formed, global-free interpreted entries;
+forward/self-reference exclusion; stable earlier interpretations; and unique
+global body types modulo conversion. Precharged expansion bounds repeated
+global bodies before insertion. This is a conservative transparent path, with
+opaque code uses of ghost globals retained as an explicit native-accepted gap.
+
+The canonical version-5 whole-program envelope records every declaration's
+roots and the complete shared arena, with no external modes or derivations.
+`NativeProgramAdmission` proves exact bytes, graph representation, independent
+formation and body typing, closure and source-order constraints. Expansion work
+is measured across every root before decoding. The native suite includes 15
+source programs, an actual Core API opaque-proof case and 14 synthetic mutations.
+
+`NativeAffineSum` separately canonicalizes actual Var/Natural/UAdd trees. Its
+sorted occurrences and balanced wide ghost constants match 90 actual
+Core.normal observations. Equality is sound and complete for all U64-valued
+assignments under mathematical-natural semantics, with no modular wrap; emitted
+literal bounds, U128 collector bounds, idempotence and compatibility with
+renaming/substitution are proved. `NativeAffineTyping` preserves the exact
+original type in the same mode, including code-variable readability and
+unreduced target types. The module is separate from the existing Conv relation
+and does not claim runtime evaluation or overflow safety. Five observation
+mutations verify that incorrect results, graph changes and missing coverage
+are rejected.
+
+`NativeIrrelevanceBoundary` proves that combining arbitrary untyped Pack-proof
+irrelevance with Proof congruence and projection would collapse every raw term.
+Native proof-irrelevant comparison therefore still needs a formation-aware
+integration; it is not assumed by the current conversion metatheory.

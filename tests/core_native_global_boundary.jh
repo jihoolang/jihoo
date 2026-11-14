@@ -1,0 +1,29 @@
+// An actual Core API case whose opaque code use of a ghost global is accepted
+// by native inference but conservatively rejected after transparent expansion.
+import core
+import core_native_snapshot
+import diag
+
+fn main() -> i32 {
+    var c = core.Core.new()
+    let sp = diag.Span.nowhere()
+    let zero = c.add(core.Term.Natural(0), sp).unwrap()
+    let eq = c.add(core.Term.Eq(zero, zero), sp).unwrap()
+    let ty = c.add(core.Term.Pi(true, eq, eq), sp).unwrap()
+    let argument = c.add(core.Term.Var(0), sp).unwrap()
+    let value = c.add(core.Term.Lam(true, eq, argument), sp).unwrap()
+    c.definitions.push(core.Definition {
+        name: "evidence".to_string(), ty, value, exported: false, span: sp
+    })
+    let u = c.add(core.Term.U64, sp).unwrap()
+    let proof = c.add(core.Term.Global(0), sp).unwrap()
+    let seven = c.add(core.Term.Natural(7), sp).unwrap()
+    let value = c.add(core.Term.Strict(proof, seven), sp).unwrap()
+    c.definitions.push(core.Definition {
+        name: "value".to_string(), ty: u, value, exported: false, span: sp
+    })
+    match c.check() {
+        Ok(_) => { print(core_native_snapshot.program_arena(c)); 0 }
+        Err(e) => { eprintln(e.msg); 1 }
+    }
+}

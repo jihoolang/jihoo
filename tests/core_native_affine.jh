@@ -1,0 +1,70 @@
+// Actual pure Core.normal observations for affine Var/Natural/UAdd graphs.
+// These are algorithm comparisons, not typing certificates or source proofs.
+import core
+import core_native_snapshot
+import diag
+
+fn add(inout c: core.Core, sink term: core.Term) -> Result(u32, String) {
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(id) => Ok(id)
+        Err(e) => Err(e.msg.clone())
+    }
+}
+
+fn combine(inout c: core.Core, leaves: [u32], group: i64) -> Result(u32, String) {
+    if leaves.len == 0 { return add(&c, core.Term.Natural(0)) }
+    if leaves.len == 1 { return Ok(leaves[0]) }
+    if group == 2 {
+        let half = leaves.len / 2
+        let left = combine(&c, leaves[..half], group)?
+        let right = combine(&c, leaves[half..], group)?
+        return add(&c, core.Term.UAdd(left, right))
+    }
+    var result = if group == 0 { leaves[0] } else { leaves[leaves.len - 1] }
+    for i in 1..leaves.len {
+        result = if group == 0 { add(&c, core.Term.UAdd(result, leaves[i]))? }
+        else { add(&c, core.Term.UAdd(leaves[leaves.len - 1 - i], result))? }
+    }
+    Ok(result)
+}
+
+fn one(variable_count: i64, literal_count: i64, group: i64) -> Result((), String) {
+    var c = core.Core.new()
+    let variables = [3 as u32, 0, 3, 1]
+    let literals = [0 as u64, 1, 2, 18446744073709551615, 18446744073709551615]
+    var leaves = Vec(u32).new()
+    for i in 0..variable_count { leaves.push(add(&c, core.Term.Var(variables[i]))?) }
+    for i in 0..literal_count { leaves.push(add(&c, core.Term.Natural(literals[i]))?) }
+    let root = combine(&c, leaves.as_slice(), group)?
+    let before = core_native_snapshot.arena(c, true, root, root)
+    let normal = match c.normal(root, core.DEPTH) {
+        Ok(root) => root
+        Err(e) => return Err(e.msg.clone())
+    }
+    print(variable_count)
+    print("\t")
+    print(literal_count)
+    print("\t")
+    print(group)
+    print("\t")
+    print(before)
+    print("\t")
+    println(core_native_snapshot.arena(c, true, root, normal))
+    Ok(())
+}
+
+fn run() -> Result((), String) {
+    for variables in 0..5 {
+        for literals in 0..6 {
+            for group in 0..3 { one(variables, literals, group)? }
+        }
+    }
+    Ok(())
+}
+
+fn main() -> i32 {
+    match run() {
+        Ok(_) => 0
+        Err(message) => { eprintln(message); 1 }
+    }
+}

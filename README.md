@@ -192,6 +192,10 @@ normalizer. Direct arena transformations also have semantic and budget proofs.
 Actual native snapshots and all constructor encodings
 are tested against these definitions. Full native implementation refinement,
 inductive-family rules and ownership connections remain open.
+An ordered transparent-global checker also proves each interpreted declaration's
+formation, body typing and closure, bound to exact whole-program graph bytes.
+A separate affine canonicalizer has semantic soundness/completeness and preserves
+the original type and mode; integration into full conversion remains open.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
 A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)

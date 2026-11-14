@@ -416,3 +416,14 @@ import Jihoo.NativeLoopTelescopes
 import Jihoo.NativeLoopConversion
 import Jihoo.NativeLoopExamples
 import Jihoo.NativeLoopMetatheoryExamples
+
+import Jihoo.NativeGlobalEnvironment
+import Jihoo.NativeGlobalEnvironmentExamples
+import Jihoo.NativeProgramWire
+import Jihoo.NativeProgramWireExamples
+import Jihoo.NativeProgramAdmission
+import Jihoo.NativeProgramAdmissionExamples
+import Jihoo.NativeAffineSum
+import Jihoo.NativeAffineTyping
+import Jihoo.NativeAffineSumExamples
+import Jihoo.NativeIrrelevanceBoundary

@@ -116,6 +116,33 @@ pub fn arena(c: core.Core, ghost: bool, term_root: u32, type_root: u32) -> Strin
     out
 }
 
+// Version 5 retains every ordered declaration and the entire shared arena.
+// The input supplies no declaration modes or inferred typing certificates.
+pub fn program_arena(c: core.Core) -> String {
+    var out = String.new()
+    token(&out, 5)
+    token(&out, c.definitions.len() as u64)
+    for definition in c.definitions {
+        token(&out, definition.ty as u64)
+        token(&out, definition.value as u64)
+    }
+    token(&out, c.nodes.len() as u64)
+    for n in c.nodes { write_node(&out, n.term) }
+    out
+}
+
+pub fn program_snapshot(source: str) -> Result(String, String) {
+    var c = match core_parse.parse(source, 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.families.len() != 0 {
+        return Err("program snapshot does not yet support families".to_string())
+    }
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    Ok(program_arena(c))
+}
+
 pub fn snapshot(source: str, mode: str) -> Result(String, String) {
     let ghost = mode == "infer" || mode == "require"
     if !ghost && mode != "code-infer" && mode != "code-require" {

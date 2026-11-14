@@ -112,6 +112,39 @@ mode. A synthetic erased data identity is accepted as a ghost observation but
 rejected as an executable declaration; forging its mode flag cannot authorize
 runtime access to its erased parameter.
 
+`NativeGlobalEnvironment` checks ordered whole programs through an independent
+transparent-global expansion relation. Both annotation and body expand against
+the previously checked prefix, then pass the same sort-derived declaration
+checker. Every interpreted entry is typed, locally closed, arity-correct and
+global-free; raw references precede their declaration, earlier entries retain
+their interpretation, and checked global bodies have unique types modulo
+conversion. Expansion precharges repeated body occurrences and bounds output
+size/depth. This conservative interpretation can reject opaque code uses of
+ghost globals that native inference accepts; it is not a proof of the native
+Global inference branch.
+
+`NativeProgramWire` and `NativeProgramAdmission` bind that checked environment
+to a canonical version-5 envelope containing all declaration roots and the full
+shared graph. Modes are absent from the format. Acceptance proves exact bytes,
+graph meanings, declaration formation/body typing, local closure, and exclusion
+of forward/self references. Aggregate root expansion is checked before decoding
+any declaration, with separate declaration/node/expanded-occurrence bounds.
+
+`NativeAffineSum` implements native-shaped affine canonicalization for the
+full-syntax Var/Natural/UAdd profile: sorted variable occurrences, one natural
+constant and balanced oversized ghost constants with valid U64 leaves. Equality
+is sound and complete for all U64-valued valuations over mathematical naturals;
+the U128 collector bound, renaming/substitution compatibility and idempotence are
+proved. `NativeAffineTyping` proves exact-original-type preservation in the same
+input mode. This standalone canonicalizer does not yet extend the current Conv
+relation or checker. Runtime folding refusal for oversized constants is explicit;
+the typing theorem does not establish runtime overflow or evaluation behavior.
+
+`NativeIrrelevanceBoundary` proves why native proof-irrelevant comparison cannot
+be inserted as an unconditional untyped Pack equation: together with Proof
+congruence and projection it would equate all raw terms. A faithful integration
+requires formation-aware irrelevance.
+
 ## Actual native correspondence tests
 
 The exhaustive writer `compiler/core_native_snapshot.jh` calls the actual native
@@ -142,6 +175,12 @@ binding transformations, including explicit negative-shift rejection.
 These comparisons are regression evidence. Native parser/exporter behavior,
 source execution, process association and IO are outside the pure theorems.
 
+The whole-program suite also checks 15 actual source programs, one constructed
+Core API opaque-proof case and 14 labelled mutations. The affine suite compares
+90 actual Core.normal results across variable/literal counts and three tree
+groupings, including oversized constants; five mutations check rejection of
+wrong results, prefix changes, unsupported atoms and incomplete coverage.
+
 ## Completion obligations
 
 The full native kernel is verified only when the following remaining obligations
@@ -153,12 +192,13 @@ are discharged, rather than replaced with more passing fixtures:
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
 3. The remaining typing/computation rules: owned/effectful folds and loops,
-   globals, checked inductive/data family environments and elimination.
+   native opaque global inference, checked inductive/data family environments
+   and elimination.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.
-5. All remaining native conversion equations, including canonical symbolic sums
-   and proof-irrelevant comparison, and refinement of native graph operations,
+5. Integration of the standalone affine results into full conversion, all other
+   native equations and typed proof-irrelevant comparison, and refinement of native graph operations,
    normalization/comparison, inference,
    family declaration and whole-program checking by their actual implementation
    semantics. A Lean port or syntactic interface audit alone does not discharge it.
@@ -177,6 +217,8 @@ bash check.sh
 lake env lean -DwarningAsError=true CheckNativeInference.lean
 cd ..
 python3 tests/core_native_kernel_correspondence.py --output out/native-kernel-correspondence
+python3 tests/core_native_program_correspondence.py --output out/native-program-correspondence
+python3 tests/core_native_affine_correspondence.py --output out/native-affine-correspondence
 ```
 
 The aggregate imports the native modules and examples; every public theorem is
