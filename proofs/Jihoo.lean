@@ -353,3 +353,6 @@ import Jihoo.CommonCaseChildTransfer
 import Jihoo.CommonCaseChildTransferChecks
 import Jihoo.CommonCaseSourceConsumption
 import Jihoo.CommonCaseSourceConsumptionChecks
+
+import Jihoo.KernelCheckerSoundness
+import Jihoo.KernelCheckerExamples
