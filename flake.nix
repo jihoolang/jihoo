@@ -229,6 +229,7 @@
               root = ./proofs;
               fileset = lib.fileset.unions [
                 ./proofs/Jihoo
+                ./proofs/scripts
                 ./proofs/Jihoo.lean
                 ./proofs/Audit.lean
                 ./proofs/EmitMixedProofTranslation.lean
