@@ -39,6 +39,8 @@ namespace Term
 @[match_pattern] abbrev ifLt (a b yes no : Term) : Term := .node .ifLt [a, b, yes, no]
 @[match_pattern] abbrev ifEq (a b yes no : Term) : Term := .node .ifEq [a, b, yes, no]
 @[match_pattern] abbrev absurd (T p : Term) : Term := .node .absurd [T, p]
+@[match_pattern] abbrev fold (n init body : Term) : Term := .node .fold [n, init, body]
+@[match_pattern] abbrev loop (n motive init body : Term) : Term := .node .loop [n, motive, init, body]
 end Term
 
 inductive SortTag where
@@ -140,6 +142,56 @@ def nonFunctionHead : Term → Bool
   | .univ _ | .prop | .u64 | .i64 | .array _ | .lt _ _ | .eq _ _ | .refine _ => true
   | _ => false
 
+/-- Exact native scalar Fold telescope. The count is weakened beneath i. -/
+def foldBodyType (n : Term) : Term :=
+  .pi false .u64 (.pi true (.lt (.var 0) (n.rename Nat.succ)) (.pi false .i64 .i64))
+
+/-- The proof bit distinguishes Prop induction from Type0 scalar iteration. -/
+def loopSortTerm (proof : Bool) : Term := if proof then .prop else .univ 0
+
+/-- Exact loop_body_type telescope from the native kernel: under i/p/acc,
+i occurs at indices 0/1/2 respectively. The accumulator is erased in Prop. -/
+def loopBodyType (n motive : Term) (proof : Bool) : Term :=
+  .pi false .u64 (.pi true (.lt (.var 0) (n.rename Nat.succ))
+    (.pi proof (.app (motive.rename (fun x => x + 2)) (.var 1))
+      (.app (motive.rename (fun x => x + 3)) (.uadd (.var 2) (.natural 1)))))
+
+/-- Code iteration has one scalar/refinement representation at every index.
+Owned accumulators await a quantity-aware judgment and are excluded here. -/
+def scalarLoopMotive : Term → Bool
+  | .lam _ _ .u64 | .lam _ _ .i64 | .lam _ _ (.refine _) => true
+  | _ => false
+
+mutual
+  /-- Conservative pure profile: explicit memory/ownership/family operations
+  reject even under three lambdas. This is stronger than native's repetition
+  gate and avoids admitting owned behavior before quantity preservation. -/
+  def repeatPure : Term → Bool
+    | .var _ => true
+    | .node op args =>
+        match op with
+        | .alloc | .load | .store | .free | .drop _ | .buffer | .ref | .lend |
+            .back _ | .give _ | .take | .borrow | .deref | .ind _ _ | .con _ _ _ |
+            .elim _ _ | .caseOf _ _ | .view _ _ _ => false
+        | _ => repeatPureArgs args
+    termination_by t => sizeOf t
+
+  def repeatPureArgs : List Term → Bool
+    | [] => true
+    | t :: ts => repeatPure t && repeatPureArgs ts
+    termination_by ts => sizeOf ts
+end
+
+/-- Ghost substitution can replace pure annotations by arbitrary typed terms;
+code admission retains the explicit repetition policy. -/
+def loopBodyAllowed (ghost : Bool) (body : Term) : Prop := ghost = true ∨ repeatPure body = true
+
+/-- Prop induction has no runtime accumulator. Code data iteration certifies a
+convertible scalar/refinement motive with a fixed representation. -/
+def loopMotiveAllowed (ghost proof : Bool) (motive : Term) : Prop :=
+  ghost = true ∨ proof = true ∨
+    ∃ normal, Conversion.Conv motive normal ∧ scalarLoopMotive normal = true
+
 mutual
   /-- A domain must actually infer a sort; arbitrary annotations are not assumed
   to be types. This definition is independent of the executable checker. -/
@@ -208,6 +260,16 @@ mutual
         HasType ctx ghost no B → HasType ctx ghost (.ifEq a b yes no) B
     | absurd {s : SortTag} : HasType ctx true T s.term → HasType ctx true p (.lt i (.natural 0)) →
         absurdAllowed ghost T → HasType ctx ghost (.absurd T p) T
+    | foldI64 : HasType ctx ghost n .u64 → HasType ctx ghost init .i64 →
+        HasType ctx ghost body (foldBodyType n) → loopBodyAllowed ghost body →
+        HasType ctx ghost (.fold n init body) .i64
+    | loop : HasType ctx true motive (.pi false .u64 (loopSortTerm proof)) →
+        loopMotiveAllowed ghost proof motive →
+        HasType ctx (ghost || proof) n .u64 →
+        HasType ctx (ghost || proof) init (.app motive (.natural 0)) →
+        HasType ctx (ghost || proof) body (loopBodyType n motive proof) →
+        loopBodyAllowed (ghost || proof) body →
+        HasType ctx ghost (.loop n motive init body) (.app motive n)
     | convert : HasType ctx ghost t A → Conversion.Conv A B → HasType ctx ghost t B
 end
 

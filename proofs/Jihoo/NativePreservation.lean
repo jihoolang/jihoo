@@ -1,5 +1,6 @@
 import Jihoo.NativeRootPreservation
 import Jihoo.NativeConversionTransport
+import Jihoo.NativeLoopConversion
 
 /-! Fixed-original-type ghost preservation for every contextual computation
 step of the full-syntax normalizer. The relation is independently defined over
@@ -579,6 +580,49 @@ private theorem preservation_mutual :
               cases children with
               | head step => exact .absurd hT.ghost (ihp _ step) (Or.inl rfl)
               | tail children => cases children
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .foldI64 (ihn _ step) hi.ghost
+                (hb.ghost.convert (Conversion.foldBodyType_congr step.conversion)) (Or.inl rfl)
+          | tail children =>
+              cases children with
+              | head step => exact .foldI64 hn.ghost (ihi _ step) hb.ghost (Or.inl rfl)
+              | tail children =>
+                  cases children with
+                  | head step => exact .foldI64 hn.ghost hi.ghost (ihb _ step) (Or.inl rfl)
+                  | tail children => cases children
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .convert (.loop hm (Or.inl rfl) (by simpa using ihn _ step)
+                (by simpa using hi.ghost)
+                (by simpa using hb.ghost.convert (Conversion.loopBodyType_count_congr _ _ step.conversion))
+                (Or.inl rfl)) (congr2 .app (.refl _) (.symm step.conversion))
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .convert (.loop (ihm _ step) (Or.inl rfl) (by simpa using hn.ghost)
+                    (by simpa using hi.ghost.convert (congr2 .app step.conversion (.refl _)))
+                    (by simpa using hb.ghost.convert (Conversion.loopBodyType_motive_congr _ _ step.conversion))
+                    (Or.inl rfl)) (congr2 .app (.symm step.conversion) (.refl _))
+              | tail children =>
+                  cases children with
+                  | head step =>
+                      exact .loop hm (Or.inl rfl) (by simpa using hn.ghost) (by simpa using ihi _ step)
+                        (by simpa using hb.ghost) (Or.inl rfl)
+                  | tail children =>
+                      cases children with
+                      | head step =>
+                          exact .loop hm (Or.inl rfl) (by simpa using hn.ghost) (by simpa using hi.ghost)
+                            (by simpa using ihb _ step) (Or.inl rfl)
+                      | tail children => cases children
     | convert ht hc ih =>
         first | intro u outer | rename_i u outer
         exact .convert (ih _ outer) hc
@@ -1038,6 +1082,49 @@ private theorem preservation_mutual :
               cases children with
               | head step => exact .absurd hT.ghost (ihp _ step) (Or.inl rfl)
               | tail children => cases children
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .foldI64 (ihn _ step) hi.ghost
+                (hb.ghost.convert (Conversion.foldBodyType_congr step.conversion)) (Or.inl rfl)
+          | tail children =>
+              cases children with
+              | head step => exact .foldI64 hn.ghost (ihi _ step) hb.ghost (Or.inl rfl)
+              | tail children =>
+                  cases children with
+                  | head step => exact .foldI64 hn.ghost hi.ghost (ihb _ step) (Or.inl rfl)
+                  | tail children => cases children
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro u outer | rename_i u outer
+        rcases outer.nodeView with root | ⟨ys,rfl,children⟩
+        · cases root
+        · cases children with
+          | head step =>
+              exact .convert (.loop hm (Or.inl rfl) (by simpa using ihn _ step)
+                (by simpa using hi.ghost)
+                (by simpa using hb.ghost.convert (Conversion.loopBodyType_count_congr _ _ step.conversion))
+                (Or.inl rfl)) (congr2 .app (.refl _) (.symm step.conversion))
+          | tail children =>
+              cases children with
+              | head step =>
+                  exact .convert (.loop (ihm _ step) (Or.inl rfl) (by simpa using hn.ghost)
+                    (by simpa using hi.ghost.convert (congr2 .app step.conversion (.refl _)))
+                    (by simpa using hb.ghost.convert (Conversion.loopBodyType_motive_congr _ _ step.conversion))
+                    (Or.inl rfl)) (congr2 .app (.symm step.conversion) (.refl _))
+              | tail children =>
+                  cases children with
+                  | head step =>
+                      exact .loop hm (Or.inl rfl) (by simpa using hn.ghost) (by simpa using ihi _ step)
+                        (by simpa using hb.ghost) (Or.inl rfl)
+                  | tail children =>
+                      cases children with
+                      | head step =>
+                          exact .loop hm (Or.inl rfl) (by simpa using hn.ghost) (by simpa using hi.ghost)
+                            (by simpa using ihb _ step) (Or.inl rfl)
+                      | tail children => cases children
     | convert ht hc ih =>
         first | intro u outer | rename_i u outer
         exact .convert (ih _ outer) hc

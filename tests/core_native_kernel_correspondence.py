@@ -115,8 +115,114 @@ CASES.update({
         '(def value (pi F (pi n U64 (Type 0)) (pi0 p (Lt 0 0) (app F 0))) '
         '(lam F (pi n U64 (Type 0)) (lam0 p (Lt 0 0) (absurd (app F 0) p))))',
         admitted=False),
-    'fold-gap': Case('(def value I64 (fold 2 (int 0) '
-                      '(lam i U64 (lam0 p (Lt i 2) (lam acc I64 acc)))))', admitted=False),
+    'fold-i64': Case(
+        '(def value I64 (fold 2 (int 0) (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (add acc (int 1)))))))',
+        mode='code-require'),
+    'fold-open-count': Case(
+        '(def value (pi n U64 I64) (lam n U64 (fold n (int 0) (lam i U64 (lam0 p (Lt i n) (lam acc I64 (add acc (int 1))))))))',
+        mode='code-require'),
+    'loop-u64': Case(
+        '(def value U64 (loop 2 (lam k U64 U64) 0 (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require'),
+    'loop-i64': Case(
+        '(def value I64 (loop 2 (lam k U64 I64) (int 0) (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (add acc (int 1)))))))',
+        mode='code-require'),
+    'loop-refinement': Case(
+        '(def value (Refine (lam c U64 (Eq c 2))) (loop 2 (lam k U64 (Refine (lam c U64 (Eq c k)))) (pack (lam c U64 (Eq c 0)) 0 (refl 0)) (lam i U64 (lam0 p (Lt i 2) (lam acc (Refine (lam c U64 (Eq c i))) (pack (lam c U64 (Eq c (uadd i 1))) (uadd i 1) (refl (uadd i 1))))))))',
+        mode='code-require'),
+    'loop-nat-induction': Case(
+        '(def value (pi n U64 (Lt n (uadd n 1))) (lam n U64 (loop n (lam k U64 (Lt k (uadd k 1))) (decide-lt 0 1) (lam i U64 (lam0 p (Lt i n) (lam0 acc (Lt i (uadd i 1)) (lt-add i (uadd i 1) 1 acc)))))))',
+        mode='require'),
+    'loop-concrete-proof': Case(
+        '(def value (Lt 2 3) (loop 2 (lam k U64 (Lt k (uadd k 1))) (decide-lt 0 1) (lam i U64 (lam0 p (Lt i 2) (lam0 acc (Lt i (uadd i 1)) (lt-add i (uadd i 1) 1 acc))))))',
+        mode='require'),
+    'loop-zero-count': Case(
+        '(def value U64 (loop 0 (lam k U64 U64) 0 (lam i U64 (lam0 p (Lt i 0) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require'),
+    'fold-unsigned-accumulator': Case(
+        '(def value U64 (fold 2 0 (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'an i64 or an owned value'),
+    'loop-wrong-init': Case(
+        '(def value U64 (loop 2 (lam k U64 U64) (int 0) (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'type mismatch'),
+    'loop-wrong-step': Case(
+        '(def value U64 (loop 2 (lam k U64 U64) 0 (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (add acc (int 1)))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'type mismatch'),
+    'loop-wrong-count': Case(
+        '(def value U64 (loop (int 2) (lam k U64 U64) 0 (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'type mismatch'),
+    'loop-type-motive': Case(
+        '(def value (Type 0) (loop 2 (lam k U64 (Type 0)) U64 (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='require',
+        native=False,
+        admitted=False,
+        diagnostic=b'runtime data or evidence'),
+    'loop-array-layout': Case(
+        '(def value (Array 0) (loop 2 (lam k U64 (Array k)) (array) (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'a scalar, a refinement or an owned value'),
+    'loop-function-accumulator': Case(
+        '(def value (pi x U64 U64) (loop 2 (lam k U64 (pi x U64 U64)) (lam x U64 x) (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'a scalar, a refinement or an owned value'),
+    'loop-false-induction-entry': Case(
+        '(def value (Lt 2 3) (loop 2 (lam k U64 (Lt k (uadd k 1))) (decide-lt 0 0) (lam i U64 (lam0 p (Lt i 2) (lam0 acc (Lt i (uadd i 1)) (lt-add i (uadd i 1) 1 acc))))))',
+        mode='require',
+        native=False,
+        admitted=False,
+        diagnostic=b'decide-lt needs a true'),
+    'loop-wrong-induction-step': Case(
+        '(def value (Lt 2 3) (loop 2 (lam k U64 (Lt k (uadd k 1))) (decide-lt 0 1) (lam i U64 (lam0 p (Lt i 2) (lam0 acc (Lt i (uadd i 1)) acc)))))',
+        mode='require',
+        native=False,
+        admitted=False,
+        diagnostic=b'type mismatch'),
+    'loop-relevant-proof-accumulator': Case(
+        '(def value (Lt 2 3) (loop 2 (lam k U64 (Lt k (uadd k 1))) (decide-lt 0 1) (lam i U64 (lam0 p (Lt i 2) (lam acc (Lt i (uadd i 1)) acc)))))',
+        mode='require',
+        native=False,
+        admitted=False,
+        diagnostic=b'proof binders must be erased'),
+    'loop-not-unrolled': Case(
+        '(def value (Eq (loop 2 (lam k U64 U64) 0 (lam i U64 (lam0 p (Lt i 2) (lam acc U64 (uadd acc 1))))) 2) (refl 2))',
+        mode='require',
+        native=False,
+        admitted=False,
+        diagnostic=b'type mismatch'),
+    'loop-owned-accumulator-gap': Case(
+        '(def value (Buffer 1) (loop 2 (lam k U64 (Buffer 1)) (alloc 1 (int 0)) (lam i U64 (lam0 p (Lt i 2) (lam acc (Buffer 1) acc)))))',
+        mode='code-require',
+        admitted=False),
+    'fold-owned-accumulator-gap': Case(
+        '(def value (Buffer 1) (fold 2 (alloc 1 (int 0)) (lam i U64 (lam0 p (Lt i 2) (lam acc (Buffer 1) acc)))))',
+        mode='code-require',
+        admitted=False),
+    'effectful-lambda-pure-profile-gap': Case(
+        '(def value I64 (fold 2 (int 0) (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (free (alloc 1 (int 0)) acc))))))',
+        mode='code-require',
+        admitted=False),
+    'effectful-function-expression-rejected': Case(
+        '(def value I64 (fold 2 (int 0) (free (alloc 1 (int 0)) (lam i U64 (lam0 p (Lt i 2) (lam acc I64 (add acc (int 1))))))))',
+        mode='code-require',
+        native=False,
+        admitted=False,
+        diagnostic=b'loop body that touches memory'),
 })
 
 

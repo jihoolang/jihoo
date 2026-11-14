@@ -411,3 +411,8 @@ import Jihoo.NativeBranchExamples
 import Jihoo.NativeBranchMetatheoryExamples
 
 import Jihoo.NativeBranchReductionExamples
+
+import Jihoo.NativeLoopTelescopes
+import Jihoo.NativeLoopConversion
+import Jihoo.NativeLoopExamples
+import Jihoo.NativeLoopMetatheoryExamples

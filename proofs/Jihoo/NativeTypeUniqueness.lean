@@ -31,6 +31,8 @@ private def TypeView (Γ : Context) (mode : Bool) : Term → Term → Prop
   | .proof s, T => ∃ p, HasType Γ true s (.refine p) ∧ Conv (.app p (.witness s)) T
   | .ifLt _ _ _ no, T | .ifEq _ _ _ no, T => ∃ B, HasType Γ mode no B ∧ Conv B T
   | .absurd U _, T => Conv U T
+  | .fold _ _ _, T => Conv .i64 T
+  | .loop n motive _ _, T => Conv (.app motive n) T
   | _, _ => False
 
 private theorem TypeView.convert (h : TypeView Γ mode t A) (hc : Conv A B) :
@@ -220,6 +222,18 @@ theorem HasType.refl_numeral_consistency
 theorem HasType.refl_false_equality_rejected (apart : m ≠ n) :
     ¬ HasType Γ mode (.refl a) (.eq (.natural m) (.natural n)) :=
   fun h => apart h.refl_numeral_consistency
+
+/-- The internal Loop proof/data bit is fixed by the motive's actual sort,
+not by the mode in which the same motive was checked. -/
+theorem HasType.loop_proof_flag_unique {p q : Bool}
+    (hp : HasType Γ mode motive (.pi false .u64 (loopSortTerm p)))
+    (hq : HasType Γ mode' motive (.pi false .u64 (loopSortTerm q))) : p = q := by
+  have sort := (hp.unique hq).pi_injective.2.2
+  cases p <;> cases q
+  · rfl
+  · exact False.elim (Conv.universe_prop_separate 0 sort)
+  · exact False.elim (Conv.universe_prop_separate 0 (.symm sort))
+  · rfl
 
 /-- The executable inferred type determines every declarative type, even
 when that second derivation uses another mode and arbitrary conversions. -/

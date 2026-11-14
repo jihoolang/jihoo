@@ -167,6 +167,14 @@ private theorem context_mutual :
     | absurd hT hp allowed ihT ihp =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .absurd (ihT Δ hctx) (ihp Δ hctx) (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .foldI64 (ihn Δ hctx) (ihi Δ hctx) (ihb Δ hctx) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .loop (ihm Δ hctx) (Or.inl rfl)
+          (by simpa using ihn Δ hctx) (by simpa using ihi Δ hctx)
+          (by simpa using ihb Δ hctx) (Or.inl rfl)
     | convert ht hc ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .convert (ih Δ hctx) hc
@@ -281,6 +289,14 @@ private theorem context_mutual :
     | absurd hT hp allowed ihT ihp =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .absurd (ihT Δ hctx) (ihp Δ hctx) (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .foldI64 (ihn Δ hctx) (ihi Δ hctx) (ihb Δ hctx) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ hctx | rename_i Δ hctx
+        exact .loop (ihm Δ hctx) (Or.inl rfl)
+          (by simpa using ihn Δ hctx) (by simpa using ihi Δ hctx)
+          (by simpa using ihb Δ hctx) (Or.inl rfl)
     | convert ht hc ih =>
         first | intro Δ hctx | rename_i Δ hctx
         exact .convert (ih Δ hctx) hc

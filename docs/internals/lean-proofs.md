@@ -4567,5 +4567,16 @@ negative shift prevents branch evidence from escaping through the inferred
 result type. Literal branch reduction substitutes the appropriate Decide/Refl
 evidence, and reflexive Transport also reduces. Parallel confluence and the
 executable normalizer proofs include these computations. The native suite
-retains 65 source fixtures, including proof-dependent Transport conversion and
+includes proof-dependent Transport conversion and
 branch-normalized type arguments, plus 31 additional admission checks.
+
+I64 Fold and dependent Loop now extend all these results, with Prop induction
+and Type0 scalar/refinement accumulators. Their exact native three-binder
+telescopes commute with renaming and substitution. Contextual preservation
+covers changed dependent counts/motives at the original result type; conversion
+does not unroll loops. Examples include an induction step that consumes its
+induction hypothesis and refinement iteration whose accumulator type changes
+with the index. The native suite now contains 87 source fixtures. Owned
+accumulators and explicit memory operations in iteration bodies remain outside
+the executable checker's conservative pure profile. The aggregate audit checks
+4,439 theorem dependencies without admitted proofs or extra axioms.

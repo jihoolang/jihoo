@@ -70,6 +70,20 @@ theorem branch_type_reweakens {Y B : Term}
   rw [raised] at shifted
   exact shifted
 
+theorem loopSort_sound {level : Term} {proof : Bool}
+    (h : loopSort level = some proof) : level = loopSortTerm proof := by
+  unfold loopSort at h
+  split at h
+  · cases h; rfl
+  · cases h; rfl
+  · contradiction
+
+theorem loopMotiveOK_sound {fuel : Nat} {ghost proof : Bool} {motive : Term}
+    (h : loopMotiveOK fuel proof motive = true) : loopMotiveAllowed ghost proof motive := by
+  rcases Bool.or_eq_true_iff.mp h with hp | hm
+  · exact Or.inr (Or.inl hp)
+  · exact Or.inr (Or.inr ⟨_, Conversion.normalize_sound fuel motive, hm⟩)
+
 private theorem sound_mutual (fuel : Nat) :
     (∀ ctx ghost t T, infer fuel ctx ghost t = some T → HasType ctx ghost t T) ∧
     (∀ ctx e A s, binder fuel ctx e A = some s → Binder ctx e A s) := by
@@ -387,7 +401,43 @@ private theorem sound_mutual (fuel : Nat) :
               · contradiction
             · contradiction
           · contradiction
-        case h_34 => contradiction
+        case h_34 =>
+          rename_i n init body
+          split at h
+          · rename_i checked
+            cases h
+            exact .foldI64 (hc ctx ghost n _ checked.1) (hc ctx ghost init _ checked.2.1)
+              (hc ctx ghost body _ checked.2.2.1) (Or.inr checked.2.2.2)
+          · contradiction
+        case h_35 =>
+          rename_i n motive init body
+          split at h
+          · rename_i domain level hm
+            split at h
+            · rename_i hdomain
+              split at h
+              · rename_i proof hs
+                split at h
+                · rename_i hprofile
+                  split at h
+                  · rename_i checked
+                    cases h
+                    have typed := he ctx true motive (.pi false domain level) hm
+                    rw [loopSort_sound hs] at typed
+                    have expected : Conversion.Conv (.pi false domain (loopSortTerm proof))
+                        (.pi false .u64 (loopSortTerm proof)) :=
+                      .node (.pi false) (.cons (Conversion.equal_sound hdomain) (.cons (.refl _) .nil))
+                    exact .loop (typed.convert expected) (loopMotiveOK_sound hprofile)
+                      (hc ctx (ghost || proof) n _ checked.1)
+                      (hc ctx (ghost || proof) init _ checked.2.1)
+                      (hc ctx (ghost || proof) body _ checked.2.2.1)
+                      (Or.inr checked.2.2.2)
+                  · contradiction
+                · contradiction
+              · contradiction
+            · contradiction
+          · contradiction
+        case h_36 => contradiction
       · intro ctx e A s h
         simp only [binder] at h
         split at h

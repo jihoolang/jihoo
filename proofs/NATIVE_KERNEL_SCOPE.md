@@ -55,6 +55,11 @@ include:
   result is lowered with checked binder removal, so evidence cannot escape its
   scope. Executable Absurd enforces the native non-function result restriction;
   neutral application heads remain conservatively rejected.
+- I64 Fold and dependent Loop with Prop or Type0 motives, including scalar and
+  refinement accumulators and genuine Nat induction using its induction
+  hypothesis. The exact three-binder telescopes have proved renaming/substitution
+  laws. Code admission conservatively rejects explicit memory/family operations
+  in the body and owned accumulators; it does not certify their resource use.
 
 `NativeConversion` proves renaming/substitution closure and soundness of the
 bounded executable converter. It traverses every native child, even when that
@@ -85,6 +90,9 @@ root's preservation. `NativePreservation` proves contextual ghost preservation
 at the exact original type, finite-step preservation and preservation by the
 actual `Conversion.normalize` implementation. This applies to all current
 pure typing rules; it is not a runtime ownership preservation theorem.
+Fold/Loop remain neutral computations, as in native conversion; preservation
+covers reductions in their count, motive, initial value and body. In particular,
+changing a dependent count preserves the original result type by conversion.
 
 `NativeSchema` / `NativeWire` provide a canonical version-4 full-graph envelope.
 Round-trip, encoding injectivity and exact-byte decoding are proved. Whole-graph
@@ -119,9 +127,10 @@ vector lengths 0, 1 and 3: **162 exact byte comparisons**.
 `tests/core_native_kernel_correspondence.py` retains actual sources, full
 snapshots, hashes and labelled synthetic mutations. Its native cases include
 universes, high impredicative Prop, polymorphism in both modes, erased indices,
-transport/refinement projections, evidence-binding branches, absurdity and
-arithmetic evidence. Unsupported ownership and fold rules remain explicit
-admitted-native/rejected-Lean fixtures.
+transport/refinement projections, evidence-binding branches, absurdity,
+arithmetic evidence, scalar iteration, refinement iteration and Nat induction.
+There are 87 source fixtures and 31 additional checks. Owned accumulators and
+effectful iteration bodies remain explicit admitted-native/rejected-Lean fixtures.
 Native code rejection of erased proof variables is also checked.
 
 The production shift/substitute/rewrite routines are also exercised directly
@@ -143,8 +152,8 @@ are discharged, rather than replaced with more passing fixtures:
    preservation of mode and representation restrictions.
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
-3. The remaining typing/computation rules: folds/loops, globals, checked
-   inductive/data family environments and elimination.
+3. The remaining typing/computation rules: owned/effectful folds and loops,
+   globals, checked inductive/data family environments and elimination.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.

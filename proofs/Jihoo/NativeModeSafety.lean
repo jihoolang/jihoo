@@ -46,6 +46,9 @@ theorem HasType.ghost (h : HasType ctx mode t T) : HasType ctx true t T := by
   | ifLt ha hb hy hn iha ihb ihy ihn => exact .ifLt iha ihb ihy ihn
   | ifEq ha hb hy hn iha ihb ihy ihn => exact .ifEq iha ihb ihy ihn
   | absurd hT hp allowed ihT ihp => exact .absurd ihT ihp (Or.inl rfl)
+  | foldI64 hn hi hb allowed ihn ihi ihb => exact .foldI64 ihn ihi ihb (Or.inl rfl)
+  | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+      exact .loop ihm (Or.inl rfl) (by simpa using ihn) (by simpa using ihi) (by simpa using ihb) (Or.inl rfl)
   | convert ht conv ih => exact .convert ih conv
 
 /-- Variable inversion retains readability through arbitrary type conversion. -/

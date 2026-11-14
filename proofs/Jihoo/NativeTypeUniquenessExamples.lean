@@ -94,4 +94,46 @@ theorem absurd_universe_ceiling_preserved
       (.absurd (.univ 31) (.var 0)) (.univ 31) := Checker.infer_sound (fuel := 12) (by cbv)
   exact h.universe_level_unique accepted
 
+private def foldBody : Term :=
+  .lam false .u64 (.lam true (.lt (.var 0) (.natural 2))
+    (.lam false .i64 (.arith .add (.var 0) (.integer 1))))
+
+private def dataMotive : Term := .lam false .u64 .u64
+private def dataBody : Term :=
+  .lam false .u64 (.lam true (.lt (.var 0) (.natural 2))
+    (.lam false .u64 (.uadd (.var 0) (.natural 1))))
+
+private def proofMotive : Term := .lam false .u64 (.eq (.var 0) (.var 0))
+private def proofBody : Term :=
+  .lam false .u64 (.lam true (.lt (.var 0) (.natural 2))
+    (.lam true (.eq (.var 1) (.var 1)) (.refl (.uadd (.var 2) (.natural 1)))))
+
+theorem fold_result_cannot_be_unsigned :
+    ¬ HasType [] true (.fold (.natural 2) (.integer 0) foldBody) .u64 := by
+  intro forged
+  have accepted : HasType [] false (.fold (.natural 2) (.integer 0) foldBody) .i64 :=
+    Checker.infer_sound (fuel := 32) (by cbv)
+  exact forged.no_scalar_confusion accepted
+
+theorem data_loop_motive_result_unique
+    (h : HasType [] true (.loop (.natural 2) dataMotive (.natural 0) dataBody) T) :
+    Conv (.app dataMotive (.natural 2)) T :=
+  Checker.infer_unique (fuel := 32) (mode := false) (by cbv) h
+
+theorem proof_loop_endpoint_cannot_be_forged :
+    ¬ HasType [] true (.loop (.natural 2) proofMotive (.refl (.natural 0)) proofBody)
+      (.eq (.natural 2) (.natural 3)) := by
+  intro forged
+  have accepted : HasType [] false (.loop (.natural 2) proofMotive (.refl (.natural 0)) proofBody)
+      (.eq (.natural 2) (.natural 2)) := Checker.check_sound (fuel := 32) (by cbv)
+  have wrong : 2 = 3 := (accepted.equality_indices_unique forged).2.natural_injective
+  cases wrong
+
+theorem loop_proof_data_flag_cannot_change
+    (h : HasType [] true proofMotive (.pi false .u64 (.univ 0))) : False := by
+  have accepted : HasType [] false proofMotive (.pi false .u64 .prop) :=
+    Checker.infer_sound (fuel := 16) (by cbv)
+  have flags : true = false := accepted.loop_proof_flag_unique h
+  cases flags
+
 end Jihoo.NativeKernel.TypeUniquenessExamples

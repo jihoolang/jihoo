@@ -1,5 +1,6 @@
 import Jihoo.NativeTyping
 import Jihoo.NativeSubstitution
+import Jihoo.NativeLoopTelescopes
 
 /-! Ghost-mode typed renaming and simultaneous substitution for the complete
 native syntax and every current declarative typing rule. Substituted variables
@@ -272,6 +273,22 @@ private theorem ghost_renaming_mutual :
           HasType.absurd (by simpa using ihT Δ ρ hρ)
             (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihp Δ ρ hρ)
             (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.foldI64 (by simpa [Term.rename,renameArgs] using ihn Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihi Δ ρ hρ)
+            (by simpa only [foldBodyType_rename] using ihb Δ ρ hρ) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.loop
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihm Δ ρ hρ)
+            (Or.inl rfl)
+            (by simpa [Term.rename,renameArgs] using ihn Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihi Δ ρ hρ)
+            (by simpa only [loopBodyType_rename,Bool.true_or] using ihb Δ ρ hρ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ ρ hρ | rename_i Δ ρ hρ
         exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ)
@@ -470,6 +487,22 @@ private theorem ghost_renaming_mutual :
         simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
           HasType.absurd (by simpa using ihT Δ ρ hρ)
             (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihp Δ ρ hρ)
+            (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.foldI64 (by simpa [Term.rename,renameArgs] using ihn Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs] using ihi Δ ρ hρ)
+            (by simpa only [foldBodyType_rename] using ihb Δ ρ hρ) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ ρ hρ | rename_i Δ ρ hρ
+        simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using
+          HasType.loop
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihm Δ ρ hρ)
+            (Or.inl rfl)
+            (by simpa [Term.rename,renameArgs] using ihn Δ ρ hρ)
+            (by simpa [Term.rename,renameArgs,Op.binders,liftRenaming] using ihi Δ ρ hρ)
+            (by simpa only [loopBodyType_rename,Bool.true_or] using ihb Δ ρ hρ)
             (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ ρ hρ | rename_i Δ ρ hρ
@@ -724,6 +757,22 @@ private theorem ghost_substitution_mutual :
           HasType.absurd (by simpa using ihT Δ σ hσ)
             (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihp Δ σ hσ)
             (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.foldI64 (by simpa [Term.subst,substArgs] using ihn Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihi Δ σ hσ)
+            (by simpa only [foldBodyType_subst] using ihb Δ σ hσ) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.loop
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihm Δ σ hσ)
+            (Or.inl rfl)
+            (by simpa [Term.subst,substArgs] using ihn Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihi Δ σ hσ)
+            (by simpa only [loopBodyType_subst,Bool.true_or] using ihb Δ σ hσ)
+            (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ σ hσ | rename_i Δ σ hσ
         exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ)
@@ -922,6 +971,22 @@ private theorem ghost_substitution_mutual :
         simpa [Term.subst,substArgs,Op.binders,liftSub] using
           HasType.absurd (by simpa using ihT Δ σ hσ)
             (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihp Δ σ hσ)
+            (Or.inl rfl)
+    | foldI64 hn hi hb allowed ihn ihi ihb =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.foldI64 (by simpa [Term.subst,substArgs] using ihn Δ σ hσ)
+            (by simpa [Term.subst,substArgs] using ihi Δ σ hσ)
+            (by simpa only [foldBodyType_subst] using ihb Δ σ hσ) (Or.inl rfl)
+    | loop hm motivePolicy hn hi hb bodyPolicy ihm ihn ihi ihb =>
+        first | intro Δ σ hσ | rename_i Δ σ hσ
+        simpa [Term.subst,substArgs,Op.binders,liftSub] using
+          HasType.loop
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihm Δ σ hσ)
+            (Or.inl rfl)
+            (by simpa [Term.subst,substArgs] using ihn Δ σ hσ)
+            (by simpa [Term.subst,substArgs,Op.binders,liftSub] using ihi Δ σ hσ)
+            (by simpa only [loopBodyType_subst,Bool.true_or] using ihb Δ σ hσ)
             (Or.inl rfl)
     | convert ht hc ih_ht =>
         first | intro Δ σ hσ | rename_i Δ σ hσ

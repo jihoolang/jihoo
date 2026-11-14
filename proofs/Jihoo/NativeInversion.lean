@@ -34,6 +34,13 @@ private def TypingView (Γ : Context) (mode : Bool) : Term → Term → Prop
       HasType (⟨.eq a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧ HasType Γ mode no B ∧ Conversion.Conv B T
   | .absurd A p, T => ∃ (s : SortTag) (i : Term), HasType Γ true A s.term ∧ HasType Γ true p (.lt i (.natural 0)) ∧
       absurdAllowed mode A ∧ Conversion.Conv A T
+  | .fold n init body, T => HasType Γ mode n .u64 ∧ HasType Γ mode init .i64 ∧
+      HasType Γ mode body (foldBodyType n) ∧ loopBodyAllowed mode body ∧ Conversion.Conv .i64 T
+  | .loop n m init body, T => ∃ (proof : Bool), HasType Γ true m (.pi false .u64 (loopSortTerm proof)) ∧
+      loopMotiveAllowed mode proof m ∧ HasType Γ (mode || proof) n .u64 ∧
+      HasType Γ (mode || proof) init (.app m (.natural 0)) ∧
+      HasType Γ (mode || proof) body (loopBodyType n m proof) ∧ loopBodyAllowed (mode || proof) body ∧
+      Conversion.Conv (.app m n) T
   | .node .deref _, _ | .node .borrow _, _ => False
   | _, _ => True
 
@@ -44,6 +51,8 @@ private theorem TypingView.convert {Γ : Context} {mode : Bool} {t A B : Term}
     | (obtain ⟨s,C,hA,hbody,hconv⟩ := h; exact ⟨s,C,hA,hbody,.trans hconv hc⟩)
     | (obtain ⟨e,C,D,hf,ha,allowed,hconv⟩ := h; exact ⟨e,C,D,hf,ha,allowed,.trans hconv hc⟩)
     | (obtain ⟨x₁,x₂,x₃,x₄,x₅,hconv⟩ := h; exact ⟨x₁,x₂,x₃,x₄,x₅,.trans hconv hc⟩)
+    | (obtain ⟨x₁,x₂,x₃,x₄,x₅,x₆,x₇,hconv⟩ := h;
+        exact ⟨x₁,x₂,x₃,x₄,x₅,x₆,x₇,.trans hconv hc⟩)
     | (obtain ⟨h₁,h₂,h₃,hconv⟩ := h; exact ⟨h₁,h₂,h₃,.trans hconv hc⟩)
     | (obtain ⟨n,h₁,h₂,h₃,hconv⟩ := h; exact ⟨n,h₁,h₂,h₃,.trans hconv hc⟩)
     | (obtain ⟨p,hs,hconv⟩ := h; exact ⟨p,hs,.trans hconv hc⟩)
@@ -73,6 +82,8 @@ private theorem HasType.typingView {Γ : Context} {mode : Bool} {t T : Term}
   case ifLt ha hb hy hn _ _ _ _ => exact ⟨_,ha,hb,hy,hn,.refl _⟩
   case ifEq ha hb hy hn _ _ _ _ => exact ⟨_,ha,hb,hy,hn,.refl _⟩
   case absurd hT hp allowed _ _ => exact ⟨_,_,hT,hp,allowed,.refl _⟩
+  case foldI64 hn hi hb allowed _ _ _ => exact ⟨hn,hi,hb,allowed,.refl _⟩
+  case loop hm motivePolicy hn hi hb bodyPolicy _ _ _ _ => exact ⟨_,hm,motivePolicy,hn,hi,hb,bodyPolicy,.refl _⟩
   case convert ht hc ih => exact ih.convert hc
 
 theorem HasType.lamView {Γ : Context} {mode e : Bool} {A body T : Term}
@@ -156,6 +167,20 @@ theorem HasType.absurdView {Γ : Context} {mode : Bool} {A p T : Term}
     (h : HasType Γ mode (.absurd A p) T) :
     ∃ (s : SortTag) (i : Term), HasType Γ true A s.term ∧ HasType Γ true p (.lt i (.natural 0)) ∧
       absurdAllowed mode A ∧ Conversion.Conv A T := h.typingView
+
+
+theorem HasType.foldView {Γ : Context} {mode : Bool} {n init body T : Term}
+    (h : HasType Γ mode (.fold n init body) T) :
+    HasType Γ mode n .u64 ∧ HasType Γ mode init .i64 ∧ HasType Γ mode body (foldBodyType n) ∧
+      loopBodyAllowed mode body ∧ Conversion.Conv .i64 T := h.typingView
+
+theorem HasType.loopView {Γ : Context} {mode : Bool} {n m init body T : Term}
+    (h : HasType Γ mode (.loop n m init body) T) :
+    ∃ (proof : Bool), HasType Γ true m (.pi false .u64 (loopSortTerm proof)) ∧
+      loopMotiveAllowed mode proof m ∧ HasType Γ (mode || proof) n .u64 ∧
+      HasType Γ (mode || proof) init (.app m (.natural 0)) ∧
+      HasType Γ (mode || proof) body (loopBodyType n m proof) ∧ loopBodyAllowed (mode || proof) body ∧
+      Conversion.Conv (.app m n) T := h.typingView
 
 theorem HasType.deref_unavailable {Γ : Context} {mode : Bool} {args : List Term} {T : Term}
     (h : HasType Γ mode (.node .deref args) T) : False := h.typingView

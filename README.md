@@ -184,9 +184,9 @@ canonical graph bytes and derives closed literal-evidence consistency.
 A [native-syntax formalization](proofs/NATIVE_KERNEL_SCOPE.md) represents all
 54 production kernel constructors, with full binder/substitution and append-only
 arena proofs. Its executable checker adds universes, ghost/code modes,
-polymorphism, arithmetic evidence, transport, refinements and evidence-binding
-branches, with proved
-acceptance soundness. Its selected conversion theory has Church–Rosser,
+polymorphism, arithmetic evidence, transport, refinements, evidence-binding
+branches and pure dependent iteration, with proved acceptance soundness.
+Its selected conversion theory has Church–Rosser,
 type uniqueness and contextual ghost preservation, including its executable
 normalizer. Direct arena transformations also have semantic and budget proofs.
 Actual native snapshots and all constructor encodings

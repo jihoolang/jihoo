@@ -27,6 +27,15 @@ def applicationOK (fuel : Nat) (ghost : Bool) (domain argument : Term) : Bool :=
   ghost || !kindOf domain ||
     (firstOrderKind domain && plain (Conversion.normalize fuel argument))
 
+/-- Read the exact native loop motive sort: Prop or Type0 only. -/
+def loopSort : Term → Option Bool
+  | .prop => some true
+  | .univ 0 => some false
+  | _ => none
+
+def loopMotiveOK (fuel : Nat) (proof : Bool) (motive : Term) : Bool :=
+  proof || scalarLoopMotive (Conversion.normalize fuel motive)
+
 mutual
   def infer : Nat → Context → Bool → Term → Option Term
     | 0, _, _, _ => none
@@ -164,6 +173,28 @@ mutual
                   else none
               | none => none
           | none => none
+      | .fold n init body =>
+          if accepts fuel (infer fuel ctx ghost n) .u64 = true ∧
+              accepts fuel (infer fuel ctx ghost init) .i64 = true ∧
+              accepts fuel (infer fuel ctx ghost body) (foldBodyType n) = true ∧
+              repeatPure body = true
+          then some .i64 else none
+      | .loop n motive init body =>
+          match expose fuel (infer fuel ctx true motive) with
+          | some (.pi false domain level) =>
+              if Conversion.equal fuel domain .u64 then
+                match loopSort level with
+                | some proof =>
+                    if loopMotiveOK fuel proof motive then
+                      if accepts fuel (infer fuel ctx (ghost || proof) n) .u64 = true ∧
+                          accepts fuel (infer fuel ctx (ghost || proof) init) (.app motive (.natural 0)) = true ∧
+                          accepts fuel (infer fuel ctx (ghost || proof) body) (loopBodyType n motive proof) = true ∧
+                          repeatPure body = true
+                      then some (.app motive n) else none
+                    else none
+                | none => none
+              else none
+          | _ => none
       | _ => none
 
   /-- Infer the domain sort and enforce Core.binder's pure binder policy. -/
