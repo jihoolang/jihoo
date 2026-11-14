@@ -1,6 +1,7 @@
 name = "jihoo-proofs"
 version = "0.1.0"
 defaultTargets = ["Jihoo"]
+weakLeanArgs = ["-M", "4096", "-j", "1"]
 
 [[lean_lib]]
 name = "Jihoo"
