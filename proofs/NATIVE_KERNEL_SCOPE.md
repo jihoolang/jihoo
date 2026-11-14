@@ -265,10 +265,10 @@ are discharged, rather than replaced with more passing fixtures:
    preservation of mode and representation restrictions.
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
-3. The remaining typing rules: View, Lend and active-loan runtime Borrow,
+3. The remaining typing rules: Lend and active-loan runtime Borrow,
    together with exact native opaque-global behavior. Owned/effectful iteration,
    checked families, dependent constructors, proposition/data elimination,
-   Case/Drop, owned Ref and Back/Give/Take already share the unified judgment.
+   Case/Drop, borrowed View, owned Ref and Back/Give/Take already share the unified judgment.
    Their remaining native computation equations still require integration.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
@@ -335,7 +335,7 @@ remove the earlier pure-prefix restriction. Ordinary fields, earlier families,
 dependent Buffer fields and family/resource-valued globals use the same unified
 checker. Independent history, recomputed positivity/parameters/layout, exact
 bytes, authenticated resource projection and environment/formal-signature scope
-invariants are proved. Native View/Lend/active-loan rules, runtime substitution
+invariants are proved. Native Lend/active-loan rules, runtime substitution
 and universe consistency remain completion work. Ghost substitution, type uniqueness and exact-original-type forward
 preservation are proved for every rule in this checkpoint.
 The integrated source suite checks 49 mixed programs and 41 exact-byte checks,
@@ -379,7 +379,7 @@ to 21, including both signed bounds, overflow and unused trapping loop bodies.
 `NativeEnvironmentGhostMetatheory` and `NativeEnvironmentContextConversion`
 establish mode promotion, typed ghost renaming/weakening, simultaneous
 substitution, dependent instantiation and context conversion for the current
-unified judgment, now comprising 59 HasType constructors plus Binder formation
+unified judgment, now comprising 60 HasType constructors plus Binder formation
 and five mutual judgments. The required environment premise contains
 closed global types and scoped formal constructor signatures; mixed checked
 history proves that premise. It is not an arbitrary well-formed-environment
@@ -451,6 +451,23 @@ also pass. An accepted ghost Drop equality remains an explicit rejected-model
 boundary because Drop computation has not been inserted into ACU. Existing
 proved Borrow/Deref inverse equations are retained. These results do not prove
 native heap execution, active-loan semantics or machine counter fidelity.
+
+`NativeViewSyntax` derives borrowed View branch telescopes from the same checked
+constructor signatures. Its field plan is computed before parameter substitution;
+recursive boxed fields receive borrowed arguments and runtime recursive results.
+Dependent field reads preserve every binder and dereference earlier borrowed
+fields. Scoping, arbitrary outer substitution/renaming, prefix extension and
+motive conversion are proved for the concrete successful builder. Unknown field
+layouts reject. Dependent code motives enforce the native fixed representation gate;
+ghost motives remain closed under typed substitution.
+
+View now shares the environment-indexed delta checker and all 60-rule ghost,
+context, uniqueness and actual forward-preservation proofs. Forty typing,
+resource, program and direct-global regressions and 17 telescope regressions
+pass. The native suite covers 33 source programs and 28 exact-byte checks,
+including typed recursive-result leaks/duplication and code dereference mutations.
+Two native-accepted equalities remain explicit gate rejections because View iota
+has not been added. Neither active loans nor runtime heap preservation is assumed.
 
 `NativeClosedTerm` now supplies generic closed-term algebra independently of
 typing. Delta algebra/conversion/bounded search use only that lower layer;

@@ -330,6 +330,76 @@ theorem dataEliminate_sound
           · contradiction
     · contradiction
 
+theorem viewMotiveOK_sound
+    (normalized : Conversion.normalize? env fuel motive = some normal)
+    (accepted : viewMotiveOK normal = true) : ViewMotiveAllowed env ghost (viewDependent normal) motive := by
+  by_cases constant : viewDependent normal = false
+  · exact Or.inr (Or.inl constant)
+  · unfold viewDependent at constant
+    split at constant
+    · rename_i erased domain body
+      exact Or.inr (Or.inr ⟨erased,domain,body,Conversion.normalize?_sound normalized,
+        by simpa only [viewMotiveOK] using accepted⟩)
+    · contradiction
+
+/-- Soundness discharges every recursive call through the smaller-fuel actual
+checker, and all expected branches come from the concrete view builder. -/
+theorem viewEliminate_sound
+    (hi : ∀ mode t T,inferSub mode t = some T → HasType env ctx mode t T)
+    (h : viewEliminate inferSub fuel env ctx ghost recursion family count motive children = some result) :
+    HasType env ctx ghost (.node (.view recursion family count) (motive :: children)) result := by
+  unfold viewEliminate at h
+  cases found : env.families[family]? with
+  | none => simp [found] at h
+  | some entry =>
+    simp only [found,Bind.bind,Option.bind] at h
+    split at h
+    · rename_i allowed
+      cases decoded : splitCases count children with
+      | none => simp [decoded] at h
+      | some pair =>
+        rcases pair with ⟨cases,scrutinee⟩
+        simp only [decoded] at h
+        cases exposed : expose fuel env (inferSub ghost scrutinee) with
+        | none => simp [exposed] at h
+        | some head =>
+          simp only [exposed] at h
+          split at h
+          · rename_i g arity indices
+            split at h
+            · rename_i same
+              obtain ⟨sameFamily,sameArity,length⟩ := same
+              subst g
+              subst arity
+              cases normalized : Conversion.normalize? env fuel motive with
+              | none => simp [normalized] at h
+              | some normal =>
+                simp only [normalized] at h
+                split at h
+                · rename_i checked
+                  cases generated : viewCaseTypes env family entry.declaration.params ctx.length entry.signatures indices motive
+                      recursion (viewDependent normal) with
+                  | none => simp [generated] at h
+                  | some types =>
+                    simp only [generated] at h
+                    split at h
+                    · rename_i branchesChecked
+                      cases h
+                      obtain ⟨branchCount,layout⟩ := splitCases_sound decoded
+                      rw [layout,← branchCount]
+                      obtain ⟨scrutineeType,typedScrutinee,convertedScrutinee⟩ := expose_elim exposed
+                      obtain ⟨motiveType,typedMotive,convertedMotive⟩ := accepts_elim checked.1
+                      exact .view found allowed.1 allowed.2.1 allowed.2.2 length
+                        (.convert (hi ghost scrutinee scrutineeType typedScrutinee) convertedScrutinee)
+                        (.convert (hi true motive motiveType typedMotive) convertedMotive)
+                        (viewMotiveOK_sound normalized checked.2) generated
+                        (branchesAgainst_sound (hi ghost) branchesChecked)
+                    · contradiction
+                · contradiction
+            · contradiction
+          · contradiction
+    · contradiction
+
 private theorem sound_mutual (fuel : Nat) (env : Environment) :
     (∀ ctx ghost t T, infer fuel env ctx ghost t = some T → HasType env ctx ghost t T) ∧
     (∀ ctx e A s, binder fuel env ctx e A = some s → Binder env ctx e A s) := by
@@ -932,7 +1002,8 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
           · contradiction
         case h_53 =>
           exact dataEliminate_sound (fun mode t T h => hi ctx mode t T h) h
-        case h_54 => contradiction
+        case h_54 => exact viewEliminate_sound (fun mode t T h => hi ctx mode t T h) h
+        case h_55 => contradiction
       · intro ctx e A s h
         simp only [binder] at h
         split at h

@@ -69,6 +69,12 @@ def PrincipalView (env : Environment) (Γ : Context) (mode : Bool) : Term → Te
       HasType env Γ scrutineeMode scrutinee (.node (.ind f entry.declaration.arity) indices) ∧
       Conv env (eliminationResult entry motive indices scrutinee) T
   | .node (.drop _) [_,rest], T => ∃ R, HasType env Γ mode rest R ∧ Conv env R T
+  | .node (.view _ family count) fields, T => ∃ entry motive branches scrutinee indices scrutineeMode dependent,
+      env.families[family]? = some entry ∧ count = branches.length ∧
+      fields = motive :: (branches ++ [scrutinee]) ∧
+      HasType env Γ scrutineeMode scrutinee (.ref (.node (.ind family entry.declaration.arity) indices)) ∧
+      HasType env Γ true motive (viewMotiveType dependent (.node (.ind family entry.declaration.arity) indices)) ∧
+      Conv env (viewResult dependent motive scrutinee) T
   | _, _ => False
 
 theorem PrincipalView.convert (h : PrincipalView env Γ mode t A) (hc : Conv env A B) :
@@ -77,6 +83,8 @@ theorem PrincipalView.convert (h : PrincipalView env Γ mode t A) (hc : Conv env
   all_goals first
     | exact False.elim h
     | exact .trans h hc
+    | (obtain ⟨a,b,c,d,e,f,g,h,i,j,k,l,m⟩ := h; exact ⟨a,b,c,d,e,f,g,h,i,j,k,l,.trans m hc⟩)
+    | (obtain ⟨a,b,c,d,e,f,g,h,i,j,k,l⟩ := h; exact ⟨a,b,c,d,e,f,g,h,i,j,k,.trans l hc⟩)
     | (obtain ⟨a,b,c,d,e,f,g,h,i,j,k⟩ := h; exact ⟨a,b,c,d,e,f,g,h,i,j,.trans k hc⟩)
     | (obtain ⟨a,b,c,d,e,f,g,h,i,j⟩ := h; exact ⟨a,b,c,d,e,f,g,h,i,.trans j hc⟩)
     | (obtain ⟨a,b,c,d,e,f,g,h,i⟩ := h; exact ⟨a,b,c,d,e,f,g,h,.trans i hc⟩)
@@ -120,6 +128,8 @@ theorem HasType.principalView (h : HasType env Γ mode t T) : PrincipalView env 
     rename_i family entry analysis ctx motiveTerm proof ghost scrutineeTerm indices types caseTerms
     cases analysis <;>
       exact ⟨_,_,_,_,_,_,found,rfl,rfl,scrutinee,by simpa only [eliminationResult,isData,↓reduceIte] using EnvironmentDelta.Basis.Conv.refl _⟩
+  case view found isData boxed arity size scrutinee motive allowed generated branches _ _ _ =>
+    exact ⟨_,_,_,_,_,_,_,found,rfl,rfl,scrutinee,motive,.refl _⟩
   case store buffer index value proof _ _ _ _ => exact ⟨_,buffer,.refl _⟩
   case load buffer index proof continuation value owner result lowered allowed _ _ _ _ =>
     exact ⟨_,_,_,_,_,_,continuation,result,lowered,.refl _⟩

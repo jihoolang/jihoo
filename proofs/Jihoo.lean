@@ -575,3 +575,17 @@ import Jihoo.NativeEnvironmentConversionPolicies
 import Jihoo.NativeEnvironmentConversionBoundary
 
 import Jihoo.NativeEnvironmentDeltaCAPIExamples
+
+import Jihoo.NativeViewSyntax
+
+import Jihoo.NativeViewBindingAlgebra
+
+import Jihoo.NativeViewExtension
+
+import Jihoo.NativeViewMotiveCongruence
+
+import Jihoo.NativeViewSyntaxExamples
+
+import Jihoo.NativeViewExamples
+
+import Jihoo.NativeEnvironmentViewMetatheoryExamples

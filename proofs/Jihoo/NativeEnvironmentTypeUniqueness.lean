@@ -209,6 +209,25 @@ theorem HasType.unique (ht : HasType env Γ mode t A)
           obtain ⟨X,hX,hc⟩ := hv
           obtain ⟨Y,hY,hd⟩ := hw
           exact .trans (.symm hc) (.trans (ih rest (by simp; omega) Γ mode mode' X Y hX hY) hd)
+        case case53 =>
+          rename_i recursion family count fields
+          obtain ⟨entry,motive,branches,scrutinee,indices,scrutineeMode,dependent,found,countEq,layout,scrut,motiveTyped,hc⟩ := hv
+          obtain ⟨entry',motive',branches',scrutinee',indices',scrutineeMode',dependent',found',countEq',layout',scrut',motiveTyped',hd⟩ := hw
+          have layouts := List.cons.inj (layout.symm.trans layout')
+          have motives := layouts.1
+          subst motive'
+          have ends := List.append_inj_right layouts.2 (countEq.symm.trans countEq')
+          have scruts := (List.cons.inj ends).1
+          subst scrutinee'
+          have smaller : sizeOf motive < sizeOf (Term.node (.view recursion family count) fields) := by
+            have member : motive ∈ fields := by rw [layout]; simp
+            have bound := List.sizeOf_lt_of_mem member
+            simp only [Term.node.sizeOf_spec]
+            omega
+          have dependencies := viewMotiveType_dependency_unique wf
+            (ih motive smaller Γ true true _ _ motiveTyped motiveTyped')
+          subst dependent'
+          exact .trans (.symm hc) hd
   exact aux t Γ mode mode' A B ht hu
 
 

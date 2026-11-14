@@ -84,4 +84,31 @@ theorem delta_context_annotation_converted : HasType aliasEnv [⟨aliasTerm,fals
     (.symm aliasDelta) false aliasWellFormed.closed
   exact source.ghostContext aliasWellFormed related
 
+private abbrev viewBox : Term := .node (.ind 0 0) []
+private abbrev viewBuffer : Term := .buffer (.natural 2)
+private def viewDeclaration : FamilyDeclaration := ⟨true,0,0,[.pi false viewBuffer viewBox],0⟩
+private def viewEntry : CheckedFamily := ⟨viewDeclaration,[⟨[⟨false,viewBuffer,none⟩],[]⟩],true⟩
+private def viewEnv : Environment := ⟨#[],#[viewEntry]⟩
+private theorem viewHistory : UnifiedProgram.UnifiedProgramChecked [] [viewDeclaration] viewEnv :=
+  UnifiedProgram.checkProgram_sound
+    (by cbv : UnifiedProgram.checkProgram 32 32 [] [viewDeclaration] = some viewEnv)
+private def viewValue : Term := .node (.con 0 0 1) [.alloc (.natural 2) (.integer 0)]
+private def viewMotive : Term := .lam false (.ref viewBox) (.buffer (.var 1))
+private def viewBranch : Term := .lam false (.ref viewBuffer) (.alloc (.var 1) (.integer 0))
+private def dependentView : Term := .node (.view false 0 1) [viewMotive,viewBranch,.borrow viewValue]
+private theorem viewTyped : HasType viewEnv [⟨.u64,true⟩] true dependentView (.buffer (.var 0)) :=
+  Checker.check_sound (by cbv : Checker.check 40 viewEnv [⟨.u64,true⟩] true dependentView (.buffer (.var 0)) = true)
+
+/-- Ambient substitution traverses the actual borrowed-field View telescope. -/
+theorem view_length_instantiated : HasType viewEnv [] true
+    (dependentView.subst (single (.natural 7))) (.buffer (.natural 7)) := by
+  simpa only [subst_buffer,Term.subst,NativeKernel.single] using
+    viewTyped.ghostInstantiate viewHistory.wellFormed
+      (HasType.natural (by decide) : HasType viewEnv [] true (.natural 7) .u64)
+
+/-- Weakening uses the same authentic checked signature scopes as substitution. -/
+theorem view_length_weakened : HasType viewEnv [⟨.i64,true⟩,⟨.u64,true⟩] true
+    (dependentView.rename Nat.succ) (.buffer (.var 1)) := by
+  simpa only [rename_buffer,Term.rename] using viewTyped.ghostWeaken viewHistory.wellFormed .i64 true
+
 end Jihoo.NativeKernel.Environment.GhostExamples

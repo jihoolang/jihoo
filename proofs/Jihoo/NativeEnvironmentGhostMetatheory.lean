@@ -5,6 +5,7 @@ import Jihoo.NativeResourceSyntax
 import Jihoo.NativeBackMetatheory
 import Jihoo.NativeOwnedLoopMetatheory
 import Jihoo.NativeDataBindingAlgebra
+import Jihoo.NativeViewBindingAlgebra
 
 /-! Ghost metatheory for the same unified environment-indexed judgment.
 Environment closure is required when moving contexts or substituting variables;
@@ -80,6 +81,7 @@ theorem HasType.ghost (typed : HasType env ctx mode term type) : HasType env ctx
     | solve | apply HasType.refOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.ghostBorrowOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.ghostDerefOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.view <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.convert <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply Arguments.nil <;> assumption
     | solve | apply Arguments.cons <;> first | assumption | simpa only [Bool.true_or]
@@ -142,6 +144,18 @@ end Ghost
   induction terms generalizing offset with
   | nil => simp only [substArgs, List.map_nil]
   | cons term rest ih => simp only [substArgs, Op.binders, liftSub, ih, List.map_cons]
+
+@[simp] theorem renameArgs_view (recursive : Bool) (family count : Nat) (ρ : Nat → Nat) (offset : Nat) (terms : List Term) :
+    renameArgs (.view recursive family count) ρ offset terms = terms.map (Term.rename ρ) := by
+  induction terms generalizing offset with
+  | nil => simp only [renameArgs,List.map_nil]
+  | cons term rest ih => simp only [renameArgs,Op.binders,liftRenaming,ih,List.map_cons]
+
+@[simp] theorem substArgs_view (recursive : Bool) (family count : Nat) (σ : Nat → Term) (offset : Nat) (terms : List Term) :
+    substArgs (.view recursive family count) σ offset terms = terms.map (Term.subst σ) := by
+  induction terms generalizing offset with
+  | nil => simp only [substArgs,List.map_nil]
+  | cons term rest ih => simp only [substArgs,Op.binders,liftSub,ih,List.map_cons]
 
 private theorem rename_shift_one (term : Term) (ρ : Nat → Nat) :
     (term.rename Nat.succ).rename (Indexed.liftRenaming ρ) = (term.rename ρ).rename Nat.succ := by
@@ -403,6 +417,17 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
     rename_i reference ih Δ ρ hρ
     simpa only [rename_deref, rename_ref] using
       HasType.ghostDerefOwned (by simpa only [rename_ref] using ih Δ ρ hρ)
+  case view =>
+    rename_i family entry ctx ghost scrutinee indices motive dependent recursive types caseTerms found isData boxed arity size scrutineeTyped motiveTyped allowed generated branches ihs ihm ihb Δ ρ hρ
+    have generated' := viewCaseTypes_rename_success (wellFormed.signatures _ _ found) generated Δ.length ρ
+    have result := HasType.view (ctx := Δ) (ghost := true) (indices := indices.map (Term.rename ρ))
+      (dependent := dependent) (recursion := recursive) found isData boxed arity
+      (by simpa only [List.length_map] using size)
+      (by simpa only [rename_ref,Term.rename,renameArgs_ind] using ihs Δ ρ hρ)
+      (by simpa only [viewMotiveType_rename,Term.rename,renameArgs_ind] using ihm Δ ρ hρ)
+      (Or.inl rfl) generated' (ihb Δ ρ hρ)
+    simpa only [Term.rename,renameArgs_view,List.map_cons,List.map_append,List.map_singleton,List.map_nil,
+      List.length_map,viewResult_rename] using result
   case convert =>
     rename_i ht hc ih_ht Δ ρ hρ
     exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ wellFormed.closed)
@@ -819,6 +844,17 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
     rename_i reference ih Δ σ hσ
     simpa only [subst_deref, subst_ref] using
       HasType.ghostDerefOwned (by simpa only [subst_ref] using ih Δ σ hσ)
+  case view =>
+    rename_i family entry ctx ghost scrutinee indices motive dependent recursive types caseTerms found isData boxed arity size scrutineeTyped motiveTyped allowed generated branches ihs ihm ihb Δ σ hσ
+    have generated' := viewCaseTypes_subst_success (wellFormed.signatures _ _ found) generated Δ.length σ
+    have result := HasType.view (ctx := Δ) (ghost := true) (indices := indices.map (Term.subst σ))
+      (dependent := dependent) (recursion := recursive) found isData boxed arity
+      (by simpa only [List.length_map] using size)
+      (by simpa only [subst_ref,Term.subst,substArgs_ind] using ihs Δ σ hσ)
+      (by simpa only [viewMotiveType_subst,Term.subst,substArgs_ind] using ihm Δ σ hσ)
+      (Or.inl rfl) generated' (ihb Δ σ hσ)
+    simpa only [Term.subst,substArgs_view,List.map_cons,List.map_append,List.map_singleton,List.map_nil,
+      List.length_map,viewResult_subst] using result
   case convert =>
     rename_i ht hc ih_ht Δ σ hσ
     exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ wellFormed.closed)

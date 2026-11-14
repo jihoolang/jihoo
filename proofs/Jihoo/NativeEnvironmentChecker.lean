@@ -144,6 +144,37 @@ def dataEliminate (inferSub : Bool → Term → Option Term) (fuel : Nat)
     else none
   else none
 
+/-- A type's normal form is never a lambda; a lambda supplies a view motive. -/
+def viewDependent : Term → Bool
+  | .lam _ _ _ => true
+  | _ => false
+
+def viewMotiveOK : Term → Bool
+  | .lam _ _ body => viewRepresentation 128 1 body
+  | _ => true
+
+/-- Native borrowed view from checked constructor signatures and actual type
+inference. Unknown aliases, extra indices and budget failures reject. -/
+def viewEliminate (inferSub : Bool → Term → Option Term) (fuel : Nat)
+    (env : Environment) (ctx : Context) (ghost recursion : Bool)
+    (family count : Nat) (motive : Term) (children : List Term) : Option Term := do
+  let entry ← env.families[family]?
+  if entry.declaration.data = true ∧ entry.boxed = true ∧ entry.declaration.arity = entry.declaration.params then
+    let (cases,scrutinee) ← splitCases count children
+    let .ref (.node (.ind g arity) indices) ← expose fuel env (inferSub ghost scrutinee) | none
+    if g = family ∧ arity = entry.declaration.arity ∧ indices.length = entry.declaration.params then
+      let normal ← Conversion.normalize? env fuel motive
+      let dependent := viewDependent normal
+      if accepts fuel env (inferSub true motive)
+          (viewMotiveType dependent (.node (.ind family arity) indices)) = true ∧ viewMotiveOK normal = true then
+        let types ← viewCaseTypes env family entry.declaration.params ctx.length entry.signatures indices motive recursion dependent
+        if branchesAgainst (inferSub ghost) fuel env types cases then
+          some (viewResult dependent motive scrutinee)
+        else none
+      else none
+    else none
+  else none
+
 mutual
   def infer : Nat → Environment → Context → Bool → Term → Option Term
     | 0, _, _, _, _ => none
@@ -450,6 +481,8 @@ mutual
           then some (.univ 0) else none
       | .node (.caseOf family count) (motive :: children) =>
           dataEliminate (infer fuel env ctx) fuel env ctx ghost true family count motive children
+      | .node (.view recursion family count) (motive :: children) =>
+          viewEliminate (infer fuel env ctx) fuel env ctx ghost recursion family count motive children
       | _ => none
 
   /-- Infer the domain sort and enforce Core.binder's pure binder policy. -/

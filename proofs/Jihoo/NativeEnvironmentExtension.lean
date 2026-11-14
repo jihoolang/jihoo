@@ -1,5 +1,7 @@
 import Jihoo.NativeEnvironmentPrefix
 import Jihoo.NativeEnvironmentTyping
+import Jihoo.NativeEnvironmentPrefix
+import Jihoo.NativeViewExtension
 
 /-! Extending a checked prefix preserves every already available lookup and
 all unified typing rules. This theorem does not assume external signatures. -/
@@ -181,6 +183,13 @@ theorem IterationMotiveAllowed.extend (extension : Extends before after)
     exact Or.inr (Or.inr (Or.inl ⟨normal,converted.extend extension,head⟩))
   · exact Or.inr (Or.inr (Or.inr ⟨flag, domain, body, converted.extend extension, owned.extend extension⟩))
 
+theorem ViewMotiveAllowed.extend (extension : Extends before after)
+    (allowed : ViewMotiveAllowed before ghost dependent motive) : ViewMotiveAllowed after ghost dependent motive := by
+  rcases allowed with ghost | constant | ⟨erased,domain,body,converted,representation⟩
+  · exact Or.inl ghost
+  · exact Or.inr (Or.inl constant)
+  · exact Or.inr (Or.inr ⟨erased,domain,body,converted.extend extension,representation⟩)
+
 /-- Appending declarations cannot invalidate a previously typed native term. -/
 theorem HasType.extend (extension : Extends before after)
     (typed : HasType before ctx ghost term type) : HasType after ctx ghost term type := by
@@ -252,6 +261,7 @@ theorem HasType.extend (extension : Extends before after)
     | solve | apply HasType.refOwned <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption)
     | solve | apply HasType.ghostBorrowOwned <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption)
     | solve | apply HasType.ghostDerefOwned <;> assumption
+    | solve | apply HasType.view <;> first | assumption | exact extension.families _ _ (by assumption) | exact viewCaseTypes_extend extension (by assumption) | exact ViewMotiveAllowed.extend extension (by assumption)
     | solve | apply HasType.convert <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
     | solve | apply Arguments.nil <;> exact (show Conversion.Conv before _ _ from by assumption).extend extension
     | solve | apply Arguments.cons <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension

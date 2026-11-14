@@ -394,6 +394,7 @@
             python3 tests/core_native_delta_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_data_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_owned_loop_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_view_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo

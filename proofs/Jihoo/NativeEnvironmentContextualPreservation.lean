@@ -1,5 +1,6 @@
 import Jihoo.NativeEnvironmentRootPreservation
 import Jihoo.NativeDataMotiveCongruence
+import Jihoo.NativeViewMotiveCongruence
 import Jihoo.NativeEnvironmentDeltaTyping
 
 /-! Contextual preservation for the actual forward ACU normalizer relation.
@@ -322,6 +323,12 @@ theorem Owned.congr (owned : Owned env A) (converted : (Conv env) A B) : Owned e
   | buffer related => exact .buffer (.trans (.symm converted) related)
   | family found boxed related => exact .family found boxed (.trans (.symm converted) related)
 
+private theorem viewResult_congr (motive : Conv env a b) (scrutinee : Conv env c d) :
+    Conv env (viewResult dependent a c) (viewResult dependent b d) := by
+  cases dependent with
+  | false => exact motive
+  | true => exact binary_congr .app motive scrutinee
+
 private theorem instantiate_congr (closed : Conversion.Closed env) (body : Term) (changed : (Conv env) a b) :
     (Conv env) (body.subst (single a)) (body.subst (single b)) := by
   apply EnvironmentDelta.Basis.Conv.subst_congr closed
@@ -537,6 +544,18 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
   case ghostDerefOwned reference _ =>
     obtain ⟨_,rfl,change⟩ := list_one changes
     exact .ghostDerefOwned (change.typed reference)
+  case view found isData boxed arity size scrutinee motive allowed generated branches _ _ _ =>
+    cases changes with
+    | cons motiveChange remaining =>
+      obtain ⟨branches',end',rfl,branchChanges,endChange⟩ := list_append remaining
+      obtain ⟨scrutinee',rfl,scrutineeChange⟩ := list_one endChange
+      obtain ⟨types',generated',typeChanges⟩ := viewCaseTypes_motive_congr wf.closed motiveChange.converted generated
+      have lengths := list_length branchChanges
+      have result := (HasType.view (ghost := true) found isData boxed arity size
+        (scrutineeChange.typed scrutinee) (motiveChange.typed motive) (Or.inl rfl) generated'
+        (branch_types_transport branches _ _ typeChanges branchChanges)).convert
+        (viewResult_congr (.symm motiveChange.converted) (.symm scrutineeChange.converted))
+      simpa only [lengths] using result
   case buffer size _ =>
     obtain ⟨_,rfl,change⟩ := list_one changes
     exact .buffer (change.typed size)

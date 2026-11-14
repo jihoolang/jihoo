@@ -4,6 +4,7 @@ import Jihoo.NativeResourceSyntax
 import Jihoo.NativeBackSyntax
 import Jihoo.NativeIterationMemory
 import Jihoo.NativeDataSyntax
+import Jihoo.NativeViewSyntax
 import Jihoo.NativeEnvironmentConversion
 
 /-! Environment-indexed native typing. All pure rules recurse through this
@@ -91,6 +92,13 @@ def IterationMotiveAllowed (env : Environment) (ghost proof : Bool) (motive : Te
   ghost = true ∨ proof = true ∨
     (∃ normal, Conversion.Conv env motive normal ∧ scalarLoopMotive normal = true) ∨
     ∃ flag domain body, Conversion.Conv env motive (.lam flag domain body) ∧ Owned env body
+
+/-- The native dependent-view result has one fixed runtime representation.
+Ghost derivations are closed under arbitrary typed motive substitution. -/
+def ViewMotiveAllowed (env : Environment) (ghost dependent : Bool) (motive : Term) : Prop :=
+  ghost = true ∨ dependent = false ∨
+    ∃ erased domain body,Conversion.Conv env motive (.lam erased domain body) ∧
+      viewRepresentation 128 1 body = true
 
 /-- The exact U64-indexed, proposition-valued native induction motive. -/
 def propMotiveType : Nat → Term
@@ -277,6 +285,16 @@ mutual
         HasType env ctx true (.borrow owner) (.ref T)
     | ghostDerefOwned : HasType env ctx true reference (.ref T) →
         HasType env ctx true (.deref reference) T
+    | view : env.families[family]? = some entry → entry.declaration.data = true → entry.boxed = true →
+        entry.declaration.arity = entry.declaration.params → indices.length = entry.declaration.params →
+        HasType env ctx ghost scrutinee (.ref (.node (.ind family entry.declaration.arity) indices)) →
+        HasType env ctx true motive
+          (viewMotiveType dependent (.node (.ind family entry.declaration.arity) indices)) →
+        ViewMotiveAllowed env ghost dependent motive →
+        viewCaseTypes env family entry.declaration.params ctx.length entry.signatures indices motive recursion dependent = some types →
+        BranchTypes env ctx ghost types cases →
+        HasType env ctx ghost (.node (.view recursion family cases.length) (motive :: (cases ++ [scrutinee])))
+          (viewResult dependent motive scrutinee)
     | convert : HasType env ctx ghost t A → Conversion.Conv env A B → HasType env ctx ghost t B
 
   /-- Constructor fields instantiate an actual dependent Pi telescope. -/
