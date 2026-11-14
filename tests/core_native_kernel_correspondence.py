@@ -117,23 +117,33 @@ def run(compiler, checker, output):
     output.mkdir(parents=True, exist_ok=True)
     exporter = output / 'core-native-snapshots'
     writer = output / 'core-native-schema'
+    transformer = output / 'core-native-transforms'
     for source, target in (('tests/core_native_snapshots.jh', exporter),
-                           ('tests/core_native_schema.jh', writer)):
+                           ('tests/core_native_schema.jh', writer),
+                           ('tests/core_native_transforms.jh', transformer)):
         success(command([*compiler, 'build', '-O2', '-I', 'compiler', source, '-o', target]))
     schema = success(command(['python3', 'tests/native_kernel_schema.py',
                               '--native-writer', writer]))
     (output / 'schema-report.txt').write_bytes(schema)
+    transform_bytes = success(command([transformer]))
+    transform_path = output / 'native-transform-observations.tsv'
+    transform_path.write_bytes(transform_bytes)
+    transforms = success(command(['lake', 'env', 'lean', '-DwarningAsError=true', '--run',
+                                  'CheckNativeTransforms.lean', transform_path], cwd=ROOT / 'proofs'))
+    (output / 'transform-report.txt').write_bytes(transforms)
     observations, additional, retained = [], [], {}
 
-    def check(name, payload, accepted, *, fuel=64, diagnostic=None, origin='synthetic'):
+    def check(name, payload, accepted, *, fuel=64, diagnostic=None, origin='synthetic',
+              declaration=False):
         (output / f'{name}.snapshot').write_bytes(payload)
-        result = command([*checker, str(fuel)], payload, cwd=ROOT / 'proofs')
+        result = command([*checker, str(fuel), *(['definition'] if declaration else [])],
+                         payload, cwd=ROOT / 'proofs')
         require(result.returncode == (0 if accepted else 1),
                 f'{name}: Lean outcome changed: {result.stderr!r}')
         if diagnostic is not None:
             require(diagnostic in result.stderr,
                     f'{name}: wrong rejection boundary: {result.stderr!r}')
-        record = {'case': name, 'origin': origin, 'fuel': fuel,
+        record = {'case': name, 'origin': origin, 'fuel': fuel, 'declaration': declaration,
                   'admission': 'accept' if accepted else 'reject',
                   'snapshot_sha256': hashlib.sha256(payload).hexdigest()}
         return record
@@ -170,6 +180,19 @@ def run(compiler, checker, output):
     for fuel in (0, 1):
         additional.append(check(f'fuel-{fuel}', retained['dependent'], False, fuel=fuel,
                                 diagnostic=b'native-syntax admission rejects'))
+
+    # A declaration derives ghost/code mode from its type's sort, independently
+    # of the observation-mode flag supplied in the serialized envelope.
+    for name in ('literal', 'universe', 'type-abstraction', 'polymorphic-application',
+                 'ghost-erased-proof', 'erased-index', 'transport', 'refinement-witness'):
+        additional.append(check(f'{name}.definition', retained[name], True,
+                                origin='actual Core exporter', declaration=True))
+    erased_identity = Snapshot(1, 2, 3, [
+        (4, (), ()), (0, (0,), ()), (45, (1,), (0, 1)), (44, (1,), (0, 0))]).encode()
+    Snapshot.read(erased_identity)
+    additional.append(check('erased-identity-ghost-observation', erased_identity, True))
+    additional.append(check('forged-ghost-declaration', erased_identity, False,
+                            declaration=True, diagnostic=b'native-syntax admission rejects'))
 
     original = Snapshot.read(retained['dependent'])
     false_eq_nodes = [*original.nodes, (47, (7,), ()), (47, (8,), ())]
@@ -219,6 +242,8 @@ def run(compiler, checker, output):
         'exporter_sha256': hashlib.sha256((ROOT / 'compiler/core_native_snapshot.jh').read_bytes()).hexdigest(),
         'commit': revision,
         'schema': schema.decode().strip(),
+        'transforms': transforms.decode().strip(),
+        'transform_observations_sha256': hashlib.sha256(transform_bytes).hexdigest(),
         'cases': observations,
         'additional_checks': additional,
     }

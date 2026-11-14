@@ -1,4 +1,4 @@
-import Jihoo.NativeAdmission
+import Jihoo.NativeDefinitions
 import Jihoo.TypingInput
 
 /-! Bounded IO adapter to the proved exact-byte native-syntax admission function.
@@ -19,12 +19,17 @@ private def preflight (bytes : ByteArray) : Bool := (do
 
 def main (args : List String) : IO UInt32 := do
   try
-    let [fuelText] := args | throw (IO.userError "expected fuel")
+    let (fuelText, declaration) ← match args with
+      | [fuel] => pure (fuel, false)
+      | [fuel, "definition"] => pure (fuel, true)
+      | _ => throw (IO.userError "expected fuel and optional definition")
     let some fuel := fuelText.toNat? | throw (IO.userError "invalid fuel")
     if fuel > 128 then throw (IO.userError "fuel exceeds limit")
     let bytes ← TypingInput.input []
     unless preflight bytes do throw (IO.userError "invalid native snapshot shape or bounds")
-    unless NativeAdmission.checkBytes fuel bytes do
+    let accepted := if declaration then Definitions.checkBytes fuel bytes
+      else NativeAdmission.checkBytes fuel bytes
+    unless accepted do
       throw (IO.userError "native-syntax admission rejects")
     IO.println "exact native-syntax snapshot accepted"
     return 0

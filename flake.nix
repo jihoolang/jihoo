@@ -302,6 +302,7 @@
                 ./proofs/CheckScopedLend.lean
                 ./proofs/CheckKernelInference.lean
                 ./proofs/CheckNativeInference.lean
+                ./proofs/CheckNativeTransforms.lean
                 ./proofs/EmitNativeSchema.lean
                 ./proofs/EmitNativeWireNodes.lean
                 ./proofs/CheckTyping.lean
@@ -349,7 +350,8 @@
               Jihoo.MirFixtureAdmission \
               Jihoo.MixedProofAdmission \
               Jihoo.MixedRawAdmission \
-              Jihoo.NativeAdmission \
+              Jihoo.NativeDefinitions \
+              Jihoo.NativePartialRenaming \
               Jihoo.NativeCompositionMirCorrespondence \
               Jihoo.NativeCompositionMirSnapshot \
               Jihoo.ScalarCoreCallers \

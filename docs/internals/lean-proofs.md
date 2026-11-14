@@ -4546,3 +4546,17 @@ erased indices, transport and refinement projections, retaining unsupported
 rules as explicit gaps. Tests bind observations and bytes; they do not prove
 execution semantics of the native source. The linked scope lists the remaining
 metatheory, families, ownership and native implementation refinement obligations.
+
+
+Full native conversion now has a proved Church–Rosser theorem, including the
+borrow/deref critical overlaps. Its genuine Pi/sort/refinement injectivity
+supports all-rule type uniqueness, typed root preservation and full contextual
+ghost preservation of the current pure judgment and executable normalizer.
+Direct arena transformations now follow references with independent work,
+depth, allocation and machine-bound checks; exact success meaning and prefix
+framing are proved without calling the tree emitter. A separate declaration
+checker derives its body mode from the type's sort, with an exact-byte theorem
+and a regression rejecting a forged ghost flag on an erased runtime value.
+The source differential suite now retains 660 actual binder-transform calls.
+Native source refinement, the remaining operator rules and runtime ownership
+connections are still explicit obligations.

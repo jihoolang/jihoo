@@ -28,6 +28,13 @@ no-removal rewrite. References into removed blocks explicitly fail; replacement
 terms are shifted only under actual binding edges. Direct native mutable
 execution and machine-cast behavior remain separate obligations.
 
+`NativeTransform` and `NativeReplacementTransform` also traverse arena references
+directly, without decoding into a tree or calling the emitter. Their successful
+shift/substitute/rewrite results have the proved tree meaning and preserve every
+existing node. Depth, visit and allocation budgets, u32 result bounds and signed
+arithmetic side conditions are explicit. Failure-state equivalence and exact
+native allocation-order/source execution remain separate obligations.
+
 `NativeTyping` independently specifies the supported pure dependent rules with
 universes, Prop, ghost/code positions and pre-binder context annotations.
 `NativeCheckerSoundness` proves acceptance soundness of the actual executable
@@ -60,6 +67,20 @@ substitution and genuine dependent instantiation for every currently supported
 rule, including universe type arguments. Results are in ghost mode; this is
 not an unconditional code-substitution theorem.
 
+`NativeConfluence` proves parallel reduction's diamond property and Church–Rosser
+for the selected complete-syntax conversion relation, including overlapping
+borrow/deref projections. Pi, sort, equality, array and refinement injectivity
+and rigid-constructor separation follow. `NativeTypeUniqueness` proves uniqueness
+modulo this conversion for every current rule, even across code/ghost modes,
+and derives universe limits and rejection of Type-in-Type.
+
+`NativeContextConversion`, `NativeInversion` and `NativeRootPreservation` supply
+lookup-based context transport, conversion-aware inversion and each executable
+root's preservation. `NativePreservation` proves contextual ghost preservation
+at the exact original type, finite-step preservation and preservation by the
+actual `Conversion.normalize` implementation. This applies to all current
+pure typing rules; it is not a runtime ownership preservation theorem.
+
 `NativeSchema` / `NativeWire` provide a canonical version-4 full-graph envelope.
 Round-trip, encoding injectivity and exact-byte decoding are proved. Whole-graph
 validation checks unused nodes too, with proved backward-reference, payload,
@@ -70,6 +91,13 @@ and caps expanded tree size/depth separately from graph size.
 Acceptance implies exact input re-encoding, whole-graph validity, graph meaning
 and well-formed arities for both roots, closed typing in the recorded mode, and
 independent ghost typing of the requested type at an inferred sort.
+
+`NativeDefinitions` derives a closed declaration's body mode from its type's
+inferred sort, independently of the snapshot's observation-mode flag. Its pure
+checker and exact-byte admission prove formation and body typing in that derived
+mode. A synthetic erased data identity is accepted as a ghost observation but
+rejected as an executable declaration; forging its mode flag cannot authorize
+runtime access to its erased parameter.
 
 ## Actual native correspondence tests
 
@@ -90,6 +118,12 @@ transport/refinement projections and arithmetic evidence. Unsupported ownership,
 branch and fold rules remain explicit admitted-native/rejected-Lean fixtures.
 Native code rejection of erased proof variables is also checked.
 
+The production shift/substitute/rewrite routines are also exercised directly
+on every constructor, three vector lengths and four operations, with an extra
+free-variable case: **660 actual Core calls**. Independent before/after snapshots
+preserve old-prefix comparisons; expected results come from the proved Lean
+binding transformations, including explicit negative-shift rejection.
+
 These comparisons are regression evidence. Native parser/exporter behavior,
 source execution, process association and IO are outside the pure theorems.
 
@@ -98,9 +132,9 @@ source execution, process association and IO are outside the pure theorems.
 The full native kernel is verified only when the following remaining obligations
 are discharged, rather than replaced with more passing fixtures:
 
-1. Contextual preservation for the universe-aware judgment, including context
-   conversion and binder changes. Typed ghost substitution is proved. Code substitution
-   additionally needs preservation of mode and representation restrictions.
+1. Extend the proved contextual ghost preservation and typed substitution to the
+   remaining typing/computation rules. Code substitution additionally needs
+   preservation of mode and representation restrictions.
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
 3. The remaining typing/computation rules: evidence-binding branches, folds/loops,
@@ -108,7 +142,9 @@ are discharged, rather than replaced with more passing fixtures:
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.
-5. Refinement of native graph operations, normalization/comparison, inference,
+5. All remaining native conversion equations, including canonical symbolic sums
+   and proof-irrelevant comparison, and refinement of native graph operations,
+   normalization/comparison, inference,
    family declaration and whole-program checking by their actual implementation
    semantics. A Lean port or syntactic interface audit alone does not discharge it.
 

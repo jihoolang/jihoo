@@ -1,0 +1,118 @@
+// Differential observations of the actual native binder transformations.
+// Before and after arenas are retained independently for every operation.
+import core
+import diag
+import core_native_snapshot
+
+fn refs(count: i64) -> Vec(u32) {
+    var out = Vec(u32).new()
+    for i in 0..count { out.push((i % 2) as u32) }
+    out
+}
+
+fn add(inout c: core.Core, sink term: core.Term) -> Result(u32, String) {
+    match c.add(term, diag.Span.nowhere()) {
+        Ok(id) => Ok(id)
+        Err(e) => Err(e.msg.clone())
+    }
+}
+
+fn one(label: str, mode: str, count: i64, sink term: core.Term) -> Result((), String) {
+    var c = core.Core.new()
+    add(&c, core.Term.Var(0))?
+    let value = add(&c, core.Term.Var(1))?
+    let root = add(&c, term)?
+    let before = core_native_snapshot.arena(c, true, root, value)
+    let result = if mode == "shift-up" { c.shift(root, 2, 0, core.DEPTH) }
+    else if mode == "shift-down" { c.shift(root, -1, 0, core.DEPTH) }
+    else if mode == "substitute" { c.substitute(root, value, core.DEPTH) }
+    else { c.rewrite(root, 0, value, core.DEPTH) }
+    let (accepted, out) = match result {
+        Ok(out) => (true, out)
+        Err(_) => (false, root)
+    }
+    let after = core_native_snapshot.arena(c, true, root, out)
+    print(count)
+    print("\t")
+    print(label)
+    print("\t")
+    print(mode)
+    print(if accepted { "\t1\t" } else { "\t0\t" })
+    print(before)
+    print("\t")
+    println(after)
+    Ok(())
+}
+
+fn emit(count: i64, mode: str) -> Result((), String) {
+    one("Var", mode, count, core.Term.Var(0))?
+    one("Global", mode, count, core.Term.Global(0))?
+    one("Universe", mode, count, core.Term.Universe(0))?
+    one("Prop", mode, count, core.Term.Prop)?
+    one("U64", mode, count, core.Term.U64)?
+    one("I64", mode, count, core.Term.I64)?
+    one("Array", mode, count, core.Term.Array(0))?
+    one("Lt", mode, count, core.Term.Lt(0, 1))?
+    one("Eq", mode, count, core.Term.Eq(0, 1))?
+    one("Refl", mode, count, core.Term.Refl(0))?
+    one("Transport", mode, count, core.Term.Transport(0, 1, 0))?
+    one("Ind", mode, count, core.Term.Ind(0, refs(count)))?
+    one("Con", mode, count, core.Term.Con(0, 0, refs(count)))?
+    one("Elim", mode, count, core.Term.Elim(0, 1, refs(count), 1))?
+    one("Arith", mode, count, core.Term.Arith(core.Arith.Add, 1, 0))?
+    one("Fold", mode, count, core.Term.Fold(0, 1, 0))?
+    one("Strict", mode, count, core.Term.Strict(0, 1))?
+    one("UAdd", mode, count, core.Term.UAdd(0, 1))?
+    one("LtAdd", mode, count, core.Term.LtAdd(0, 1, 0, 1))?
+    one("LtCancel", mode, count, core.Term.LtCancel(0, 1, 0, 1))?
+    one("LtLe", mode, count, core.Term.LtLe(0, 1, 0, 1, 0))?
+    one("USub", mode, count, core.Term.USub(0, 1, 0))?
+    one("ZeroLe", mode, count, core.Term.ZeroLe(0))?
+    one("Refine", mode, count, core.Term.Refine(0))?
+    one("Pack", mode, count, core.Term.Pack(0, 1, 0))?
+    one("Witness", mode, count, core.Term.Witness(0))?
+    one("Proof", mode, count, core.Term.Proof(0))?
+    one("Buffer", mode, count, core.Term.Buffer(0))?
+    one("Alloc", mode, count, core.Term.Alloc(0, 1))?
+    one("Load", mode, count, core.Term.Load(0, 1, 0, 1))?
+    one("Store", mode, count, core.Term.Store(0, 1, 0, 1))?
+    one("Free", mode, count, core.Term.Free(0, 1))?
+    one("Drop", mode, count, core.Term.Drop(0, 1, 0))?
+    one("Ref", mode, count, core.Term.Ref(0))?
+    one("Lend", mode, count, core.Term.Lend(0, 1, 0))?
+    one("Back", mode, count, core.Term.Back(false, 1, 0))?
+    one("Give", mode, count, core.Term.Give(false, 1, 0, 1))?
+    one("Take", mode, count, core.Term.Take(0, 1))?
+    one("Borrow", mode, count, core.Term.Borrow(0))?
+    one("Deref", mode, count, core.Term.Deref(0))?
+    one("View", mode, count, core.Term.View(false, 0, 0, refs(count), 0))?
+    one("Loop", mode, count, core.Term.Loop(0, 1, 0, 1))?
+    one("Absurd", mode, count, core.Term.Absurd(0, 1))?
+    one("Case", mode, count, core.Term.Case(0, 1, refs(count), 1))?
+    one("Pi", mode, count, core.Term.Pi(false, 1, 0))?
+    one("Lam", mode, count, core.Term.Lam(false, 1, 0))?
+    one("App", mode, count, core.Term.App(0, 1))?
+    one("Natural", mode, count, core.Term.Natural(0))?
+    one("Integer", mode, count, core.Term.Integer(0))?
+    one("Elements", mode, count, core.Term.Elements(refs(count)))?
+    one("Index", mode, count, core.Term.Index(0, 1, 0))?
+    one("Decide", mode, count, core.Term.Decide(0, 1))?
+    one("IfLt", mode, count, core.Term.IfLt(0, 1, 0, 1))?
+    one("IfEq", mode, count, core.Term.IfEq(0, 1, 0, 1))?
+    one("VarFree", mode, count, core.Term.Var(1))?
+    Ok(())
+}
+
+fn run() -> Result((), String) {
+    for count in [0 as i64, 1, 3] {
+        for mode in ["shift-up", "shift-down", "substitute", "rewrite"] { emit(count, mode)? }
+    }
+    Ok(())
+}
+
+fn main() -> i32 {
+    match run() {
+        Ok(_) => 0
+        Err(message) => { eprintln(message); 1 }
+    }
+}

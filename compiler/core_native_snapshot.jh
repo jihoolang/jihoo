@@ -107,6 +107,15 @@ pub fn write_node(inout out: String, term: core.Term) {
     }
 }
 
+// Retain an exact arena without running any additional Core operation.
+pub fn arena(c: core.Core, ghost: bool, term_root: u32, type_root: u32) -> String {
+    var out = String.new()
+    for field in [4 as u64, if ghost { 1 } else { 0 }, term_root as u64,
+        type_root as u64, c.nodes.len() as u64] { token(&out, field) }
+    for n in c.nodes { write_node(&out, n.term) }
+    out
+}
+
 pub fn snapshot(source: str, mode: str) -> Result(String, String) {
     let ghost = mode == "infer" || mode == "require"
     if !ghost && mode != "code-infer" && mode != "code-require" {
@@ -133,9 +142,5 @@ pub fn snapshot(source: str, mode: str) -> Result(String, String) {
         }
         declared
     } else { inferred }
-    var out = String.new()
-    for field in [4 as u64, if ghost { 1 } else { 0 }, value as u64,
-        selected as u64, c.nodes.len() as u64] { token(&out, field) }
-    for n in c.nodes { write_node(&out, n.term) }
-    Ok(out)
+    Ok(arena(c, ghost, value, selected))
 }

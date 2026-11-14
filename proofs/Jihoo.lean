@@ -387,3 +387,22 @@ import Jihoo.NativeArenaPartial
 import Jihoo.NativePartialRenamingExamples
 import Jihoo.NativeGhostMetatheory
 import Jihoo.NativeGhostMetatheoryExamples
+
+import Jihoo.NativeConfluence
+import Jihoo.NativeConfluenceExamples
+import Jihoo.NativeTypeUniqueness
+import Jihoo.NativeTypeUniquenessExamples
+import Jihoo.NativeContextConversion
+import Jihoo.NativeInversion
+import Jihoo.NativeInversionExamples
+import Jihoo.NativeConversionTransport
+import Jihoo.NativeRootPreservation
+import Jihoo.NativeRootPreservationExamples
+import Jihoo.NativePreservation
+import Jihoo.NativePreservationExamples
+import Jihoo.NativeTransform
+import Jihoo.NativeTransformExamples
+import Jihoo.NativeReplacementTransform
+import Jihoo.NativeReplacementTransformExamples
+import Jihoo.NativeDefinitions
+import Jihoo.NativeDefinitionsExamples
