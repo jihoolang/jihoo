@@ -1,0 +1,6 @@
+; Signed literal folding preserves the type at both bounds; overflow stays neutral.
+(def upper I64 (add (int 9223372036854775806) (int 1)))
+(def lower I64 (sub (int -9223372036854775807) (int 1)))
+(def positiveOverflow I64 (add (int 9223372036854775807) (int 1)))
+(def negativeOverflow I64 (sub (int -9223372036854775808) (int 1)))
+(def productOverflow I64 (mul (int 9223372036854775807) (int 2)))

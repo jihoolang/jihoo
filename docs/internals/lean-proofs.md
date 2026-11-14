@@ -4579,7 +4579,7 @@ induction hypothesis and refinement iteration whose accumulator type changes
 with the index. The native suite now contains 89 source fixtures. Owned
 accumulators and explicit memory operations in iteration bodies remain outside
 the executable checker's conservative pure profile. The aggregate audit checks
-5,312 theorem dependencies without admitted proofs or extra axioms.
+5,380 theorem dependencies without admitted proofs or extra axioms.
 
 ### Ordered global environments and affine canonical forms
 
@@ -4692,8 +4692,9 @@ authenticates the resource gate without a caller-selected owner list.
 earlier families, dependent Buffer fields and family/resource-valued globals.
 Its independent history and exact version-6 admission establish positive checked
 signatures, mode-derived body typing, quantities and concrete environment and
-formal-signature scope invariants. Generalized substitution, type uniqueness,
-preservation, the remaining operators and consistency still require proofs.
+formal-signature scope invariants. Ghost substitution and context conversion are proved for the current unified
+rules. Type uniqueness, contextual preservation, additional operators and
+consistency still require proofs.
 
 The completed ACU transport/parallel construction proves actual finite forward
 Church–Rosser for `ACU.Conv`, plus rigid/Pi/scalar/array/equality/refinement
@@ -4732,3 +4733,22 @@ aggregate at 8 GiB, and Lean runs with one thread and a 4 GiB allocation cap.
 The wrapper is independent of the terminal's cgroup and reapplies limits after
 reboot. Native regression commands inside CI retain their existing sandbox;
 local invocations must use the wrapper.
+
+`NativeEnvironmentOperationalRoots` adds exact-original-type ghost preservation
+for signed literal arithmetic, Strict, pure Free and zero-count Fold/Loop. Its
+root-only evaluator reaches its result by actual finite steps, decreases node
+count and reaches a root normal form once fuel covers the input node count.
+Signed overflow stays neutral. These proofs use the same environment judgment
+but do not assume the enlarged equations belong to ACU conversion or inherit its
+contextual confluence. All 21 actual Core preservation fixtures now pass.
+
+The same actual-ACU environment judgment now has mode promotion, typed ghost
+renaming/weakening, full simultaneous substitution, dependent instantiation and
+context conversion. `NativeEnvironmentBindingAlgebra` handles captured motives,
+scoped constructor templates and proposition case telescopes. Environment
+closure is derived from mixed checked histories through `EnvWellFormed`,
+including closed global types and correctly scoped formal signatures. Three
+checked-history regressions instantiate dependent constructors, weaken globals
+and substitute an index captured by an induction motive. These 48 audited
+theorems cover every current unified rule, including Back/Give/Take; they do not
+claim runtime substitution, full contextual preservation or consistency.

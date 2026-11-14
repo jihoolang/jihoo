@@ -1,0 +1,9 @@
+; A zero count returns the initial value without computing a trapping step.
+(def folded I64
+  (fold 0 (int 9)
+    (lam i U64 (lam0 p (Lt i 0) (lam a I64
+      (mul (int 9223372036854775807) (int 2)))))))
+(def looped I64
+  (loop 0 (lam i U64 I64) (int 9)
+    (lam i U64 (lam0 p (Lt i 0) (lam a I64
+      (mul (int 9223372036854775807) (int 2)))))))

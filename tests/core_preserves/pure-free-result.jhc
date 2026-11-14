@@ -1,0 +1,2 @@
+; Free disappears in pure normalization, preserving the result's type.
+(def released I64 (free (alloc 2 (int 0)) (add (int 20) (int 22))))

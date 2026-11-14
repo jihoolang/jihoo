@@ -5526,3 +5526,139 @@ end Jihoo.CommonDataCaseRegisterSafetyChecks
 #print axioms Jihoo.NativeKernel.Environment.BackRepresentation.substitution
 
 #print axioms Jihoo.NativeKernel.Environment.ghost_backRepresentation
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Root.preserves
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Root.renaming
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Root.substitution
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.contract_sound
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.contract_preserves
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Steps.trans
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Steps.preserves
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Root.size_decreases
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.run_steps
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.run_preserves
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.run_size
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.run_eventually_stops
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.overflow_remains
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.signed_upper_boundary
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.signed_lower_boundary
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.positive_overflow_kept
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.negative_overflow_kept
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.multiplication_overflow_kept
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.empty_fold_does_not_visit_body
+
+#print axioms Jihoo.NativeKernel.Environment.ValueReduction.Examples.free_then_arithmetic
+
+#print axioms Jihoo.NativeKernel.Environment.scoped_rename_congr
+
+#print axioms Jihoo.NativeKernel.Environment.scoped_subst_congr
+
+#print axioms Jihoo.NativeKernel.Environment.closed_rename
+
+#print axioms Jihoo.NativeKernel.Environment.closed_subst
+
+#print axioms Jihoo.NativeKernel.Environment.scoped_rename_lift
+
+#print axioms Jihoo.NativeKernel.Environment.scoped_subst_lift
+
+#print axioms Jihoo.NativeKernel.Environment.applications_rename
+
+#print axioms Jihoo.NativeKernel.Environment.applications_subst
+
+#print axioms Jihoo.NativeKernel.Environment.propCaseType_eq
+
+#print axioms Jihoo.NativeKernel.Environment.variable_subst_eq_rename
+
+#print axioms Jihoo.NativeKernel.Environment.shifted_scoped
+
+#print axioms Jihoo.NativeKernel.Environment.recursiveFields_scoped
+
+#print axioms Jihoo.NativeKernel.Environment.hypothesisType_subst
+
+#print axioms Jihoo.NativeKernel.Environment.fieldTelescope_subst
+
+#print axioms Jihoo.NativeKernel.Environment.hypothesisTelescope_subst
+
+#print axioms Jihoo.NativeKernel.Environment.propCaseType_subst
+
+#print axioms Jihoo.NativeKernel.Environment.propCaseType_rename
+
+#print axioms Jihoo.NativeKernel.Environment.lower_raised
+
+#print axioms Jihoo.NativeKernel.Environment.load_result_shifted
+
+#print axioms Jihoo.NativeKernel.Environment.propMotiveType_subst
+
+#print axioms Jihoo.NativeKernel.Environment.propMotiveType_rename
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghost
+
+#print axioms Jihoo.NativeKernel.Environment.renameArgs_ind
+
+#print axioms Jihoo.NativeKernel.Environment.substArgs_ind
+
+#print axioms Jihoo.NativeKernel.Environment.binderAllowed_renaming
+
+#print axioms Jihoo.NativeKernel.Environment.binderAllowed_substitution
+
+#print axioms Jihoo.NativeKernel.Environment.renameArgs_con
+
+#print axioms Jihoo.NativeKernel.Environment.renameArgs_elim
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghostRenaming
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghostWeaken
+
+#print axioms Jihoo.NativeKernel.Environment.Binder.ghostRenaming
+
+#print axioms Jihoo.NativeKernel.Environment.substArgs_con
+
+#print axioms Jihoo.NativeKernel.Environment.substArgs_elim
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.Substitution.lift
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghostSubstitution
+
+#print axioms Jihoo.NativeKernel.Environment.Binder.ghostSubstitution
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.Substitution.single
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghostInstantiate
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.checkedGhostSubstitution
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.ContextConversion.refl
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.ContextConversion.trans
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.ContextConversion.extend
+
+#print axioms Jihoo.NativeKernel.Environment.Ghost.ContextConversion.substitution
+
+#print axioms Jihoo.NativeKernel.Environment.HasType.ghostContext
+
+#print axioms Jihoo.NativeKernel.Environment.Binder.ghostContext
+
+#print axioms Jihoo.NativeKernel.Environment.GhostExamples.closed_global_weakened
+
+#print axioms Jihoo.NativeKernel.Environment.GhostExamples.dependent_constructor_instantiated
+
+#print axioms Jihoo.NativeKernel.Environment.GhostExamples.captured_proposition_motive_instantiated

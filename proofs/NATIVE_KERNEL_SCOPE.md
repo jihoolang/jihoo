@@ -330,8 +330,9 @@ remove the earlier pure-prefix restriction. Ordinary fields, earlier families,
 dependent Buffer fields and family/resource-valued globals use the same unified
 checker. Independent history, recomputed positivity/parameters/layout, exact
 bytes, authenticated resource projection and environment/formal-signature scope
-invariants are proved. The native loan/case/view/drop operators and general unified
-substitution/preservation/uniqueness remain completion work.
+invariants are proved. The native loan/case/view/drop operators and unified contextual
+preservation/type uniqueness remain completion work; ghost substitution is proved
+for every rule in this checkpoint.
 The integrated source suite checks 49 mixed programs and 41 exact-byte checks,
 including dependent Buffer fields, earlier flat/boxed families, constructor-valued
 globals, resource leaks/duplication and malformed unused graph nodes.
@@ -358,5 +359,25 @@ pure judgment is proved without casting code policies from a smaller conversion
 relation. Back/Give/Take include owned and erased results, dependent motives,
 checked two-binder result removal and metadata-derived ownership. Their suite
 checks 37 actual source fixtures and 28 exact-byte checks. The aggregate axiom
-audit currently covers 5,312 declarations using only Lean's standard logical
+audit currently covers 5,380 declarations using only Lean's standard logical
 axioms, with warnings treated as errors.
+
+`NativeEnvironmentOperationalRoots` proves original-type ghost preservation for
+additional pure value equations: signed literal arithmetic within I64 bounds,
+Strict's result, pure Free and empty Fold/Loop. Its bounded root-only evaluator
+has exact finite reachability, decreasing node count and eventual root normality;
+overflow remains uncontracted. These equations are not silently inserted into
+`ACU.Conv`: contextual preservation/confluence of the combined theory remains
+open. The three new source fixtures bring actual Core preservation regressions
+to 21, including both signed bounds, overflow and unused trapping loop bodies.
+
+`NativeEnvironmentGhostMetatheory` and `NativeEnvironmentContextConversion`
+now establish mode promotion, typed ghost renaming/weakening, simultaneous
+substitution, dependent instantiation and context conversion for all 54 rules
+of the current unified judgment. The required environment premise contains
+closed global types and scoped formal constructor signatures; mixed checked
+history proves that premise. It is not an arbitrary well-formed-environment
+assumption supplied by a certificate. Binding algebra covers captured motives,
+recursive proposition cases and two-binder Load/Take removal. These are ghost
+results; unconditional runtime substitution and full contextual preservation
+remain separate obligations.
