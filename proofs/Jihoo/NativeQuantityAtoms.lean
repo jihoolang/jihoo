@@ -210,45 +210,54 @@ def CallPlan.atomSubstAt (depth : Nat) (σ : Nat → Atom) (p : CallPlan) : Call
   ⟨p.modes, p.runtimeArgs.map (Term.subst (fun x => atomTerm (σ x))),
     p.body.subst (liftSub (p.modes.length + depth) (fun x => atomTerm (σ x)))⟩
 
-theorem peelCall_atom_subst (fuel : Nat) (locals : List Bool) (head : Term)
+theorem peelCallAux_atom_subst (fuel : Nat) (locals : List Bool) (linearSeen : Bool) (head : Term)
     (args : List Term) (σ : Nat → Atom) :
-    peelCall fuel locals (head.subst (liftSub locals.length (fun x => atomTerm (σ x))))
+    peelCallAux fuel locals linearSeen (head.subst (liftSub locals.length (fun x => atomTerm (σ x))))
         (args.map (Term.subst (fun x => atomTerm (σ x)))) =
-      (peelCall fuel locals head args).map (CallPlan.atomSubstAt locals.length σ) := by
-  induction fuel generalizing locals head args σ with
+      (peelCallAux fuel locals linearSeen head args).map (CallPlan.atomSubstAt locals.length σ) := by
+  induction fuel generalizing locals linearSeen head args σ with
   | zero => rfl
   | succ fuel ih =>
     cases args with
     | nil =>
-        simp only [List.map_nil, peelCall, callResult_atom_subst]
+        simp only [List.map_nil, peelCallAux, callResult_atom_subst]
         split <;> simp [CallPlan.atomSubstAt]
     | cons a args =>
       cases head with
       | var x =>
           rw [Term.subst, ← liftedAtoms_term]
-          cases h : liftedAtoms locals.length σ x <;> simp [atomTerm, h, peelCall]
+          cases h : liftedAtoms locals.length σ x <;> simp [atomTerm, h, peelCallAux]
       | node op children =>
         cases op <;> cases children with
-        | nil => simp [Term.subst, substArgs, peelCall]
+        | nil => simp [Term.subst, substArgs, peelCallAux]
         | cons domain tail =>
           cases tail with
-          | nil => simp [Term.subst, substArgs, peelCall]
+          | nil => simp [Term.subst, substArgs, peelCallAux]
           | cons body rest =>
             cases rest <;> simp only [Term.subst, substArgs, List.map_cons, Op.binders,
-              liftSub, peelCall]
+              liftSub, peelCallAux]
             all_goals first
             | rfl
             | (
               rename_i erased
               rw [← liftedAtoms_term, binderMode_atom_subst, domainNonFunction_atom_subst]
-              have hr := ih (domainNonFunction domain :: locals) body args σ
-              simp only [List.length_cons, liftSub] at hr
-              rw [← liftedAtoms_term] at hr
-              rw [hr]
-              cases binderMode erased domain <;>
-                cases peelCall fuel (domainNonFunction domain :: locals) body args <;>
-                cases erased <;>
-                simp [CallPlan.atomSubstAt, Nat.add_comm, Nat.add_left_comm])
+              cases hd : binderMode erased domain with
+              | none => rfl
+              | some mode =>
+                dsimp only [bind, pure, Option.bind]
+                have hr := ih (domainNonFunction domain :: locals) (linearSeen || mode == .linear) body args σ
+                simp only [List.length_cons, liftSub] at hr
+                rw [← liftedAtoms_term] at hr
+                rw [hr]
+                cases peelCallAux fuel (domainNonFunction domain :: locals) (linearSeen || mode == .linear) body args <;>
+                  cases erased <;> simp [CallPlan.atomSubstAt, Nat.add_comm, Nat.add_left_comm])
+
+theorem peelCall_atom_subst (fuel : Nat) (locals : List Bool) (head : Term)
+    (args : List Term) (σ : Nat → Atom) :
+    peelCall fuel locals (head.subst (liftSub locals.length (fun x => atomTerm (σ x))))
+        (args.map (Term.subst (fun x => atomTerm (σ x)))) =
+      (peelCall fuel locals head args).map (CallPlan.atomSubstAt locals.length σ) := by
+  exact peelCallAux_atom_subst fuel locals false head args σ
 
 theorem sequence_relabel (cs : List Control) (ρ : Nat → Option Nat) :
     sequence (cs.map (fun c => c.relabel ρ)) = (sequence cs).relabel ρ := by

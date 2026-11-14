@@ -3,6 +3,8 @@ import Jihoo.NativeEnvironmentBindingAlgebra
 import Jihoo.NativeGhostMetatheory
 import Jihoo.NativeResourceSyntax
 import Jihoo.NativeBackMetatheory
+import Jihoo.NativeOwnedLoopMetatheory
+import Jihoo.NativeDataBindingAlgebra
 
 /-! Ghost metatheory for the same unified environment-indexed judgment.
 Environment closure is required when moving contexts or substituting variables;
@@ -16,6 +18,7 @@ theorem HasType.ghost (typed : HasType env ctx mode term type) : HasType env ctx
     (motive_2 := fun ctx _ term type _ => HasType env ctx true term type)
     (motive_3 := fun ctx _ data telescope arguments result _ => Arguments env ctx true data telescope arguments result)
     (motive_4 := fun ctx motive signatures branches _ => Cases env ctx motive signatures branches)
+    (motive_5 := fun ctx _ types branches _ => BranchTypes env ctx true types branches)
   all_goals intros
   all_goals first
     | solve | apply Binder.intro <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
@@ -71,11 +74,19 @@ theorem HasType.ghost (typed : HasType env ctx mode term type) : HasType env ctx
     | solve | apply HasType.back <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.give <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.take <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.foldOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.dataElim <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.drop <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.refOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.ghostBorrowOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
+    | solve | apply HasType.ghostDerefOwned <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply HasType.convert <;> first | assumption | exact Or.inl rfl | simpa only [Bool.true_or]
     | solve | apply Arguments.nil <;> assumption
     | solve | apply Arguments.cons <;> first | assumption | simpa only [Bool.true_or]
     | solve | apply Cases.nil
     | solve | apply Cases.cons <;> assumption
+    | solve | apply BranchTypes.nil
+    | solve | apply BranchTypes.cons <;> first | assumption | simpa only [Bool.true_or]
 
 @[simp] theorem renameArgs_ind (family count : Nat) (ρ : Nat → Nat) (offset : Nat) (terms : List Term) :
     renameArgs (.ind family count) ρ offset terms = terms.map (Term.rename ρ) := by
@@ -120,6 +131,18 @@ end Ghost
   | nil => simp only [renameArgs, List.map_nil]
   | cons term rest ih => simp only [renameArgs, Op.binders, liftRenaming, ih, List.map_cons]
 
+@[simp] theorem renameArgs_caseOf (family count : Nat) (ρ : Nat → Nat) (offset : Nat) (terms : List Term) :
+    renameArgs (.caseOf family count) ρ offset terms = terms.map (Term.rename ρ) := by
+  induction terms generalizing offset with
+  | nil => simp only [renameArgs, List.map_nil]
+  | cons term rest ih => simp only [renameArgs, Op.binders, liftRenaming, ih, List.map_cons]
+
+@[simp] theorem substArgs_caseOf (family count : Nat) (σ : Nat → Term) (offset : Nat) (terms : List Term) :
+    substArgs (.caseOf family count) σ offset terms = terms.map (Term.subst σ) := by
+  induction terms generalizing offset with
+  | nil => simp only [substArgs, List.map_nil]
+  | cons term rest ih => simp only [substArgs, Op.binders, liftSub, ih, List.map_cons]
+
 private theorem rename_shift_one (term : Term) (ρ : Nat → Nat) :
     (term.rename Nat.succ).rename (Indexed.liftRenaming ρ) = (term.rename ρ).rename Nat.succ := by
   rw [Term.rename_comp, Term.rename_comp]
@@ -137,6 +160,8 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
     (motive_4 := fun ctx motive signatures branches _ => ∀ Δ ρ, Ghost.Renaming ctx Δ ρ →
       (∀ signature ∈ signatures, UnifiedProgram.SignatureScoped signature) →
       Cases env Δ (motive.rename ρ) signatures (branches.map (Term.rename ρ)))
+    (motive_5 := fun ctx _ types branches _ => ∀ Δ ρ, Ghost.Renaming ctx Δ ρ →
+      BranchTypes env Δ true (types.map (Term.rename ρ)) (branches.map (Term.rename ρ)))
   all_goals intros
   case intro =>
     rename_i typed allowed ih_typed Δ ρ hρ
@@ -342,6 +367,42 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
       cv (by simpa only [rename_takeResultType, liftRenaming] using cp)
       cr (load_result_shifted _) (Or.inl rfl)
     simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using target
+  case foldOwned =>
+    rename_i count init owned body allowed ihc ihi ihb Δ ρ hρ
+    have lifted := HasType.foldOwned (ghost := true)
+      (by simpa [Term.rename, renameArgs] using ihc Δ ρ hρ) (ihi Δ ρ hρ) (owned.renaming ρ)
+      (by simpa only [foldAccumulatorBodyType_rename] using ihb Δ ρ hρ) (Or.inl rfl)
+    simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using lifted
+  case dataElim =>
+    rename_i family entry analysis ctx motive proof ghost scrutinee indices types caseTerms found isData boxed size motiveTyped scrutineeTyped generated branches allowed ihm ihs ihb Δ ρ hρ
+    have hm := ihm Δ ρ hρ
+    rw [dataMotiveType_rename] at hm
+    have generated' := dataCaseTypes_rename_success (wellFormed.signatures _ _ found) generated Δ.length ρ
+    have lifted := HasType.dataElim (ghost := true) (ctx := Δ) (analysis := analysis)
+      (proof := proof) (indices := indices.map (Term.rename ρ)) found isData boxed
+      (by simpa only [List.length_map] using size)
+      (by simpa only [List.map_take] using hm)
+      (by simpa only [Term.rename, renameArgs_ind, Bool.true_or] using ihs Δ ρ hρ)
+      (by simpa only [List.map_take] using generated')
+      (by simpa only [Bool.true_or] using ihb Δ ρ hρ) (Or.inl rfl)
+    cases analysis <;> simpa only [Bool.false_eq_true, ↓reduceIte, Term.rename, apply_ite, renameArgs_elim, renameArgs_caseOf, List.map_cons, List.map_append,
+      List.map_singleton, List.map_nil, List.length_map, applications_rename, List.map_drop,
+      renameArgs, Op.binders, liftRenaming] using lifted
+  case drop =>
+    rename_i found boxed owner rest iho ihr Δ ρ hρ
+    simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
+      HasType.drop found boxed (by simpa [Term.rename, renameArgs_ind] using iho Δ ρ hρ) (ihr Δ ρ hρ)
+  case refOwned =>
+    rename_i owner owned ih Δ ρ hρ
+    simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
+      HasType.refOwned (by simpa [Term.rename, renameArgs] using ih Δ ρ hρ) (owned.renaming ρ)
+  case ghostBorrowOwned =>
+    rename_i owner owned ih Δ ρ hρ
+    simpa only [rename_borrow, rename_ref] using HasType.ghostBorrowOwned (ih Δ ρ hρ) (owned.renaming ρ)
+  case ghostDerefOwned =>
+    rename_i reference ih Δ ρ hρ
+    simpa only [rename_deref, rename_ref] using
+      HasType.ghostDerefOwned (by simpa only [rename_ref] using ih Δ ρ hρ)
   case convert =>
     rename_i ht hc ih_ht Δ ρ hρ
     exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ)
@@ -438,6 +499,10 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
     have branch := iht Δ ρ hρ
     rw [propCaseType_rename (scopes _ (by simp))] at branch
     exact Cases.cons branch (ihb Δ ρ hρ (fun signature member => scopes signature (by simp [member])))
+  case nil => exact BranchTypes.nil
+  case cons =>
+    rename_i typed branches iht ihb Δ ρ hρ
+    simpa only [List.map_cons] using BranchTypes.cons (iht Δ ρ hρ) (ihb Δ ρ hρ)
 
 theorem HasType.ghostRenaming (wellFormed : UnifiedProgram.EnvWellFormed env)
     (typed : HasType env ctx mode term type) {Δ : Context} {ρ : Nat → Nat}
@@ -511,6 +576,8 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
     (motive_4 := fun ctx motive signatures branches _ => ∀ Δ σ, Ghost.Substitution env ctx Δ σ →
       (∀ signature ∈ signatures, UnifiedProgram.SignatureScoped signature) →
       Cases env Δ (motive.subst σ) signatures (branches.map (Term.subst σ)))
+    (motive_5 := fun ctx _ types branches _ => ∀ Δ σ, Ghost.Substitution env ctx Δ σ →
+      BranchTypes env Δ true (types.map (Term.subst σ)) (branches.map (Term.subst σ)))
   all_goals intros
   case intro =>
     rename_i typed allowed ih_typed Δ σ hσ
@@ -716,6 +783,42 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
       cv (by simpa only [subst_takeResultType, liftSub] using cp)
       cr (load_result_shifted _) (Or.inl rfl)
     simpa [Term.subst, substArgs, Op.binders, liftSub] using target
+  case foldOwned =>
+    rename_i count init owned body allowed ihc ihi ihb Δ σ hσ
+    have lifted := HasType.foldOwned (ghost := true)
+      (by simpa [Term.subst, substArgs] using ihc Δ σ hσ) (ihi Δ σ hσ) (owned.substitution σ)
+      (by simpa only [foldAccumulatorBodyType_subst] using ihb Δ σ hσ) (Or.inl rfl)
+    simpa [Term.subst, substArgs, Op.binders, liftSub] using lifted
+  case dataElim =>
+    rename_i family entry analysis ctx motive proof ghost scrutinee indices types caseTerms found isData boxed size motiveTyped scrutineeTyped generated branches allowed ihm ihs ihb Δ σ hσ
+    have hm := ihm Δ σ hσ
+    rw [dataMotiveType_subst] at hm
+    have generated' := dataCaseTypes_subst_success (wellFormed.signatures _ _ found) generated Δ.length σ
+    have lifted := HasType.dataElim (ghost := true) (ctx := Δ) (analysis := analysis)
+      (proof := proof) (indices := indices.map (Term.subst σ)) found isData boxed
+      (by simpa only [List.length_map] using size)
+      (by simpa only [List.map_take] using hm)
+      (by simpa only [Term.subst, substArgs_ind, Bool.true_or] using ihs Δ σ hσ)
+      (by simpa only [List.map_take] using generated')
+      (by simpa only [Bool.true_or] using ihb Δ σ hσ) (Or.inl rfl)
+    cases analysis <;> simpa only [Bool.false_eq_true, ↓reduceIte, Term.subst, apply_ite, substArgs_elim, substArgs_caseOf, List.map_cons, List.map_append,
+      List.map_singleton, List.map_nil, List.length_map, applications_subst, List.map_drop,
+      substArgs, Op.binders, liftSub] using lifted
+  case drop =>
+    rename_i found boxed owner rest iho ihr Δ σ hσ
+    simpa [Term.subst, substArgs, Op.binders, liftSub] using
+      HasType.drop found boxed (by simpa [Term.subst, substArgs_ind] using iho Δ σ hσ) (ihr Δ σ hσ)
+  case refOwned =>
+    rename_i owner owned ih Δ σ hσ
+    simpa [Term.subst, substArgs, Op.binders, liftSub] using
+      HasType.refOwned (by simpa [Term.subst, substArgs] using ih Δ σ hσ) (owned.substitution σ)
+  case ghostBorrowOwned =>
+    rename_i owner owned ih Δ σ hσ
+    simpa only [subst_borrow, subst_ref] using HasType.ghostBorrowOwned (ih Δ σ hσ) (owned.substitution σ)
+  case ghostDerefOwned =>
+    rename_i reference ih Δ σ hσ
+    simpa only [subst_deref, subst_ref] using
+      HasType.ghostDerefOwned (by simpa only [subst_ref] using ih Δ σ hσ)
   case convert =>
     rename_i ht hc ih_ht Δ σ hσ
     exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ)
@@ -823,6 +926,10 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
     have branch := iht Δ σ hσ
     rw [propCaseType_subst (scopes _ (by simp))] at branch
     exact Cases.cons branch (ihb Δ σ hσ (fun signature member => scopes signature (by simp [member])))
+  case nil => exact BranchTypes.nil
+  case cons =>
+    rename_i typed branches iht ihb Δ σ hσ
+    simpa only [List.map_cons] using BranchTypes.cons (iht Δ σ hσ) (ihb Δ σ hσ)
 
 theorem HasType.ghostSubstitution (wellFormed : UnifiedProgram.EnvWellFormed env)
     (typed : HasType env ctx mode term type) {Δ : Context} {σ : Nat → Term}

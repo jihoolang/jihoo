@@ -16,8 +16,8 @@ private abbrev twoOwners : Term := .lam false buffer (.lam false buffer
 example : check 64 0 [] [] (apply2 add one one) = true := by decide
 example : check 64 1 [0] [] (apply2 add (.var 0) one) = true := by decide
 example : check 64 1 [0] [] (apply2 add (.var 0) (.var 0)) = false := by decide
-example : project 64 (.app add one) = none := by decide
-example : project 64 (.app add (.var 0)) = none := by decide
+example : (project 64 (.app add one)).isSome = true := by decide
+example : (project 64 (.app add (.var 0))).isSome = true := by decide
 example : check 64 1 [0] [] (apply2 firstOwner (.var 0) (.integer 0)) = true := by decide
 example : check 64 2 [0, 1] [] (apply2 twoOwners (.var 0) (.var 1)) = true := by decide
 example : check 64 1 [0] [] (apply2 twoOwners (.var 0) (.var 0)) = false := by decide
@@ -28,8 +28,8 @@ example : check 64 1 [0] []
 example : check 64 1 [0] []
     (.app (.lam false buffer (.node (.give false) [zero, .var 0, .var 0])) (.var 0)) = false := by decide
 example : project 64 (.app (.var 0) zero) = none := by decide
-example : project 64 (.app (.lam false (.pi false .u64 .u64) (.var 0))
-    (.lam false .u64 (.var 0))) = none := by decide
+example : (project 64 (.app (.lam false (.pi false .u64 .u64) (.var 0))
+    (.lam false .u64 (.var 0)))).isSome = true := by decide
 
 example : check 64 1 [0] []
     (.app (.lam true .u64 (.node .alloc [zero, .integer 0])) (.var 0)) = false := by decide

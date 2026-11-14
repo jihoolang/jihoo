@@ -168,6 +168,25 @@ theorem loopMotiveOK_sound {fuel : Nat} {ghost proof : Bool} {motive : Term}
   · exact Or.inr (Or.inl hp)
   · exact Or.inr (Or.inr ⟨_, Conversion.normalize_sound fuel motive, hm⟩)
 
+theorem iterationBodyOK_sound (h : iterationBodyOK env body = true) :
+    IterationBodyAllowed env ghost body := Or.inr (Bool.or_eq_true_iff.mp h)
+
+theorem iterationMotiveOK_sound (h : iterationMotiveOK fuel env proof motive = true) :
+    IterationMotiveAllowed env ghost proof motive := by
+  rcases Bool.or_eq_true_iff.mp h with scalar | owned
+  · rcases loopMotiveOK_sound (ghost := ghost) scalar with ghost | proof | scalar
+    · exact Or.inl ghost
+    · exact Or.inr (Or.inl proof)
+    · exact Or.inr (Or.inr (Or.inl scalar))
+  · unfold ownedLoopMotiveOK at owned
+    split at owned
+    · rename_i flag domain body normal
+      exact Or.inr (Or.inr (Or.inr ⟨flag, domain, body,
+        by change Conversion.Conv motive (.node (.lam flag) [domain, body]);
+           rw [← normal]; exact Conversion.normalize_sound fuel motive,
+        ownedHead_sound owned⟩))
+    · contradiction
+
 theorem instantiate_sound
     (hi : ∀ ghost t T, inferField ghost t = some T → HasType env ctx ghost t T)
     (h : instantiate inferField fuel ghost data telescope arguments = some result) :
@@ -233,6 +252,92 @@ theorem splitCases_sound {count : Nat} {children branches : List Term} {scrutine
               obtain ⟨rfl, rfl⟩ := h
               obtain ⟨length, layout⟩ := ih decoded
               exact ⟨by simp only [List.length_cons, length], by simp only [List.cons_append, layout]⟩
+
+theorem branchesAgainst_sound
+    (hi : ∀ t T, inferBranch t = some T → HasType env ctx ghost t T)
+    (h : branchesAgainst inferBranch fuel types branchesList = true) :
+    BranchTypes env ctx ghost types branchesList := by
+  induction types generalizing branchesList with
+  | nil => cases branchesList with
+    | nil => exact .nil
+    | cons _ _ => simp [branchesAgainst] at h
+  | cons type types ih => cases branchesList with
+    | nil => simp [branchesAgainst] at h
+    | cons branch branches =>
+      obtain ⟨accepted, tail⟩ := Bool.and_eq_true_iff.mp h
+      obtain ⟨actual, inferred, converted⟩ := accepts_elim accepted
+      exact .cons (.convert (hi _ _ inferred) converted) (ih tail)
+
+theorem dataMotiveProof_sound
+    (h : dataMotiveProof inferred fuel family params arity ps = some proof) :
+    accepts fuel inferred (dataMotiveType family params arity ps proof) = true := by
+  unfold dataMotiveProof at h
+  split at h
+  · rename_i accepted; cases h; exact accepted
+  · split at h
+    · rename_i accepted; cases h; exact accepted
+    · contradiction
+
+/-- Soundness of the concrete elimination helper, instantiated only by the
+smaller-fuel recursive checker in infer_sound. -/
+theorem dataEliminate_sound
+    (hi : ∀ mode t T, inferSub mode t = some T → HasType env ctx mode t T)
+    (h : dataEliminate inferSub fuel env ctx ghost analysis family count motive children = some result) :
+    HasType env ctx ghost
+      (.node (if analysis then .caseOf family count else .elim family count) (motive :: children)) result := by
+  unfold dataEliminate at h
+  cases found : env.families[family]? with
+  | none => simp [found] at h
+  | some entry =>
+    simp only [found, Bind.bind, Option.bind] at h
+    split at h
+    · rename_i allowed
+      cases decoded : splitCases count children with
+      | none => simp [decoded] at h
+      | some pair =>
+        rcases pair with ⟨cases, scrutinee⟩
+        simp only [decoded] at h
+        cases exposed : expose fuel (inferSub true scrutinee) with
+        | none => simp [exposed] at h
+        | some head =>
+          simp only [exposed] at h
+          split at h
+          · rename_i g arity indices
+            split at h
+            · rename_i same
+              obtain ⟨sameFamily, sameArity, length⟩ := same
+              subst g
+              subst arity
+              cases selected : dataMotiveProof (inferSub true motive) fuel family
+                  entry.declaration.params entry.declaration.arity (indices.take entry.declaration.params) with
+              | none => simp [selected] at h
+              | some proof =>
+                simp only [selected] at h
+                cases generated : dataCaseTypes family entry.declaration.params ctx.length entry.signatures
+                    (indices.take entry.declaration.params) motive (entry.boxed && !analysis) proof with
+                | none => simp [generated] at h
+                | some types =>
+                  simp only [generated] at h
+                  split at h
+                  · rename_i checked
+                    cases h
+                    obtain ⟨branchCount, layout⟩ := splitCases_sound decoded
+                    rw [layout, ← branchCount]
+                    obtain ⟨actual, typed, converted⟩ := accepts_elim (dataMotiveProof_sound selected)
+                    obtain ⟨scrutineeType, typedScrutinee, convertedScrutinee⟩ := accepts_elim checked.1
+                    exact .dataElim found allowed.1
+                      (fun ha => by
+                        rcases allowed.2 with hn | hb
+                        · simp [ha] at hn
+                        · exact hb)
+                      length (.convert (hi true motive actual typed) converted)
+                      (.convert (hi (ghost || proof) scrutinee scrutineeType typedScrutinee) convertedScrutinee)
+                      generated (branchesAgainst_sound (hi (ghost || proof)) checked.2.1)
+                      (takeNonFunctionGate_sound checked.2.2)
+                  · contradiction
+            · contradiction
+          · contradiction
+    · contradiction
 
 private theorem sound_mutual (fuel : Nat) (env : Environment) :
     (∀ ctx ghost t T, infer fuel env ctx ghost t = some T → HasType env ctx ghost t T) ∧
@@ -559,10 +664,24 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
         case h_34 =>
           rename_i n init body
           split at h
-          · rename_i checked
-            cases h
-            exact .foldI64 (hc ctx ghost n _ checked.1) (hc ctx ghost init _ checked.2.1)
-              (hc ctx ghost body _ checked.2.2.1) (Or.inr checked.2.2.2)
+          · rename_i countTyped
+            split at h
+            · rename_i initialType
+              split at h
+              · rename_i checked
+                cases h
+                exact .foldI64 (hc ctx ghost n _ countTyped) (he ctx ghost init _ initialType)
+                  (hc ctx ghost body _ checked.1) (iterationBodyOK_sound checked.2)
+              · contradiction
+            · rename_i accumulator initialType
+              split at h
+              · rename_i checked
+                cases h
+                exact .foldOwned (hc ctx ghost n _ countTyped) (he ctx ghost init _ initialType)
+                  (ownedHead_sound checked.1) (hc ctx ghost body _ checked.2.1)
+                  (iterationBodyOK_sound checked.2.2)
+              · contradiction
+            · contradiction
           · contradiction
         case h_35 =>
           rename_i n motive init body
@@ -582,11 +701,11 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                     have expected : Conversion.Conv (.pi false domain (loopSortTerm proof))
                         (.pi false .u64 (loopSortTerm proof)) :=
                       .node (.pi false) (.cons (Conversion.equal_sound hdomain) (.cons (.refl _) .nil))
-                    exact .loop (typed.convert expected) (loopMotiveOK_sound hprofile)
+                    exact .loop (typed.convert expected) (iterationMotiveOK_sound hprofile)
                       (hc ctx (ghost || proof) n _ checked.1)
                       (hc ctx (ghost || proof) init _ checked.2.1)
                       (hc ctx (ghost || proof) body _ checked.2.2.1)
-                      (Or.inr checked.2.2.2)
+                      (iterationBodyOK_sound checked.2.2.2)
                   · contradiction
                 · contradiction
               · contradiction
@@ -657,7 +776,7 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                   · contradiction
                 · contradiction
               · contradiction
-            · contradiction
+            · exact dataEliminate_sound (fun mode t T h => hi ctx mode t T h) h
           · contradiction
         case h_40 =>
           rename_i n
@@ -724,14 +843,17 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
             exact .refBuffer (hc ctx true n _ checked)
           · contradiction
         case h_46 =>
-          rename_i buffer
+          rename_i owner
           split at h
           · rename_i isGhost
             subst ghost
             split at h
-            · rename_i n bufferType
-              cases h
-              exact .ghostBorrow (he ctx true buffer _ bufferType)
+            · rename_i ownerType typedOwner
+              split at h
+              · rename_i owned
+                cases h
+                exact .ghostBorrowOwned (he ctx true owner _ typedOwner) (ownedHead_sound owned)
+              · contradiction
             · contradiction
           · contradiction
         case h_47 =>
@@ -740,9 +862,9 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
           · rename_i isGhost
             subst ghost
             split at h
-            · rename_i n referenceType
+            · rename_i ownerType referenceType
               cases h
-              exact .ghostDeref (he ctx true reference _ referenceType)
+              exact .ghostDerefOwned (he ctx true reference _ referenceType)
             · contradiction
           · contradiction
         case h_48 =>
@@ -792,7 +914,32 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
               · contradiction
             · contradiction
           · contradiction
-        case h_51 => contradiction
+        case h_51 =>
+          rename_i family owner rest
+          split at h
+          · rename_i entry found
+            split at h
+            · rename_i boxed
+              split at h
+              · rename_i g count indices typedOwner
+                split at h
+                · rename_i sameFamily
+                  subst g
+                  exact .drop found boxed (he ctx ghost owner _ typedOwner) (hi ctx ghost rest T h)
+                · contradiction
+              · contradiction
+            · contradiction
+          · contradiction
+        case h_52 =>
+          rename_i owner notBuffer
+          split at h
+          · rename_i checked
+            cases h
+            exact .refOwned (hc ctx true owner _ checked.1) (ownedHead_normalize_sound checked.2)
+          · contradiction
+        case h_53 =>
+          exact dataEliminate_sound (fun mode t T h => hi ctx mode t T h) h
+        case h_54 => contradiction
       · intro ctx e A s h
         simp only [binder] at h
         split at h

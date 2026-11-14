@@ -4579,7 +4579,7 @@ induction hypothesis and refinement iteration whose accumulator type changes
 with the index. The native suite now contains 89 source fixtures. Owned
 accumulators and explicit memory operations in iteration bodies remain outside
 the executable checker's conservative pure profile. The aggregate audit checks
-5,380 theorem dependencies without admitted proofs or extra axioms.
+5,670 theorem dependencies without admitted proofs or extra axioms.
 
 ### Ordered global environments and affine canonical forms
 
@@ -4641,8 +4641,8 @@ The fresh-sentinel check also validates locals in a closed outer context. This
 remains resource projection semantics: authentic outer ownership contexts,
 Buffer typing, general call signatures, alias-sensitive Lend, native heap
 execution and machine counter bounds require further integration. Forty actual
-runtime-use observations retain full graphs and contexts; 31 agree exactly,
-seven expose stronger local checks and two retain explicit call gaps. Six
+runtime-use observations retain full graphs and contexts; 32 agree exactly,
+seven expose stronger local checks and one retains an unknown-callee gap. Six
 mutations verify the observation adapter.
 
 `NativeACU` and `NativeACUAffine` provide explicit associativity/commutativity/zero
@@ -4693,8 +4693,9 @@ earlier families, dependent Buffer fields and family/resource-valued globals.
 Its independent history and exact version-6 admission establish positive checked
 signatures, mode-derived body typing, quantities and concrete environment and
 formal-signature scope invariants. Ghost substitution and context conversion are proved for the current unified
-rules. Type uniqueness, contextual preservation, additional operators and
-consistency still require proofs.
+rules. Type uniqueness across both modes and contextual ghost preservation
+now follow from actual ACU forward reduction and injectivity. Additional
+operators, runtime substitution and consistency still require proofs.
 
 The completed ACU transport/parallel construction proves actual finite forward
 Church–Rosser for `ACU.Conv`, plus rigid/Pi/scalar/array/equality/refinement
@@ -4752,3 +4753,55 @@ checked-history regressions instantiate dependent constructors, weaken globals
 and substitute an index captured by an induction motive. These 48 audited
 theorems cover every current unified rule, including Back/Give/Take; they do not
 claim runtime substitution, full contextual preservation or consistency.
+
+The same current unified judgment now also has principal inversion and type
+uniqueness across code/ghost modes, with actual ACU injectivity. Its contextual
+ghost preservation covers the actual full `MixedRed` forward relation and the
+concrete bounded normalizer at the exact original type. Environment closure is
+derived from checked history. Dependent constructor arguments, proposition
+motives, converted context annotations and Load/Take continuations are included;
+forward rigid/lambda shape lemmas discharge the required syntax invariants.
+These results do not assert preservation under arbitrary symmetric raw equality.
+
+A separate authenticated environment-delta layer now derives closed/global-free
+stored bodies from mixed admission, proves renaming/substitution/idempotence,
+and combines global unfolding with ACU. Conversion is equivalent to a genuine
+finite forward join; actual forward confluence and Pi/sort injectivity follow.
+Its concrete bounded implementation precharges repeated stored bodies, retains
+failure and proves forward output, sound equality and node/depth bounds. A
+delta root preserves the original unified type using actual checked body
+typing. Full typing-checker migration to this environment-indexed conversion
+and contextual delta preservation remain open.
+
+The delta adapter compares 19 actual source programs and 22 exact-byte checks.
+It authenticates the version-6 checked prefix, original root and immutable arena
+prefix before comparing actual Core.normal output. A valid generic identity is
+retained as an explicit quantity-profile boundary; classifying abstract types
+or replaying unknown call signatures requires genuine representation context
+proofs. These comparisons remain regression evidence, not source refinement.
+
+Owned Fold/Loop, data Elim/Case/Drop and generic owned references now form one
+coherent extension of the same checker and ghost metatheory: 59 HasType
+constructors, Binder formation and five mutual judgments. Iteration retains
+its original bound and admits Buffer/boxed accumulators and native memory
+callbacks. Computed data branch telescopes include exact parameters, field
+scopes and recursive hypotheses, with genuine binding and motive congruence.
+The expanded judgment has typed ghost substitution, cross-mode uniqueness and
+full actual ACU forward/normalizer preservation at the original type.
+
+The joint native suites pass data 23/22 and owned iteration 28/26 source/byte
+checks, alongside existing Back, ownership, quantity and mixed-program tests.
+35 data, 24 owned-iteration and seven expanded-metatheory regressions pass in
+Lean. One ghost Drop equality still exposes the absent Drop computation; no
+iota or new proof irrelevance equation is assumed. Native heap/loan execution,
+unknown callees, abstract representation contexts and source refinement remain
+open. Generic closed-term algebra was extracted to `NativeClosedTerm`; delta
+conversion is now independent of environment typing, while the later
+`NativeEnvironmentDeltaChecked` module supplies authentic checked provenance.
+
+The actual-ACU plain-type separation proof excludes Buffer/Ref/Pi/Back and
+boxed-family heads through constructive arithmetic and forward invariants plus
+Church–Rosser. Its 28 audited declarations include seven regressions and an
+explicit reverse-beta plainness boundary. These raw Boolean facts do not imply
+typing preservation of arbitrary quotient representatives or supply abstract
+kind/typed-index realization; those remain separate obligations.

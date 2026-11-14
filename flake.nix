@@ -309,6 +309,7 @@
                 ./proofs/CheckNativeOwnership.lean
                 ./proofs/CheckNativeUnifiedProgram.lean
                 ./proofs/CheckNativeACUNormalizer.lean
+                ./proofs/CheckNativeDelta.lean
                 ./proofs/CheckNativeTransforms.lean
                 ./proofs/EmitNativeSchema.lean
                 ./proofs/EmitNativeWireNodes.lean
@@ -365,6 +366,7 @@
               Jihoo.NativeOwnershipAdmission \
               Jihoo.NativeUnifiedAdmission \
               Jihoo.NativeACUBoundedNormalizer \
+              Jihoo.NativeEnvironmentDeltaBounded \
               Jihoo.NativePartialRenaming \
               Jihoo.NativeCompositionMirCorrespondence \
               Jihoo.NativeCompositionMirSnapshot \
@@ -389,6 +391,9 @@
             python3 tests/core_native_unified_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_back_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_native_acu_normalizer_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_delta_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_data_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_owned_loop_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo

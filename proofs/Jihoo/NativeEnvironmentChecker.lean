@@ -64,6 +64,18 @@ def resourceNonFunctionHead : Term → Bool
 
 def takeNonFunctionHead (result : Term) : Bool := nonFunctionHead result || resourceNonFunctionHead result
 
+/-- Native binders(body,3) permits memory operations beneath the callback. -/
+def iterationBodyOK (env : Environment) (body : Term) : Bool :=
+  hasLeadingLambdas 3 body || iterationMemoryFree env body
+
+def ownedLoopMotiveOK (fuel : Nat) (env : Environment) (motive : Term) : Bool :=
+  match Conversion.normalize fuel motive with
+  | .lam _ _ body => ownedHead env body
+  | _ => false
+
+def iterationMotiveOK (fuel : Nat) (env : Environment) (proof : Bool) (motive : Term) : Bool :=
+  loopMotiveOK fuel proof motive || ownedLoopMotiveOK fuel env motive
+
 /-- Instantiate all constructor fields using only concrete recursive inference. -/
 def instantiate (inferField : Bool → Term → Option Term) (fuel : Nat) (ghost data : Bool) :
     Term → List Term → Option Term
@@ -93,6 +105,42 @@ def splitCases : Nat → List Term → Option (List Term × Term)
       let (branches, scrutinee) ← splitCases n children
       pure (branch :: branches, scrutinee)
   | _, _ => none
+
+/-- Check a list of computed branch types; no signature callback is accepted. -/
+def branchesAgainst (inferBranch : Term → Option Term) (fuel : Nat) :
+    List Term → List Term → Bool
+  | [], [] => true
+  | type :: types, branch :: branches =>
+      accepts fuel (inferBranch branch) type && branchesAgainst inferBranch fuel types branches
+  | _, _ => false
+
+def dataMotiveProof (inferred : Option Term) (fuel family params arity : Nat) (ps : List Term) : Option Bool :=
+  if accepts fuel inferred (dataMotiveType family params arity ps true) then some true
+  else if accepts fuel inferred (dataMotiveType family params arity ps false) then some false
+  else none
+
+/-- Concrete data elimination. The recursive inference argument is always the
+smaller-fuel call of infer; soundness discharges it from that induction. -/
+def dataEliminate (inferSub : Bool → Term → Option Term) (fuel : Nat)
+    (env : Environment) (ctx : Context) (ghost analysis : Bool)
+    (family count : Nat) (motive : Term) (children : List Term) : Option Term := do
+  let entry ← env.families[family]?
+  if entry.declaration.data = true ∧ (analysis = false ∨ entry.boxed = true) then
+    let (cases, scrutinee) ← splitCases count children
+    let .node (.ind g arity) indices ← expose fuel (inferSub true scrutinee) | none
+    if g = family ∧ arity = entry.declaration.arity ∧ indices.length = entry.declaration.arity then
+      let ps := indices.take entry.declaration.params
+      let proof ← dataMotiveProof (inferSub true motive) fuel family
+        entry.declaration.params entry.declaration.arity ps
+      let types ← dataCaseTypes family entry.declaration.params ctx.length entry.signatures ps motive
+        (entry.boxed && !analysis) proof
+      let result := Term.app (applications motive (indices.drop entry.declaration.params)) scrutinee
+      if accepts fuel (inferSub (ghost || proof) scrutinee) (.node (.ind family arity) indices) = true ∧
+          branchesAgainst (inferSub (ghost || proof)) fuel types cases = true ∧
+          ((ghost || proof) || takeNonFunctionHead (Conversion.normalize fuel result)) = true
+      then some result else none
+    else none
+  else none
 
 mutual
   def infer : Nat → Environment → Context → Bool → Term → Option Term
@@ -235,22 +283,28 @@ mutual
               | none => none
           | none => none
       | .fold n init body =>
-          if accepts fuel (infer fuel env ctx ghost n) .u64 = true ∧
-              accepts fuel (infer fuel env ctx ghost init) .i64 = true ∧
-              accepts fuel (infer fuel env ctx ghost body) (foldBodyType n) = true ∧
-              repeatPure body = true
-          then some .i64 else none
+          if accepts fuel (infer fuel env ctx ghost n) .u64 = true then
+            match expose fuel (infer fuel env ctx ghost init) with
+            | some .i64 =>
+                if accepts fuel (infer fuel env ctx ghost body) (foldBodyType n) = true ∧
+                    iterationBodyOK env body = true then some .i64 else none
+            | some accumulator =>
+                if ownedHead env accumulator = true ∧
+                    accepts fuel (infer fuel env ctx ghost body) (foldAccumulatorBodyType n accumulator) = true ∧
+                    iterationBodyOK env body = true then some accumulator else none
+            | none => none
+          else none
       | .loop n motive init body =>
           match expose fuel (infer fuel env ctx true motive) with
           | some (.pi false domain level) =>
               if Conversion.equal fuel domain .u64 then
                 match loopSort level with
                 | some proof =>
-                    if loopMotiveOK fuel proof motive then
+                    if iterationMotiveOK fuel env proof motive then
                       if accepts fuel (infer fuel env ctx (ghost || proof) n) .u64 = true ∧
                           accepts fuel (infer fuel env ctx (ghost || proof) init) (.app motive (.natural 0)) = true ∧
                           accepts fuel (infer fuel env ctx (ghost || proof) body) (loopBodyType n motive proof) = true ∧
-                          repeatPure body = true
+                          iterationBodyOK env body = true
                       then some (.app motive n) else none
                     else none
                 | none => none
@@ -295,7 +349,7 @@ mutual
                       | _ => none
                     else none
                 | none => none
-              else none
+              else dataEliminate (infer fuel env ctx) fuel env ctx ghost false f count motive children
           | none => none
       | .buffer n =>
           if accepts fuel (infer fuel env ctx true n) .u64 then some (.univ 0) else none
@@ -334,16 +388,16 @@ mutual
           | _ => none
       | .ref (.buffer n) =>
           if accepts fuel (infer fuel env ctx true n) .u64 then some (.univ 0) else none
-      | .borrow buffer =>
+      | .borrow owner =>
           if ghost = true then
-            match expose fuel (infer fuel env ctx true buffer) with
-            | some (.buffer n) => some (.ref (.buffer n))
+            match expose fuel (infer fuel env ctx true owner) with
+            | some T => if ownedHead env T then some (.ref T) else none
             | _ => none
           else none
       | .deref reference =>
           if ghost = true then
             match expose fuel (infer fuel env ctx true reference) with
-            | some (.ref (.buffer n)) => some (.buffer n)
+            | some (.ref T) => some T
             | _ => none
           else none
       | .back erased owner motive =>
@@ -379,6 +433,21 @@ mutual
                   else none
               | _ => none
           | _ => none
+      | .node (.drop family) [owner, rest] =>
+          match env.families[family]? with
+          | some entry =>
+              if entry.boxed then
+                match expose fuel (infer fuel env ctx ghost owner) with
+                | some (.node (.ind g _) _) => if g = family then infer fuel env ctx ghost rest else none
+                | _ => none
+              else none
+          | _ => none
+      | .ref owner =>
+          if accepts fuel (infer fuel env ctx true owner) (.univ 0) = true ∧
+              ownedHead env (Conversion.normalize fuel owner) = true
+          then some (.univ 0) else none
+      | .node (.caseOf family count) (motive :: children) =>
+          dataEliminate (infer fuel env ctx) fuel env ctx ghost true family count motive children
       | _ => none
 
   /-- Infer the domain sort and enforce Core.binder's pure binder policy. -/

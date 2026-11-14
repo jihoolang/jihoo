@@ -50,12 +50,15 @@ private theorem view (typed : HasType env ctx mode term type) : View env ctx mod
     (motive_2 := fun ctx mode term type _ => View env ctx mode term type)
     (motive_3 := fun _ _ _ _ _ _ _ => True)
     (motive_4 := fun _ _ _ _ _ => True)
+    (motive_5 := fun _ _ _ _ _ => True)
   all_goals intros
   all_goals first | trivial | skip
   case arith => exact .refl _
   case strict => exact ⟨_, by assumption, .refl _⟩
   case free => exact ⟨_, by assumption, .refl _⟩
   case foldI64 => exact ⟨_, by assumption, .refl _⟩
+  case foldOwned => exact ⟨_, by assumption, .refl _⟩
+  case dataElim => split <;> trivial
   case loop => exact ⟨_, by assumption, .refl _⟩
   case convert => exact View.convert (by assumption) (by assumption)
 

@@ -54,13 +54,28 @@ private theorem scoped_branch {depth : Nat} {op : Op} {a b yes no : Term}
               | zero => simpa [h3] using (Option.some.inj ht ▸ hn)
               | succ i => simp at ht
 
+private theorem dataCase_scoped (analysis : Bool) (family depth : Nat)
+    (motive scrutinee : Term) (cases : List Term)
+    (hm : motive.Scoped depth) (hs : scrutinee.Scoped depth)
+    (hc : ∀ branch ∈ cases, branch.Scoped depth) :
+    (Term.node (if analysis then .caseOf family cases.length else .elim family cases.length)
+      (motive :: (cases ++ [scrutinee]))).Scoped depth := by
+  cases analysis <;> apply scoped_node (by intro i; rfl)
+  all_goals intro a member
+  all_goals rcases List.mem_cons.mp member with rfl | member
+  all_goals first | exact hm | skip
+  all_goals rcases List.mem_append.mp member with member | member
+  all_goals first | exact hc _ member | (obtain rfl := List.mem_singleton.mp member; exact hs)
+
 theorem HasType.term_scoped (h : HasType env ctx mode t T) : t.Scoped ctx.length := by
   apply HasType.rec (t := h)
     (motive_1 := fun ctx _ A _ _ => A.Scoped ctx.length)
     (motive_2 := fun ctx _ t _ _ => t.Scoped ctx.length)
     (motive_3 := fun ctx _ _ _ xs _ _ => ∀ x ∈ xs, x.Scoped ctx.length)
     (motive_4 := fun ctx _ _ xs _ => ∀ x ∈ xs, x.Scoped ctx.length)
+    (motive_5 := fun ctx _ _ xs _ => ∀ x ∈ xs, x.Scoped ctx.length)
   all_goals intros
+  all_goals try (apply dataCase_scoped <;> assumption)
   all_goals first
     | assumption
     | solve | apply Term.Scoped.var; exact lookup_bound (by assumption)

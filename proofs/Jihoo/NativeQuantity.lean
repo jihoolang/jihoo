@@ -112,16 +112,23 @@ def splitSpine : Nat → Term → List Term → Option (Term × List Term)
 
 /-- Each consumed lambda contributes one scope. Runtime arguments stay outside
 all scopes and are visited exactly once; erased arguments contribute no events. -/
-def peelCall : Nat → List Bool → Term → List Term → Option CallPlan
-  | 0, _, _, _ => none
-  | _ + 1, locals, body, [] =>
-      if callResult locals body then some ⟨[], [], body⟩ else none
-  | fuel + 1, locals, .node (.lam erased) [domain, body], a :: args => do
+def peelCallAux : Nat → List Bool → Bool → Term → List Term → Option CallPlan
+  | 0, _, _, _, _ => none
+  | _ + 1, locals, linearSeen, body, [] =>
+      if callResult locals body || !linearSeen
+      then some ⟨[], [], body⟩ else none
+  | fuel + 1, locals, linearSeen, .node (.lam erased) [domain, body], a :: args => do
       let mode ← binderMode erased domain
-      let rest ← peelCall fuel (domainNonFunction domain :: locals) body args
+      let rest ← peelCallAux fuel (domainNonFunction domain :: locals)
+        (linearSeen || mode == .linear) body args
       pure ⟨mode :: rest.modes,
         (if erased then rest.runtimeArgs else a :: rest.runtimeArgs), rest.body⟩
-  | _ + 1, _, _, _ :: _ => none
+  | _ + 1, _, _, _, _ :: _ => none
+
+/-- Native partial calls may return any value after only non-linear runtime
+arguments. An owned argument still requires a known nonfunction result. -/
+def peelCall (fuel : Nat) (locals : List Bool) (head : Term) (args : List Term) : Option CallPlan :=
+  peelCallAux fuel locals false head args
 
 def finishCall (f : Term → Option Control) (p : CallPlan) : Option Control := do
   let arguments ← p.runtimeArgs.mapM f

@@ -1,0 +1,38 @@
+// One checked source program and before/after arenas from actual Core.normal.
+import core
+import core_parse
+import core_snapshot
+import core_native_snapshot
+
+fn run(source: str) -> Result((), String) {
+    var c = match core_parse.parse(source, 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    if c.definitions.len() == 0 { return Err("expected a final definition".to_string()) }
+    let root = c.definitions[c.definitions.len() - 1].value
+    let program = core_native_snapshot.family_program_arena(c)
+    let before = core_native_snapshot.arena(c, true, root, root)
+    let result = match c.normal(root, core.DEPTH) {
+        Ok(result) => result
+        Err(e) => return Err(e.msg.clone())
+    }
+    print(program)
+    print("\t")
+    print(before)
+    print("\t")
+    println(core_native_snapshot.arena(c, true, root, result))
+    Ok(())
+}
+
+fn main() -> i32 {
+    let source = match core_snapshot.stdin_once() {
+        Ok(source) => source
+        Err(message) => { eprintln(message); return 1 }
+    }
+    match run(source.as_str()) {
+        Ok(_) => 0
+        Err(message) => { eprintln(message); 1 }
+    }
+}

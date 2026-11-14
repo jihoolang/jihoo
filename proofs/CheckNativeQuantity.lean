@@ -67,9 +67,9 @@ def main (args : List String) : IO UInt32 := do
       if policy = "equal" then agreements := agreements + 1
       else if policy = "local-gap" then locals := locals + 1
       else unsupported := unsupported + 1
-    unless agreements = 31 ∧ locals = 7 ∧ unsupported = 2 do
+    unless agreements = 32 ∧ locals = 7 ∧ unsupported = 1 do
       throw (IO.userError "quantity coverage classification changed")
-    IO.println "native quantity: 31 count/rejection agreements, 7 stricter local scope checks, 2 explicit call gaps"
+    IO.println "native quantity: 32 count/rejection agreements, 7 stricter local scope checks, 1 explicit call gap"
     return 0
   catch error =>
     IO.eprintln s!"native quantity correspondence rejected: {error}"

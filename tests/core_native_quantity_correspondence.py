@@ -42,7 +42,7 @@ def run(compiler, checker, output):
         require((result.returncode == 0) == accepted,
                 f'{name}: unexpected quantity comparison: {result.stderr.decode(errors="replace")}')
         if accepted:
-            require(result.stdout == b'native quantity: 31 count/rejection agreements, 7 stricter local scope checks, 2 explicit call gaps\n',
+            require(result.stdout == b'native quantity: 32 count/rejection agreements, 7 stricter local scope checks, 1 explicit call gap\n',
                     'missing quantity comparison acknowledgement')
         return {'case': name, 'origin': 'actual Core.runtime_uses' if accepted else 'synthetic',
                 'admission': 'accept' if accepted else 'reject',

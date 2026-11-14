@@ -193,10 +193,14 @@ Actual native snapshots and all constructor encodings
 are tested against these definitions. Ordered checked globals and recomputed
 inductive signatures are bound to exact whole-program graph bytes. The unified
 environment checker adds dependent constructors, proposition elimination,
-Buffer/ref operations and Back/Give/Take, with code quantities derived from
+Buffer/ref operations, Back/Give/Take, owned iteration and data elimination
+with Case/Drop, with code quantities derived from
 checked type and family metadata. It uses the proved bounded full-term ACU
 converter, whose actual forward reduction has Church–Rosser and injectivity.
-The remaining operators, generalized preservation/consistency, native source
+The same judgment has ghost substitution, type uniqueness and contextual
+ghost preservation at the original type. Checked-environment delta expansion
+also has forward confluence and a bounded comparator; its typing-checker
+integration remains open. Further operators, consistency, native source
 refinement and runtime heap/loan correspondence remain open.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.

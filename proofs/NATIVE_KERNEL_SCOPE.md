@@ -228,8 +228,9 @@ snapshots, hashes and labelled synthetic mutations. Its native cases include
 universes, high impredicative Prop, polymorphism in both modes, erased indices,
 transport/refinement projections, evidence-binding branches, absurdity,
 arithmetic evidence, scalar iteration, refinement iteration and Nat induction.
-There are 89 source fixtures and 31 additional checks. Owned accumulators and
-effectful iteration bodies remain explicit admitted-native/rejected-Lean fixtures.
+There are 89 source fixtures and 31 additional checks. This legacy pure path
+retains owned/effectful-iteration gaps; the unified gate below now checks those
+forms with authentic representation and quantity conditions.
 Native code rejection of erased proof variables is also checked.
 
 The production shift/substitute/rewrite routines are also exercised directly
@@ -249,8 +250,8 @@ wrong results, prefix changes, unsupported atoms and incomplete coverage.
 
 The family suite checks 20 actual source programs and 18 labelled mutations.
 Quantity observations retain each complete arena, context references/erasure
-flags and queried variable: 31 count/rejection agreements, seven deliberately
-stricter invalid-local-scope checks and two explicit call boundaries. Six
+flags and queried variable: 32 count/rejection agreements, seven deliberately
+stricter invalid-local-scope checks and one unknown-callee boundary. Six
 mutations test its comparison adapter. Bare native runtime_uses does not itself
 validate all local scopes, so the stricter cases are not equivalence claims.
 
@@ -264,10 +265,11 @@ are discharged, rather than replaced with more passing fixtures:
    preservation of mode and representation restrictions.
 2. A consistency/normalization argument for the universe-aware judgment, beyond
    forward reachability of a bounded untyped simplifier.
-3. The remaining typing/computation rules: owned/effectful folds and loops,
-   native opaque-global behavior, data elimination, Case/View/Drop and Lend.
-   Checked family environments, dependent constructors, proposition elimination,
-   Buffer/ref and Back/Give/Take already share the unified judgment.
+3. The remaining typing rules: View, Lend and active-loan runtime Borrow,
+   together with exact native opaque-global behavior. Owned/effectful iteration,
+   checked families, dependent constructors, proposition/data elimination,
+   Case/Drop, owned Ref and Back/Give/Take already share the unified judgment.
+   Their remaining native computation equations still require integration.
 4. Runtime ownership, quantities, borrow/continuation boundaries and first-order
    representation, connected to the same complete native judgment. Existing
    restricted resource proofs do not automatically supply this connection.
@@ -299,6 +301,9 @@ scripts/proof-limits.sh python3 tests/core_native_ownership_correspondence.py --
 scripts/proof-limits.sh python3 tests/core_native_unified_correspondence.py --output out/native-unified-correspondence
 scripts/proof-limits.sh python3 tests/core_native_back_correspondence.py --output out/native-back-correspondence
 scripts/proof-limits.sh python3 tests/core_native_acu_normalizer_correspondence.py --output out/native-acu-normalizer-correspondence
+scripts/proof-limits.sh python3 tests/core_native_delta_correspondence.py --output out/native-delta-correspondence
+scripts/proof-limits.sh python3 tests/core_native_data_correspondence.py --output out/native-data-correspondence
+scripts/proof-limits.sh python3 tests/core_native_owned_loop_correspondence.py --output out/native-owned-loop-correspondence
 ```
 
 The aggregate imports the native modules and examples; every public theorem is
@@ -330,9 +335,9 @@ remove the earlier pure-prefix restriction. Ordinary fields, earlier families,
 dependent Buffer fields and family/resource-valued globals use the same unified
 checker. Independent history, recomputed positivity/parameters/layout, exact
 bytes, authenticated resource projection and environment/formal-signature scope
-invariants are proved. The native loan/case/view/drop operators and unified contextual
-preservation/type uniqueness remain completion work; ghost substitution is proved
-for every rule in this checkpoint.
+invariants are proved. Native View/Lend/active-loan rules, runtime substitution
+and universe consistency remain completion work. Ghost substitution, type uniqueness and exact-original-type forward
+preservation are proved for every rule in this checkpoint.
 The integrated source suite checks 49 mixed programs and 41 exact-byte checks,
 including dependent Buffer fields, earlier flat/boxed families, constructor-valued
 globals, resource leaks/duplication and malformed unused graph nodes.
@@ -359,7 +364,7 @@ pure judgment is proved without casting code policies from a smaller conversion
 relation. Back/Give/Take include owned and erased results, dependent motives,
 checked two-binder result removal and metadata-derived ownership. Their suite
 checks 37 actual source fixtures and 28 exact-byte checks. The aggregate axiom
-audit currently covers 5,380 declarations using only Lean's standard logical
+audit currently covers 5,670 declarations using only Lean's standard logical
 axioms, with warnings treated as errors.
 
 `NativeEnvironmentOperationalRoots` proves original-type ghost preservation for
@@ -372,12 +377,73 @@ open. The three new source fixtures bring actual Core preservation regressions
 to 21, including both signed bounds, overflow and unused trapping loop bodies.
 
 `NativeEnvironmentGhostMetatheory` and `NativeEnvironmentContextConversion`
-now establish mode promotion, typed ghost renaming/weakening, simultaneous
-substitution, dependent instantiation and context conversion for all 54 rules
-of the current unified judgment. The required environment premise contains
+establish mode promotion, typed ghost renaming/weakening, simultaneous
+substitution, dependent instantiation and context conversion for the current
+unified judgment, now comprising 59 HasType constructors plus Binder formation
+and five mutual judgments. The required environment premise contains
 closed global types and scoped formal constructor signatures; mixed checked
 history proves that premise. It is not an arbitrary well-formed-environment
 assumption supplied by a certificate. Binding algebra covers captured motives,
 recursive proposition cases and two-binder Load/Take removal. These are ghost
-results; unconditional runtime substitution and full contextual preservation
-remain separate obligations.
+results; runtime substitution remains a separate obligation. Full contextual
+ghost preservation for the current ACU relation is supplied below.
+
+`NativeEnvironmentInversion`, `NativeEnvironmentTypeUniqueness` and
+`NativeEnvironmentContextualPreservation` now establish principal inversion,
+cross-mode type uniqueness and exact-original-type ghost preservation for every
+current unified rule under actual full ACU conversion. The forward theorem
+covers the actual `MixedRed` relation and concrete bounded normalizer, with
+environment closure supplied by checked history. It handles dependent
+constructor fields, captured proposition motives, Ref/Buffer shapes and the
+actual leading-lambda shape of Take. No preservation under arbitrary symmetric
+untyped conversion is assumed.
+
+`NativeEnvironmentDelta` derives closed/global-free interpreted entries from
+the same mixed history and proves binding-natural, idempotent global expansion.
+`NativeEnvironmentDeltaConversion` combines it with actual ACU: delta and node
+congruence, substitution, Pi/sort injectivity, genuine finite forward confluence
+and conversion iff forward join. `NativeEnvironmentDeltaBounded` precharges
+repeated bodies against a shared allowance before ACU normalization, propagates
+unknown/malformed-global and budget failure, and proves exact forward results,
+sound comparison and output bounds. The delta root preserves the original type
+in the existing unified judgment using its actual stored body typing.
+Installation of this environment-indexed conversion into all typing/checker
+slots and full contextual delta preservation are still required.
+
+The delta source suite checks 19 actual programs and 22 exact-byte comparisons
+and mutations, binding checked version-6 metadata and before/after arenas to the
+same original root and unchanged prefix. It retains a genuine native-accepted
+generic-quantity gap: authentic abstract kind/representation contexts and
+unknown-callee signature replay are still needed. Parser/export/IO execution
+refinement, all native equations and universe consistency remain open.
+
+Owned Fold/Loop, data Elim/Case/Drop and generic owned Ref/Borrow/Deref now
+extend that same checker and all its ghost metatheory. The exact iteration
+telescope retains the original bound; Buffer and boxed accumulators permit
+memory under their three leading callback lambdas. Other function expressions
+retain the native effect gate. Data branches are generated from checked
+parameters, fields, recursive hypotheses and actual motive; positivity,
+scoping and binding/motive naturality are proved. The five mutual judgments
+have cross-mode uniqueness and original-type forward normalization preservation.
+Case quantities enforce equal branch use and zero recursive outer captures;
+closed admission computes metadata and normalizes binder annotations itself.
+
+The joint tests pass 23 native data programs/22 byte checks, 28 owned iteration
+programs/26 byte checks, and all prior Back/ownership/mixed-program regressions.
+Thirty-five data, 24 iteration and seven expanded-metatheory Lean regressions
+also pass. An accepted ghost Drop equality remains an explicit rejected-model
+boundary because Drop computation has not been inserted into ACU. Existing
+proved Borrow/Deref inverse equations are retained. These results do not prove
+native heap execution, active-loan semantics or machine counter fidelity.
+
+`NativeClosedTerm` now supplies generic closed-term algebra independently of
+typing. Delta algebra/conversion/bounded search use only that lower layer;
+`NativeEnvironmentDeltaChecked` authenticates it from mixed history afterward.
+This keeps future installation of delta into typing free of import cycles.
+
+`NativeEnvironmentPlainSeparation` proves that an actually plain type cannot
+convert under the current ACU theory to Buffer, Ref, Pi, Back or a boxed family.
+The proof uses raw Boolean forward invariants and genuine Church–Rosser; it
+does not assume symmetric preservation of plainness or typing. Seven regressions
+include the explicit failure of reverse-beta plainness invariance. Authentic
+abstract kinds and typed-index representation interpretations remain work.

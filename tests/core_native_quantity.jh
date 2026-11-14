@@ -155,7 +155,7 @@ fn run() -> Result((), String) {
     let copiedOwner = add(&c, core.Term.Lam(false, buf, copied))?
     let copiedCall = add(&c, core.Term.App(copiedOwner, v0))?
     emit(&c, "known-call-invalid-linear-duplicate", "local-gap", copiedCall, 0, ctx)
-    emit(&c, "partial-call-without-owned-use", "unsupported", addFirst, 0, ctx)
+    emit(&c, "partial-call-without-owned-use", "equal", addFirst, 0, ctx)
     let partial = duplicateFirst
     emit(&c, "partial-call-owned-capture", "equal", partial, 0, ctx)
     let nestedCall = add(&c, core.Term.App(scalarId, scalarCall))?

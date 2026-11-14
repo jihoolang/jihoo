@@ -2,6 +2,8 @@ import Jihoo.NativeTyping
 import Jihoo.NativeKernelEnvironment
 import Jihoo.NativeResourceSyntax
 import Jihoo.NativeBackSyntax
+import Jihoo.NativeIterationMemory
+import Jihoo.NativeDataSyntax
 import Jihoo.NativeEnvironmentConversion
 
 /-! Environment-indexed native typing. All pure rules recurse through this
@@ -78,22 +80,22 @@ def BackRepresentation (env : Environment) (ghost erased : Bool) (motive : Term)
     ∃ flag domain body, Conversion.Conv motive (.lam flag domain body) ∧
       fixedRepresentation env body = true
 
-/-- Apply a motive to its indices in declaration order. -/
-def applications (f : Term) (xs : List Term) : Term := xs.foldl Term.app f
+/-- A repeated expression is either a full native callback telescope or
+certifiably memory-free. Ghost substitution has no runtime repetition duties. -/
+def IterationBodyAllowed (env : Environment) (ghost : Bool) (body : Term) : Prop :=
+  ghost = true ∨ hasLeadingLambdas 3 body = true ∨ iterationMemoryFree env body = true
 
-/-- Rebuild the checked, global-expanded constructor telescope. -/
-def signatureTerm (family : Nat) (signature : Signature) : Term :=
-  signature.fields.foldr (fun field rest => .pi field.erased field.domain rest)
-    (.node (.ind family signature.result.length) signature.result)
+/-- Runtime motives have a scalar/refinement or an owned representation at
+every index. Proposition induction and ghost derivations remain unrestricted. -/
+def IterationMotiveAllowed (env : Environment) (ghost proof : Bool) (motive : Term) : Prop :=
+  ghost = true ∨ proof = true ∨
+    (∃ normal, Conversion.Conv motive normal ∧ scalarLoopMotive normal = true) ∨
+    ∃ flag domain body, Conversion.Conv motive (.lam flag domain body) ∧ Owned env body
 
 /-- The exact U64-indexed, proposition-valued native induction motive. -/
 def propMotiveType : Nat → Term
   | 0 => .prop
   | n + 1 => .pi false .u64 (propMotiveType n)
-
-/-- Recursive fields retain their position in the dependent field telescope. -/
-def recursiveFields (fields : List Field) : List (Nat × List Term) :=
-  fields.zipIdx.filterMap fun (field, j) => field.recursive.map fun xs => (j, xs)
 
 /-- Core.case_type: fields, erased recursive hypotheses, then P(result).
 Every shift is relative to the field/hypothesis scope of the stored signature. -/
@@ -178,14 +180,18 @@ mutual
     | absurd {s : SortTag} : HasType env ctx true T s.term → HasType env ctx true p (.lt i (.natural 0)) →
         absurdAllowed ghost T → HasType env ctx ghost (.absurd T p) T
     | foldI64 : HasType env ctx ghost n .u64 → HasType env ctx ghost init .i64 →
-        HasType env ctx ghost body (foldBodyType n) → loopBodyAllowed ghost body →
+        HasType env ctx ghost body (foldBodyType n) → IterationBodyAllowed env ghost body →
         HasType env ctx ghost (.fold n init body) .i64
+    | foldOwned : HasType env ctx ghost n .u64 → HasType env ctx ghost init accumulator →
+        Owned env accumulator → HasType env ctx ghost body (foldAccumulatorBodyType n accumulator) →
+        IterationBodyAllowed env ghost body →
+        HasType env ctx ghost (.fold n init body) accumulator
     | loop : HasType env ctx true motive (.pi false .u64 (loopSortTerm proof)) →
-        loopMotiveAllowed ghost proof motive →
+        IterationMotiveAllowed env ghost proof motive →
         HasType env ctx (ghost || proof) n .u64 →
         HasType env ctx (ghost || proof) init (.app motive (.natural 0)) →
         HasType env ctx (ghost || proof) body (loopBodyType n motive proof) →
-        loopBodyAllowed (ghost || proof) body →
+        IterationBodyAllowed env (ghost || proof) body →
         HasType env ctx ghost (.loop n motive init body) (.app motive n)
     | global : env.globals[g]? = some declaration →
         HasType env ctx ghost (.node (.global g) [])
@@ -245,6 +251,32 @@ mutual
         Conversion.Conv result normal → PartialRenaming.shift (-2) 0 normal = some outside →
         continuationAllowed ghost outside →
         HasType env ctx ghost (.take value (.lam false declaredOwner (.lam erased declaredResult body))) outside
+    | dataElim : env.families[family]? = some entry → entry.declaration.data = true →
+        (analysis = true → entry.boxed = true) →
+        indices.length = entry.declaration.arity →
+        HasType env ctx true motive (dataMotiveType family entry.declaration.params
+          entry.declaration.arity (indices.take entry.declaration.params) proof) →
+        HasType env ctx (ghost || proof) scrutinee
+          (.node (.ind family entry.declaration.arity) indices) →
+        dataCaseTypes family entry.declaration.params ctx.length entry.signatures
+          (indices.take entry.declaration.params) motive (entry.boxed && !analysis) proof = some types →
+        BranchTypes env ctx (ghost || proof) types cases →
+        continuationAllowed (ghost || proof)
+          (.app (applications motive (indices.drop entry.declaration.params)) scrutinee) →
+        HasType env ctx ghost
+          (.node (if analysis then .caseOf family cases.length else .elim family cases.length)
+            (motive :: (cases ++ [scrutinee])))
+          (.app (applications motive (indices.drop entry.declaration.params)) scrutinee)
+    | drop : env.families[family]? = some entry → entry.boxed = true →
+        HasType env ctx ghost owner (.node (.ind family count) indices) →
+        HasType env ctx ghost rest T →
+        HasType env ctx ghost (.node (.drop family) [owner, rest]) T
+    | refOwned : HasType env ctx true owner (.univ 0) → Owned env owner →
+        HasType env ctx ghost (.ref owner) (.univ 0)
+    | ghostBorrowOwned : HasType env ctx true owner T → Owned env T →
+        HasType env ctx true (.borrow owner) (.ref T)
+    | ghostDerefOwned : HasType env ctx true reference (.ref T) →
+        HasType env ctx true (.deref reference) T
     | convert : HasType env ctx ghost t A → Conversion.Conv A B → HasType env ctx ghost t B
 
   /-- Constructor fields instantiate an actual dependent Pi telescope. -/
@@ -264,6 +296,12 @@ mutual
     | cons : HasType env ctx true branch (propCaseType signature motive) →
         Cases env ctx motive signatures branches →
         Cases env ctx motive (signature :: signatures) (branch :: branches)
+  /-- Branch terms are checked against the concrete generated telescope list. -/
+  inductive BranchTypes (env : Environment) : Context → Bool → List Term → List Term → Prop where
+    | nil : BranchTypes env ctx ghost [] []
+    | cons : HasType env ctx ghost branch type → BranchTypes env ctx ghost types branches →
+        BranchTypes env ctx ghost (type :: types) (branch :: branches)
+
 end
 
 /-- Every legacy pure derivation has a constructive ghost embedding. Runtime

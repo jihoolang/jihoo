@@ -1,8 +1,9 @@
 import Jihoo.NativeConversion
 
 /-! An independent explicit ACU extension of the existing native conversion.
-This relation is not installed in the shared typing judgment or executable
-checker. Its full confluence and rigid injectivity require separate proofs. -/
+The environment-indexed typing judgment uses this actual relation. Full
+confluence and rigid injectivity are established by the subsequent parallel
+and forward-confluence modules. -/
 namespace Jihoo.NativeKernel.ACU
 
 open Conversion (ListRel)

@@ -156,42 +156,51 @@ theorem splitSpine_rename (fuel : Nat) (head : Term) (args : List Term) (ρ : Na
 def CallPlan.renameAt (depth : Nat) (ρ : Nat → Nat) (p : CallPlan) : CallPlan :=
   ⟨p.modes, p.runtimeArgs.map (Term.rename ρ), p.body.rename (liftRenaming (p.modes.length + depth) ρ)⟩
 
-theorem peelCall_rename (fuel : Nat) (locals : List Bool) (head : Term)
+theorem peelCallAux_rename (fuel : Nat) (locals : List Bool) (linearSeen : Bool) (head : Term)
     (args : List Term) (ρ : Nat → Nat) :
-    peelCall fuel locals (head.rename (liftRenaming locals.length ρ))
+    peelCallAux fuel locals linearSeen (head.rename (liftRenaming locals.length ρ))
         (args.map (Term.rename ρ)) =
-      (peelCall fuel locals head args).map (CallPlan.renameAt locals.length ρ) := by
-  induction fuel generalizing locals head args ρ with
+      (peelCallAux fuel locals linearSeen head args).map (CallPlan.renameAt locals.length ρ) := by
+  induction fuel generalizing locals linearSeen head args ρ with
   | zero => rfl
   | succ fuel ih =>
     cases args with
     | nil =>
-        simp only [List.map_nil, peelCall, callResult_rename]
+        simp only [List.map_nil, peelCallAux, callResult_rename]
         split <;> simp [CallPlan.renameAt]
     | cons a args =>
       cases head with
-      | var x => simp [Term.rename, peelCall]
+      | var x => simp [Term.rename, peelCallAux]
       | node op children =>
         cases op <;> cases children with
-        | nil => simp [Term.rename, renameArgs, peelCall]
+        | nil => simp [Term.rename, renameArgs, peelCallAux]
         | cons domain tail =>
           cases tail with
-          | nil => simp [Term.rename, renameArgs, peelCall]
+          | nil => simp [Term.rename, renameArgs, peelCallAux]
           | cons body rest =>
             cases rest <;> simp only [Term.rename, renameArgs, List.map_cons, Op.binders,
-              liftRenaming, peelCall]
+              liftRenaming, peelCallAux]
             all_goals first
             | rfl
             | (
               rename_i erased
               rw [binderMode_rename, domainNonFunction_rename]
-              have hr := ih (domainNonFunction domain :: locals) body args ρ
-              simp only [List.length_cons, liftRenaming] at hr
-              rw [hr]
-              cases binderMode erased domain <;>
-                cases peelCall fuel (domainNonFunction domain :: locals) body args <;>
-                cases erased <;>
-                simp [CallPlan.renameAt, Nat.add_comm, Nat.add_left_comm])
+              cases hd : binderMode erased domain with
+              | none => rfl
+              | some mode =>
+                dsimp only [bind, pure, Option.bind]
+                have hr := ih (domainNonFunction domain :: locals) (linearSeen || mode == .linear) body args ρ
+                simp only [List.length_cons, liftRenaming] at hr
+                rw [hr]
+                cases peelCallAux fuel (domainNonFunction domain :: locals) (linearSeen || mode == .linear) body args <;>
+                  cases erased <;> simp [CallPlan.renameAt, Nat.add_comm, Nat.add_left_comm])
+
+theorem peelCall_rename (fuel : Nat) (locals : List Bool) (head : Term)
+    (args : List Term) (ρ : Nat → Nat) :
+    peelCall fuel locals (head.rename (liftRenaming locals.length ρ))
+        (args.map (Term.rename ρ)) =
+      (peelCall fuel locals head args).map (CallPlan.renameAt locals.length ρ) := by
+  exact peelCallAux_rename fuel locals false head args ρ
 
 theorem sequence_rename (cs : List Control) (ρ : Nat → Nat) :
     sequence (cs.map (Control.rename ρ)) = (sequence cs).rename ρ := by

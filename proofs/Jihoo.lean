@@ -503,3 +503,59 @@ import Jihoo.NativeEnvironmentGhostMetatheory
 import Jihoo.NativeEnvironmentContextConversion
 
 import Jihoo.NativeEnvironmentGhostMetatheoryExamples
+
+import Jihoo.NativeEnvironmentInversion
+
+import Jihoo.NativeEnvironmentUniquenessAlgebra
+
+import Jihoo.NativeEnvironmentTypeUniqueness
+
+import Jihoo.NativeEnvironmentRootPreservation
+
+import Jihoo.NativeEnvironmentTypeUniquenessExamples
+
+import Jihoo.NativeEnvironmentContextualPreservation
+
+import Jihoo.NativeEnvironmentContextualPreservationExamples
+
+import Jihoo.NativeEnvironmentDelta
+
+import Jihoo.NativeEnvironmentDeltaConversion
+
+import Jihoo.NativeEnvironmentDeltaBounded
+
+import Jihoo.NativeEnvironmentDeltaTyping
+
+import Jihoo.NativeEnvironmentDeltaExamples
+
+import Jihoo.NativeOwnedLoopExamples
+
+import Jihoo.NativeOwnedLoopQuantity
+
+import Jihoo.NativeOwnedLoopMetatheory
+
+import Jihoo.NativeIterationMemory
+
+import Jihoo.NativeOwnedLoopSyntax
+
+import Jihoo.NativeEnvironmentCaseQuantity
+
+import Jihoo.NativeDataExamples
+
+import Jihoo.NativeDataMotiveCongruence
+
+import Jihoo.NativeDataBindingAlgebra
+
+import Jihoo.NativeDataSyntax
+
+import Jihoo.NativeEnvironmentBranchMetatheory
+
+import Jihoo.NativeEnvironmentDataMetatheoryExamples
+
+import Jihoo.NativeClosedTerm
+
+import Jihoo.NativeEnvironmentDeltaChecked
+
+import Jihoo.NativeEnvironmentPlainExamples
+
+import Jihoo.NativeEnvironmentPlainSeparation
