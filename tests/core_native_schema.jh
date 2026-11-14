@@ -1,0 +1,396 @@
+// Exhaustive serializer fixture: no typing assumptions on these individual nodes.
+import core
+import core_native_snapshot
+
+fn refs(count: i64) -> Vec(u32) {
+    var out = Vec(u32).new()
+    for i in 0..count { out.push(0) }
+    out
+}
+
+fn emit(count: i64) {
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Var(0))
+        print(count)
+        print("\tVar\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Global(0))
+        print(count)
+        print("\tGlobal\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Universe(0))
+        print(count)
+        print("\tUniverse\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Prop)
+        print(count)
+        print("\tProp\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.U64)
+        print(count)
+        print("\tU64\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.I64)
+        print(count)
+        print("\tI64\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Array(0))
+        print(count)
+        print("\tArray\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Lt(0, 0))
+        print(count)
+        print("\tLt\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Eq(0, 0))
+        print(count)
+        print("\tEq\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Refl(0))
+        print(count)
+        print("\tRefl\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Transport(0, 0, 0))
+        print(count)
+        print("\tTransport\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Ind(0, refs(count)))
+        print(count)
+        print("\tInd\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Con(0, 0, refs(count)))
+        print(count)
+        print("\tCon\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Elim(0, 0, refs(count), 0))
+        print(count)
+        print("\tElim\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Arith(core.Arith.Add, 0, 0))
+        print(count)
+        print("\tArith\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Fold(0, 0, 0))
+        print(count)
+        print("\tFold\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Strict(0, 0))
+        print(count)
+        print("\tStrict\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.UAdd(0, 0))
+        print(count)
+        print("\tUAdd\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.LtAdd(0, 0, 0, 0))
+        print(count)
+        print("\tLtAdd\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.LtCancel(0, 0, 0, 0))
+        print(count)
+        print("\tLtCancel\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.LtLe(0, 0, 0, 0, 0))
+        print(count)
+        print("\tLtLe\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.USub(0, 0, 0))
+        print(count)
+        print("\tUSub\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.ZeroLe(0))
+        print(count)
+        print("\tZeroLe\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Refine(0))
+        print(count)
+        print("\tRefine\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Pack(0, 0, 0))
+        print(count)
+        print("\tPack\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Witness(0))
+        print(count)
+        print("\tWitness\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Proof(0))
+        print(count)
+        print("\tProof\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Buffer(0))
+        print(count)
+        print("\tBuffer\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Alloc(0, 0))
+        print(count)
+        print("\tAlloc\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Load(0, 0, 0, 0))
+        print(count)
+        print("\tLoad\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Store(0, 0, 0, 0))
+        print(count)
+        print("\tStore\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Free(0, 0))
+        print(count)
+        print("\tFree\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Drop(0, 0, 0))
+        print(count)
+        print("\tDrop\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Ref(0))
+        print(count)
+        print("\tRef\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Lend(0, 0, 0))
+        print(count)
+        print("\tLend\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Back(false, 0, 0))
+        print(count)
+        print("\tBack\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Give(false, 0, 0, 0))
+        print(count)
+        print("\tGive\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Take(0, 0))
+        print(count)
+        print("\tTake\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Borrow(0))
+        print(count)
+        print("\tBorrow\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Deref(0))
+        print(count)
+        print("\tDeref\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.View(false, 0, 0, refs(count), 0))
+        print(count)
+        print("\tView\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Loop(0, 0, 0, 0))
+        print(count)
+        print("\tLoop\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Absurd(0, 0))
+        print(count)
+        print("\tAbsurd\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Case(0, 0, refs(count), 0))
+        print(count)
+        print("\tCase\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Pi(false, 0, 0))
+        print(count)
+        print("\tPi\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Lam(false, 0, 0))
+        print(count)
+        print("\tLam\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.App(0, 0))
+        print(count)
+        print("\tApp\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Natural(0))
+        print(count)
+        print("\tNatural\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Integer(0))
+        print(count)
+        print("\tInteger\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Elements(refs(count)))
+        print(count)
+        print("\tElements\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Index(0, 0, 0))
+        print(count)
+        print("\tIndex\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.Decide(0, 0))
+        print(count)
+        print("\tDecide\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.IfLt(0, 0, 0, 0))
+        print(count)
+        print("\tIfLt\t")
+        println(out)
+    }
+    {
+        var out = String.new()
+        core_native_snapshot.write_node(&out, core.Term.IfEq(0, 0, 0, 0))
+        print(count)
+        print("\tIfEq\t")
+        println(out)
+    }
+}
+
+fn main() {
+    emit(0)
+    emit(1)
+    emit(3)
+}

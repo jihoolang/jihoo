@@ -181,6 +181,13 @@ Lean proofs establish acceptance soundness, forward computation and type
 preservation of its normalizer, and declarative type uniqueness modulo
 conversion. Certificate-free snapshot admission binds these guarantees to exact
 canonical graph bytes and derives closed literal-evidence consistency.
+A [native-syntax formalization](proofs/NATIVE_KERNEL_SCOPE.md) represents all
+54 production kernel constructors, with full binder/substitution and append-only
+arena proofs. Its executable checker adds universes, ghost/code modes,
+polymorphism, arithmetic evidence, transport and refinements, with proved
+acceptance soundness. Actual native snapshots and all constructor encodings
+are tested against these definitions. Full native implementation refinement,
+inductive-family rules and ownership connections remain open.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
 A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)

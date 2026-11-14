@@ -301,6 +301,9 @@
                 ./proofs/CheckLinearCaller.lean
                 ./proofs/CheckScopedLend.lean
                 ./proofs/CheckKernelInference.lean
+                ./proofs/CheckNativeInference.lean
+                ./proofs/EmitNativeSchema.lean
+                ./proofs/EmitNativeWireNodes.lean
                 ./proofs/CheckTyping.lean
                 ./proofs/CheckBetaReplay.lean
                 ./proofs/CheckEvidence.lean
@@ -346,6 +349,7 @@
               Jihoo.MirFixtureAdmission \
               Jihoo.MixedProofAdmission \
               Jihoo.MixedRawAdmission \
+              Jihoo.NativeAdmission \
               Jihoo.NativeCompositionMirCorrespondence \
               Jihoo.NativeCompositionMirSnapshot \
               Jihoo.ScalarCoreCallers \
@@ -360,6 +364,7 @@
             python3 tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
             python3 -O tests/core_call_machine.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_kernel_correspondence.py --compiler ${jihoo}/bin/jihoo
+            python3 tests/core_native_kernel_correspondence.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_producer_gates.py
             python3 tests/core_transform_certificates.py --compiler ${jihoo}/bin/jihoo
             python3 tests/core_artifact_replay.py --compiler ${jihoo}/bin/jihoo

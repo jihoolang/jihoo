@@ -4515,3 +4515,34 @@ quantities, production `Core.infer` / `Core.normal` equivalence and whole
 compiler correctness remain unproved. Fuel bounds search depth, not total
 work; exhausted normalization returns a residual and comparison failure is
 inconclusive. Typing U64 addition does not establish absence of runtime overflow.
+
+### Full native syntax, universes and modes
+
+The [native-kernel proof scope](../../proofs/NATIVE_KERNEL_SCOPE.md) now uses one
+shared syntax for all 54 production Term constructors, including universes,
+inductive/family nodes, ownership forms and evidence-binding branches. Generic
+binding-aware renaming/substitution proofs cover every constructor. The graph
+arena has independent representation semantics, decoder soundness/eventual
+completeness, prefix framing and executable capture-avoiding transformations.
+
+The universe-aware pure checker adds actual sort inference, impredicative Prop,
+type abstraction, erased U64 and proof binders, ghost/code variable restrictions,
+arithmetic evidence, proposition transport and refinements. Its concrete
+inference/checking/sort functions have proved acceptance soundness. Verified
+conversion also exposes type heads and handles refinement projections; code
+type arguments pass a conservative first-order representation gate. These
+results do not yet establish consistency or ownership safety of the complete
+universe-aware calculus. Typed ghost renaming, weakening, simultaneous
+substitution and dependent instantiation are now proved for every supported
+rule. Term scoping and arity, erased-variable exclusion, partial negative shift
+and no-removal rewrite also have full-syntax proofs.
+
+A canonical version-4 envelope includes mode and the complete native graph.
+Certificate-free admission proves exact bytes, graph validity and closed model
+typing, with independent formation at an inferred sort. All 54 actual native
+constructor encodings match the proved encoder at three vector lengths (162
+cases). A separate native correspondence suite includes universes, polymorphism,
+erased indices, transport and refinement projections, retaining unsupported
+rules as explicit gaps. Tests bind observations and bytes; they do not prove
+execution semantics of the native source. The linked scope lists the remaining
+metatheory, families, ownership and native implementation refinement obligations.

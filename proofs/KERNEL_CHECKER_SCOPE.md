@@ -87,6 +87,9 @@ capture avoidance. It also rejects malformed transport, incorrect roots,
 false equality/ordering mutations and an invalid unreachable graph node.
 Native erased U64 binders remain an explicit accepted-native/rejected-Raw case.
 These comparisons are regression evidence, not a native refinement theorem.
+The newer [full-native syntax](NATIVE_KERNEL_SCOPE.md) entry point accepts
+erased U64 binders and adds universes and mode checking. It shares the complete
+54-constructor vocabulary rather than extending this historical Raw datatype.
 
 Native parser/exporter fidelity, build and process association, code generation
 and IO remain trusted. Universes, Prop as a term, globals, inductive families,

@@ -1,0 +1,141 @@
+// Full native constructor snapshots for mechanized kernel correspondence.
+// This exporter performs actual Core calls; source/IO fidelity remains trusted.
+import core
+import core_parse
+
+fn token(inout out: String, value: u64) {
+    var n = value
+    while n > 0 {
+        out.push(if n % 2 == 0 { '0' } else { '1' })
+        n /= 2
+    }
+    out.push(';')
+}
+
+fn node(inout out: String, tag: u64, payload: [u64], refs: [u32]) {
+    token(&out, tag)
+    token(&out, payload.len as u64)
+    for value in payload { token(&out, value) }
+    token(&out, refs.len as u64)
+    for reference in refs { token(&out, reference as u64) }
+}
+
+// Exhaustive on the production Term enum, including all ownership and family
+// forms. Serialization never invokes inference or normalization.
+pub fn write_node(inout out: String, term: core.Term) {
+    match term {
+        Var(x0) => node(&out, 0, [x0 as u64], [])
+        Global(x0) => node(&out, 1, [x0 as u64], [])
+        Universe(x0) => node(&out, 2, [x0 as u64], [])
+        Prop => node(&out, 3, [], [])
+        U64 => node(&out, 4, [], [])
+        I64 => node(&out, 5, [], [])
+        Array(x0) => node(&out, 6, [], [x0])
+        Lt(x0, x1) => node(&out, 7, [], [x0, x1])
+        Eq(x0, x1) => node(&out, 8, [], [x0, x1])
+        Refl(x0) => node(&out, 9, [], [x0])
+        Transport(x0, x1, x2) => node(&out, 10, [], [x0, x1, x2])
+        Ind(x0, x1) => node(&out, 11, [x0 as u64, x1.len() as u64], x1.as_slice())
+        Con(x0, x1, x2) => node(&out, 12, [x0 as u64, x1 as u64, x2.len() as u64], x2.as_slice())
+        Elim(x0, x1, x2, x3) => {
+            var refs = Vec(u32).new()
+            refs.push(x1)
+            for reference in x2 { refs.push(reference) }
+            refs.push(x3)
+            node(&out, 13, [x0 as u64, x2.len() as u64], refs.as_slice())
+        }
+        Arith(x0, x1, x2) => {
+            let op: u64 = match x0 { Add => 0, Sub => 1, Mul => 2 }
+            node(&out, 14, [op], [x1, x2])
+        }
+        Fold(x0, x1, x2) => node(&out, 15, [], [x0, x1, x2])
+        Strict(x0, x1) => node(&out, 16, [], [x0, x1])
+        UAdd(x0, x1) => node(&out, 17, [], [x0, x1])
+        LtAdd(x0, x1, x2, x3) => node(&out, 18, [], [x0, x1, x2, x3])
+        LtCancel(x0, x1, x2, x3) => node(&out, 19, [], [x0, x1, x2, x3])
+        LtLe(x0, x1, x2, x3, x4) => node(&out, 20, [], [x0, x1, x2, x3, x4])
+        USub(x0, x1, x2) => node(&out, 21, [], [x0, x1, x2])
+        ZeroLe(x0) => node(&out, 22, [], [x0])
+        Refine(x0) => node(&out, 23, [], [x0])
+        Pack(x0, x1, x2) => node(&out, 24, [], [x0, x1, x2])
+        Witness(x0) => node(&out, 25, [], [x0])
+        Proof(x0) => node(&out, 26, [], [x0])
+        Buffer(x0) => node(&out, 27, [], [x0])
+        Alloc(x0, x1) => node(&out, 28, [], [x0, x1])
+        Load(x0, x1, x2, x3) => node(&out, 29, [], [x0, x1, x2, x3])
+        Store(x0, x1, x2, x3) => node(&out, 30, [], [x0, x1, x2, x3])
+        Free(x0, x1) => node(&out, 31, [], [x0, x1])
+        Drop(x0, x1, x2) => node(&out, 32, [x0 as u64], [x1, x2])
+        Ref(x0) => node(&out, 33, [], [x0])
+        Lend(x0, x1, x2) => node(&out, 34, [], [x0, x1, x2])
+        Back(x0, x1, x2) => node(&out, 35, [if x0 { 1 } else { 0 }], [x1, x2])
+        Give(x0, x1, x2, x3) => node(&out, 36, [if x0 { 1 } else { 0 }], [x1, x2, x3])
+        Take(x0, x1) => node(&out, 37, [], [x0, x1])
+        Borrow(x0) => node(&out, 38, [], [x0])
+        Deref(x0) => node(&out, 39, [], [x0])
+        View(x0, x1, x2, x3, x4) => {
+            var refs = Vec(u32).new()
+            refs.push(x2)
+            for reference in x3 { refs.push(reference) }
+            refs.push(x4)
+            node(&out, 40, [if x0 { 1 } else { 0 }, x1 as u64, x3.len() as u64], refs.as_slice())
+        }
+        Loop(x0, x1, x2, x3) => node(&out, 41, [], [x0, x1, x2, x3])
+        Absurd(x0, x1) => node(&out, 42, [], [x0, x1])
+        Case(x0, x1, x2, x3) => {
+            var refs = Vec(u32).new()
+            refs.push(x1)
+            for reference in x2 { refs.push(reference) }
+            refs.push(x3)
+            node(&out, 43, [x0 as u64, x2.len() as u64], refs.as_slice())
+        }
+        Pi(x0, x1, x2) => node(&out, 44, [if x0 { 1 } else { 0 }], [x1, x2])
+        Lam(x0, x1, x2) => node(&out, 45, [if x0 { 1 } else { 0 }], [x1, x2])
+        App(x0, x1) => node(&out, 46, [], [x0, x1])
+        Natural(x0) => node(&out, 47, [x0 as u64], [])
+        Integer(x0) => node(
+            &out,
+            48,
+            [if x0 < 0 { 1 } else { 0 }, if x0 < 0 { (0 -% x0) as u64 } else { x0 as u64 }],
+            []
+        )
+        Elements(x0) => node(&out, 49, [x0.len() as u64], x0.as_slice())
+        Index(x0, x1, x2) => node(&out, 50, [], [x0, x1, x2])
+        Decide(x0, x1) => node(&out, 51, [], [x0, x1])
+        IfLt(x0, x1, x2, x3) => node(&out, 52, [], [x0, x1, x2, x3])
+        IfEq(x0, x1, x2, x3) => node(&out, 53, [], [x0, x1, x2, x3])
+    }
+}
+
+pub fn snapshot(source: str, mode: str) -> Result(String, String) {
+    let ghost = mode == "infer" || mode == "require"
+    if !ghost && mode != "code-infer" && mode != "code-require" {
+        return Err("expected infer, require, code-infer or code-require".to_string())
+    }
+    var c = match core_parse.parse(source, 0) {
+        Ok(c) => c
+        Err(e) => return Err(e.msg.clone())
+    }
+    if c.definitions.len() != 1 || c.families.len() != 0 {
+        return Err("expected exactly one definition and no families".to_string())
+    }
+    let value = c.definitions[0].value
+    let declared = c.definitions[0].ty
+    match c.check() { Ok(_) => {}, Err(e) => return Err(e.msg.clone()) }
+    let inferred = match c.infer(value, [], ghost, core.DEPTH) {
+        Ok(ty) => ty
+        Err(e) => return Err(e.msg.clone())
+    }
+    let selected = if mode == "require" || mode == "code-require" {
+        match c.require(value, declared, [], ghost, core.DEPTH) {
+            Ok(_) => {}
+            Err(e) => return Err(e.msg.clone())
+        }
+        declared
+    } else { inferred }
+    var out = String.new()
+    for field in [4 as u64, if ghost { 1 } else { 0 }, value as u64,
+        selected as u64, c.nodes.len() as u64] { token(&out, field) }
+    for n in c.nodes { write_node(&out, n.term) }
+    Ok(out)
+}

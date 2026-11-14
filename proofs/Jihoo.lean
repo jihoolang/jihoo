@@ -363,3 +363,27 @@ import Jihoo.KernelTypeUniquenessExamples
 import Jihoo.KernelAdmission
 import Jihoo.KernelAdmissionExamples
 import Jihoo.KernelNormalization
+
+import Jihoo.NativeSyntax
+import Jihoo.NativeSubstitution
+import Jihoo.NativeSubstitutionExamples
+import Jihoo.NativeArena
+import Jihoo.NativeArenaExamples
+import Jihoo.NativeConversion
+import Jihoo.NativeNormalization
+import Jihoo.NativeConversionExamples
+import Jihoo.NativeTyping
+import Jihoo.NativeChecker
+import Jihoo.NativeCheckerSoundness
+import Jihoo.NativeCheckerExamples
+import Jihoo.NativeModeSafety
+import Jihoo.NativeSchema
+import Jihoo.NativeWire
+import Jihoo.NativeAdmission
+import Jihoo.NativeAdmissionExamples
+
+import Jihoo.NativePartialRenaming
+import Jihoo.NativeArenaPartial
+import Jihoo.NativePartialRenamingExamples
+import Jihoo.NativeGhostMetatheory
+import Jihoo.NativeGhostMetatheoryExamples
