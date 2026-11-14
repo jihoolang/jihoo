@@ -1,117 +1,115 @@
-# Raw checker scope and native correspondence
+# Executable dependent kernel: verified scope
 
-`Jihoo.KernelChecker` takes raw terms, not derivation certificates. Its
-acceptance-soundness target is the existing `CoreBridge.Raw.Beta.HasType` /
-`IsType` judgment under `GraphCertificates.Typing.context`. This is a
-universe-free, ghost-mode fragment. It is not a proof of native `Core.infer`,
-completeness, native equivalence, or whole-kernel correctness.
+The executable `Jihoo.KernelChecker` infers and checks raw terms without an
+input derivation, typing certificate, or reduction trace. Its acceptance theorem
+uses the existing independently defined `CoreBridge.Raw.Beta.HasType` and
+`IsType` judgments. It covers the complete universe-free, ghost-mode `Raw`
+syntax. Native `compiler/core.jh` has additional syntax and rules; its
+implementation has not been proved equivalent to this checker.
 
-The interface is `infer fuel ctx term : Option Raw` and
-`isType fuel ctx ty : Bool`. Contexts are newest first; each stored annotation
-is in its pre-binder scope and lookup weakens it. Context well-formedness is
-not assumed, matching the existing declarative variable rule. Consequently,
-`infer` success alone does not promise that its output type passes `isType`
-for an arbitrary caller-provided context. The snapshot regression adapter
-checks both on closed terms.
+## Executable checking and conversion
 
-## Checked implementation rules
-
-The following line references are to `compiler/core.jh` at main
-`644ccf1280c7e88bd0fbdf1d561d44bd903a2975`.
-
-| Native rule | Raw checker relationship |
+| Operation | Supported behavior |
 | --- | --- |
-| `infer`, 2138–2186: variables, literal types, Eq and Refl | Lookup reverses native's oldest-first context. Eq/Refl require U64 operands; literal bounds are explicit in Raw because its payloads are unbounded Nat/Int. Native payloads are u64/i64. |
-| `infer`, 2284–2288: UAdd | Both operands must have U64 type. Neither inference rule promises the sum fits in u64. |
-| `binder`, 1591–1615; Pi/Lam, 2769–2795 | Raw requires `erased = domain.proposition`. Native also permits erased u64/data binders; those additional cases are intentionally rejected. Runtime linearity is outside Raw. |
-| App, 2796–2828 | Infer a Pi, check the argument against its domain, substitute the argument into the codomain. Raw requires a syntactic Pi and structural argument-type equality. |
-| `transform`, 270–307; `shift`/`substitute`, 512–524 | Native shifts free occurrences below binders and decrements indices above the removed binder. Raw uses existing `subst (single argument)` and context weakening. The nested regression checks capture avoidance. |
-| `require`/`equal`, 1576–1580 and 1618–1629 | Native normalizes both types before structural comparison. Raw performs no normalization or conversion search. |
-| `normal`, 551 onward, and UAdd at 887–891 | Native beta/arithmetic normalization is additional behavior, not refined by this checker. |
-| `tick`, 263 onward; `DEPTH`, 12 | Native depth/work budgets and Raw fuel are different mechanisms. No one-to-one budget or termination-cost equivalence is claimed. |
+| `infer fuel ctx term` | Variables, bounded unsigned/signed literals, addition, proof-checked subtraction, signed arrays, literal ordering evidence, reflexivity, zero bounds, proof-checked indexing, dependent lambdas and application |
+| `isType fuel ctx ty` | U64, I64, arrays with typed length indices, equality and ordering with typed indices, and dependent Pi formation |
+| `check fuel ctx term expected` | Independent expected-type formation and conversion of the inferred type to the requested type |
+| `KernelConversion.normalize fuel term` | Every Raw child position, including annotations and proof fields; capture-avoiding beta contraction, nonoverflowing literal addition, nonunderflowing literal subtraction, and finite local-array selection |
+| `KernelConversion.equal fuel a b` | Structural equality of the two computed residuals; success proves conversion and a common forward reduct |
+| `KernelAdmission.checkBytes fuel bytes` | Exact canonical version-3 snapshot decoding, bounded whole-graph validation, and closed checking of the selected roots |
 
-Formation supports U64, I64, Eq and dependent Pi. Inference supports variables,
-bounded natural/integer literals, UAdd, Refl, Lam and App. All other Raw
-constructors reject. Universes, Prop and globals have no Raw constructor;
-unreachable native sort nodes may remain in the existing graph envelope, but
-cannot be selected as a Raw term or type. Arrays, Lt, elements, indexing and
-subtraction are intentionally unsupported in this iteration. Runtime ownership,
-inductives, universes, native normalization refinement and LLVM are outside scope.
+Contexts are newest first. Each stored annotation is in its pre-binder scope;
+lookup performs weakening. Pi and lambda require the erased flag to equal the
+domain's proposition classification. `decide` accepts literal natural endpoints
+with independently checked word bounds and strict comparison. An empty array
+has length zero. Application and indexing normalize the inferred type before
+inspecting its Pi or array constructor. Arguments and bounds witnesses are
+checked by verified conversion, including conversion inside dependent indices.
 
-Fuel zero rejects. Fuel bounds recursive checker depth, not total work in context
-lookup, equality or raw-tree traversal. Application additionally reuses
-`TypingCertificates.substitutionSafe` (tree size/depth product guards). This is
-not a general denial-of-service or total resource bound on arbitrary Raw inputs.
-The existing snapshot adapter adds its own bounded byte/graph decoding.
+Checker fuel zero rejects. Normalizer fuel zero returns the input unchanged.
+The normalizer returns a convertible residual when its budget is exhausted;
+it does not report that residual as a complete normal form. Comparison failure
+is inconclusive. Fuel bounds recursive depth, not total allocation, execution
+time or tree traversal. Beta contraction and dependent application use the
+existing `Typing.substitutionSafe` size/depth guard before substitution.
 
-## Regression evidence and trust boundary
+An addition can have type U64 while its runtime execution would overflow.
+Typing is not a trap-freedom theorem. Literal folding leaves overflow and
+underflow neutral. Closed proof truth is guaranteed only for closed contexts;
+an arbitrary supplied open context may contain false assumptions. `infer`
+therefore does not by itself promise formation of its returned type under an
+arbitrary context. `check` independently establishes the expected type's
+formation.
 
-`Jihoo/KernelCheckerExamples.lean` proves concrete outcomes by kernel-checked
-simplification/reduction of the implementation. It covers dependent application,
-free-variable capture beneath a returned lambda, telescope lookup, false equality
-evidence, wrong argument types, literal bounds, unsupported constructors, binder
-flags, structural conversion rejection and fuel exhaustion. No `native_decide`,
-axiom, admitted proof or derivation-certificate input is used.
+## Mechanized guarantees
 
-`tests/core_kernel_correspondence.py` builds the existing
-`tests/core_typing_snapshots.jh` against this checkout's `compiler/core.jh`.
-The production exporter `compiler/core_snapshot.jh:71–96` parses and checks the
-one-definition source, calls native ghost-mode inference, and retains declared
-or actual inferred roots. Lines 175 onward serialize the complete resulting
-arena without another Core call. `CheckKernelInference.lean` uses existing
-`TypingInput.canonicalSnapshot` and `GraphCertificates.decode`, then invokes the
-raw checker on those decoded roots. No alternate codec or proof producer is added.
+- `KernelConversion.normalize_sound` and `equal_sound` construct conversion
+  derivations for the actual executable results, on every Raw input.
+- `KernelNormalization.normalize_steps` proves that the exact computed
+  residual is reachable by forward beta/arithmetic/read computation. Its
+  preservation theorems retain the original raw type, preserve formation,
+  and permit independent normalization of a term and its result type.
+- `KernelChecker.infer_sound`, `isType_sound` and `check_sound` prove acceptance
+  soundness together by induction on the concrete checker budget.
+  `check_isType` proves independent formation and `infer_instantiate` proves
+  capture-avoiding dependent instantiation.
+- `Beta.HasType.unique` proves type uniqueness modulo conversion for every
+  derivation of the existing declarative judgment, including arbitrary fixed
+  contexts. Consequences retain function binder modes and codomains, equality
+  indices and concrete array lengths, and rule out scalar type confusion.
+- `KernelAdmission.checkBytes_sound` binds closed typing and formation to the
+  exact original bytes and complete graph. `checkBytes_represents` also gives
+  the graph representation relation for both roots. No typing certificate is
+  supplied or replayed.
+- `KernelAdmission.checkBytes_normalizes` connects admitted bytes to the
+  existing unconditional closed head-normalization theorem.
+  `checkSnapshot_preservation` retains the declared type through contextual
+  beta sequences. Literal equality and ordering truth follow from admitted
+  evidence, and false closed equality/bound snapshots are rejected.
 
-Matching snapshots are regression evidence, not a formal translation theorem.
-The association of source, compiled exporter, native calls, graph serialization,
-process output and executed Lean code remains trusted. Kernel-checked theorems
-concern the Lean definitions; executing a Lean IO adapter also trusts code
-generation/runtime. The runner retains original sources and exact snapshot bytes
-and writes a manifest with source hashes and observed outcomes when `--output`
-is supplied. It does not authenticate an arbitrary external snapshot's origin.
+All these proofs are checked by Lean 4.34.1. They use no `sorry`, new axioms,
+`native_decide`, assumed checker-soundness premise, or proof-bearing input.
+The aggregate axiom audit permits only Lean's standard logical axioms.
 
-The conversion-gap fixture is accepted natively and rejected structurally.
-The array fixture is accepted natively and rejected as unsupported. Invalid
-argument and false-equality fixtures fail native checking before any snapshot
-exists; corresponding Raw rejections are checked separately in the Lean examples.
-The runner also checks actual inferred roots for dependent/capture cases, fuel
-0/1, a mutated selected type root and malformed transport. It never changes the
-native checker to force outcomes to agree.
+## Native correspondence and remaining boundary
 
-## Reproduction and integration dependencies
+`tests/core_kernel_correspondence.py` compiles the existing snapshot exporter
+against this checkout's actual `compiler/core.jh`. Accepted native sources feed
+their exact retained snapshot bytes to `CheckKernelInference.lean`, which runs
+the proved `KernelAdmission.checkBytes` function after bounded IO preflight.
+The runner retains sources, snapshots, hashes, observed outcomes and adversarial
+payloads in its output directory.
 
-With the repository's native development shell and pinned Lean 4.34.1:
+The suite covers arithmetic and beta conversion, computed array lengths and
+indices, dependent array application, a dependent reader with three
+applications, subtraction and index proof checking, literal boundaries and
+capture avoidance. It also rejects malformed transport, incorrect roots,
+false equality/ordering mutations and an invalid unreachable graph node.
+Native erased U64 binders remain an explicit accepted-native/rejected-Raw case.
+These comparisons are regression evidence, not a native refinement theorem.
+
+Native parser/exporter fidelity, build and process association, code generation
+and IO remain trusted. Universes, Prop as a term, globals, inductive families,
+additional arithmetic/evidence rules, runtime quantities, ownership, effects
+and LLVM are outside Raw. Native normalization also has additional equations.
+Completeness, native `Core.infer` / `Core.normal` equivalence, full contextual
+normalization and whole-compiler correctness are not claimed.
+
+## Reproduction
+
+With pinned Lean and the repository's native development environment:
 
 ```sh
 cd proofs
-lake build Jihoo.KernelChecker Jihoo.TypingInput
-lake env lean -DwarningAsError=true Jihoo/KernelCheckerExamples.lean
+lake build --wfail
+bash check.sh
 lake env lean -DwarningAsError=true CheckKernelInference.lean
 cd ..
 python3 tests/core_kernel_correspondence.py --output out/kernel-correspondence
 ```
 
-The aggregate `Jihoo.lean` imports the concrete checker soundness proofs and all
-31 reduction examples. `Audit.lean` audits the four public soundness theorems,
-the two exhaustion helpers and the two named dependent/capture examples;
-`check.sh` enforces the updated exact audit count and existing axiom allowlist.
-The existing `lean-proofs` flake check runs this aggregate. The existing
-`graph-certificates` check builds the checker alongside its existing validator
-imports and runs the native correspondence suite once. No additional CI job or
-redundant optimized-Python run is added; the suite uses explicit `require`
-checks rather than Python assertions. Existing coverage and security checks
-are retained.
-
-## Worker C validation record
-
-Checked against A commit `232cf0db47650603ce78b33b5ee0178d292afde9`;
-`KernelChecker.lean` SHA-256
-`3a664a869f96a1ae4af64430c63d6a04d461fb11ba3b9c389a0081dfc0f44d55`.
-All 31 Lean examples and the snapshot adapter passed Lean 4.34.1 with
-`-DwarningAsError=true`. The named `dependent_application` and `nested_capture`
-proofs report only `propext` and `Quot.sound` in their elaborated axiom lists.
-The 12 native fixtures and seven additional snapshot/fuel checks passed using
-LLVM 21.1.8 and the repository's pinned seed to compile the actual core exporter.
-The native cases include both signed/unsigned boundaries and the erased-u64
-binder difference. Full repository-wide Lean aggregate/audit and all CI checks
-remain integration responsibilities; this record does not claim they ran.
+`Jihoo.lean` imports all kernel modules and examples. `Audit.lean` checks every
+public theorem in the new conversion, normalization, checker, uniqueness and
+admission modules and all their named examples. `check.sh` verifies the exact
+aggregate audit count and allowed axiom dependencies. The existing
+`lean-proofs` and `graph-certificates` flake checks retain this integration.

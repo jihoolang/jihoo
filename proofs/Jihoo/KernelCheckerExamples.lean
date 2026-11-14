@@ -16,13 +16,8 @@ private def nested : Raw :=
   .lam false .u64
     (.app (.lam false .u64 (.lam false .u64 (.refl (.var 1)))) (.var 0))
 
--- Shared reduction recipe; every resulting proof is checked by Lean.
-macro "kernel_checker_example" : tactic =>
-  `(tactic| (simp [infer, isType, dependent, nested, GraphCertificates.Typing.context,
-    Context.extend, rename, proposition, subst, single, liftSub,
-    GraphCertificates.Typing.substitutionSafe, GraphCertificates.Typing.rawSize,
-    GraphCertificates.Typing.rawDepth, GraphCertificates.treeLimit,
-    GraphCertificates.depthLimit, wordBound, signedBound]))
+-- Concrete outcomes are reduced and checked by the Lean kernel.
+macro "kernel_checker_example" : tactic => `(tactic| cbv)
 
 theorem dependent_application : infer 12 [] dependent = some (.eq (.natural 7) (.natural 7)) := by
   kernel_checker_example
@@ -46,7 +41,7 @@ example : infer 12 []
       (.refl (.natural 0))) = none := by
   kernel_checker_example
 example : infer 4 [] (.refl (.natural 0)) ≠ some (.eq (.natural 0) (.natural 1)) := by
-  kernel_checker_example
+  decide +kernel
 -- An unequal proposition can be formed; formation does not produce evidence.
 example : isType 4 [] (.eq (.natural 0) (.natural 1)) = true := by
   kernel_checker_example
@@ -73,20 +68,20 @@ example : infer 4 [] .u64 = none := by
   kernel_checker_example
 example : isType 4 [] .u64 = true := by
   kernel_checker_example
-example : isType 4 [] (.array (.natural 1)) = false := by
+example : isType 4 [] (.array (.natural 1)) = true := by
   kernel_checker_example
-example : infer 4 [] (.elements [.integer 7]) = none := by
+example : infer 4 [] (.elements [.integer 7]) = some (.array (.natural 1)) := by
   kernel_checker_example
-example : infer 4 [] (.decide (.natural 0) (.natural 1)) = none := by
+example : infer 4 [] (.decide (.natural 0) (.natural 1)) = some (.lt (.natural 0) (.natural 1)) := by
   kernel_checker_example
 example : infer 4 [] (.lam true .u64 (.var 0)) = none := by
   kernel_checker_example
 example : infer 4 [] (.lam false (.eq (.natural 0) (.natural 0)) (.var 0)) = none := by
   kernel_checker_example
--- Native conversion accepts this argument; structural checking rejects it.
+-- Verified conversion now accepts the native arithmetic-conversion case.
 example : infer 12 []
     (.app (.lam true (.eq (.uadd (.natural 0) (.natural 1)) (.natural 1)) (.natural 7))
-      (.refl (.natural 1))) = none := by
+      (.refl (.natural 1))) = some .u64 := by
   kernel_checker_example
 example : infer 0 [] (.natural 7) = none := rfl
 example : isType 0 [] .u64 = false := rfl

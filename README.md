@@ -174,6 +174,13 @@ Target renaming, typed substitution and head-beta retyping preserve the restrict
 judgment; typed artifact outputs still require explicit input-typing premises.
 A separate beta-aware target proves fixed-type contextual beta preservation,
 including annotation changes, using proved conversion and context transport.
+A [verified executable kernel](proofs/KERNEL_CHECKER_SCOPE.md) now checks the
+complete universe-free, ghost-mode Raw calculus directly from terms, including
+dependent functions, arrays, bounds evidence and arithmetic/beta conversion.
+Lean proofs establish acceptance soundness, forward computation and type
+preservation of its normalizer, and declarative type uniqueness modulo
+conversion. Certificate-free snapshot admission binds these guarantees to exact
+canonical graph bytes and derives closed literal-evidence consistency.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
 A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)
@@ -284,9 +291,11 @@ erased. Modules opt in with `#![dependent_core]`, and
   place, with no mutable reference in the kernel;
 - [a vector](lib/dependent/vec.jh) whose contracts are [types](examples/core_vec.jh).
 
-The kernel is **not verified**: its soundness rests on rejection suites, an independent
-evaluator and independent reviews. A mechanized proof is planned after 0.5, in Lean 4, as is
-formal verification of the compiler itself. The core is a subset, with i64 elements, no type
+The full native kernel is **not verified**. The executable Lean kernel and
+its [mechanized guarantees](proofs/KERNEL_CHECKER_SCOPE.md) cover a restricted
+calculus; equivalence to native inference and normalization remains unproved.
+The native kernel also uses rejection suites, an independent evaluator and
+independent reviews. The core is a subset, with i64 elements, no type
 parameters and the [other limits](docs/language/dependent-types.md#what-it-does-not-do) its
 guide lists. The existing verifier still proves unmarked programs and the compiler's own source.
 

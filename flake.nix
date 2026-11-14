@@ -340,7 +340,7 @@
               Jihoo.HeadNormalizationCodec \
               Jihoo.InitializationCalls \
               Jihoo.InitializationStore \
-              Jihoo.KernelChecker \
+              Jihoo.KernelAdmission \
               Jihoo.LinearCoreCallers \
               Jihoo.MirCallerValidation \
               Jihoo.MirFixtureAdmission \

@@ -4464,3 +4464,54 @@ interfaces, not full branch/application lowering. Scalar value equality, native
 representation refinement, and whole-body/compiler correctness are not claimed.
 Run `bash proofs/check-common-data-target-context.sh` for the dedicated kernel
 checks and axiom audit; the same checks are included in the aggregate proof suite.
+
+### Executable dependent kernel and exact-byte admission
+
+The [executable kernel scope](../../proofs/KERNEL_CHECKER_SCOPE.md) now includes
+all term constructors in the existing universe-free, ghost-mode `Raw` syntax.
+`KernelChecker.infer`, `isType` and `check` consume raw syntax directly. They
+construct their own recursive premises and use the verified conversion search;
+no derivation certificate or reduction trace is supplied. Formation covers
+scalar, array, equality, ordering and dependent function types. Inference adds
+proof-checked subtraction, arrays, literal ordering evidence, zero bounds and
+indexing to dependent lambdas/application and the existing scalar fragment.
+
+`KernelConversion` computes bounded residuals throughout the syntax, including
+binder annotations, dependent codomains, arrays and proof positions. It
+contracts capture-avoiding beta redexes, bounded literal addition/subtraction
+and local-array reads. `normalize_sound` and `equal_sound` prove conversion
+soundness for these exact definitions. `KernelNormalization.normalize_steps`
+strengthens this to an actual forward contextual computation path for every
+input. The preservation theorems retain the original raw type and preserve
+formation; term and result type may also be normalized independently.
+
+`KernelCheckerSoundness` proves inference and formation soundness jointly by
+induction on fuel. Application normalizes the inferred function type and checks
+the argument by verified conversion before dependent substitution. Indexing
+similarly exposes an array type and checks its index and bounds evidence.
+`check_sound` derives the exact requested type, while `check_isType` derives its
+formation separately. Arbitrary caller-provided contexts need not be well
+formed; only closed contexts support the unconditional proof-truth guarantees.
+
+`KernelTypeUniqueness` proves that any two derivations of the full existing
+`Raw.Beta.HasType` judgment assign convertible types. This theorem is about
+all derivations, independently of executable acceptance. It derives uniqueness
+of concrete array lengths, equality endpoints and full dependent function
+types, including binder modes, and excludes U64/I64 confusion.
+
+`KernelAdmission.checkBytes` checks an existing canonical version-3 snapshot
+without a typing certificate. Acceptance implies exact re-encoding of the input
+bytes, graph representation of both roots, closed typing and type formation.
+It connects this result to the existing closed head-normalization and literal
+consistency theorems, so admitted literal equality/ordering evidence is true.
+The CLI runs this same proved pure function after the existing bounded IO
+preflight. Native tests retain exact exporter snapshots and adversarial
+mutations; they remain regression evidence, not a native refinement theorem.
+
+The old conversion and array gaps are positive regression cases. Erased U64
+binders remain outside this Raw binder discipline. Universes, globals,
+inductives, additional native conversion equations, runtime ownership and
+quantities, production `Core.infer` / `Core.normal` equivalence and whole
+compiler correctness remain unproved. Fuel bounds search depth, not total
+work; exhausted normalization returns a residual and comparison failure is
+inconclusive. Typing U64 addition does not establish absence of runtime overflow.

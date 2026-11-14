@@ -356,3 +356,10 @@ import Jihoo.CommonCaseSourceConsumptionChecks
 
 import Jihoo.KernelCheckerSoundness
 import Jihoo.KernelCheckerExamples
+import Jihoo.KernelConversionExamples
+import Jihoo.KernelCheckerExtendedExamples
+import Jihoo.KernelTypeUniqueness
+import Jihoo.KernelTypeUniquenessExamples
+import Jihoo.KernelAdmission
+import Jihoo.KernelAdmissionExamples
+import Jihoo.KernelNormalization
