@@ -32,10 +32,32 @@ with open(sys.argv[1], encoding="utf-8") as audit:
 allowed = {"propext", "Quot.sound", "Classical.choice"}
 entries = re.findall(r"depends on axioms: \[([^\]]*)\]", report)
 closed = re.findall(r"does not depend on any axioms", report)
-assert len(entries) + len(closed) == 5851, report
+assert len(entries) + len(closed) == 6186, report
 for entry in entries:
     unexpected = set(filter(None, re.split(r"[,\s]+", entry))) - allowed
     assert not unexpected, f"Unexpected proof dependencies: {unexpected}"
+PY
+# Generated finite universes and Pi/contextual codes must match their sources.
+# These generators emit text only; Lean checks every resulting declaration.
+python3 - <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+root = Path.cwd()
+generators = (
+    ("generate-native-finite-universes.py", "NativeFiniteUniverses.lean"),
+    ("generate-native-finite-pi.py", "NativeFinitePi.lean"),
+    ("generate-native-contextual-universe-codes.py", "NativeContextualUniverseCodes.lean"),
+)
+with tempfile.TemporaryDirectory(prefix="jihoo-finite-model-") as directory:
+    output = Path(directory)
+    (output / "Jihoo").mkdir()
+    for generator, module in generators:
+        subprocess.run([sys.executable, str(root / "scripts" / generator)],
+                       cwd=output, check=True)
+        assert (output / "Jihoo" / module).read_bytes() == (root / "Jihoo" / module).read_bytes(), module
 PY
 # The exact Lean-generated program is a normal core preservation fixture.
 # Its acceptance by the executable checker is separately tested by core.py.

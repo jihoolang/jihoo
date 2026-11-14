@@ -498,3 +498,50 @@ Such a table cannot satisfy the world invariant derived from checked history.
 The native delta adapter also checks original source bodies and observed normal
 outputs with this installed typing checker, in addition to exact graph/prefix
 and combined-conversion checks. Native parser/export/IO refinement remains open.
+
+
+`NativeFiniteUniverses`, `NativeFinitePi`, and the contextual universe model/code
+modules construct a finite Tarski hierarchy, dependent Pi closure, contextual
+substitution, and concrete encode/decode equations for the native universe range
+and administrative top. Three text generators reproduce the checked modules
+exactly; they supply no logical axioms. This host model is not a total
+interpretation of all native typing derivations.
+
+`NativeFunctionFundamental` now reconstructs a concrete U64/nondependent-function
+expression from actual unified `HasType` and syntax-only recognition. Its
+contextual realization is derived for every realizing closing substitution;
+source membership or normalization is not an input. Arbitrary raw result
+conversions remain allowed. `NativeTypeFormationBoundary` verifies that raw
+result-type regularity fails: a natural value may be assigned `UAdd U64 0`, even
+though that type has no sort. `NativeQuotientTypingBoundary` separately verifies
+that symmetric arithmetic quotient steps need not preserve term typing. Neither
+false property is used by the semantic development.
+
+`NativeNumeralForward` proves that conversion to a valid numeral in an
+admissible world gives a genuine finite delta/ACU forward path to that numeral.
+Forward descendants of literals remain numeric trees; symbolic contraction
+handles arbitrary valid totals without allocating unary expansions of large
+constants. `NativeFunctionNormalization` applies this to actual recognized
+U64/function source typing, retaining the original independently checked type
+under real checked history and proving unique numeral results. This establishes
+weak normalization of that fragment, including arbitrary-depth identity chains;
+it does not assert termination of commutative reduction or completeness of the
+bounded executable search.
+
+The candidate/atomic observation modules additionally derive truth for their
+explicit supported proof trace. Actual checked global reflexivity is supported
+after delta unfolding; opaque Load stays conservatively rejected. Full dependent
+universe/family/resource/iteration fundamental lemmas, full consistency, source
+execution refinement, and native loan obligations remain open.
+
+
+`NativeDependentFormulaSemantics` and `NativeDependentProofFundamental` extend
+actual source reconstruction to Refl, U64 lambdas and applications with
+variable/literal indices and genuinely dependent proposition codomains. The
+semantic families include equality, order and impredicative U64 Pi; substitution
+and conversion coherence hold for every natural assignment. Actual `HasType`
+and syntax-only recognition derive truth of the raw result conversion class,
+including authentic global aliases and unformed raw proposition representatives.
+False closed equality and order atoms are excluded throughout that grammar.
+This is a dependent source fundamental theorem for the stated grammar, not a
+fundamental lemma for arbitrary universe-polymorphic terms or native resources.

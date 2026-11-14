@@ -205,6 +205,10 @@ combined forward reduction and concrete normalization preserve the original
 independently derived type, including beneath dependent binders. Further
 operators and family iota equations, consistency, native source
 refinement and runtime heap/loan correspondence remain open.
+A concrete finite universe/context model and a source-derived U64/function
+fundamental theorem are also checked. Recognized closed U64 terms have a genuine
+finite forward path to a unique numeral; the full dependent fundamental theorem
+and consistency remain open.
 [Checked typing artifacts](docs/internals/typing-certificates.md) independently
 validate closed typing and formation derivations bound to complete exported graphs.
 A [symbolic dependent Buffer judgment](docs/internals/symbolic-core-typing.md)
