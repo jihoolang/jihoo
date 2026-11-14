@@ -1,5 +1,5 @@
 import Jihoo.GraphCertificates
-import Lean
+import Lean.Data.Json.Parser
 
 /-! Unverified serialization adapter. The pure validation theorems start at
 `Certificate`, not at bytes. This deliberately accepts a small canonical JSON
