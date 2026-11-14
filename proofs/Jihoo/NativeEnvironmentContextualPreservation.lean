@@ -1,5 +1,6 @@
 import Jihoo.NativeEnvironmentRootPreservation
 import Jihoo.NativeDataMotiveCongruence
+import Jihoo.NativeEnvironmentDeltaTyping
 
 /-! Contextual preservation for the actual forward ACU normalizer relation.
 A child induction supplies conversion, preservation in every context, and the
@@ -9,22 +10,22 @@ open Jihoo.NativeKernel.Environment.Conversion
 
 /-- Preserve every existing leading lambda, including its binder flag and an
 actual conversion between annotations. New lambdas may be exposed at leaves. -/
-def LambdaShape : Term → Term → Prop
+def LambdaShape (env : Environment) : Term → Term → Prop
   | .lam erased domain body, output =>
       ∃ domain' body', output = .lam erased domain' body' ∧
-        Conv domain domain' ∧ LambdaShape body body'
+        (Conv env) domain domain' ∧ LambdaShape env body body'
   | _, _ => True
 termination_by input _ => sizeOf input
 
-theorem LambdaShape.refl (term : Term) : LambdaShape term term := by
-  fun_cases LambdaShape term term
+theorem LambdaShape.refl (term : Term) : LambdaShape env term term := by
+  fun_cases LambdaShape env term term
   · rename_i erased domain body
     exact ⟨domain,body,rfl,.refl _,LambdaShape.refl body⟩
   · trivial
 termination_by sizeOf term
 
-theorem LambdaShape.trans (first : LambdaShape a b) (second : LambdaShape b c) : LambdaShape a c := by
-  fun_cases LambdaShape a b <;> simp only [LambdaShape] at first ⊢
+theorem LambdaShape.trans (first : LambdaShape env a b) (second : LambdaShape env b c) : LambdaShape env a c := by
+  fun_cases LambdaShape env a b <;> simp only [LambdaShape] at first ⊢
   · rename_i erased domain body
     obtain ⟨domain',body',rfl,domains,bodies⟩ := first
     simp only [LambdaShape] at second
@@ -73,26 +74,69 @@ theorem mixed_rigid_shape (step : ACU.MixedRed input output) :
   | nil => trivial
   | cons => trivial
 
+private theorem forward_list_refl (terms : List Term) : ListRel (EnvironmentDelta.Forward env) terms terms := by
+  induction terms with
+  | nil => exact .nil
+  | cons term terms ih => exact .cons .refl ih
+
+private theorem forward_list_trans (first : ListRel (EnvironmentDelta.Forward env) xs ys)
+    (second : ListRel (EnvironmentDelta.Forward env) ys zs) : ListRel (EnvironmentDelta.Forward env) xs zs := by
+  induction first generalizing zs with
+  | nil => cases second; exact .nil
+  | cons first rest ih => cases second with | cons next tail => exact .cons (.trans first next) (ih tail)
+
+private theorem forward_of_mixed_list (kids : ListRel ACU.MixedRed xs ys) :
+    ListRel (EnvironmentDelta.Forward env) xs ys := by
+  induction kids with
+  | nil => exact .nil
+  | cons first rest ih => exact .cons (.acu first) ih
+
+/-- Delta cannot contract a rigid non-global head; every retained child has an actual forward path. -/
+theorem forward_rigid_shape (step : EnvironmentDelta.Forward env input output) :
+    ∀ {op xs}, EnvironmentDelta.Basis.rigid op = true → input = .node op xs →
+    ∃ ys, output = .node op ys ∧ ListRel (EnvironmentDelta.Forward env) xs ys := by
+  induction step using EnvironmentDelta.Forward.rec (motive_2 := fun _ _ _ => True) with
+  | refl => intro op xs rigid equality; exact ⟨xs,equality,forward_list_refl xs⟩
+  | trans first second ihfirst ihsecond =>
+      intro op xs rigid equality
+      obtain ⟨ys,middle,firstKids⟩ := ihfirst rigid equality
+      obtain ⟨zs,last,secondKids⟩ := ihsecond rigid middle
+      exact ⟨zs,last,forward_list_trans firstKids secondKids⟩
+  | node op kids _ =>
+      intro op' xs rigid equality
+      cases equality
+      exact ⟨_,rfl,kids⟩
+  | delta found =>
+      intro op xs rigid equality
+      cases equality
+      simp [EnvironmentDelta.Basis.rigid,GlobalEnvironment.ordinary] at rigid
+  | acu step =>
+      intro op xs rigid equality
+      obtain ⟨ys,last,kids⟩ := mixed_rigid_shape step (Bool.and_eq_true_iff.mp rigid).2 equality
+      exact ⟨ys,last,forward_of_mixed_list kids⟩
+  | nil => trivial
+  | cons => trivial
+
 structure GhostTransform (env : Environment) (input output : Term) : Prop where
-  forward : ACU.MixedRed input output
-  shape : LambdaShape input output
+  forward : EnvironmentDelta.Forward env input output
+  shape : LambdaShape env input output
   preserves : ∀ {ctx type}, HasType env ctx true input type → HasType env ctx true output type
 
 theorem GhostTransform.refl (term : Term) : GhostTransform env term term :=
-  ⟨.refl _,LambdaShape.refl term,fun typed => typed⟩
+  ⟨.refl,LambdaShape.refl term,fun typed => typed⟩
 
 theorem GhostTransform.trans (first : GhostTransform env a b) (second : GhostTransform env b c) :
     GhostTransform env a c :=
   ⟨.trans first.forward second.forward,first.shape.trans second.shape,
     fun typed => second.preserves (first.preserves typed)⟩
 
-theorem GhostTransform.converted (change : GhostTransform env input output) : Conv input output :=
-  change.forward.toConv
+theorem GhostTransform.converted (change : GhostTransform env input output) : (Conv env) input output :=
+  EnvironmentDelta.Basis.forward_toConv change.forward
 
 theorem GhostTransform.typed (change : GhostTransform env a b) (typed : HasType env ctx mode a T) :
     HasType env ctx true b T := change.preserves typed.ghost
 
-theorem binderAllowed_congr (allowed : binderAllowed env erased A sort) (converted : Conv A B) :
+theorem binderAllowed_congr (allowed : binderAllowed env erased A sort) (converted : (Conv env) A B) :
     binderAllowed env erased B sort := by
   rcases allowed with pure | ⟨erased, family,count,indices,entry,found,data,related⟩
   · apply Or.inl
@@ -105,12 +149,12 @@ theorem binderAllowed_congr (allowed : binderAllowed env erased A sort) (convert
   · exact Or.inr ⟨erased,family,count,indices,entry,found,data,.trans (.symm converted) related⟩
 
 theorem Arguments.convertTelescope (args : Arguments env ctx mode data telescope xs result)
-    (converted : Conv telescope' telescope) : Arguments env ctx mode data telescope' xs result := by
+    (converted : (Conv env) telescope' telescope) : Arguments env ctx mode data telescope' xs result := by
   cases args with
   | nil tail => exact .nil (.trans converted tail)
   | cons head typed tail => exact .cons (.trans converted head) typed tail
 
-private theorem arguments_transport (args : Arguments env ctx mode data telescope xs result) :
+private theorem arguments_transport (closed : Conversion.Closed env) (args : Arguments env ctx mode data telescope xs result) :
     ∀ ys, ListRel (GhostTransform env) xs ys → Arguments env ctx true data telescope ys result := by
   apply Arguments.rec (t := args)
     (motive_1 := fun _ _ _ _ _ => True) (motive_2 := fun _ _ _ _ _ => True)
@@ -129,8 +173,8 @@ private theorem arguments_transport (args : Arguments env ctx mode data telescop
     | cons headChange tailChanges =>
       rename_i newArgument newArguments
       have tailTyped := ihtail _ tailChanges
-      have replacement : Conv (rest.subst (single newArgument)) (rest.subst (single argument)) := by
-        apply ACU.Conv.subst_congr
+      have replacement : (Conv env) (rest.subst (single newArgument)) (rest.subst (single argument)) := by
+        apply EnvironmentDelta.Basis.Conv.subst_congr closed
         intro index
         cases index with
         | zero => exact .symm headChange.converted
@@ -139,49 +183,49 @@ private theorem arguments_transport (args : Arguments env ctx mode data telescop
       · simpa only [Bool.true_or] using headChange.typed typed
       · exact tailTyped.convertTelescope replacement
 
-private theorem binary_congr (op : Op) (left : Conv a a') (right : Conv b b') :
-    Conv (.node op [a,b]) (.node op [a',b']) := .node op (.cons left (.cons right .nil))
+private theorem binary_congr (op : Op) (left : (Conv env) a a') (right : (Conv env) b b') :
+    (Conv env) (.node op [a,b]) (.node op [a',b']) := .node op (.cons left (.cons right .nil))
 
-private theorem hypothesisTelescope_congr (converted : Conv a b) (bodies : Conv body body') :
-    Conv (hypothesisTelescope fields offset recursive a body)
+private theorem hypothesisTelescope_congr (closed : Conversion.Closed env) (converted : (Conv env) a b) (bodies : (Conv env) body body') :
+    (Conv env) (hypothesisTelescope fields offset recursive a body)
       (hypothesisTelescope fields offset recursive b body') := by
   induction recursive generalizing offset with
   | nil => exact bodies
   | cons pair rest ih =>
     simp only [hypothesisTelescope, List.zipIdx_cons, List.foldr_cons]
     exact binary_congr (.pi true)
-      (applications_motive_congr (converted.renaming _) _) (ih (offset := offset + 1))
+      (applications_motive_congr (converted.renaming _ closed) _) (ih (offset := offset + 1))
 
-private theorem fieldTelescope_congr (bodies : Conv body body') (fields : List Field) :
-    Conv (fields.foldr (fun field rest => Term.pi field.erased field.domain rest) body)
+private theorem fieldTelescope_congr (bodies : (Conv env) body body') (fields : List Field) :
+    (Conv env) (fields.foldr (fun field rest => Term.pi field.erased field.domain rest) body)
       (fields.foldr (fun field rest => Term.pi field.erased field.domain rest) body') := by
   induction fields with
   | nil => exact bodies
   | cons field fields ih => exact binary_congr (.pi field.erased) (.refl _) ih
 
-theorem propCaseType_congr (signature : Signature) (converted : Conv a b) :
-    Conv (propCaseType signature a) (propCaseType signature b) := by
+theorem propCaseType_congr (closed : Conversion.Closed env) (signature : Signature) (converted : (Conv env) a b) :
+    (Conv env) (propCaseType signature a) (propCaseType signature b) := by
   rw [propCaseType_eq,propCaseType_eq]
   exact fieldTelescope_congr
-    (hypothesisTelescope_congr converted (applications_motive_congr (converted.renaming _) _)) _
+    (hypothesisTelescope_congr closed converted (applications_motive_congr (converted.renaming _ closed) _)) _
 
-theorem foldBodyType_congr (converted : Conv n n') : Conv (foldBodyType n) (foldBodyType n') := by
+theorem foldBodyType_congr (closed : Conversion.Closed env) (converted : (Conv env) n n') : (Conv env) (foldBodyType n) (foldBodyType n') := by
   unfold foldBodyType
   exact binary_congr (.pi false) (.refl _)
-    (binary_congr (.pi true) (binary_congr .lt (.refl _) (converted.renaming Nat.succ)) (.refl _))
+    (binary_congr (.pi true) (binary_congr .lt (.refl _) (converted.renaming Nat.succ closed)) (.refl _))
 
-theorem loopBodyType_count_congr (motive : Term) (proof : Bool) (converted : Conv n n') :
-    Conv (loopBodyType n motive proof) (loopBodyType n' motive proof) := by
+theorem loopBodyType_count_congr (closed : Conversion.Closed env) (motive : Term) (proof : Bool) (converted : (Conv env) n n') :
+    (Conv env) (loopBodyType n motive proof) (loopBodyType n' motive proof) := by
   unfold loopBodyType
   exact binary_congr (.pi false) (.refl _)
-    (binary_congr (.pi true) (binary_congr .lt (.refl _) (converted.renaming Nat.succ)) (.refl _))
+    (binary_congr (.pi true) (binary_congr .lt (.refl _) (converted.renaming Nat.succ closed)) (.refl _))
 
-theorem loopBodyType_motive_congr (n : Term) (proof : Bool) (converted : Conv m m') :
-    Conv (loopBodyType n m proof) (loopBodyType n m' proof) := by
+theorem loopBodyType_motive_congr (closed : Conversion.Closed env) (n : Term) (proof : Bool) (converted : (Conv env) m m') :
+    (Conv env) (loopBodyType n m proof) (loopBodyType n m' proof) := by
   unfold loopBodyType
   exact binary_congr (.pi false) (.refl _) (binary_congr (.pi true) (.refl _)
-    (binary_congr (.pi proof) (binary_congr .app (converted.renaming (fun x => x+2)) (.refl _))
-      (binary_congr .app (converted.renaming (fun x => x+3)) (.refl _))))
+    (binary_congr (.pi proof) (binary_congr .app (converted.renaming (fun x => x+2) closed) (.refl _))
+      (binary_congr .app (converted.renaming (fun x => x+3) closed) (.refl _))))
 
 private theorem list_one (changes : ListRel R [a] ys) : ∃ a', ys = [a'] ∧ R a a' := by
   cases changes with | cons first rest => cases rest; exact ⟨_,rfl,first⟩
@@ -226,14 +270,14 @@ private theorem list_typed (changes : ListRel (GhostTransform env) xs ys)
     · exact first.typed (typed _ (by simp))
     · exact ih (fun x member => typed x (by simp [member])) y member
 
-private theorem cases_transport (branches : Cases env ctx motive signatures terms) :
-    ∀ terms' motive', ListRel (GhostTransform env) terms terms' → Conv motive motive' →
+private theorem cases_transport (closed : Conversion.Closed env) (branches : Cases env ctx motive signatures terms) :
+    ∀ terms' motive', ListRel (GhostTransform env) terms terms' → (Conv env) motive motive' →
     Cases env ctx motive' signatures terms' := by
   apply Cases.rec (t := branches)
     (motive_1 := fun _ _ _ _ _ => True) (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ _ => True)
     (motive_4 := fun ctx motive signatures terms _ =>
-      ∀ terms' motive', ListRel (GhostTransform env) terms terms' → Conv motive motive' →
+      ∀ terms' motive', ListRel (GhostTransform env) terms terms' → (Conv env) motive motive' →
       Cases env ctx motive' signatures terms')
     (motive_5 := fun _ _ _ _ _ => True)
   all_goals intros
@@ -246,17 +290,17 @@ private theorem cases_transport (branches : Cases env ctx motive signatures term
     rename_i ctx branch signature motive signatures branches typed tail _ ihtail terms' motive' changes converted
     cases changes with
     | cons first rest =>
-      exact .cons ((first.typed typed).convert (propCaseType_congr signature converted))
+      exact .cons ((first.typed typed).convert (propCaseType_congr closed signature converted))
         (ihtail _ _ rest converted)
 
 private theorem branch_types_transport (branches : BranchTypes env ctx mode types terms) :
-    ∀ types' terms', ListRel Conv types types' → ListRel (GhostTransform env) terms terms' →
+    ∀ types' terms', ListRel (Conv env) types types' → ListRel (GhostTransform env) terms terms' →
       BranchTypes env ctx true types' terms' := by
   apply BranchTypes.rec (t := branches)
     (motive_1 := fun _ _ _ _ _ => True) (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ _ => True) (motive_4 := fun _ _ _ _ _ => True)
     (motive_5 := fun ctx _ types terms _ =>
-      ∀ types' terms', ListRel Conv types types' → ListRel (GhostTransform env) terms terms' →
+      ∀ types' terms', ListRel (Conv env) types types' → ListRel (GhostTransform env) terms terms' →
         BranchTypes env ctx true types' terms')
   all_goals intros
   all_goals first | trivial | skip
@@ -273,14 +317,14 @@ private theorem branch_types_transport (branches : BranchTypes env ctx mode type
       | cons changedTerm restTerms =>
         exact .cons ((changedTerm.typed typed).convert changedType) (ihtail _ _ restTypes restTerms)
 
-theorem Owned.congr (owned : Owned env A) (converted : Conv A B) : Owned env B := by
+theorem Owned.congr (owned : Owned env A) (converted : (Conv env) A B) : Owned env B := by
   cases owned with
   | buffer related => exact .buffer (.trans (.symm converted) related)
   | family found boxed related => exact .family found boxed (.trans (.symm converted) related)
 
-private theorem instantiate_congr (body : Term) (changed : Conv a b) :
-    Conv (body.subst (single a)) (body.subst (single b)) := by
-  apply ACU.Conv.subst_congr
+private theorem instantiate_congr (closed : Conversion.Closed env) (body : Term) (changed : (Conv env) a b) :
+    (Conv env) (body.subst (single a)) (body.subst (single b)) := by
+  apply EnvironmentDelta.Basis.Conv.subst_congr closed
   intro index
   cases index with
   | zero => exact changed
@@ -324,7 +368,7 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
     | intro domain allowed =>
       have binding' := Binder.intro (domainChange.typed domain) (binderAllowed_congr allowed domainChange.converted)
       have body' := (bodyChange.typed body).ghostContext wf
-        ((Ghost.ContextConversion.refl _).extend domainChange.converted _)
+        ((Ghost.ContextConversion.refl env _).extend domainChange.converted _ wf.closed)
       exact .pi binding' body'
   case lam binding body _ _ =>
     obtain ⟨_,_,rfl,domainChange,bodyChange⟩ := list_two changes
@@ -332,13 +376,13 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
     | intro domain allowed =>
       have binding' := Binder.intro (domainChange.typed domain) (binderAllowed_congr allowed domainChange.converted)
       have body' := (bodyChange.typed body).ghostContext wf
-        ((Ghost.ContextConversion.refl _).extend domainChange.converted _)
+        ((Ghost.ContextConversion.refl env _).extend domainChange.converted _ wf.closed)
       exact (HasType.lam binding' body').convert
         (binary_congr (.pi _) (.symm domainChange.converted) (.refl _))
   case app function argument allowed _ _ =>
     obtain ⟨_,_,rfl,functionChange,argumentChange⟩ := list_two changes
     exact (HasType.app (functionChange.typed function) (by simpa only [Bool.true_or] using argumentChange.typed argument)
-      (Or.inl rfl)).convert (instantiate_congr _ (.symm argumentChange.converted))
+      (Or.inl rfl)).convert (instantiate_congr wf.closed _ (.symm argumentChange.converted))
   case uadd left right _ _ =>
     obtain ⟨_,_,rfl,first,second⟩ := list_two changes
     exact .uadd (first.typed left) (second.typed right)
@@ -424,12 +468,12 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
   case ifLt left right yes no _ _ _ _ =>
     obtain ⟨_,_,_,_,rfl,first,second,third,fourth⟩ := list_four changes
     have yes' := (third.typed yes).ghostContext wf
-      ((Ghost.ContextConversion.refl _).extend (binary_congr .lt first.converted second.converted) true)
+      ((Ghost.ContextConversion.refl env _).extend (binary_congr .lt first.converted second.converted) true wf.closed)
     exact .ifLt (first.typed left) (second.typed right) yes' (fourth.typed no)
   case ifEq left right yes no _ _ _ _ =>
     obtain ⟨_,_,_,_,rfl,first,second,third,fourth⟩ := list_four changes
     have yes' := (third.typed yes).ghostContext wf
-      ((Ghost.ContextConversion.refl _).extend (binary_congr .eq first.converted second.converted) true)
+      ((Ghost.ContextConversion.refl env _).extend (binary_congr .eq first.converted second.converted) true wf.closed)
     exact .ifEq (first.typed left) (second.typed right) yes' (fourth.typed no)
   case absurd target proof allowed _ _ =>
     obtain ⟨_,_,rfl,first,second⟩ := list_two changes
@@ -437,16 +481,16 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
   case foldI64 count init body allowed _ _ _ =>
     obtain ⟨_,_,_,rfl,first,second,third⟩ := list_three changes
     exact .foldI64 (first.typed count) (second.typed init)
-      ((third.typed body).convert (foldBodyType_congr first.converted)) (Or.inl rfl)
+      ((third.typed body).convert (foldBodyType_congr wf.closed first.converted)) (Or.inl rfl)
   case foldOwned count init owned body allowed _ _ _ =>
     obtain ⟨_,_,_,rfl,first,second,third⟩ := list_three changes
     exact .foldOwned (first.typed count) (second.typed init) owned
-      ((third.typed body).convert (foldAccumulatorBodyType_count_congr first.converted)) (Or.inl rfl)
+      ((third.typed body).convert (foldAccumulatorBodyType_count_congr wf.closed first.converted)) (Or.inl rfl)
   case loop motive motiveAllowed count init body bodyAllowed _ _ _ _ =>
     obtain ⟨_,_,_,_,rfl,first,second,third,fourth⟩ := list_four changes
     have init' := (third.typed init).convert (binary_congr .app second.converted (.refl _))
     have body' := (fourth.typed body).convert
-      (.trans (loopBodyType_count_congr _ _ first.converted) (loopBodyType_motive_congr _ _ second.converted))
+      (.trans (loopBodyType_count_congr wf.closed _ _ first.converted) (loopBodyType_motive_congr wf.closed _ _ second.converted))
     exact (HasType.loop (second.typed motive) (Or.inl rfl)
       (by simpa only [Bool.true_or] using first.typed count)
       (by simpa only [Bool.true_or] using init')
@@ -456,7 +500,7 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
   case ind found arity size indices _ =>
     exact .ind found arity ((list_length changes).symm.trans size) (list_typed changes indices)
   case con found signature size args _ =>
-    exact .con found signature (size.trans (list_length changes)) (arguments_transport args _ changes)
+    exact .con found signature (size.trans (list_length changes)) (arguments_transport wf.closed args _ changes)
   case propElim found proof motive branches scrutinee _ _ _ =>
     cases changes with
     | cons motiveChange remaining =>
@@ -464,7 +508,7 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
       obtain ⟨scrutinee',rfl,scrutineeChange⟩ := list_one endChange
       have lengths := list_length branchChanges
       have result := (HasType.propElim (ghost := true) found proof (motiveChange.typed motive)
-        (cases_transport branches _ _ branchChanges motiveChange.converted) (scrutineeChange.typed scrutinee)).convert
+        (cases_transport wf.closed branches _ _ branchChanges motiveChange.converted) (scrutineeChange.typed scrutinee)).convert
         (applications_motive_congr (.symm motiveChange.converted) _)
       simpa only [lengths] using result
   case dataElim found isData boxed size motive scrutinee generated branches allowed _ _ _ =>
@@ -472,7 +516,7 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
     | cons motiveChange remaining =>
       obtain ⟨branches',end',rfl,branchChanges,endChange⟩ := list_append remaining
       obtain ⟨scrutinee',rfl,scrutineeChange⟩ := list_one endChange
-      obtain ⟨types',generated',typeChanges⟩ := dataCaseTypes_motive_congr motiveChange.converted generated
+      obtain ⟨types',generated',typeChanges⟩ := dataCaseTypes_motive_congr wf.closed motiveChange.converted generated
       have lengths := list_length branchChanges
       have result := (HasType.dataElim (ghost := true) found isData boxed size (motiveChange.typed motive)
         (by simpa only [Bool.true_or] using scrutineeChange.typed scrutinee) generated'
@@ -514,7 +558,7 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
     exact .free (first.typed buffer) (second.typed rest)
   case refBuffer size _ =>
     obtain ⟨_,rfl,change⟩ := list_one changes
-    obtain ⟨_,rfl,kids⟩ := mixed_rigid_shape change.forward rfl rfl
+    obtain ⟨_,rfl,kids⟩ := forward_rigid_shape change.forward rfl rfl
     obtain ⟨_,rfl,_⟩ := list_one kids
     exact .refBuffer (change.typed (HasType.buffer (ghost := true) size)).bufferView.1
   case ghostBorrow buffer _ =>
@@ -549,8 +593,8 @@ private theorem children_preservation (wf : UnifiedProgram.EnvWellFormed env)
 
 /-- Leading binders survive actual forward reduction. This does not follow
 from symmetric conversion and is proved from rigid forward syntax instead. -/
-theorem mixed_lambda_shape (step : ACU.MixedRed input output) : LambdaShape input output := by
-  fun_cases LambdaShape input output
+theorem mixed_lambda_shape (step : ACU.MixedRed input output) : LambdaShape env input output := by
+  fun_cases LambdaShape env input output
   · rename_i erased domain body
     obtain ⟨ys,shape,kids⟩ := mixed_rigid_shape step rfl rfl
     cases kids with
@@ -558,13 +602,13 @@ theorem mixed_lambda_shape (step : ACU.MixedRed input output) : LambdaShape inpu
       cases rest with
       | cons bodyStep rest =>
         cases rest
-        exact ⟨_,_,shape,domainStep.toConv,mixed_lambda_shape bodyStep⟩
+        exact ⟨_,_,shape,.acu domainStep.toConv,mixed_lambda_shape bodyStep⟩
   · trivial
 termination_by sizeOf input
 
 private theorem transform (step : ACU.MixedRed input output)
     (preserved : ∀ {ctx type}, HasType env ctx true input type → HasType env ctx true output type) :
-    GhostTransform env input output := ⟨step,mixed_lambda_shape step,preserved⟩
+    GhostTransform env input output := ⟨.acu step,mixed_lambda_shape step,preserved⟩
 
 theorem arithmetic_ghost_transform (wf : UnifiedProgram.EnvWellFormed env)
     (step : ACU.ArithmeticRed input output) : GhostTransform env input output := by
@@ -612,15 +656,52 @@ theorem HasType.ghostArithmeticRed (wf : UnifiedProgram.EnvWellFormed env)
     (typed : HasType env ctx mode term type) (step : ACU.ArithmeticRed term output) :
     HasType env ctx true output type := (arithmetic_ghost_transform wf step).typed typed
 
-/-- A successful run of the concrete bounded normalizer retains the original
-independently derived type, including underneath every native binding edge. -/
-theorem HasType.ghostNormalize (wf : UnifiedProgram.EnvWellFormed env)
-    (typed : HasType env ctx mode term type) (normalized : Conversion.normalize? fuel term = some output) :
-    HasType env ctx true output type := typed.ghostMixedRed wf (Conversion.normalize?_forward normalized)
+/-- Leading binders also survive global unfolding under arbitrary native contexts. -/
+theorem forward_lambda_shape (step : EnvironmentDelta.Forward env input output) : LambdaShape env input output := by
+  fun_cases LambdaShape env input output
+  · rename_i erased domain body
+    obtain ⟨ys,shape,kids⟩ := forward_rigid_shape step rfl rfl
+    cases kids with
+    | cons domainStep rest =>
+      cases rest with
+      | cons bodyStep rest =>
+        cases rest
+        exact ⟨_,_,shape,EnvironmentDelta.Basis.forward_toConv domainStep,forward_lambda_shape bodyStep⟩
+  · trivial
+termination_by sizeOf input
 
-/-- Checked program history supplies the exact closure invariant needed above. -/
+/-- Every actual delta/ACU path preserves the original type under the same checked history. -/
+theorem forward_ghost_transform (history : UnifiedProgram.UnifiedProgramChecked definitions familyDeclarations env)
+    (step : EnvironmentDelta.Forward env input output) : GhostTransform env input output := by
+  induction step using EnvironmentDelta.Forward.rec
+    (motive_2 := fun xs ys _ => ListRel (GhostTransform env) xs ys) with
+  | refl => exact .refl _
+  | trans first second ihfirst ihsecond => exact ihfirst.trans ihsecond
+  | acu reduced => exact mixed_ghost_transform history.wellFormed reduced
+  | node op kids ih =>
+      exact ⟨.node op kids,forward_lambda_shape (.node op kids),
+        fun typed => children_preservation history.wellFormed typed op _ rfl _ ih⟩
+  | delta found =>
+      refine ⟨.delta found,by simp [LambdaShape],?_⟩
+      intro ctx type typed
+      obtain ⟨declaration,selected,preserved⟩ := EnvironmentDelta.checked_global_preserves history typed
+      have same := Option.some.inj (found.symm.trans selected)
+      subst declaration
+      exact preserved
+  | nil => exact .nil
+  | cons first rest ihfirst ihrest => exact .cons ihfirst ihrest
+
+theorem HasType.ghostForward (history : UnifiedProgram.UnifiedProgramChecked definitions familyDeclarations env)
+    (typed : HasType env ctx mode term type) (step : EnvironmentDelta.Forward env term output) :
+    HasType env ctx true output type := (forward_ghost_transform history step).typed typed
+
+/-- A successful concrete bounded delta/ACU normalization retains the independently derived original type. -/
+theorem HasType.ghostNormalize (history : UnifiedProgram.UnifiedProgramChecked definitions familyDeclarations env)
+    (typed : HasType env ctx mode term type) (normalized : Conversion.normalize? env fuel term = some output) :
+    HasType env ctx true output type := typed.ghostForward history (Conversion.normalize?_forward normalized)
+
 theorem HasType.checkedGhostNormalize (history : UnifiedProgram.UnifiedProgramChecked definitions familyDeclarations env)
-    (typed : HasType env ctx mode term type) (normalized : Conversion.normalize? fuel term = some output) :
-    HasType env ctx true output type := typed.ghostNormalize history.wellFormed normalized
+    (typed : HasType env ctx mode term type) (normalized : Conversion.normalize? env fuel term = some output) :
+    HasType env ctx true output type := typed.ghostNormalize history normalized
 
 end Jihoo.NativeKernel.Environment

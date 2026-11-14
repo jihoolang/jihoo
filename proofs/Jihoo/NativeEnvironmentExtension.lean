@@ -1,53 +1,34 @@
+import Jihoo.NativeEnvironmentPrefix
 import Jihoo.NativeEnvironmentTyping
 
 /-! Extending a checked prefix preserves every already available lookup and
 all unified typing rules. This theorem does not assume external signatures. -/
 namespace Jihoo.NativeKernel.Environment
 
-structure Extends (before after : Environment) : Prop where
-  globals : ∀ (index : Nat) declaration, before.globals[index]? = some declaration →
-    after.globals[index]? = some declaration
-  families : ∀ (index : Nat) entry, before.families[index]? = some entry →
-    after.families[index]? = some entry
-
-theorem Extends.refl (env : Environment) : Extends env env := ⟨fun _ _ h => h, fun _ _ h => h⟩
-
-theorem Extends.trans (first : Extends before middle) (second : Extends middle after) :
-    Extends before after :=
-  ⟨fun i d h => second.globals i d (first.globals i d h),
-    fun i e h => second.families i e (first.families i e h)⟩
-
-theorem Extends.pushGlobal (env : Environment) (declaration : GlobalDeclaration) :
-    Extends env ⟨env.globals.push declaration, env.families⟩ := by
-  constructor
-  · intro index existing found
-    obtain ⟨inside, value⟩ := Array.getElem?_eq_some_iff.mp found
-    rw [Array.getElem?_push_lt inside, value]
-  · exact fun _ _ h => h
-
-theorem Extends.pushFamily (env : Environment) (entry : CheckedFamily) :
-    Extends env ⟨env.globals, env.families.push entry⟩ := by
-  constructor
-  · exact fun _ _ h => h
-  · intro index existing found
-    obtain ⟨inside, value⟩ := Array.getElem?_eq_some_iff.mp found
-    rw [Array.getElem?_push_lt inside, value]
-
 theorem dataBinderAllowed.extend (extension : Extends before after)
     (allowed : dataBinderAllowed before domain) : dataBinderAllowed after domain := by
   obtain ⟨family, count, indices, entry, found, data, converted⟩ := allowed
-  exact ⟨family, count, indices, entry, extension.families _ _ found, data, converted⟩
+  exact ⟨family, count, indices, entry, extension.families _ _ found, data, converted.extend extension⟩
+
+theorem pureBinderAllowed.extend (extension : Extends before after)
+    (allowed : pureBinderAllowed before erased domain sort) : pureBinderAllowed after erased domain sort := by
+  cases erased with
+  | false => exact allowed
+  | true =>
+    rcases allowed with proof | converted
+    · exact Or.inl proof
+    · exact Or.inr (converted.extend extension)
 
 theorem binderAllowed.extend (extension : Extends before after)
     (allowed : binderAllowed before erased domain sort) : binderAllowed after erased domain sort := by
   rcases allowed with old | ⟨erased, data⟩
-  · exact Or.inl old
+  · exact Or.inl (old.extend extension)
   · exact Or.inr ⟨erased, data.extend extension⟩
 
 theorem Owned.extend (extension : Extends before after) (owned : Owned before term) : Owned after term := by
   cases owned with
-  | buffer converted => exact .buffer converted
-  | family found boxed converted => exact .family (extension.families _ _ found) boxed converted
+  | buffer converted => exact .buffer (converted.extend extension)
+  | family found boxed converted => exact .family (extension.families _ _ found) boxed (converted.extend extension)
 
 theorem fixedRepresentation.extend (extension : Extends before after)
     (certificate : fixedRepresentation before term = true) : fixedRepresentation after term = true := by
@@ -73,7 +54,7 @@ theorem BackRepresentation.extend (extension : Extends before after)
   rcases represented with hg | he | ⟨flag,domain,body,converted,fixed⟩
   · exact Or.inl hg
   · exact Or.inr (Or.inl he)
-  · exact Or.inr (Or.inr ⟨flag,domain,body,converted,fixedRepresentation.extend extension fixed⟩)
+  · exact Or.inr (Or.inr ⟨flag,domain,body,converted.extend extension,fixedRepresentation.extend extension fixed⟩)
 
 mutual
   theorem familyPlain.extend (extension : Extends before after)
@@ -132,10 +113,23 @@ theorem plain.extend (extension : Extends before after)
 theorem applicationAllowed.extend (extension : Extends before after)
     (allowed : applicationAllowed before ghost domain argument) :
     applicationAllowed after ghost domain argument := by
-  rcases allowed with ghost | ⟨free,kind | ⟨firstOrder,normal,converted,certificate⟩⟩
+  rcases allowed with ghost | ⟨domainNormal,domainConverted,free,kind | ⟨firstOrder,argumentNormal,argumentConverted,certificate⟩⟩
   · exact Or.inl ghost
-  · exact Or.inr ⟨free,Or.inl kind⟩
-  · exact Or.inr ⟨free,Or.inr ⟨firstOrder,normal,converted,plain.extend extension certificate⟩⟩
+  · exact Or.inr ⟨domainNormal,domainConverted.extend extension,free,Or.inl kind⟩
+  · exact Or.inr ⟨domainNormal,domainConverted.extend extension,free,
+      Or.inr ⟨firstOrder,argumentNormal,argumentConverted.extend extension,plain.extend extension certificate⟩⟩
+
+theorem absurdAllowed.extend (extension : Extends before after)
+    (allowed : absurdAllowed before ghost result) : absurdAllowed after ghost result := by
+  rcases allowed with ghost | positive
+  · exact Or.inl ghost
+  · exact Or.inr (positive.extend extension)
+
+theorem continuationAllowed.extend (extension : Extends before after)
+    (allowed : continuationAllowed before ghost result) : continuationAllowed after ghost result := by
+  rcases allowed with ghost | positive
+  · exact Or.inl ghost
+  · exact Or.inr (positive.extend extension)
 
 mutual
   theorem iterationMemoryFree.extend (extension : Extends before after)
@@ -183,8 +177,9 @@ theorem IterationMotiveAllowed.extend (extension : Extends before after)
   rcases allowed with ghost | proof | scalar | ⟨flag, domain, body, converted, owned⟩
   · exact Or.inl ghost
   · exact Or.inr (Or.inl proof)
-  · exact Or.inr (Or.inr (Or.inl scalar))
-  · exact Or.inr (Or.inr (Or.inr ⟨flag, domain, body, converted, owned.extend extension⟩))
+  · obtain ⟨normal,converted,head⟩ := scalar
+    exact Or.inr (Or.inr (Or.inl ⟨normal,converted.extend extension,head⟩))
+  · exact Or.inr (Or.inr (Or.inr ⟨flag, domain, body, converted.extend extension, owned.extend extension⟩))
 
 /-- Appending declarations cannot invalidate a previously typed native term. -/
 theorem HasType.extend (extension : Extends before after)
@@ -198,68 +193,68 @@ theorem HasType.extend (extension : Extends before after)
     (motive_5 := fun ctx ghost types branches _ => BranchTypes after ctx ghost types branches)
   all_goals intros
   all_goals first
-    | solve | apply Binder.intro <;> first | assumption | exact binderAllowed.extend extension (by assumption)
-    | solve | apply HasType.var <;> first | assumption
-    | solve | apply HasType.univ <;> first | assumption
-    | solve | apply HasType.prop <;> first | assumption
-    | solve | apply HasType.u64 <;> first | assumption
-    | solve | apply HasType.i64 <;> first | assumption
-    | solve | apply HasType.natural <;> first | assumption
-    | solve | apply HasType.integer <;> first | assumption
-    | solve | apply HasType.array <;> first | assumption
-    | solve | apply HasType.lt <;> first | assumption
-    | solve | apply HasType.eq <;> first | assumption
-    | solve | apply HasType.pi <;> first | assumption
-    | solve | apply HasType.lam <;> first | assumption
-    | solve | apply HasType.app <;> first | assumption | exact applicationAllowed.extend extension (by assumption)
-    | solve | apply HasType.uadd <;> first | assumption
-    | solve | apply HasType.usub <;> first | assumption
-    | solve | apply HasType.refl <;> first | assumption
-    | solve | apply HasType.zeroLe <;> first | assumption
-    | solve | apply HasType.decide <;> first | assumption
-    | solve | apply HasType.decideConverted <;> first | assumption
-    | solve | apply HasType.elements <;> first | assumption
-    | solve | apply HasType.index <;> first | assumption
-    | solve | apply HasType.arith <;> first | assumption
-    | solve | apply HasType.strict <;> first | assumption
-    | solve | apply HasType.ltAdd <;> first | assumption
-    | solve | apply HasType.ltCancel <;> first | assumption
-    | solve | apply HasType.ltLe <;> first | assumption
-    | solve | apply HasType.transport <;> first | assumption
-    | solve | apply HasType.refine <;> first | assumption
-    | solve | apply HasType.pack <;> first | assumption
-    | solve | apply HasType.witness <;> first | assumption
-    | solve | apply HasType.proof <;> first | assumption
-    | solve | apply HasType.ifLt <;> first | assumption
-    | solve | apply HasType.ifEq <;> first | assumption
-    | solve | apply HasType.absurd <;> first | assumption
-    | solve | apply HasType.foldI64 <;> first | assumption | exact IterationBodyAllowed.extend extension (by assumption)
-    | solve | apply HasType.foldOwned <;> first | assumption | exact Owned.extend extension (by assumption) | exact IterationBodyAllowed.extend extension (by assumption)
-    | solve | apply HasType.loop <;> first | assumption | exact IterationMotiveAllowed.extend extension (by assumption) | exact IterationBodyAllowed.extend extension (by assumption)
-    | solve | apply HasType.global <;> first | assumption | exact extension.globals _ _ (by assumption)
-    | solve | apply HasType.ind <;> first | assumption | exact extension.families _ _ (by assumption)
-    | solve | apply HasType.con <;> first | assumption | exact extension.families _ _ (by assumption)
-    | solve | apply HasType.propElim <;> first | assumption | exact extension.families _ _ (by assumption)
-    | solve | apply HasType.buffer <;> first | assumption
-    | solve | apply HasType.alloc <;> first | assumption
-    | solve | apply HasType.store <;> first | assumption
-    | solve | apply HasType.load <;> first | assumption
-    | solve | apply HasType.free <;> first | assumption
-    | solve | apply HasType.refBuffer <;> first | assumption
-    | solve | apply HasType.ghostBorrow <;> first | assumption
-    | solve | apply HasType.ghostDeref <;> first | assumption
-    | solve | apply HasType.borrowedIndex <;> first | assumption
-    | solve | apply HasType.back <;> first | assumption | exact Owned.extend extension (by assumption) | exact BackRepresentation.extend extension (by assumption)
-    | solve | apply HasType.give <;> first | assumption | exact Owned.extend extension (by assumption) | exact BackRepresentation.extend extension (by assumption)
-    | solve | apply HasType.take <;> assumption
-    | solve | apply HasType.dataElim <;> first | assumption | exact extension.families _ _ (by assumption)
-    | solve | apply HasType.drop <;> first | assumption | exact extension.families _ _ (by assumption)
-    | solve | apply HasType.refOwned <;> first | assumption | exact Owned.extend extension (by assumption)
-    | solve | apply HasType.ghostBorrowOwned <;> first | assumption | exact Owned.extend extension (by assumption)
+    | solve | apply Binder.intro <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact binderAllowed.extend extension (by assumption)
+    | solve | apply HasType.var <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.univ <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.prop <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.u64 <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.i64 <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.natural <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.integer <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.array <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.lt <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.eq <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.pi <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.lam <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.app <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact applicationAllowed.extend extension (by assumption)
+    | solve | apply HasType.uadd <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.usub <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.refl <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.zeroLe <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.decide <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.decideConverted <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.elements <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.index <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.arith <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.strict <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ltAdd <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ltCancel <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ltLe <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.transport <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.refine <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.pack <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.witness <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.proof <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ifLt <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ifEq <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.absurd <;> first | assumption | exact absurdAllowed.extend extension (by assumption) | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.foldI64 <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact IterationBodyAllowed.extend extension (by assumption)
+    | solve | apply HasType.foldOwned <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption) | exact IterationBodyAllowed.extend extension (by assumption)
+    | solve | apply HasType.loop <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact IterationMotiveAllowed.extend extension (by assumption) | exact IterationBodyAllowed.extend extension (by assumption)
+    | solve | apply HasType.global <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.globals _ _ (by assumption)
+    | solve | apply HasType.ind <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.families _ _ (by assumption)
+    | solve | apply HasType.con <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.families _ _ (by assumption)
+    | solve | apply HasType.propElim <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.families _ _ (by assumption)
+    | solve | apply HasType.buffer <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.alloc <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.store <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.load <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.free <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.refBuffer <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ghostBorrow <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.ghostDeref <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.borrowedIndex <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.back <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption) | exact BackRepresentation.extend extension (by assumption)
+    | solve | apply HasType.give <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption) | exact BackRepresentation.extend extension (by assumption)
+    | solve | apply HasType.take <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply HasType.dataElim <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.families _ _ (by assumption)
+    | solve | apply HasType.drop <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact extension.families _ _ (by assumption)
+    | solve | apply HasType.refOwned <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption)
+    | solve | apply HasType.ghostBorrowOwned <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption) | exact Owned.extend extension (by assumption)
     | solve | apply HasType.ghostDerefOwned <;> assumption
-    | solve | apply HasType.convert <;> first | assumption
-    | solve | apply Arguments.nil <;> assumption
-    | solve | apply Arguments.cons <;> assumption
+    | solve | apply HasType.convert <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension | exact continuationAllowed.extend extension (by assumption)
+    | solve | apply Arguments.nil <;> exact (show Conversion.Conv before _ _ from by assumption).extend extension
+    | solve | apply Arguments.cons <;> first | assumption | exact (show Conversion.Conv before _ _ from by assumption).extend extension
     | solve | apply Cases.nil
     | solve | apply Cases.cons <;> assumption
     | solve | apply BranchTypes.nil

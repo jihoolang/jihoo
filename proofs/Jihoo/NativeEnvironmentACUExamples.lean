@@ -21,7 +21,7 @@ theorem nonaffine_type_indices_typed : HasType empty ctx true (.refl left) (.eq 
 theorem legacy_comparator_missed_nonaffine_acu :
     Jihoo.NativeKernel.Conversion.equal 12 left right = false := by cbv
 
-theorem actual_acu_comparator_accepts_nonaffine_atoms : Conversion.equal 12 left right = true := by cbv
+theorem actual_acu_comparator_accepts_nonaffine_atoms : Conversion.equal empty 12 left right = true := by cbv
 
 private def wrappedFunctionContext : Context :=
   [⟨.uadd (.pi false .u64 .u64) (.natural 0),false⟩]
@@ -50,22 +50,22 @@ theorem ghost_global_application_typed : HasType aliasEnv [] true typeApplicatio
   Checker.infer_sound global_buffer_alias_ghost_type_argument_accepted
 
 /-- The nonfunction property quantifies full ACU conversion, including zero. -/
-theorem additive_hidden_function_is_not_nonFunction :
-    ¬ nonFunction (.uadd (.pi false .u64 .u64) (.natural 0)) := by
+theorem additive_hidden_function_is_not_nonFunction (admissible : EnvironmentDelta.Admissible env) :
+    ¬ nonFunction env (.uadd (.pi false .u64 .u64) (.natural 0)) := by
   intro allowed
-  exact allowed false .u64 .u64 (.zero _)
+  exact allowed.not_pi (.acu (.zero _)) admissible
 
 theorem untyped_proof_slots_remain_distinct :
-    Conversion.equal 8 (.pack (.var 7) (.var 2) (.var 0)) (.pack (.var 7) (.var 2) (.var 1)) = false := by cbv
+    Conversion.equal empty 8 (.pack (.var 7) (.var 2) (.var 0)) (.pack (.var 7) (.var 2) (.var 1)) = false := by cbv
 
-theorem head_exposure_propagates_bounded_refusal (failed : Conversion.normalize? fuel t = none) :
-    Checker.expose fuel (some t) = none := by
+theorem head_exposure_propagates_bounded_refusal (failed : Conversion.normalize? env fuel t = none) :
+    Checker.expose fuel env (some t) = none := by
   simpa only [Checker.expose,Option.bind_some] using failed
 
-theorem failed_inference_stays_unexposed : Checker.expose 8 none = none := rfl
+theorem failed_inference_stays_unexposed : Checker.expose 8 env none = none := rfl
 
 theorem old_conversion_embeds_in_actual_base (h : Jihoo.NativeKernel.Conversion.Conv a b) :
-    Conversion.Conv a b := Conversion.ofLegacy h
+    Conversion.Conv env a b := Conversion.ofLegacy h
 
 theorem old_pure_typing_has_ghost_embedding (h : Jihoo.NativeKernel.HasType context mode t T) :
     HasType environment context true t T := ofPure h

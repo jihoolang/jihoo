@@ -55,4 +55,33 @@ theorem captured_proposition_motive_instantiated : HasType propositionEnv [] tru
   simpa only [Term.subst, substArgs, Op.binders, liftSub, NativeKernel.single] using
     source.ghostInstantiate propositionWellFormed argument
 
+private def aliasDeclaration : GlobalDeclaration := ⟨.univ 0,.u64⟩
+private def aliasEnv : Environment := ⟨#[aliasDeclaration],#[]⟩
+private def aliasTerm : Term := .node (.global 0) []
+private theorem aliasWellFormed : UnifiedProgram.EnvWellFormed aliasEnv :=
+  UnifiedProgram.checkProgram_wellFormed
+    (by cbv : UnifiedProgram.checkProgram 24 24 [aliasDeclaration] [] = some aliasEnv)
+private theorem aliasDelta : Conversion.Conv aliasEnv aliasTerm .u64 :=
+  .delta (index := 0) (declaration := aliasDeclaration) rfl
+
+/-- A real delta conversion in the body is transported through simultaneous
+substitution using the authenticated closed-global invariant. -/
+theorem delta_body_conversion_instantiated : HasType aliasEnv [] true (.natural 7) .u64 := by
+  have lookupTyped : HasType aliasEnv [⟨aliasTerm,false⟩] false (.var 0) aliasTerm := by
+    simpa only [aliasTerm,Term.rename,renameArgs] using
+      (HasType.var (env := aliasEnv) (ctx := [⟨aliasTerm,false⟩]) (x := 0) rfl (Or.inr rfl))
+  have converted := lookupTyped.convert aliasDelta
+  have argument : HasType aliasEnv [] true (.natural 7) aliasTerm :=
+    (HasType.natural (by decide)).convert (.symm aliasDelta)
+  simpa only [Term.subst,substArgs,NativeKernel.single] using converted.ghostInstantiate aliasWellFormed argument
+
+/-- Context conversion renames the actual delta equation under a binder. -/
+theorem delta_context_annotation_converted : HasType aliasEnv [⟨aliasTerm,false⟩] true (.var 0) .u64 := by
+  have source : HasType aliasEnv [⟨.u64,false⟩] true (.var 0) .u64 := by
+    simpa only [Term.rename,renameArgs] using
+      (HasType.var (env := aliasEnv) (ctx := [⟨.u64,false⟩]) (x := 0) rfl (Or.inl rfl))
+  have related := Ghost.ContextConversion.extend (Ghost.ContextConversion.refl aliasEnv [])
+    (.symm aliasDelta) false aliasWellFormed.closed
+  exact source.ghostContext aliasWellFormed related
+
 end Jihoo.NativeKernel.Environment.GhostExamples

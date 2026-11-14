@@ -101,19 +101,19 @@ theorem HasType.ghost (typed : HasType env ctx mode term type) : HasType env ctx
   | cons term rest ih => simp only [substArgs, Op.binders, liftSub, ih, List.map_cons]
 
 /-- Environment-aware erased-data policy is natural in ambient variables. -/
-theorem binderAllowed_renaming (allowed : binderAllowed env erased domain sort) (ρ : Nat → Nat) :
+theorem binderAllowed_renaming (closed : Conversion.Closed env) (allowed : binderAllowed env erased domain sort) (ρ : Nat → Nat) :
     binderAllowed env erased (domain.rename ρ) sort := by
   rcases allowed with pure | ⟨erased, family, count, indices, entry, found, data, converted⟩
-  · exact Or.inl (pureBinderAllowed_renaming pure ρ)
+  · exact Or.inl (pureBinderAllowed_renaming closed pure ρ)
   · exact Or.inr ⟨erased, family, count, indices.map (Term.rename ρ), entry, found, data,
-      by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using converted.renaming ρ⟩
+      by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using converted.renaming ρ closed⟩
 
-theorem binderAllowed_substitution (allowed : binderAllowed env erased domain sort) (substitution : Nat → Term) :
+theorem binderAllowed_substitution (closed : Conversion.Closed env) (allowed : binderAllowed env erased domain sort) (substitution : Nat → Term) :
     binderAllowed env erased (domain.subst substitution) sort := by
   rcases allowed with pure | ⟨erased, family, count, indices, entry, found, data, converted⟩
-  · exact Or.inl (pureBinderAllowed_substitution pure substitution)
+  · exact Or.inl (pureBinderAllowed_substitution closed pure substitution)
   · exact Or.inr ⟨erased, family, count, indices.map (Term.subst substitution), entry, found, data,
-      by simpa [Term.subst, substArgs, Op.binders, liftSub] using converted.substitution substitution⟩
+      by simpa [Term.subst, substArgs, Op.binders, liftSub] using converted.substitution substitution closed⟩
 
 namespace Ghost
 abbrev Renaming := Jihoo.NativeKernel.Ghost.Renaming
@@ -165,7 +165,7 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
   all_goals intros
   case intro =>
     rename_i typed allowed ih_typed Δ ρ hρ
-    exact .intro (by simpa using ih_typed Δ ρ hρ) (binderAllowed_renaming allowed ρ)
+    exact .intro (by simpa using ih_typed Δ ρ hρ) (binderAllowed_renaming wellFormed.closed allowed ρ)
   case var =>
     rename_i hx _ Δ ρ hρ
     simpa only [Term.rename] using HasType.var (hρ _ _ hx) (Or.inl rfl)
@@ -240,8 +240,8 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
     rename_i ha hb ca cb hm hn hmn ih_ha ih_hb Δ ρ hρ
     simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
       HasType.decideConverted (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ha Δ ρ hρ) (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_hb Δ ρ hρ)
-        (by simpa [Term.rename, renameArgs] using ca.renaming ρ)
-        (by simpa [Term.rename, renameArgs] using cb.renaming ρ) hm hn hmn
+        (by simpa [Term.rename, renameArgs] using ca.renaming ρ wellFormed.closed)
+        (by simpa [Term.rename, renameArgs] using cb.renaming ρ wellFormed.closed) hm hn hmn
   case elements =>
     rename_i n xs Γ mode hn hb hs ih_hs Δ ρ hρ
     have ht := HasType.elements (ctx := Δ) (ghost := true)
@@ -344,22 +344,22 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
   case back =>
     rename_i formed owned motive allowed iho ihm Δ ρ hρ
     have target := HasType.back (ghost := true)
-      (by simpa [Term.rename, renameArgs] using iho Δ ρ hρ) (owned.renaming ρ)
+      (by simpa [Term.rename, renameArgs] using iho Δ ρ hρ) (owned.renaming ρ wellFormed.closed)
       (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihm Δ ρ hρ) (Or.inl rfl)
     simpa only [rename_back, Term.rename, renameArgs] using target
   case give =>
     rename_i owner owned motive allowed result iho ihm ihr Δ ρ hρ
     have target := HasType.give (ghost := true)
-      (iho Δ ρ hρ) (owned.renaming ρ)
+      (iho Δ ρ hρ) (owned.renaming ρ wellFormed.closed)
       (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihm Δ ρ hρ) (Or.inl rfl)
       (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihr Δ ρ hρ)
     simpa only [rename_give, rename_back] using target
   case take =>
     rename_i value continuation owner result converted lowered allowed ihv ihk Δ ρ hρ
-    have cv := owner.renaming ρ
-    have cp := result.renaming (liftRenaming 1 ρ)
+    have cv := owner.renaming ρ wellFormed.closed
+    have cp := result.renaming (liftRenaming 1 ρ) wellFormed.closed
     rw [rename_takeResultType] at cp
-    have cr := converted.renaming (liftRenaming 2 ρ)
+    have cr := converted.renaming (liftRenaming 2 ρ) wellFormed.closed
     rw [load_result_rename ρ lowered] at cr
     have target := HasType.take (ghost := true)
       (by simpa only [rename_back] using ihv Δ ρ hρ)
@@ -370,7 +370,7 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
   case foldOwned =>
     rename_i count init owned body allowed ihc ihi ihb Δ ρ hρ
     have lifted := HasType.foldOwned (ghost := true)
-      (by simpa [Term.rename, renameArgs] using ihc Δ ρ hρ) (ihi Δ ρ hρ) (owned.renaming ρ)
+      (by simpa [Term.rename, renameArgs] using ihc Δ ρ hρ) (ihi Δ ρ hρ) (owned.renaming ρ wellFormed.closed)
       (by simpa only [foldAccumulatorBodyType_rename] using ihb Δ ρ hρ) (Or.inl rfl)
     simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using lifted
   case dataElim =>
@@ -395,17 +395,17 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
   case refOwned =>
     rename_i owner owned ih Δ ρ hρ
     simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using
-      HasType.refOwned (by simpa [Term.rename, renameArgs] using ih Δ ρ hρ) (owned.renaming ρ)
+      HasType.refOwned (by simpa [Term.rename, renameArgs] using ih Δ ρ hρ) (owned.renaming ρ wellFormed.closed)
   case ghostBorrowOwned =>
     rename_i owner owned ih Δ ρ hρ
-    simpa only [rename_borrow, rename_ref] using HasType.ghostBorrowOwned (ih Δ ρ hρ) (owned.renaming ρ)
+    simpa only [rename_borrow, rename_ref] using HasType.ghostBorrowOwned (ih Δ ρ hρ) (owned.renaming ρ wellFormed.closed)
   case ghostDerefOwned =>
     rename_i reference ih Δ ρ hρ
     simpa only [rename_deref, rename_ref] using
       HasType.ghostDerefOwned (by simpa only [rename_ref] using ih Δ ρ hρ)
   case convert =>
     rename_i ht hc ih_ht Δ ρ hρ
-    exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ)
+    exact .convert (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ih_ht Δ ρ hρ) (hc.renaming ρ wellFormed.closed)
   case global =>
     rename_i found Δ ρ hρ
     have closed := (wellFormed.globals _ _ found).1
@@ -451,9 +451,9 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
   case load =>
     rename_i buffer index proof continuation value owner converted lowered allowed ihb ihi ihp ihk Δ ρ hρ
     have hk := ihk Δ ρ hρ
-    have cv := value.renaming ρ
-    have co := owner.renaming (Indexed.liftRenaming ρ)
-    have cr := converted.renaming (liftRenaming 2 ρ)
+    have cv := value.renaming ρ wellFormed.closed
+    have co := owner.renaming (Indexed.liftRenaming ρ) wellFormed.closed
+    have cr := converted.renaming (liftRenaming 2 ρ) wellFormed.closed
     rw [load_result_rename ρ lowered] at cr
     have result := HasType.load (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihb Δ ρ hρ)
       (by simpa [Term.rename, renameArgs] using ihi Δ ρ hρ)
@@ -481,14 +481,14 @@ private theorem renaming_rule (wellFormed : UnifiedProgram.EnvWellFormed env)
       ((by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihi Δ ρ hρ)) ((by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using ihp Δ ρ hρ))
   case nil =>
     rename_i converted Δ ρ hρ
-    simpa only [List.map_nil] using Arguments.nil (ctx := Δ) (ghost := true) (converted.renaming ρ)
+    simpa only [List.map_nil] using Arguments.nil (ctx := Δ) (ghost := true) (converted.renaming ρ wellFormed.closed)
   case cons =>
     rename_i telescope erased domain rest ctx mode data argument arguments result converted typed argumentsTyped iht iha Δ ρ hρ
     have tail := iha Δ ρ hρ
     change Arguments env Δ true data ((rest.subst (single argument)).rename ρ)
       (arguments.map (Term.rename ρ)) (result.rename ρ) at tail
     rw [Term.rename_instantiate] at tail
-    have result := Arguments.cons (env := env) (ctx := Δ) (ghost := true) (data := data) (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using converted.renaming ρ)
+    have result := Arguments.cons (env := env) (ctx := Δ) (ghost := true) (data := data) (by simpa [Term.rename, renameArgs, Op.binders, liftRenaming] using converted.renaming ρ wellFormed.closed)
       (by simpa only [Bool.true_or] using iht Δ ρ hρ)
       tail
     simpa only [List.map_cons] using result
@@ -521,7 +521,7 @@ theorem Binder.ghostRenaming (wellFormed : UnifiedProgram.EnvWellFormed env)
   cases binding with
   | intro formed allowed =>
       exact .intro (by simpa only [SortTag.rename_term] using formed.ghostRenaming wellFormed renamed)
-        (binderAllowed_renaming allowed ρ)
+        (binderAllowed_renaming wellFormed.closed allowed ρ)
 
 @[simp] theorem substArgs_con (family constructor count : Nat) (σ : Nat → Term) (offset : Nat) (terms : List Term) :
     substArgs (.con family constructor count) σ offset terms = terms.map (Term.subst σ) := by
@@ -581,7 +581,7 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
   all_goals intros
   case intro =>
     rename_i typed allowed ih_typed Δ σ hσ
-    exact .intro (by simpa using ih_typed Δ σ hσ) (binderAllowed_substitution allowed σ)
+    exact .intro (by simpa using ih_typed Δ σ hσ) (binderAllowed_substitution wellFormed.closed allowed σ)
   case var =>
     rename_i hx _ Δ σ hσ
     simpa only [Term.subst] using hσ _ _ hx
@@ -656,8 +656,8 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
     rename_i ha hb ca cb hm hn hmn ih_ha ih_hb Δ σ hσ
     simpa [Term.subst, substArgs, Op.binders, liftSub] using
       HasType.decideConverted (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ha Δ σ hσ) (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_hb Δ σ hσ)
-        (by simpa [Term.subst, substArgs] using ca.substitution σ)
-        (by simpa [Term.subst, substArgs] using cb.substitution σ) hm hn hmn
+        (by simpa [Term.subst, substArgs] using ca.substitution σ wellFormed.closed)
+        (by simpa [Term.subst, substArgs] using cb.substitution σ wellFormed.closed) hm hn hmn
   case elements =>
     rename_i n xs Γ mode hn hb hs ih_hs Δ σ hσ
     have ht := HasType.elements (ctx := Δ) (ghost := true)
@@ -760,22 +760,22 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
   case back =>
     rename_i formed owned motive allowed iho ihm Δ σ hσ
     have target := HasType.back (ghost := true)
-      (by simpa [Term.subst, substArgs] using iho Δ σ hσ) (owned.substitution σ)
+      (by simpa [Term.subst, substArgs] using iho Δ σ hσ) (owned.substitution σ wellFormed.closed)
       (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ihm Δ σ hσ) (Or.inl rfl)
     simpa only [subst_back, Term.subst, substArgs] using target
   case give =>
     rename_i owner owned motive allowed result iho ihm ihr Δ σ hσ
     have target := HasType.give (ghost := true)
-      (iho Δ σ hσ) (owned.substitution σ)
+      (iho Δ σ hσ) (owned.substitution σ wellFormed.closed)
       (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ihm Δ σ hσ) (Or.inl rfl)
       (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ihr Δ σ hσ)
     simpa only [subst_give, subst_back] using target
   case take =>
     rename_i value continuation owner result converted lowered allowed ihv ihk Δ σ hσ
-    have cv := owner.substitution σ
-    have cp := result.substitution (liftSub 1 σ)
+    have cv := owner.substitution σ wellFormed.closed
+    have cp := result.substitution (liftSub 1 σ) wellFormed.closed
     rw [subst_takeResultType] at cp
-    have cr := converted.substitution (liftSub 2 σ)
+    have cr := converted.substitution (liftSub 2 σ) wellFormed.closed
     rw [load_result_subst σ lowered] at cr
     have target := HasType.take (ghost := true)
       (by simpa only [subst_back] using ihv Δ σ hσ)
@@ -786,7 +786,7 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
   case foldOwned =>
     rename_i count init owned body allowed ihc ihi ihb Δ σ hσ
     have lifted := HasType.foldOwned (ghost := true)
-      (by simpa [Term.subst, substArgs] using ihc Δ σ hσ) (ihi Δ σ hσ) (owned.substitution σ)
+      (by simpa [Term.subst, substArgs] using ihc Δ σ hσ) (ihi Δ σ hσ) (owned.substitution σ wellFormed.closed)
       (by simpa only [foldAccumulatorBodyType_subst] using ihb Δ σ hσ) (Or.inl rfl)
     simpa [Term.subst, substArgs, Op.binders, liftSub] using lifted
   case dataElim =>
@@ -811,17 +811,17 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
   case refOwned =>
     rename_i owner owned ih Δ σ hσ
     simpa [Term.subst, substArgs, Op.binders, liftSub] using
-      HasType.refOwned (by simpa [Term.subst, substArgs] using ih Δ σ hσ) (owned.substitution σ)
+      HasType.refOwned (by simpa [Term.subst, substArgs] using ih Δ σ hσ) (owned.substitution σ wellFormed.closed)
   case ghostBorrowOwned =>
     rename_i owner owned ih Δ σ hσ
-    simpa only [subst_borrow, subst_ref] using HasType.ghostBorrowOwned (ih Δ σ hσ) (owned.substitution σ)
+    simpa only [subst_borrow, subst_ref] using HasType.ghostBorrowOwned (ih Δ σ hσ) (owned.substitution σ wellFormed.closed)
   case ghostDerefOwned =>
     rename_i reference ih Δ σ hσ
     simpa only [subst_deref, subst_ref] using
       HasType.ghostDerefOwned (by simpa only [subst_ref] using ih Δ σ hσ)
   case convert =>
     rename_i ht hc ih_ht Δ σ hσ
-    exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ)
+    exact .convert (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ih_ht Δ σ hσ) (hc.substitution σ wellFormed.closed)
   case global =>
     rename_i found Δ σ hσ
     have closed := (wellFormed.globals _ _ found).1
@@ -873,9 +873,9 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
   case load =>
     rename_i buffer index proof continuation value owner converted lowered allowed ihb ihi ihp ihk Δ σ hσ
     have hk := ihk Δ σ hσ
-    have cv := value.substitution σ
-    have co := owner.substitution (liftSubOne σ)
-    have cr := converted.substitution (liftSub 2 σ)
+    have cv := value.substitution σ wellFormed.closed
+    have co := owner.substitution (liftSubOne σ) wellFormed.closed
+    have cr := converted.substitution (liftSub 2 σ) wellFormed.closed
     rw [load_result_subst σ lowered] at cr
     have result := HasType.load (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ihb Δ σ hσ)
       (by simpa [Term.subst, substArgs] using ihi Δ σ hσ)
@@ -909,7 +909,7 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
       (by simpa [Term.subst, substArgs, Op.binders, liftSub] using ihp Δ σ hσ)
   case nil =>
     rename_i converted Δ σ hσ
-    simpa only [List.map_nil] using Arguments.nil (ctx := Δ) (ghost := true) (converted.substitution σ)
+    simpa only [List.map_nil] using Arguments.nil (ctx := Δ) (ghost := true) (converted.substitution σ wellFormed.closed)
   case cons =>
     rename_i telescope erased domain rest ctx mode data argument arguments result converted typed argumentsTyped iht iha Δ σ hσ
     have tail := iha Δ σ hσ
@@ -917,7 +917,7 @@ private theorem substitution_rule (wellFormed : UnifiedProgram.EnvWellFormed env
       (arguments.map (Term.subst σ)) (result.subst σ) at tail
     rw [Term.subst_instantiate] at tail
     have result := Arguments.cons (env := env) (ctx := Δ) (ghost := true) (data := data)
-      (by simpa [Term.subst, substArgs, Op.binders, liftSub] using converted.substitution σ)
+      (by simpa [Term.subst, substArgs, Op.binders, liftSub] using converted.substitution σ wellFormed.closed)
       (by simpa only [Bool.true_or] using iht Δ σ hσ) tail
     simpa only [List.map_cons] using result
   case nil => exact Cases.nil
@@ -942,7 +942,7 @@ theorem Binder.ghostSubstitution (wellFormed : UnifiedProgram.EnvWellFormed env)
   cases binding with
   | intro formed allowed =>
       exact .intro (by simpa only [SortTag.subst_term] using formed.ghostSubstitution wellFormed substituted)
-        (binderAllowed_substitution allowed σ)
+        (binderAllowed_substitution wellFormed.closed allowed σ)
 
 namespace Ghost
 theorem Substitution.single (erased : Bool) (typed : HasType env ctx true argument domain) :

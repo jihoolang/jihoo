@@ -3,7 +3,8 @@ import Jihoo.NativeACUFullConfluence
 
 /-! Representation separation for the actual environment-free ACU theory.
 Plainness is transported forward, not assumed invariant under symmetric
-conversion. Globals remain rigid here; checked delta is a separate layer. -/
+conversion. The statements below explicitly name ACU.Conv. The checker now uses the separate
+environment-indexed delta/ACU relation and a positive nonfunction certificate. -/
 namespace Jihoo.NativeKernel.Environment
 set_option linter.unusedSimpArgs false
 
@@ -304,7 +305,7 @@ theorem familyPlain_qstar (h : ACU.QStar a b) (plain : familyPlain env a = true)
 This uses proved full conversion confluence, not symmetric plain invariance. -/
 theorem plain_rigid_separate (plain : Environment.plain env term = true)
     (rigid : ACU.fullRigid op = true) (forbidden : ∀ arguments,familyPlain env (.node op arguments) = false) :
-    ¬ Conversion.Conv term (.node op arguments) := by
+    ¬ ACU.Conv term (.node op arguments) := by
   intro converted
   obtain ⟨common,left,right⟩ := converted.church_rosser_modulo_arithmetic
   have commonPlain := familyPlain_qstar left (plain_familyPlain plain)
@@ -313,22 +314,59 @@ theorem plain_rigid_separate (plain : Environment.plain env term = true)
   rw [forbidden children] at headPlain
   contradiction
 
-theorem plain_not_buffer (plain : Environment.plain env term = true) : ¬ Conversion.Conv term (.buffer n) :=
+theorem plain_not_buffer (plain : Environment.plain env term = true) : ¬ ACU.Conv term (.buffer n) :=
   plain_rigid_separate plain rfl (fun _ => by simp only [familyPlain])
 
-theorem plain_not_ref (plain : Environment.plain env term = true) : ¬ Conversion.Conv term (.ref owner) :=
+theorem plain_not_ref (plain : Environment.plain env term = true) : ¬ ACU.Conv term (.ref owner) :=
   plain_rigid_separate plain rfl (fun _ => by simp only [familyPlain])
 
-theorem plain_nonFunction (plain : Environment.plain env term = true) : nonFunction term :=
+theorem plain_nonFunction (plain : Environment.plain env term = true) : ∀ erased domain body, ¬ ACU.Conv term (.pi erased domain body) :=
   fun _ _ _ => plain_rigid_separate plain rfl (fun _ => by simp only [familyPlain])
 
-theorem plain_not_back (plain : Environment.plain env term = true) : ¬ Conversion.Conv term (.back erased owner motive) :=
+theorem plain_not_back (plain : Environment.plain env term = true) : ¬ ACU.Conv term (.back erased owner motive) :=
   plain_rigid_separate plain rfl (fun _ => by simp only [familyPlain])
 
 theorem plain_not_boxed_family (plain : Environment.plain env term = true)
     (found : env.families[family]? = some entry) (boxed : entry.boxed = true) :
-    ¬ Conversion.Conv term (.node (.ind family count) indices) :=
+    ¬ ACU.Conv term (.node (.ind family count) indices) :=
   plain_rigid_separate plain rfl (fun _ => by
+    simp only [familyPlain,found,Option.any_some,boxed,Bool.not_true,Bool.false_and])
+
+/-- The same separation holds for the installed delta/ACU relation in an authentic world.
+Plainness supplies global-freedom of the source; the rigid target has an ordinary head. -/
+theorem plain_rigid_separate_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true)
+    (rigid : EnvironmentDelta.Basis.rigid op = true)
+    (forbidden : ∀ arguments,familyPlain env (.node op arguments) = false) :
+    ¬ Conversion.Conv env term (.node op arguments) := by
+  intro converted
+  have pure := converted.toProjected admissible
+  change ACU.Conv (EnvironmentDelta.expand env term) (EnvironmentDelta.expand env (.node op arguments)) at pure
+  rw [EnvironmentDelta.expand_globalFree ((globalFree_correct term).mp (Bool.and_eq_true_iff.mp plain).1),
+    EnvironmentDelta.expand_ordinary (Bool.and_eq_true_iff.mp rigid).1] at pure
+  exact plain_rigid_separate plain (Bool.and_eq_true_iff.mp rigid).2 forbidden pure
+
+theorem plain_not_buffer_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true) : ¬ Conversion.Conv env term (.buffer n) :=
+  plain_rigid_separate_delta admissible plain rfl (fun _ => by simp only [familyPlain])
+
+theorem plain_not_ref_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true) : ¬ Conversion.Conv env term (.ref owner) :=
+  plain_rigid_separate_delta admissible plain rfl (fun _ => by simp only [familyPlain])
+
+theorem plain_not_pi_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true) : ¬ Conversion.Conv env term (.pi erased domain body) :=
+  plain_rigid_separate_delta admissible plain rfl (fun _ => by simp only [familyPlain])
+
+theorem plain_not_back_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true) : ¬ Conversion.Conv env term (.back erased owner motive) :=
+  plain_rigid_separate_delta admissible plain rfl (fun _ => by simp only [familyPlain])
+
+theorem plain_not_boxed_family_delta (admissible : EnvironmentDelta.Admissible env)
+    (plain : Environment.plain env term = true)
+    (found : env.families[family]? = some entry) (boxed : entry.boxed = true) :
+    ¬ Conversion.Conv env term (.node (.ind family count) indices) :=
+  plain_rigid_separate_delta admissible plain rfl (fun _ => by
     simp only [familyPlain,found,Option.any_some,boxed,Bool.not_true,Bool.false_and])
 
 end Jihoo.NativeKernel.Environment

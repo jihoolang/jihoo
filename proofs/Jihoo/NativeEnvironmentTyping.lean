@@ -14,10 +14,10 @@ namespace Jihoo.NativeKernel.Environment
 /-- Data-valued erased binders are recognized through the checked family table. -/
 def dataBinderAllowed (env : Environment) (domain : Term) : Prop :=
   ∃ family count indices entry, env.families[family]? = some entry ∧
-    entry.declaration.data = true ∧ Conversion.Conv domain (.node (.ind family count) indices)
+    entry.declaration.data = true ∧ Conversion.Conv env domain (.node (.ind family count) indices)
 
 def binderAllowed (env : Environment) (erased : Bool) (domain : Term) (sort : SortTag) : Prop :=
-  pureBinderAllowed erased domain sort ∨
+  pureBinderAllowed env erased domain sort ∨
     (erased = true ∧ dataBinderAllowed env domain)
 
 mutual
@@ -44,10 +44,10 @@ def plain (env : Environment) (term : Term) : Bool :=
   globalFree term && (Jihoo.NativeKernel.plain term || familyPlain env term)
 
 def applicationAllowed (env : Environment) (ghost : Bool) (domain argument : Term) : Prop :=
-  ghost = true ∨ (globalFree domain = true ∧
-    (kindOf domain = false ∨
-      (firstOrderKind domain = true ∧
-        ∃ normal, Conversion.Conv argument normal ∧ plain env normal = true)))
+  ghost = true ∨ ∃ domainNormal, Conversion.Conv env domain domainNormal ∧ globalFree domainNormal = true ∧
+    (kindOf domainNormal = false ∨
+      (firstOrderKind domainNormal = true ∧
+        ∃ argumentNormal, Conversion.Conv env argument argumentNormal ∧ plain env argumentNormal = true))
 
 theorem binderAllowed_ofPure (h : Jihoo.NativeKernel.binderAllowed erased domain sort) :
     binderAllowed env erased domain sort := Or.inl (pureBinderAllowed_ofLegacy h)
@@ -57,14 +57,14 @@ theorem applicationAllowed_ofPure (_h : Jihoo.NativeKernel.applicationAllowed gh
 
 /-- Ghost substitution may expose a function behind a neutral type variable.
 Code checking keeps the native nonfunction gate; ghost checking is unrestricted. -/
-def continuationAllowed (ghost : Bool) (result : Term) : Prop :=
-  ghost = true ∨ nonFunction result
+def continuationAllowed (env : Environment) (ghost : Bool) (result : Term) : Prop :=
+  ghost = true ∨ nonFunction env result
 
 /-- Ownership comes from a buffer head or the actual boxed-family metadata. -/
 inductive Owned (env : Environment) : Term → Prop where
-  | buffer : Conversion.Conv T (.buffer n) → Owned env T
+  | buffer : Conversion.Conv env T (.buffer n) → Owned env T
   | family : env.families[family]? = some entry → entry.boxed = true →
-      Conversion.Conv T (.node (.ind family count) indices) → Owned env T
+      Conversion.Conv env T (.node (.ind family count) indices) → Owned env T
 
 /-- Runtime results given back have one fixed representation and hold no borrow.
 Family representation is read from the same environment as term typing. -/
@@ -77,7 +77,7 @@ def fixedRepresentation (env : Environment) : Term → Bool
 Ghost derivations may substitute arbitrary typed computations into a motive. -/
 def BackRepresentation (env : Environment) (ghost erased : Bool) (motive : Term) : Prop :=
   ghost = true ∨ erased = true ∨
-    ∃ flag domain body, Conversion.Conv motive (.lam flag domain body) ∧
+    ∃ flag domain body, Conversion.Conv env motive (.lam flag domain body) ∧
       fixedRepresentation env body = true
 
 /-- A repeated expression is either a full native callback telescope or
@@ -89,8 +89,8 @@ def IterationBodyAllowed (env : Environment) (ghost : Bool) (body : Term) : Prop
 every index. Proposition induction and ghost derivations remain unrestricted. -/
 def IterationMotiveAllowed (env : Environment) (ghost proof : Bool) (motive : Term) : Prop :=
   ghost = true ∨ proof = true ∨
-    (∃ normal, Conversion.Conv motive normal ∧ scalarLoopMotive normal = true) ∨
-    ∃ flag domain body, Conversion.Conv motive (.lam flag domain body) ∧ Owned env body
+    (∃ normal, Conversion.Conv env motive normal ∧ scalarLoopMotive normal = true) ∨
+    ∃ flag domain body, Conversion.Conv env motive (.lam flag domain body) ∧ Owned env body
 
 /-- The exact U64-indexed, proposition-valued native induction motive. -/
 def propMotiveType : Nat → Term
@@ -146,7 +146,7 @@ mutual
     | decide : a < 2^64 → b < 2^64 → a < b →
         HasType env ctx ghost (.decide (.natural a) (.natural b)) (.lt (.natural a) (.natural b))
     | decideConverted : HasType env ctx true a .u64 → HasType env ctx true b .u64 →
-        Conversion.Conv a (.natural m) → Conversion.Conv b (.natural n) →
+        Conversion.Conv env a (.natural m) → Conversion.Conv env b (.natural n) →
         m < 2^64 → n < 2^64 → m < n →
         HasType env ctx ghost (.decide a b) (.lt a b)
     | elements : xs.length = n → xs.length < 2^64 →
@@ -178,7 +178,7 @@ mutual
         HasType env (⟨.eq a b, true⟩ :: ctx) ghost yes (B.rename Nat.succ) →
         HasType env ctx ghost no B → HasType env ctx ghost (.ifEq a b yes no) B
     | absurd {s : SortTag} : HasType env ctx true T s.term → HasType env ctx true p (.lt i (.natural 0)) →
-        absurdAllowed ghost T → HasType env ctx ghost (.absurd T p) T
+        absurdAllowed env ghost T → HasType env ctx ghost (.absurd T p) T
     | foldI64 : HasType env ctx ghost n .u64 → HasType env ctx ghost init .i64 →
         HasType env ctx ghost body (foldBodyType n) → IterationBodyAllowed env ghost body →
         HasType env ctx ghost (.fold n init body) .i64
@@ -221,9 +221,9 @@ mutual
     | load : HasType env ctx ghost buffer (.buffer n) → HasType env ctx ghost index .u64 →
         HasType env ctx true proof (.lt index n) →
         HasType env ctx ghost continuation (.pi false valueDomain (.pi false ownerDomain result)) →
-        Conversion.Conv valueDomain .i64 → Conversion.Conv ownerDomain (.buffer (n.rename Nat.succ)) →
-        Conversion.Conv result normal → PartialRenaming.shift (-2) 0 normal = some outside →
-        continuationAllowed ghost outside → HasType env ctx ghost (.load buffer index proof continuation) outside
+        Conversion.Conv env valueDomain .i64 → Conversion.Conv env ownerDomain (.buffer (n.rename Nat.succ)) →
+        Conversion.Conv env result normal → PartialRenaming.shift (-2) 0 normal = some outside →
+        continuationAllowed env ghost outside → HasType env ctx ghost (.load buffer index proof continuation) outside
     | free : HasType env ctx ghost buffer (.buffer n) → HasType env ctx ghost rest T →
         HasType env ctx ghost (.free buffer rest) T
     | refBuffer : HasType env ctx true n .u64 →
@@ -247,9 +247,9 @@ mutual
     | take : HasType env ctx ghost value (.back erased owner motive) →
         HasType env ctx ghost (.lam false declaredOwner (.lam erased declaredResult body))
           (.pi false inferredOwner (.pi inferredErased inferredResult result)) →
-        Conversion.Conv declaredOwner owner → Conversion.Conv declaredResult (takeResultType motive) →
-        Conversion.Conv result normal → PartialRenaming.shift (-2) 0 normal = some outside →
-        continuationAllowed ghost outside →
+        Conversion.Conv env declaredOwner owner → Conversion.Conv env declaredResult (takeResultType motive) →
+        Conversion.Conv env result normal → PartialRenaming.shift (-2) 0 normal = some outside →
+        continuationAllowed env ghost outside →
         HasType env ctx ghost (.take value (.lam false declaredOwner (.lam erased declaredResult body))) outside
     | dataElim : env.families[family]? = some entry → entry.declaration.data = true →
         (analysis = true → entry.boxed = true) →
@@ -261,7 +261,7 @@ mutual
         dataCaseTypes family entry.declaration.params ctx.length entry.signatures
           (indices.take entry.declaration.params) motive (entry.boxed && !analysis) proof = some types →
         BranchTypes env ctx (ghost || proof) types cases →
-        continuationAllowed (ghost || proof)
+        continuationAllowed env (ghost || proof)
           (.app (applications motive (indices.drop entry.declaration.params)) scrutinee) →
         HasType env ctx ghost
           (.node (if analysis then .caseOf family cases.length else .elim family cases.length)
@@ -277,13 +277,13 @@ mutual
         HasType env ctx true (.borrow owner) (.ref T)
     | ghostDerefOwned : HasType env ctx true reference (.ref T) →
         HasType env ctx true (.deref reference) T
-    | convert : HasType env ctx ghost t A → Conversion.Conv A B → HasType env ctx ghost t B
+    | convert : HasType env ctx ghost t A → Conversion.Conv env A B → HasType env ctx ghost t B
 
   /-- Constructor fields instantiate an actual dependent Pi telescope. -/
   inductive Arguments (env : Environment) : Context → Bool → Bool →
       Term → List Term → Term → Prop where
-    | nil : Conversion.Conv telescope result → Arguments env ctx ghost data telescope [] result
-    | cons : Conversion.Conv telescope (.pi erased domain rest) →
+    | nil : Conversion.Conv env telescope result → Arguments env ctx ghost data telescope [] result
+    | cons : Conversion.Conv env telescope (.pi erased domain rest) →
         HasType env ctx (ghost || !(data && !erased)) argument domain →
         Arguments env ctx ghost data
           (rest.subst (fun | 0 => argument | n + 1 => .var n)) arguments result →

@@ -13,9 +13,9 @@ theorem HasType.ghostBetaContract {Γ : Context} {mode e e' : Bool}
     (ha : HasType env Γ true a A') :
     HasType env Γ true (body.subst (single a)) (B'.subst (single a)) := by
   obtain ⟨s,B,hA,hbody,hconv⟩ := hf.lamView
-  obtain ⟨he,hdom,hcod⟩ := hconv.pi_injective
+  obtain ⟨he,hdom,hcod⟩ := hconv.pi_injective wf.admissible
   exact (hbody.ghostInstantiate wf (ha.convert (.symm hdom))).convert
-    (hcod.substitution (single a))
+    (hcod.substitution (single a) wf.closed)
 
 theorem HasType.ghostBeta {Γ : Context} {mode e : Bool} {A body a T : Term}
     (wf : UnifiedProgram.EnvWellFormed env)
@@ -36,6 +36,7 @@ theorem HasType.ghostSub {Γ : Context} {mode : Bool} {a b : Nat} {p T : Term}
 
 theorem HasType.ghostRead {Γ : Context} {mode : Bool} {count k : Nat}
     {xs : List Term} {p v T : Term}
+    (wf : UnifiedProgram.EnvWellFormed env)
     (h : HasType env Γ mode (.index (.elements count xs) (.natural k) p) T)
     (selected : xs[k]? = some v) : HasType env Γ true v T := by
   obtain ⟨n,ha,hi,hp,hconv⟩ := h.indexView
@@ -43,8 +44,8 @@ theorem HasType.ghostRead {Γ : Context} {mode : Bool} {count k : Nat}
   · have value := ha.elementsView.2.2.1 v (List.mem_of_getElem? selected)
     exact value.ghost.convert hconv
   · have impossible := ha.principalView
-    exact False.elim (ACU.Conv.full_rigid_disjoint (op := .array) (op' := .ref)
-      rfl rfl (by intro same; cases same) impossible)
+    exact False.elim (EnvironmentDelta.Basis.Conv.full_rigid_disjoint (op := .array) (op' := .ref)
+      rfl rfl (by intro same; cases same) impossible wf.admissible)
 
 theorem HasType.ghostWitnessPack {Γ : Context} {mode : Bool} {p a q T : Term}
     (h : HasType env Γ mode (.witness (.pack p a q)) T) : HasType env Γ true a T := by
@@ -54,11 +55,12 @@ theorem HasType.ghostWitnessPack {Γ : Context} {mode : Bool} {p a q T : Term}
 /-- Projection keeps the original predicate application, even when both the
 refinement type and the final result type were independently converted. -/
 theorem HasType.ghostProofPack {Γ : Context} {mode : Bool} {p a q T : Term}
+    (wf : UnifiedProgram.EnvWellFormed env)
     (h : HasType env Γ mode (.proof (.pack p a q)) T) : HasType env Γ true q T := by
   obtain ⟨pred,packed,hconv⟩ := h.proofView
   obtain ⟨hp,ha,hq,hpred⟩ := packed.packView
-  have predicates := hpred.refine_injective
-  have application : Conversion.Conv (.app p a) (.app pred (.witness (.pack p a q))) :=
+  have predicates := hpred.refine_injective wf.admissible
+  have application : Conversion.Conv env (.app p a) (.app pred (.witness (.pack p a q))) :=
     .node .app (.cons predicates (.cons (.symm (.legacy (.witnessPack p a q))) .nil))
   exact hq.convert (.trans application hconv)
 
@@ -101,20 +103,21 @@ theorem HasType.ghostIfEqFalse {Γ : Context} {mode : Bool} {a b yes no T : Term
 /-- Equality conversion cannot change a reflexivity proof into unequal indices:
 real Eq injectivity supplies conversion between the predicate arguments. -/
 theorem HasType.ghostTransportRefl {Γ : Context} {mode : Bool} {f a p T : Term}
+    (wf : UnifiedProgram.EnvWellFormed env)
     (h : HasType env Γ mode (.transport f (.refl a) p) T) : HasType env Γ true p T := by
   obtain ⟨u,v,hf,he,hp,hconv⟩ := h.transportView
-  obtain ⟨au,av⟩ := he.reflView.2.eq_injective
-  have uv : Conversion.Conv u v := .trans (.symm au) av
-  have application : Conversion.Conv (.app f u) (.app f v) :=
+  obtain ⟨au,av⟩ := he.reflView.2.eq_injective wf.admissible
+  have uv : Conversion.Conv env u v := .trans (.symm au) av
+  have application : Conversion.Conv env (.app f u) (.app f v) :=
     .node .app (.cons (.refl _) (.cons uv .nil))
   exact hp.convert (.trans application hconv)
 
 
-theorem HasType.ghostDerefBorrow (h : HasType env Γ mode (.deref (.borrow a)) T) :
+theorem HasType.ghostDerefBorrow (wf : UnifiedProgram.EnvWellFormed env) (h : HasType env Γ mode (.deref (.borrow a)) T) :
     HasType env Γ true a T := by
   obtain ⟨n,borrowed,hc⟩ := h.derefView
   obtain ⟨m,original,hd⟩ := borrowed.borrowView
-  exact original.convert (.trans (ref_injective hd) hc)
+  exact original.convert (.trans (ref_injective wf hd) hc)
 
 theorem HasType.ghostBorrowDeref (h : HasType env Γ mode (.borrow (.deref a)) T) :
     HasType env Γ true a T := by
@@ -127,12 +130,12 @@ theorem compute_ghost_preservation (wf : UnifiedProgram.EnvWellFormed env)
   cases step with
   | beta => exact typed.ghostBeta wf
   | sub a b p lower upper => exact typed.ghostSub upper
-  | read count xs k p v selected => exact typed.ghostRead selected
+  | read count xs k p v selected => exact typed.ghostRead wf selected
   | witnessPack => exact typed.ghostWitnessPack
-  | proofPack => exact typed.ghostProofPack
-  | derefBorrow => exact typed.ghostDerefBorrow
+  | proofPack => exact typed.ghostProofPack wf
+  | derefBorrow => exact typed.ghostDerefBorrow wf
   | borrowDeref => exact typed.ghostBorrowDeref
-  | transportRefl => exact typed.ghostTransportRefl
+  | transportRefl => exact typed.ghostTransportRefl wf
   | ifLtTrue m n yes no holds => exact typed.ghostIfLtTrue wf holds
   | ifLtFalse => exact typed.ghostIfLtFalse
   | ifEqTrue => exact typed.ghostIfEqTrue wf rfl

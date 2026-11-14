@@ -28,15 +28,15 @@ inductive Root : Term → Term → Prop where
   | loopZero (motive init body : Term) : Root (.loop (.natural 0) motive init body) init
 
 private def View (env : Environment) (ctx : Context) (mode : Bool) : Term → Term → Prop
-  | .arith _ _ _, T => Conversion.Conv .i64 T
+  | .arith _ _ _, T => Conversion.Conv env .i64 T
   | .strict _ rest, T | .free _ rest, T | .fold _ rest _, T =>
-      ∃ A, HasType env ctx mode rest A ∧ Conversion.Conv A T
+      ∃ A, HasType env ctx mode rest A ∧ Conversion.Conv env A T
   | .loop n motive init _, T =>
       ∃ proof : Bool, HasType env ctx (mode || proof) init (.app motive (.natural 0)) ∧
-        Conversion.Conv (.app motive n) T
+        Conversion.Conv env (.app motive n) T
   | _, _ => True
 
-private theorem View.convert (view : View env ctx mode term A) (converted : Conversion.Conv A B) :
+private theorem View.convert (view : View env ctx mode term A) (converted : Conversion.Conv env A B) :
     View env ctx mode term B := by
   fun_cases View env ctx mode term A <;> simp only [View] at view ⊢
   all_goals first

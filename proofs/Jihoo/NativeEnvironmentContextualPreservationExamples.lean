@@ -4,6 +4,8 @@ import Jihoo.NativeEnvironmentContextualPreservation
 continuation syntax, and the exact bounded normalizer. -/
 namespace Jihoo.NativeKernel.Environment.ContextualExamples
 
+private theorem emptyHistory : UnifiedProgram.UnifiedProgramChecked [] [] empty := .empty
+
 private abbrev two : Term := .uadd (.natural 1) (.natural 1)
 private theorem emptyWellFormed : UnifiedProgram.EnvWellFormed empty :=
   UnifiedProgram.checkProgram_wellFormed
@@ -73,8 +75,8 @@ theorem concrete_normalizer_original_type : HasType empty [] true
     (.ref (.buffer (.natural 2))) (.univ 0) := by
   have source : HasType empty [] false (.ref (.buffer two)) (.univ 0) :=
     Checker.infer_sound (fuel := 24) (by cbv)
-  exact source.ghostNormalize emptyWellFormed
-    (by cbv : Conversion.normalize? 4 (.ref (.buffer two)) = some (.ref (.buffer (.natural 2))))
+  exact source.ghostNormalize emptyHistory
+    (by cbv : Conversion.normalize? empty 4 (.ref (.buffer two)) = some (.ref (.buffer (.natural 2))))
 
 private def backMotive : Term := .lam false (.buffer (.natural 2)) .i64
 private def given : Term := .give false backMotive allocated (.integer 0)

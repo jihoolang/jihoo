@@ -31,7 +31,7 @@ inductive Skeleton (env : Environment) : Term → Term → Prop where
   | var (x : Nat) : Skeleton env (.var x) (.var x)
   | node : ordinary op = true → Conversion.ListRel (Skeleton env) arguments projected →
       Skeleton env (.node op arguments) (.node op projected)
-  | lam : Environment.Conversion.Conv domain normal → Skeleton env normal projectedDomain →
+  | lam : Environment.Conversion.Conv env domain normal → Skeleton env normal projectedDomain →
       Skeleton env body projectedBody →
       Skeleton env (.lam erased domain body) (.lam erased projectedDomain projectedBody)
   | familyType : env.families[family]? = some entry →
@@ -81,7 +81,7 @@ def skeleton : Nat → Environment → Term → Option Term
           | .lam erased =>
               match arguments with
               | [domain, body] => do
-                  let normal ← Environment.Conversion.normalize? fuel domain
+                  let normal ← Environment.Conversion.normalize? env fuel domain
                   let projectedDomain ← skeleton fuel env normal
                   let projectedBody ← skeleton fuel env body
                   pure (.lam erased projectedDomain projectedBody)
@@ -192,7 +192,7 @@ theorem skeleton_sound (h : skeleton fuel env term = some projected) : Skeleton 
                     cases rest with
                     | cons _ _ => contradiction
                     | nil =>
-                        cases normalized : Environment.Conversion.normalize? fuel domain with
+                        cases normalized : Environment.Conversion.normalize? env fuel domain with
                         | none => simp [normalized] at h
                         | some normal =>
                             simp only [normalized, Bind.bind, Option.bind] at h
@@ -244,7 +244,7 @@ theorem Skeleton.extend (extension : Environment.Extends before after)
     (motive_2 := fun terms projected _ => Conversion.ListRel (Skeleton after) terms projected) with
   | var index => exact .var index
   | node ordinary terms ih => exact .node ordinary ih
-  | lam converted _ _ domain body => exact .lam converted domain body
+  | lam converted _ _ domain body => exact .lam (converted.extend extension) domain body
   | familyType found => exact .familyType (extension.families _ _ found)
   | constructor found signature count relevant terms ih =>
       exact .constructor (extension.families _ _ found) signature count relevant ih

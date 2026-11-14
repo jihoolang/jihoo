@@ -1,4 +1,4 @@
-import Jihoo.NativeEnvironmentDeltaBounded
+import Jihoo.NativeEnvironmentContextualPreservation
 import Jihoo.NativeUnifiedAdmission
 import Jihoo.TypingInput
 
@@ -33,8 +33,15 @@ def main (args : List String) : IO UInt32 := do
     unless roots.valueRoot == before.termRoot do throw (IO.userError "wrong observed source root")
     let some term := NativeArena.decode 128 before.arena before.termRoot | throw (IO.userError "bad input root")
     let some result := NativeArena.decode 128 after.arena after.typeRoot | throw (IO.userError "bad output root")
-    unless EnvironmentDelta.Bounded.equal env 64 200000 term result do
+    unless Environment.Conversion.equal env 64 term result do
       throw (IO.userError "native normal output fails proved delta/ACU comparator")
+    let some declaration := env.globals.toList.getLast? | throw (IO.userError "missing interpreted declaration")
+    let some sort := Environment.Checker.sort 64 env [] declaration.type |
+      throw (IO.userError "interpreted declaration has no checked sort")
+    unless Environment.Checker.check 64 env [] (Definitions.bodyMode sort) term declaration.type do
+      throw (IO.userError "original global term fails installed typing checker")
+    unless Environment.Checker.check 64 env [] true result declaration.type do
+      throw (IO.userError "normal output fails original-type ghost checking")
     IO.println "native checked delta/ACU observation accepted"
     return 0
   catch error =>

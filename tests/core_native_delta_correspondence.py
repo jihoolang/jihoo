@@ -2,7 +2,8 @@
 """Checked mixed environments and actual Core.normal versus proved delta/ACU.
 
 The source/export/IO association remains regression evidence. This does not
-replace native operational refinement or install delta in the typing checker.
+replace native operational refinement. The adapter uses the installed delta/ACU
+typing checker for original bodies and observed normal results.
 Run local compiler/checker jobs through scripts/proof-limits.sh.
 """
 from __future__ import annotations
@@ -123,7 +124,7 @@ def run(compiler, checker, output):
                         'synthetic', b'invalid canonical mixed program'))
     checks.append(check('mutated-empty-protocol', b'', False, 'synthetic'))
     (output / 'manifest.json').write_text(json.dumps({
-        'claim': 'native observation regression; full source operational refinement and typing delta migration remain open',
+        'claim': 'native observation regression; installed delta/ACU typing and native observation regression; full source operational refinement remains open',
         'core_sha256': hashlib.sha256((ROOT / 'compiler/core.jh').read_bytes()).hexdigest(),
         'exporter_sha256': hashlib.sha256((ROOT / 'compiler/core_native_snapshot.jh').read_bytes()).hexdigest(),
         'cases': observations, 'checks': checks}, indent=2) + '\n')

@@ -8,15 +8,15 @@ No derivation, typing certificate or soundness assumption is supplied as input. 
 namespace Jihoo.NativeKernel.Environment.Checker
 
 theorem accepts_elim {fuel : Nat} {inferred : Option Term} {expected : Term}
-    (h : accepts fuel inferred expected = true) :
-    ∃ actual, inferred = some actual ∧ Conversion.Conv actual expected := by
+    (h : accepts fuel env inferred expected = true) :
+    ∃ actual, inferred = some actual ∧ Conversion.Conv env actual expected := by
   cases inferred with
   | none => simp [accepts] at h
   | some actual => exact ⟨actual, rfl, Conversion.equal_sound h⟩
 
 theorem expose_elim {fuel : Nat} {inferred : Option Term} {expected : Term}
-    (h : expose fuel inferred = some expected) :
-    ∃ actual, inferred = some actual ∧ Conversion.Conv actual expected := by
+    (h : expose fuel env inferred = some expected) :
+    ∃ actual, inferred = some actual ∧ Conversion.Conv env actual expected := by
   cases inferred with
   | none => simp [expose] at h
   | some actual =>
@@ -33,8 +33,8 @@ theorem dataBinderOK_sound (h : dataBinderOK env domain = true) : dataBinderAllo
         exact ⟨family, count, indices, entry, found, by simpa only [found, Option.any_some] using h, .refl _⟩
   · contradiction
 
-theorem pureBinderOK_sound {sort : SortTag} (h : pureBinderOK fuel erased domain sort = true) :
-    pureBinderAllowed erased domain sort := by
+theorem pureBinderOK_sound {sort : SortTag} (h : pureBinderOK fuel env erased domain sort = true) :
+    pureBinderAllowed env erased domain sort := by
   cases erased with
   | false => change sort ≠ .prop; exact of_decide_eq_true h
   | true =>
@@ -49,40 +49,42 @@ theorem binderOK_sound {fuel : Nat} {e : Bool} {A : Term} {s : SortTag}
   · obtain ⟨erased, data⟩ := Bool.and_eq_true_iff.mp data
     obtain ⟨family, count, indices, entry, found, isData, converted⟩ := dataBinderOK_sound data
     exact Or.inr ⟨erased, family, count, indices, entry, found, isData,
-      .trans (Conversion.normalize_sound fuel A) converted⟩
+      .trans (Conversion.normalize_sound env fuel A) converted⟩
 
-theorem applicationOK_sound {fuel : Nat} {ghost : Bool} {A a : Term}
-    (h : applicationOK fuel env ghost A a = true) : applicationAllowed env ghost A a := by
-  cases ghost with
-  | true => exact Or.inl rfl
-  | false =>
-      have checked : globalFree A = true ∧
-          (!kindOf A || (firstOrderKind A && plain env (Conversion.normalize fuel a))) = true := by
-        simpa only [applicationOK,Bool.false_or,Bool.and_eq_true] using h
-      refine Or.inr ⟨checked.1,?_⟩
-      cases hk : kindOf A with
-      | false => exact Or.inl rfl
-      | true =>
-          have hs : firstOrderKind A = true ∧ plain env (Conversion.normalize fuel a) = true := by
-            simpa only [hk,Bool.not_true,Bool.false_or,Bool.and_eq_true] using checked.2
-          exact Or.inr ⟨hs.1,_,Conversion.normalize_sound fuel a,hs.2⟩
+theorem applicationOK_sound (h : applicationOK fuel env ghost A a = true) : applicationAllowed env ghost A a := by
+  unfold applicationOK at h
+  rcases Bool.or_eq_true_iff.mp h with erased | checked
+  · exact Or.inl erased
+  · cases normalized : Conversion.normalize? env fuel A with
+    | none => simp only [normalized] at checked; contradiction
+    | some domain =>
+        have both : globalFree domain = true ∧
+            (!kindOf domain || (firstOrderKind domain && plain env (Conversion.normalize env fuel a))) = true := by
+          simpa only [normalized, Bool.and_eq_true] using checked
+        refine Or.inr ⟨domain, Conversion.normalize?_sound normalized, both.1, ?_⟩
+        cases kind : kindOf domain with
+        | false => exact Or.inl rfl
+        | true =>
+            have properties : firstOrderKind domain = true ∧ plain env (Conversion.normalize env fuel a) = true := by
+              simpa only [kind, Bool.not_true, Bool.false_or, Bool.and_eq_true] using both.2
+            exact Or.inr ⟨properties.1, _, Conversion.normalize_sound env fuel a, properties.2⟩
 
 /-- A rigid canonical nonfunction head cannot become a Pi by conversion. -/
-theorem nonFunctionHead_sound {T : Term} (h : nonFunctionHead T = true) : nonFunction T :=
+theorem nonFunctionHead_sound {T : Term} (h : nonFunctionHead T = true) : nonFunction env T :=
   Environment.nonFunctionHead_full h
 
-theorem nonFunction_of_conversion {A B : Term} (conv : Conversion.Conv A B)
-    (h : nonFunction B) : nonFunction A :=
-  fun e X Y converted => h e X Y (.trans (.symm conv) converted)
+theorem nonFunction_of_conversion {A B : Term} (conv : Conversion.Conv env A B)
+    (h : nonFunction env B) : nonFunction env A :=
+  EnvironmentDelta.Basis.NonFunction.of_conversion conv h
 
 /-- Runtime continuation results remain nonfunctions; ghost substitution may
 expose arbitrary type heads without introducing runtime captures. -/
 theorem nonFunctionGate_sound
-    (h : (ghost || nonFunctionHead (Conversion.normalize fuel result)) = true) :
-    ghost = true ∨ nonFunction result := by
+    (h : (ghost || nonFunctionHead (Conversion.normalize env fuel result)) = true) :
+    ghost = true ∨ nonFunction env result := by
   rcases Bool.or_eq_true_iff.mp h with erased | rigid
   · exact Or.inl erased
-  · exact Or.inr (nonFunction_of_conversion (Conversion.normalize_sound fuel result)
+  · exact Or.inr (nonFunction_of_conversion (Conversion.normalize_sound env fuel result)
       (nonFunctionHead_sound rigid))
 
 theorem ownedHead_sound (h : ownedHead env T = true) : Owned env T := by
@@ -97,11 +99,11 @@ theorem ownedHead_sound (h : ownedHead env T = true) : Owned env T := by
   · contradiction
 
 theorem ownedHead_normalize_sound
-    (h : ownedHead env (Conversion.normalize fuel T) = true) : Owned env T := by
+    (h : ownedHead env (Conversion.normalize env fuel T) = true) : Owned env T := by
   cases ownedHead_sound h with
-  | buffer converted => exact .buffer (.trans (Conversion.normalize_sound fuel T) converted)
+  | buffer converted => exact .buffer (.trans (Conversion.normalize_sound env fuel T) converted)
   | family found boxed converted =>
-      exact .family found boxed (.trans (Conversion.normalize_sound fuel T) converted)
+      exact .family found boxed (.trans (Conversion.normalize_sound env fuel T) converted)
 
 theorem backMotiveOK_sound (h : backMotiveOK fuel env erased motive = true) :
     BackRepresentation env ghost erased motive := by
@@ -111,33 +113,22 @@ theorem backMotiveOK_sound (h : backMotiveOK fuel env erased motive = true) :
     refine Or.inr (Or.inr ?_)
     split at represented
     · rename_i flag domain body normal
-      exact ⟨flag, domain, body, by change Conversion.Conv motive (.node (.lam flag) [domain, body]); rw [← normal]; exact Conversion.normalize_sound fuel motive, represented⟩
+      exact ⟨flag, domain, body, by change Conversion.Conv env motive (.node (.lam flag) [domain, body]); rw [← normal]; exact Conversion.normalize_sound env fuel motive, represented⟩
     · contradiction
 
-theorem resourceNonFunctionHead_sound (h : resourceNonFunctionHead T = true) : nonFunction T := by
-  intro erased A B converted
-  cases T with
-  | var => simp [resourceNonFunctionHead] at h
-  | node op args =>
-      cases op <;> simp only [resourceNonFunctionHead, Bool.false_eq_true] at h
-      all_goals first
-        | exact ACU.Conv.full_rigid_disjoint rfl rfl (by intro same; cases same) converted
-        | (cases args with
-          | nil => contradiction
-          | cons a args =>
-            cases args with
-            | nil => exact ACU.Conv.full_rigid_disjoint rfl rfl (by intro same; cases same) converted
-            | cons b args => cases args <;> first
-                | contradiction
-                | exact ACU.Conv.full_rigid_disjoint rfl rfl (by intro same; cases same) converted)
+theorem resourceNonFunctionHead_sound (h : resourceNonFunctionHead T = true) : nonFunction env T := by
+  apply EnvironmentDelta.Basis.NonFunction.ofHead
+  fun_cases resourceNonFunctionHead T <;>
+    simp_all only [resourceNonFunctionHead, EnvironmentDelta.Basis.nonFunctionHead,
+      EnvironmentDelta.Basis.nonFunctionOp, Bool.false_eq_true]
 
 theorem takeNonFunctionGate_sound
-    (h : (ghost || takeNonFunctionHead (Conversion.normalize fuel result)) = true) :
-    continuationAllowed ghost result := by
+    (h : (ghost || takeNonFunctionHead (Conversion.normalize env fuel result)) = true) :
+    continuationAllowed env ghost result := by
   rcases Bool.or_eq_true_iff.mp h with erased | rigid
   · exact Or.inl erased
   · apply Or.inr
-    apply nonFunction_of_conversion (Conversion.normalize_sound fuel result)
+    apply nonFunction_of_conversion (Conversion.normalize_sound env fuel result)
     rcases Bool.or_eq_true_iff.mp rigid with scalar | resource
     · exact nonFunctionHead_sound scalar
     · exact resourceNonFunctionHead_sound resource
@@ -163,10 +154,10 @@ theorem loopSort_sound {level : Term} {proof : Bool}
   · contradiction
 
 theorem loopMotiveOK_sound {fuel : Nat} {ghost proof : Bool} {motive : Term}
-    (h : loopMotiveOK fuel proof motive = true) : loopMotiveAllowed ghost proof motive := by
+    (h : loopMotiveOK fuel env proof motive = true) : loopMotiveAllowed env ghost proof motive := by
   rcases Bool.or_eq_true_iff.mp h with hp | hm
   · exact Or.inr (Or.inl hp)
-  · exact Or.inr (Or.inr ⟨_, Conversion.normalize_sound fuel motive, hm⟩)
+  · exact Or.inr (Or.inr ⟨_, Conversion.normalize_sound env fuel motive, hm⟩)
 
 theorem iterationBodyOK_sound (h : iterationBodyOK env body = true) :
     IterationBodyAllowed env ghost body := Or.inr (Bool.or_eq_true_iff.mp h)
@@ -182,20 +173,20 @@ theorem iterationMotiveOK_sound (h : iterationMotiveOK fuel env proof motive = t
     split at owned
     · rename_i flag domain body normal
       exact Or.inr (Or.inr (Or.inr ⟨flag, domain, body,
-        by change Conversion.Conv motive (.node (.lam flag) [domain, body]);
-           rw [← normal]; exact Conversion.normalize_sound fuel motive,
+        by change Conversion.Conv env motive (.node (.lam flag) [domain, body]);
+           rw [← normal]; exact Conversion.normalize_sound env fuel motive,
         ownedHead_sound owned⟩))
     · contradiction
 
 theorem instantiate_sound
     (hi : ∀ ghost t T, inferField ghost t = some T → HasType env ctx ghost t T)
-    (h : instantiate inferField fuel ghost data telescope arguments = some result) :
+    (h : instantiate inferField fuel env ghost data telescope arguments = some result) :
     Arguments env ctx ghost data telescope arguments result := by
   induction arguments generalizing telescope with
   | nil =>
       simp only [instantiate, Option.some.injEq] at h
       subst result
-      exact .nil (Conversion.normalize_sound fuel telescope)
+      exact .nil (Conversion.normalize_sound env fuel telescope)
   | cons argument arguments ih =>
       simp only [instantiate] at h
       split at h
@@ -203,14 +194,14 @@ theorem instantiate_sound
         split at h
         · rename_i accepted
           obtain ⟨actual, inferred, converted⟩ := accepts_elim accepted
-          exact .cons (by simpa only [normal] using Conversion.normalize_sound fuel telescope)
+          exact .cons (by simpa only [normal] using Conversion.normalize_sound env fuel telescope)
             (.convert (hi _ _ _ inferred) converted) (ih h)
         · contradiction
       · contradiction
 
 theorem branches_sound
     (hi : ∀ t T, inferBranch t = some T → HasType env ctx true t T)
-    (h : branches inferBranch fuel motive signatures branchesList = true) :
+    (h : branches inferBranch fuel env motive signatures branchesList = true) :
     Cases env ctx motive signatures branchesList := by
   induction signatures generalizing branchesList with
   | nil =>
@@ -255,7 +246,7 @@ theorem splitCases_sound {count : Nat} {children branches : List Term} {scrutine
 
 theorem branchesAgainst_sound
     (hi : ∀ t T, inferBranch t = some T → HasType env ctx ghost t T)
-    (h : branchesAgainst inferBranch fuel types branchesList = true) :
+    (h : branchesAgainst inferBranch fuel env types branchesList = true) :
     BranchTypes env ctx ghost types branchesList := by
   induction types generalizing branchesList with
   | nil => cases branchesList with
@@ -269,8 +260,8 @@ theorem branchesAgainst_sound
       exact .cons (.convert (hi _ _ inferred) converted) (ih tail)
 
 theorem dataMotiveProof_sound
-    (h : dataMotiveProof inferred fuel family params arity ps = some proof) :
-    accepts fuel inferred (dataMotiveType family params arity ps proof) = true := by
+    (h : dataMotiveProof env inferred fuel family params arity ps = some proof) :
+    accepts fuel env inferred (dataMotiveType family params arity ps proof) = true := by
   unfold dataMotiveProof at h
   split at h
   · rename_i accepted; cases h; exact accepted
@@ -297,7 +288,7 @@ theorem dataEliminate_sound
       | some pair =>
         rcases pair with ⟨cases, scrutinee⟩
         simp only [decoded] at h
-        cases exposed : expose fuel (inferSub true scrutinee) with
+        cases exposed : expose fuel env (inferSub true scrutinee) with
         | none => simp [exposed] at h
         | some head =>
           simp only [exposed] at h
@@ -308,7 +299,7 @@ theorem dataEliminate_sound
               obtain ⟨sameFamily, sameArity, length⟩ := same
               subst g
               subst arity
-              cases selected : dataMotiveProof (inferSub true motive) fuel family
+              cases selected : dataMotiveProof env (inferSub true motive) fuel family
                   entry.declaration.params entry.declaration.arity (indices.take entry.declaration.params) with
               | none => simp [selected] at h
               | some proof =>
@@ -349,12 +340,12 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
       · intro ctx e A s h; simp [binder] at h
   | succ fuel ih =>
       rcases ih with ⟨hi, hbind⟩
-      have hc : ∀ ctx ghost t T, accepts fuel (infer fuel env ctx ghost t) T = true →
+      have hc : ∀ ctx ghost t T, accepts fuel env (infer fuel env ctx ghost t) T = true →
           HasType env ctx ghost t T := by
         intro ctx ghost t T h
         obtain ⟨actual, ha, conv⟩ := accepts_elim h
         exact .convert (hi ctx ghost t actual ha) conv
-      have he : ∀ ctx ghost t T, expose fuel (infer fuel env ctx ghost t) = some T →
+      have he : ∀ ctx ghost t T, expose fuel env (infer fuel env ctx ghost t) = some T →
           HasType env ctx ghost t T := by
         intro ctx ghost t T h
         obtain ⟨actual, ha, conv⟩ := expose_elim h
@@ -490,8 +481,10 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
               split at h
               · rename_i bounds
                 cases h
-                have haConv := Conversion.normalize_sound fuel a
-                have hbConv := Conversion.normalize_sound fuel b
+                have haConv := Conversion.normalize_sound env fuel a
+                have hbConv := Conversion.normalize_sound env fuel b
+                change Conversion.Conv env a (Conversion.normalize env fuel a) at haConv
+                change Conversion.Conv env b (Conversion.normalize env fuel b) at hbConv
                 rw [hm] at haConv
                 rw [hn] at hbConv
                 exact .decideConverted (hc ctx true a _ hab.1) (hc ctx true b _ hab.2)
@@ -652,7 +645,7 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                     have typed := he ctx true T V hU
                     rw [SortTag.ofTerm_sound hs] at typed
                     have evidence := he ctx true p (.lt i n) hp
-                    have bound : Conversion.Conv (.lt i n) (.lt i (.natural 0)) :=
+                    have bound : Conversion.Conv env (.lt i n) (.lt i (.natural 0)) :=
                       .node .lt (.cons (.refl _) (.cons (Conversion.equal_sound hz) .nil))
                     exact .absurd typed (evidence.convert bound)
                       (nonFunctionGate_sound hhead)
@@ -698,7 +691,7 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                     cases h
                     have typed := he ctx true motive (.pi false domain level) hm
                     rw [loopSort_sound hs] at typed
-                    have expected : Conversion.Conv (.pi false domain (loopSortTerm proof))
+                    have expected : Conversion.Conv env (.pi false domain (loopSortTerm proof))
                         (.pi false .u64 (loopSortTerm proof)) :=
                       .node (.pi false) (.cons (Conversion.equal_sound hdomain) (.cons (.refl _) .nil))
                     exact .loop (typed.convert expected) (iterationMotiveOK_sound hprofile)
@@ -821,7 +814,7 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                       exact .load (he ctx ghost buffer _ bufferType) (hc ctx ghost index _ checked.1)
                         (hc ctx true proof _ checked.2) (he ctx ghost continuation _ continuationType)
                         (Conversion.equal_sound domains.1) (Conversion.equal_sound domains.2)
-                        (Conversion.normalize_sound fuel result) lowered
+                        (Conversion.normalize_sound env fuel result) lowered
                         (nonFunctionGate_sound nonfunction)
                     · contradiction
                   · contradiction
@@ -906,7 +899,7 @@ private theorem sound_mutual (fuel : Nat) (env : Environment) :
                       cases h
                       exact .take (he ctx ghost value _ typedValue)
                         (he ctx ghost _ _ typedContinuation) (Conversion.equal_sound ownerDomain)
-                        (Conversion.equal_sound resultDomain) (Conversion.normalize_sound fuel result)
+                        (Conversion.equal_sound resultDomain) (Conversion.normalize_sound env fuel result)
                         lowered (takeNonFunctionGate_sound permitted)
                     · contradiction
                   · contradiction
@@ -973,7 +966,7 @@ by
 theorem sort_sound {fuel : Nat} {env : Environment} {ctx : Context} {ty : Term} {s : SortTag}
     (h : sort fuel env ctx ty = some s) : HasType env ctx true ty s.term := by
   unfold sort at h
-  cases hi : expose fuel (infer fuel env ctx true ty) with
+  cases hi : expose fuel env (infer fuel env ctx true ty) with
   | none => simp [hi] at h
   | some T =>
       simp only [hi, Option.bind_some] at h

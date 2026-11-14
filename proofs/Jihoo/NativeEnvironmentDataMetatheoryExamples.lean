@@ -37,7 +37,7 @@ theorem data_parameter_weakened : HasType checkedEnv [⟨.i64,true⟩,⟨.u64,fa
 /-- Data and proposition elimination share the actual native Elim operator;
 its checked family metadata still determines a unique result across modes. -/
 theorem data_elimination_unique (other : HasType checkedEnv [⟨.u64,false⟩] mode (elimination motive) T) :
-    Conversion.Conv .u64 T := source.unique other
+    Conversion.Conv checkedEnv .u64 T := source.unique history.wellFormed other
 
 private def reducibleMotive : Term := .lam false (paramNat (.var 0))
   (.app (.lam false .u64 .u64) (.natural 0))
@@ -68,7 +68,7 @@ private theorem emptyWellFormed : UnifiedProgram.EnvWellFormed empty :=
     (by cbv : UnifiedProgram.checkProgram 24 24 [] [] = some empty)
 
 theorem owned_fold_result_unique (other : HasType empty [] mode ownedFold T) :
-    Conversion.Conv buffer T := foldTyped.unique other
+    Conversion.Conv empty buffer T := foldTyped.unique emptyWellFormed other
 
 theorem owned_fold_weakened : HasType empty [⟨.u64,true⟩] true
     (ownedFold.rename Nat.succ) buffer := by
@@ -81,6 +81,6 @@ theorem family_borrow_round_trip : HasType checkedEnv [⟨.u64,false⟩] true
       (.deref (.borrow (.node (.con 0 0 1) [.var 0]))) (paramNat (.var 0)) :=
     Checker.check_sound (by cbv : Checker.check 32 checkedEnv [⟨.u64,false⟩] true
       (.deref (.borrow (.node (.con 0 0 1) [.var 0]))) (paramNat (.var 0)) = true)
-  exact typed.ghostDerefBorrow
+  exact typed.ghostDerefBorrow history.wellFormed
 
 end Jihoo.NativeKernel.Environment.DataMetatheoryExamples

@@ -13,65 +13,65 @@ def eliminationResult (entry : CheckedFamily) (motive : Term) (indices : List Te
   else applications motive indices
 
 def PrincipalView (env : Environment) (Γ : Context) (mode : Bool) : Term → Term → Prop
-  | .var x, T => ∃ b, lookup Γ x = some b ∧ Conv b.ty T
-  | .univ n, T => Conv (.univ (n+1)) T
-  | .prop, T | .u64, T | .i64, T | .array _, T | .refine _, T => Conv (.univ 0) T
-  | .lt _ _, T | .eq _ _, T => Conv .prop T
-  | .natural _, T | .uadd _ _, T | .usub _ _ _, T | .witness _, T => Conv .u64 T
-  | .integer _, T | .index _ _ _, T | .arith _ _ _, T => Conv .i64 T
-  | .elements _ xs, T => Conv (.array (.natural xs.length)) T
-  | .decide a b, T => Conv (.lt a b) T
-  | .refl a, T => Conv (.eq a a) T
-  | .zeroLe a, T => Conv (.lt (.natural 0) (.uadd a (.natural 1))) T
-  | .ltAdd a b c _, T => Conv (.lt (.uadd a c) (.uadd b c)) T
-  | .ltCancel a b _ _, T => Conv (.lt a b) T
-  | .ltLe a _ c _ _, T => Conv (.lt a c) T
-  | .pack p _ _, T => Conv (.refine p) T
+  | .var x, T => ∃ b, lookup Γ x = some b ∧ Conv env b.ty T
+  | .univ n, T => Conv env (.univ (n+1)) T
+  | .prop, T | .u64, T | .i64, T | .array _, T | .refine _, T => Conv env (.univ 0) T
+  | .lt _ _, T | .eq _ _, T => Conv env .prop T
+  | .natural _, T | .uadd _ _, T | .usub _ _ _, T | .witness _, T => Conv env .u64 T
+  | .integer _, T | .index _ _ _, T | .arith _ _ _, T => Conv env .i64 T
+  | .elements _ xs, T => Conv env (.array (.natural xs.length)) T
+  | .decide a b, T => Conv env (.lt a b) T
+  | .refl a, T => Conv env (.eq a a) T
+  | .zeroLe a, T => Conv env (.lt (.natural 0) (.uadd a (.natural 1))) T
+  | .ltAdd a b c _, T => Conv env (.lt (.uadd a c) (.uadd b c)) T
+  | .ltCancel a b _ _, T => Conv env (.lt a b) T
+  | .ltLe a _ c _ _, T => Conv env (.lt a c) T
+  | .pack p _ _, T => Conv env (.refine p) T
   | .pi e A B, T => ∃ s r : SortTag,
-      HasType env Γ true A s.term ∧ HasType env (⟨A,e⟩ :: Γ) true B r.term ∧ Conv (s.pi r).term T
-  | .lam e A body, T => ∃ B, HasType env (⟨A,e⟩ :: Γ) mode body B ∧ Conv (.pi e A B) T
-  | .app f a, T => ∃ e A B, HasType env Γ mode f (.pi e A B) ∧ Conv (B.subst (single a)) T
-  | .strict _ b, T => ∃ B, HasType env Γ mode b B ∧ Conv B T
-  | .transport f e _, T => ∃ a b, HasType env Γ true e (.eq a b) ∧ Conv (.app f b) T
-  | .proof s, T => ∃ p, HasType env Γ true s (.refine p) ∧ Conv (.app p (.witness s)) T
-  | .ifLt _ _ _ no, T | .ifEq _ _ _ no, T => ∃ B, HasType env Γ mode no B ∧ Conv B T
-  | .absurd U _, T => Conv U T
-  | .fold _ init _, T => ∃ A, HasType env Γ mode init A ∧ Conv A T
-  | .loop n motive _ _, T => Conv (.app motive n) T
+      HasType env Γ true A s.term ∧ HasType env (⟨A,e⟩ :: Γ) true B r.term ∧ Conv env (s.pi r).term T
+  | .lam e A body, T => ∃ B, HasType env (⟨A,e⟩ :: Γ) mode body B ∧ Conv env (.pi e A B) T
+  | .app f a, T => ∃ e A B, HasType env Γ mode f (.pi e A B) ∧ Conv env (B.subst (single a)) T
+  | .strict _ b, T => ∃ B, HasType env Γ mode b B ∧ Conv env B T
+  | .transport f e _, T => ∃ a b, HasType env Γ true e (.eq a b) ∧ Conv env (.app f b) T
+  | .proof s, T => ∃ p, HasType env Γ true s (.refine p) ∧ Conv env (.app p (.witness s)) T
+  | .ifLt _ _ _ no, T | .ifEq _ _ _ no, T => ∃ B, HasType env Γ mode no B ∧ Conv env B T
+  | .absurd U _, T => Conv env U T
+  | .fold _ init _, T => ∃ A, HasType env Γ mode init A ∧ Conv env A T
+  | .loop n motive _ _, T => Conv env (.app motive n) T
   | .node (.global g) [], T => ∃ declaration, env.globals[g]? = some declaration ∧
-      Conv (declaration.type.rename (fun x => x + Γ.length)) T
+      Conv env (declaration.type.rename (fun x => x + Γ.length)) T
   | .node (.ind f _) _, T => ∃ entry, env.families[f]? = some entry ∧
-      Conv (if entry.declaration.data then .univ 0 else .prop) T
+      Conv env (if entry.declaration.data then .univ 0 else .prop) T
   | .node (.con f k _) xs, T => ∃ entry signature arity indices,
       env.families[f]? = some entry ∧ entry.signatures[k]? = some signature ∧
       Arguments env Γ mode entry.declaration.data
         ((signatureTerm f signature).rename (fun x => x + Γ.length)) xs
-        (.node (.ind f arity) indices) ∧ Conv (.node (.ind f arity) indices) T
+        (.node (.ind f arity) indices) ∧ Conv env (.node (.ind f arity) indices) T
   | .node (.elim f count) args, T => ∃ entry motive branches scrutinee indices scrutineeMode,
       env.families[f]? = some entry ∧ count = branches.length ∧
       args = motive :: (branches ++ [scrutinee]) ∧
       HasType env Γ scrutineeMode scrutinee (.node (.ind f entry.declaration.arity) indices) ∧
-      Conv (eliminationResult entry motive indices scrutinee) T
-  | .buffer _, T | .ref _, T | .back _ _ _, T => Conv (.univ 0) T
-  | .alloc n _, T => Conv (.buffer n) T
-  | .store b _ _ _, T => ∃ n, HasType env Γ mode b (.buffer n) ∧ Conv (.buffer n) T
-  | .free _ rest, T => ∃ R, HasType env Γ mode rest R ∧ Conv R T
-  | .borrow b, T => ∃ R, HasType env Γ true b R ∧ Conv (.ref R) T
-  | .deref r, T => ∃ R, HasType env Γ true r (.ref R) ∧ Conv R T
-  | .give e motive owner _, T => ∃ R, HasType env Γ mode owner R ∧ Conv (.back e R motive) T
+      Conv env (eliminationResult entry motive indices scrutinee) T
+  | .buffer _, T | .ref _, T | .back _ _ _, T => Conv env (.univ 0) T
+  | .alloc n _, T => Conv env (.buffer n) T
+  | .store b _ _ _, T => ∃ n, HasType env Γ mode b (.buffer n) ∧ Conv env (.buffer n) T
+  | .free _ rest, T => ∃ R, HasType env Γ mode rest R ∧ Conv env R T
+  | .borrow b, T => ∃ R, HasType env Γ true b R ∧ Conv env (.ref R) T
+  | .deref r, T => ∃ R, HasType env Γ true r (.ref R) ∧ Conv env R T
+  | .give e motive owner _, T => ∃ R, HasType env Γ mode owner R ∧ Conv env (.back e R motive) T
   | .load _ _ _ continuation, T | .take _ continuation, T =>
       ∃ A e B C normal outside,
       HasType env Γ mode continuation (.pi false A (.pi e B C)) ∧
-      Conv C normal ∧ PartialRenaming.shift (-2) 0 normal = some outside ∧ Conv outside T
+      Conv env C normal ∧ PartialRenaming.shift (-2) 0 normal = some outside ∧ Conv env outside T
   | .node (.caseOf f count) args, T => ∃ entry motive branches scrutinee indices scrutineeMode,
       env.families[f]? = some entry ∧ count = branches.length ∧
       args = motive :: (branches ++ [scrutinee]) ∧
       HasType env Γ scrutineeMode scrutinee (.node (.ind f entry.declaration.arity) indices) ∧
-      Conv (eliminationResult entry motive indices scrutinee) T
-  | .node (.drop _) [_,rest], T => ∃ R, HasType env Γ mode rest R ∧ Conv R T
+      Conv env (eliminationResult entry motive indices scrutinee) T
+  | .node (.drop _) [_,rest], T => ∃ R, HasType env Γ mode rest R ∧ Conv env R T
   | _, _ => False
 
-theorem PrincipalView.convert (h : PrincipalView env Γ mode t A) (hc : Conv A B) :
+theorem PrincipalView.convert (h : PrincipalView env Γ mode t A) (hc : Conv env A B) :
     PrincipalView env Γ mode t B := by
   fun_cases PrincipalView env Γ mode t A <;> simp only [PrincipalView] at h ⊢
   all_goals first
@@ -92,7 +92,7 @@ theorem HasType.principalView (h : HasType env Γ mode t T) : PrincipalView env 
     (motive_2 := fun ctx ghost term type _ => PrincipalView env ctx ghost term type)
     (motive_3 := fun _ _ _ _ _ _ _ => True) (motive_4 := fun _ _ _ _ _ => True) (motive_5 := fun _ _ _ _ _ => True)
   all_goals intros
-  all_goals first | trivial | exact ACU.Conv.refl _ | skip
+  all_goals first | trivial | exact EnvironmentDelta.Basis.Conv.refl _ | skip
   case var hx readable => exact ⟨_, hx, .refl _⟩
   case pi hA hB _ _ =>
     cases hA with
@@ -111,7 +111,7 @@ theorem HasType.principalView (h : HasType env Γ mode t T) : PrincipalView env 
   case ind found arity size typed ih => exact ⟨_,found,.refl _⟩
   case con found sigFound size typed ih => exact ⟨_,_,_,_,found,sigFound,typed,.refl _⟩
   case propElim found prop motive branches scrutinee _ _ _ =>
-    exact ⟨_,_,_,_,_,_,found,rfl,rfl,scrutinee,by simpa only [eliminationResult,prop,Bool.false_eq_true,↓reduceIte] using ACU.Conv.refl _⟩
+    exact ⟨_,_,_,_,_,_,found,rfl,rfl,scrutinee,by simpa only [eliminationResult,prop,Bool.false_eq_true,↓reduceIte] using EnvironmentDelta.Basis.Conv.refl _⟩
   case foldOwned count init owned body allowed _ _ _ => exact ⟨_,init,.refl _⟩
   case ghostBorrowOwned owner owned _ => exact ⟨_,owner,.refl _⟩
   case ghostDerefOwned reference _ => exact ⟨_,reference,.refl _⟩
@@ -119,7 +119,7 @@ theorem HasType.principalView (h : HasType env Γ mode t T) : PrincipalView env 
   case dataElim found isData boxed size motive scrutinee generated branches allowed ihm ihs ihb =>
     rename_i family entry analysis ctx motiveTerm proof ghost scrutineeTerm indices types caseTerms
     cases analysis <;>
-      exact ⟨_,_,_,_,_,_,found,rfl,rfl,scrutinee,by simpa only [eliminationResult,isData,↓reduceIte] using ACU.Conv.refl _⟩
+      exact ⟨_,_,_,_,_,_,found,rfl,rfl,scrutinee,by simpa only [eliminationResult,isData,↓reduceIte] using EnvironmentDelta.Basis.Conv.refl _⟩
   case store buffer index value proof _ _ _ _ => exact ⟨_,buffer,.refl _⟩
   case load buffer index proof continuation value owner result lowered allowed _ _ _ _ =>
     exact ⟨_,_,_,_,_,_,continuation,result,lowered,.refl _⟩
@@ -132,46 +132,46 @@ theorem HasType.principalView (h : HasType env Γ mode t T) : PrincipalView env 
 
 def TypingView (env : Environment) (Γ : Context) (mode : Bool) : Term → Term → Prop
   | .lam e A body, T => ∃ s B, Binder env Γ e A s ∧ HasType env (⟨A,e⟩ :: Γ) mode body B ∧
-      Conversion.Conv (.pi e A B) T
+      Conversion.Conv env (.pi e A B) T
   | .app f a, T => ∃ e A B, HasType env Γ mode f (.pi e A B) ∧ HasType env Γ (mode || e) a A ∧
-      applicationAllowed env mode A a ∧ Conversion.Conv (B.subst (single a)) T
+      applicationAllowed env mode A a ∧ Conversion.Conv env (B.subst (single a)) T
   | .elements n xs, T => xs.length = n ∧ xs.length < 2^64 ∧
-      (∀ x ∈ xs, HasType env Γ mode x .i64) ∧ Conversion.Conv (.array (.natural xs.length)) T
+      (∀ x ∈ xs, HasType env Γ mode x .i64) ∧ Conversion.Conv env (.array (.natural xs.length)) T
   | .index a i p, T => ∃ n, (HasType env Γ mode a (.array n) ∨ HasType env Γ mode a (.ref (.buffer n))) ∧ HasType env Γ mode i .u64 ∧
-      HasType env Γ true p (.lt i n) ∧ Conversion.Conv .i64 T
+      HasType env Γ true p (.lt i n) ∧ Conversion.Conv env .i64 T
   | .pack p a q, T => HasType env Γ true p (.pi false .u64 .prop) ∧ HasType env Γ mode a .u64 ∧
-      HasType env Γ true q (.app p a) ∧ Conversion.Conv (.refine p) T
-  | .witness s, T => ∃ p, HasType env Γ mode s (.refine p) ∧ Conversion.Conv .u64 T
-  | .proof s, T => ∃ p, HasType env Γ true s (.refine p) ∧ Conversion.Conv (.app p (.witness s)) T
-  | .uadd a b, T => HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧ Conversion.Conv .u64 T
+      HasType env Γ true q (.app p a) ∧ Conversion.Conv env (.refine p) T
+  | .witness s, T => ∃ p, HasType env Γ mode s (.refine p) ∧ Conversion.Conv env .u64 T
+  | .proof s, T => ∃ p, HasType env Γ true s (.refine p) ∧ Conversion.Conv env (.app p (.witness s)) T
+  | .uadd a b, T => HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧ Conversion.Conv env .u64 T
   | .usub a b p, T => HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
-      HasType env Γ true p (.lt b (.uadd a (.natural 1))) ∧ Conversion.Conv .u64 T
-  | .refl a, T => HasType env Γ true a .u64 ∧ Conversion.Conv (.eq a a) T
-  | .natural n, T => n < 2^64 ∧ Conversion.Conv .u64 T
-  | .integer n, T => -(2^63 : Int) ≤ n ∧ n < (2^63 : Int) ∧ Conversion.Conv .i64 T
+      HasType env Γ true p (.lt b (.uadd a (.natural 1))) ∧ Conversion.Conv env .u64 T
+  | .refl a, T => HasType env Γ true a .u64 ∧ Conversion.Conv env (.eq a a) T
+  | .natural n, T => n < 2^64 ∧ Conversion.Conv env .u64 T
+  | .integer n, T => -(2^63 : Int) ≤ n ∧ n < (2^63 : Int) ∧ Conversion.Conv env .i64 T
   | .pi e A B, T => ∃ s r, Binder env Γ e A s ∧ HasType env (⟨A,e⟩ :: Γ) true B r.term ∧
-      Conversion.Conv (s.pi r).term T
+      Conversion.Conv env (s.pi r).term T
   | .transport f e p, T => ∃ a b, HasType env Γ true f (.pi false .u64 .prop) ∧
-      HasType env Γ true e (.eq a b) ∧ HasType env Γ true p (.app f a) ∧ Conversion.Conv (.app f b) T
+      HasType env Γ true e (.eq a b) ∧ HasType env Γ true p (.app f a) ∧ Conversion.Conv env (.app f b) T
   | .ifLt a b yes no, T => ∃ B, HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
-      HasType env (⟨.lt a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧ HasType env Γ mode no B ∧ Conversion.Conv B T
+      HasType env (⟨.lt a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧ HasType env Γ mode no B ∧ Conversion.Conv env B T
   | .ifEq a b yes no, T => ∃ B, HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
-      HasType env (⟨.eq a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧ HasType env Γ mode no B ∧ Conversion.Conv B T
+      HasType env (⟨.eq a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧ HasType env Γ mode no B ∧ Conversion.Conv env B T
   | .absurd A p, T => ∃ (s : SortTag) (i : Term), HasType env Γ true A s.term ∧ HasType env Γ true p (.lt i (.natural 0)) ∧
-      absurdAllowed mode A ∧ Conversion.Conv A T
-  | .fold n init _, T => ∃ A, HasType env Γ mode n .u64 ∧ HasType env Γ mode init A ∧ Conversion.Conv A T
+      absurdAllowed env mode A ∧ Conversion.Conv env A T
+  | .fold n init _, T => ∃ A, HasType env Γ mode n .u64 ∧ HasType env Γ mode init A ∧ Conversion.Conv env A T
   | .loop n m init body, T => ∃ (proof : Bool), HasType env Γ true m (.pi false .u64 (loopSortTerm proof)) ∧
       IterationMotiveAllowed env mode proof m ∧ HasType env Γ (mode || proof) n .u64 ∧
       HasType env Γ (mode || proof) init (.app m (.natural 0)) ∧
       HasType env Γ (mode || proof) body (loopBodyType n m proof) ∧ IterationBodyAllowed env (mode || proof) body ∧
-      Conversion.Conv (.app m n) T
-  | .buffer n, T => HasType env Γ true n .u64 ∧ Conversion.Conv (.univ 0) T
-  | .borrow b, T => ∃ R, HasType env Γ true b R ∧ Conversion.Conv (.ref R) T
-  | .deref r, T => ∃ R, HasType env Γ true r (.ref R) ∧ Conversion.Conv R T
+      Conversion.Conv env (.app m n) T
+  | .buffer n, T => HasType env Γ true n .u64 ∧ Conversion.Conv env (.univ 0) T
+  | .borrow b, T => ∃ R, HasType env Γ true b R ∧ Conversion.Conv env (.ref R) T
+  | .deref r, T => ∃ R, HasType env Γ true r (.ref R) ∧ Conversion.Conv env R T
   | _, _ => True
 
 theorem TypingView.convert {Γ : Context} {mode : Bool} {t A B : Term}
-    (h : TypingView env Γ mode t A) (hc : Conversion.Conv A B) : TypingView env Γ mode t B := by
+    (h : TypingView env Γ mode t A) (hc : Conversion.Conv env A B) : TypingView env Γ mode t B := by
   fun_cases TypingView env Γ mode t A <;> simp only [TypingView] at h ⊢
   all_goals first
     | (obtain ⟨s,C,hA,hbody,hconv⟩ := h; exact ⟨s,C,hA,hbody,.trans hconv hc⟩)
@@ -227,89 +227,89 @@ theorem HasType.typingView {Γ : Context} {mode : Bool} {t T : Term}
 
 theorem HasType.lamView {Γ : Context} {mode e : Bool} {A body T : Term}
     (h : HasType env Γ mode (.lam e A body) T) :
-    ∃ s B, Binder env Γ e A s ∧ HasType env (⟨A,e⟩ :: Γ) mode body B ∧ Conversion.Conv (.pi e A B) T :=
+    ∃ s B, Binder env Γ e A s ∧ HasType env (⟨A,e⟩ :: Γ) mode body B ∧ Conversion.Conv env (.pi e A B) T :=
   h.typingView
 
 theorem HasType.appView {Γ : Context} {mode : Bool} {f a T : Term}
     (h : HasType env Γ mode (.app f a) T) :
     ∃ e A B, HasType env Γ mode f (.pi e A B) ∧ HasType env Γ (mode || e) a A ∧
-      applicationAllowed env mode A a ∧ Conversion.Conv (B.subst (single a)) T := h.typingView
+      applicationAllowed env mode A a ∧ Conversion.Conv env (B.subst (single a)) T := h.typingView
 
 theorem HasType.elementsView {Γ : Context} {mode : Bool} {n : Nat} {xs : List Term} {T : Term}
     (h : HasType env Γ mode (.elements n xs) T) :
     xs.length = n ∧ xs.length < 2^64 ∧ (∀ x ∈ xs, HasType env Γ mode x .i64) ∧
-      Conversion.Conv (.array (.natural xs.length)) T := h.typingView
+      Conversion.Conv env (.array (.natural xs.length)) T := h.typingView
 
 theorem HasType.indexView {Γ : Context} {mode : Bool} {a i p T : Term}
     (h : HasType env Γ mode (.index a i p) T) :
     ∃ n, (HasType env Γ mode a (.array n) ∨ HasType env Γ mode a (.ref (.buffer n))) ∧ HasType env Γ mode i .u64 ∧
-      HasType env Γ true p (.lt i n) ∧ Conversion.Conv .i64 T := h.typingView
+      HasType env Γ true p (.lt i n) ∧ Conversion.Conv env .i64 T := h.typingView
 
 theorem HasType.packView {Γ : Context} {mode : Bool} {p a q T : Term}
     (h : HasType env Γ mode (.pack p a q) T) :
     HasType env Γ true p (.pi false .u64 .prop) ∧ HasType env Γ mode a .u64 ∧
-      HasType env Γ true q (.app p a) ∧ Conversion.Conv (.refine p) T := h.typingView
+      HasType env Γ true q (.app p a) ∧ Conversion.Conv env (.refine p) T := h.typingView
 
 theorem HasType.witnessView {Γ : Context} {mode : Bool} {s T : Term}
     (h : HasType env Γ mode (.witness s) T) :
-    ∃ p, HasType env Γ mode s (.refine p) ∧ Conversion.Conv .u64 T := h.typingView
+    ∃ p, HasType env Γ mode s (.refine p) ∧ Conversion.Conv env .u64 T := h.typingView
 
 theorem HasType.proofView {Γ : Context} {mode : Bool} {s T : Term}
     (h : HasType env Γ mode (.proof s) T) :
-    ∃ p, HasType env Γ true s (.refine p) ∧ Conversion.Conv (.app p (.witness s)) T := h.typingView
+    ∃ p, HasType env Γ true s (.refine p) ∧ Conversion.Conv env (.app p (.witness s)) T := h.typingView
 
 theorem HasType.uaddView {Γ : Context} {mode : Bool} {a b T : Term}
     (h : HasType env Γ mode (.uadd a b) T) :
-    HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧ Conversion.Conv .u64 T := h.typingView
+    HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧ Conversion.Conv env .u64 T := h.typingView
 
 theorem HasType.usubView {Γ : Context} {mode : Bool} {a b p T : Term}
     (h : HasType env Γ mode (.usub a b p) T) :
     HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
-      HasType env Γ true p (.lt b (.uadd a (.natural 1))) ∧ Conversion.Conv .u64 T := h.typingView
+      HasType env Γ true p (.lt b (.uadd a (.natural 1))) ∧ Conversion.Conv env .u64 T := h.typingView
 
 theorem HasType.reflView {Γ : Context} {mode : Bool} {a T : Term}
     (h : HasType env Γ mode (.refl a) T) :
-    HasType env Γ true a .u64 ∧ Conversion.Conv (.eq a a) T := h.typingView
+    HasType env Γ true a .u64 ∧ Conversion.Conv env (.eq a a) T := h.typingView
 
 theorem HasType.naturalView {Γ : Context} {mode : Bool} {n : Nat} {T : Term}
-    (h : HasType env Γ mode (.natural n) T) : n < 2^64 ∧ Conversion.Conv .u64 T := h.typingView
+    (h : HasType env Γ mode (.natural n) T) : n < 2^64 ∧ Conversion.Conv env .u64 T := h.typingView
 
 theorem HasType.integerView {Γ : Context} {mode : Bool} {n : Int} {T : Term}
     (h : HasType env Γ mode (.integer n) T) :
-    -(2^63 : Int) ≤ n ∧ n < (2^63 : Int) ∧ Conversion.Conv .i64 T := h.typingView
+    -(2^63 : Int) ≤ n ∧ n < (2^63 : Int) ∧ Conversion.Conv env .i64 T := h.typingView
 
 theorem HasType.piView {Γ : Context} {mode e : Bool} {A B T : Term}
     (h : HasType env Γ mode (.pi e A B) T) :
     ∃ s r, Binder env Γ e A s ∧ HasType env (⟨A,e⟩ :: Γ) true B r.term ∧
-      Conversion.Conv (s.pi r).term T := h.typingView
+      Conversion.Conv env (s.pi r).term T := h.typingView
 
 
 
 theorem HasType.transportView {Γ : Context} {mode : Bool} {f e p T : Term}
     (h : HasType env Γ mode (.transport f e p) T) :
     ∃ a b, HasType env Γ true f (.pi false .u64 .prop) ∧ HasType env Γ true e (.eq a b) ∧
-      HasType env Γ true p (.app f a) ∧ Conversion.Conv (.app f b) T := h.typingView
+      HasType env Γ true p (.app f a) ∧ Conversion.Conv env (.app f b) T := h.typingView
 
 theorem HasType.ifLtView {Γ : Context} {mode : Bool} {a b yes no T : Term}
     (h : HasType env Γ mode (.ifLt a b yes no) T) :
     ∃ B, HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
       HasType env (⟨.lt a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧
-      HasType env Γ mode no B ∧ Conversion.Conv B T := h.typingView
+      HasType env Γ mode no B ∧ Conversion.Conv env B T := h.typingView
 
 theorem HasType.ifEqView {Γ : Context} {mode : Bool} {a b yes no T : Term}
     (h : HasType env Γ mode (.ifEq a b yes no) T) :
     ∃ B, HasType env Γ mode a .u64 ∧ HasType env Γ mode b .u64 ∧
       HasType env (⟨.eq a b,true⟩ :: Γ) mode yes (B.rename Nat.succ) ∧
-      HasType env Γ mode no B ∧ Conversion.Conv B T := h.typingView
+      HasType env Γ mode no B ∧ Conversion.Conv env B T := h.typingView
 
 theorem HasType.absurdView {Γ : Context} {mode : Bool} {A p T : Term}
     (h : HasType env Γ mode (.absurd A p) T) :
     ∃ (s : SortTag) (i : Term), HasType env Γ true A s.term ∧ HasType env Γ true p (.lt i (.natural 0)) ∧
-      absurdAllowed mode A ∧ Conversion.Conv A T := h.typingView
+      absurdAllowed env mode A ∧ Conversion.Conv env A T := h.typingView
 
 
 theorem HasType.foldView (h : HasType env Γ mode (.fold n init body) T) :
-    ∃ A, HasType env Γ mode n .u64 ∧ HasType env Γ mode init A ∧ Conversion.Conv A T := h.typingView
+    ∃ A, HasType env Γ mode n .u64 ∧ HasType env Γ mode init A ∧ Conversion.Conv env A T := h.typingView
 
 theorem HasType.loopView {Γ : Context} {mode : Bool} {n m init body T : Term}
     (h : HasType env Γ mode (.loop n m init body) T) :
@@ -317,15 +317,15 @@ theorem HasType.loopView {Γ : Context} {mode : Bool} {n m init body T : Term}
       IterationMotiveAllowed env mode proof m ∧ HasType env Γ (mode || proof) n .u64 ∧
       HasType env Γ (mode || proof) init (.app m (.natural 0)) ∧
       HasType env Γ (mode || proof) body (loopBodyType n m proof) ∧ IterationBodyAllowed env (mode || proof) body ∧
-      Conversion.Conv (.app m n) T := h.typingView
+      Conversion.Conv env (.app m n) T := h.typingView
 
 theorem HasType.borrowView (h : HasType env Γ mode (.borrow b) T) :
-    ∃ R, HasType env Γ true b R ∧ Conversion.Conv (.ref R) T := h.typingView
+    ∃ R, HasType env Γ true b R ∧ Conversion.Conv env (.ref R) T := h.typingView
 
 theorem HasType.derefView (h : HasType env Γ mode (.deref r) T) :
-    ∃ R, HasType env Γ true r (.ref R) ∧ Conversion.Conv R T := h.typingView
+    ∃ R, HasType env Γ true r (.ref R) ∧ Conversion.Conv env R T := h.typingView
 
 theorem HasType.bufferView (h : HasType env Γ mode (.buffer n) T) :
-    HasType env Γ true n .u64 ∧ Conversion.Conv (.univ 0) T := h.typingView
+    HasType env Γ true n .u64 ∧ Conversion.Conv env (.univ 0) T := h.typingView
 
 end Jihoo.NativeKernel.Environment

@@ -154,19 +154,27 @@ theorem EnvWellFormed.empty : EnvWellFormed Environment.empty := by
   · intro index declaration found
     obtain ⟨inside, _⟩ := Array.getElem?_eq_some_iff.mp found
     exact False.elim (Nat.not_lt_zero index inside)
+  · intro index declaration found
+    obtain ⟨inside, _⟩ := Array.getElem?_eq_some_iff.mp found
+    exact False.elim (Nat.not_lt_zero index inside)
   · intro index entry found
     obtain ⟨inside, _⟩ := Array.getElem?_eq_some_iff.mp found
     exact False.elim (Nat.not_lt_zero index inside)
 
 theorem EnvWellFormed.pushGlobal (prior : EnvWellFormed env)
     (closed : declaration.type.Scoped 0 ∧ declaration.value.Scoped 0 ∧
-      declaration.type.WellFormed ∧ declaration.value.WellFormed) :
+      declaration.type.WellFormed ∧ declaration.value.WellFormed)
+    (transparent : GlobalEnvironment.GlobalFree declaration.type ∧ GlobalEnvironment.GlobalFree declaration.value) :
     EnvWellFormed ⟨env.globals.push declaration, env.families⟩ := by
   constructor
   · intro index selected found
     rcases lookup_push_cases found with old | rfl
     · exact prior.globals index selected old
     · exact closed
+  · intro index selected found
+    rcases lookup_push_cases found with old | rfl
+    · exact prior.transparent index selected old
+    · exact transparent
   · exact prior.signatures
 
 theorem EnvWellFormed.pushFamily (prior : EnvWellFormed env)
@@ -174,6 +182,7 @@ theorem EnvWellFormed.pushFamily (prior : EnvWellFormed env)
     EnvWellFormed ⟨env.globals, env.families.push entry⟩ := by
   constructor
   · exact prior.globals
+  · exact prior.transparent
   · intro index selected found signature member
     rcases lookup_push_cases found with old | rfl
     · exact prior.signatures index selected old signature member
@@ -183,7 +192,13 @@ theorem UnifiedProgramChecked.wellFormed (history : UnifiedProgramChecked defini
     EnvWellFormed env := by
   induction history with
   | empty => exact EnvWellFormed.empty
-  | definition history checked ih => exact ih.pushGlobal checked.closed
+  | definition history checked ih =>
+      apply ih.pushGlobal checked.closed
+      refine ⟨checked.typeExpansion.globalFree ?_, checked.valueExpansion.globalFree ?_⟩
+      all_goals
+        intro entry member
+        obtain ⟨index, selected⟩ := List.mem_iff_getElem?.mp member
+        exact (ih.transparent index entry (by simpa using selected)).2
   | family history checked ih => exact ih.pushFamily checked.signatures_scoped
 
 theorem checkProgram_wellFormed

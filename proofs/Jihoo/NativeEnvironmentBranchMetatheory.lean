@@ -48,13 +48,13 @@ theorem BranchTypes.ghostSubstitution (wf : UnifiedProgram.EnvWellFormed env)
     exact .cons (typed.ghostSubstitution wf related) (ihtail related)
 
 theorem BranchTypes.ghostContext (wf : UnifiedProgram.EnvWellFormed env)
-    (branches : BranchTypes env ctx mode types terms) (related : Ghost.ContextConversion ctx target) :
+    (branches : BranchTypes env ctx mode types terms) (related : Ghost.ContextConversion env ctx target) :
     BranchTypes env target true (types) (terms) := by
   revert related
   apply BranchTypes.rec (t := branches)
     (motive_1 := fun _ _ _ _ _ => True) (motive_2 := fun _ _ _ _ _ => True)
     (motive_3 := fun _ _ _ _ _ _ _ => True) (motive_4 := fun _ _ _ _ _ => True)
-    (motive_5 := fun ctx _ types terms _ => Ghost.ContextConversion ctx target → BranchTypes env target true (types) (terms))
+    (motive_5 := fun ctx _ types terms _ => Ghost.ContextConversion env ctx target → BranchTypes env target true (types) (terms))
   all_goals intros
   all_goals first | trivial | skip
   case nil => exact .nil

@@ -32,7 +32,7 @@ def runtimeFieldOK (env : Environment) (data erased : Bool) (domain : Term) : Bo
 def IndexChecked (env : Environment) (self : Nat) (ctx : Context) (source normal : Term) : Prop :=
   selfFree self source = true ∧ ∃ expanded,
     GlobalEnvironment.Expansion env.globals source expanded ∧
-    Environment.HasType env ctx true expanded .u64 ∧ Environment.Conversion.Conv expanded normal ∧
+    Environment.HasType env ctx true expanded .u64 ∧ Environment.Conversion.Conv env expanded normal ∧
     Environment.HasType env ctx true normal .u64
 
 abbrev IndicesChecked (env : Environment) (self : Nat) (ctx : Context) :=
@@ -42,7 +42,7 @@ def checkIndex (fuel : Nat) (env : Environment) (self : Nat) (ctx : Context) (so
   if selfFree self source then
     let expanded ← GlobalEnvironment.expand fuel env.globals source
     if Environment.Checker.check fuel env ctx true expanded .u64 then
-      let normal := Environment.Conversion.normalize fuel expanded
+      let normal := Environment.Conversion.normalize env fuel expanded
       if Environment.Checker.check fuel env ctx true normal .u64 then some normal else none
     else none
   else none
@@ -54,7 +54,7 @@ inductive FieldChecked (env : Environment) (self : Nat) (declaration : Declarati
     (ctx : Context) : Bool → Term → Field → Prop where
   | ordinary : selfFree self source = true →
       GlobalEnvironment.Expansion env.globals source expanded →
-      Environment.Binder env ctx erased expanded sourceSort → Environment.Conversion.Conv expanded normal →
+      Environment.Binder env ctx erased expanded sourceSort → Environment.Conversion.Conv env expanded normal →
       Environment.Binder env ctx erased normal normalSort →
       runtimeFieldOK env declaration.data erased normal = true →
       FieldChecked env self declaration ctx erased source ⟨erased, normal, none⟩
@@ -80,7 +80,7 @@ where ordinary : Option Field := do
   if selfFree self source then
     let expanded ← GlobalEnvironment.expand fuel env.globals source
     let _ ← Environment.Checker.binder fuel env ctx erased expanded
-    let normal := Environment.Conversion.normalize fuel expanded
+    let normal := Environment.Conversion.normalize env fuel expanded
     let _ ← Environment.Checker.binder fuel env ctx erased normal
     if runtimeFieldOK env declaration.data erased normal then some ⟨erased, normal, none⟩ else none
   else none
@@ -160,7 +160,7 @@ theorem checkIndex_sound (h : checkIndex fuel env self ctx source = some normal)
           · rename_i normalTyped
             cases h
             exact ⟨free, term, GlobalEnvironment.expand_sound expanded,
-              Environment.Checker.check_sound sourceTyped, Environment.Conversion.normalize_sound fuel term,
+              Environment.Checker.check_sound sourceTyped, Environment.Conversion.normalize_sound env fuel term,
               Environment.Checker.check_sound normalTyped⟩
           · contradiction
         · contradiction
@@ -184,7 +184,7 @@ private theorem ordinary_sound
         | none => simp [sourceBound] at h
         | some sourceSort =>
             simp only [sourceBound] at h
-            cases normalBound : Environment.Checker.binder fuel env ctx erased (Environment.Conversion.normalize fuel term) with
+            cases normalBound : Environment.Checker.binder fuel env ctx erased (Environment.Conversion.normalize env fuel term) with
             | none => simp [normalBound] at h
             | some normalSort =>
                 simp only [normalBound] at h
@@ -192,7 +192,7 @@ private theorem ordinary_sound
                 · rename_i runtime
                   cases h
                   exact .ordinary free (GlobalEnvironment.expand_sound expanded)
-                    (Environment.Checker.binder_sound sourceBound) (Environment.Conversion.normalize_sound fuel term)
+                    (Environment.Checker.binder_sound sourceBound) (Environment.Conversion.normalize_sound env fuel term)
                     (Environment.Checker.binder_sound normalBound) runtime
                 · contradiction
   · contradiction

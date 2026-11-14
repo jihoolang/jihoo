@@ -407,8 +407,24 @@ repeated bodies against a shared allowance before ACU normalization, propagates
 unknown/malformed-global and budget failure, and proves exact forward results,
 sound comparison and output bounds. The delta root preserves the original type
 in the existing unified judgment using its actual stored body typing.
-Installation of this environment-indexed conversion into all typing/checker
-slots and full contextual delta preservation are still required.
+`NativeEnvironmentConversionBasis` now installs an environment-indexed
+inductive delta/ACU relation into the same typing constructors and executable
+checker. The executable normalizer, comparison, inferred-head exposure and
+runtime domain checks use the actual environment. Acceptance soundness does
+not assume admissibility: every successful bounded operation yields an actual
+finite forward derivation in the inductive relation. Admissibility is used
+where needed for confluence and rigid/Pi/sort injectivity, and closed stored
+bodies are used for renaming and substitution. Mixed checked history derives
+both invariants; callers do not supply a validity oracle.
+
+Full contextual delta preservation now uses actual checked history to obtain
+the stored body's typing. `GhostTransform` carries the actual combined
+`EnvironmentDelta.Forward` path; its child theorem retains the original type
+under every existing binding/resource/elimination rule. Successful concrete
+normalization therefore retains an independently derived original type,
+including a type which still contains global aliases. The ACU-only forward
+preservation theorem continues to need only the closed/transparent world.
+No preservation of arbitrary symmetric conversion representatives is asserted.
 
 The delta source suite checks 19 actual programs and 22 exact-byte comparisons
 and mutations, binding checked version-6 metadata and before/after arenas to the
@@ -439,7 +455,13 @@ native heap execution, active-loan semantics or machine counter fidelity.
 `NativeClosedTerm` now supplies generic closed-term algebra independently of
 typing. Delta algebra/conversion/bounded search use only that lower layer;
 `NativeEnvironmentDeltaChecked` authenticates it from mixed history afterward.
-This keeps future installation of delta into typing free of import cycles.
+This permits installation of delta into typing without import cycles. Prefix
+metadata (`NativeEnvironmentPrefix`) is also independent of typing. The code
+nonfunction condition is now a positive conversion-to-head witness, so adding
+a later definition preserves an earlier certificate. Its exclusion of Pi uses
+the authenticated world. The raw declarative application policy permits
+conversion representatives; only actual executable application checking
+provides a computed normal form for runtime kind safety.
 
 `NativeEnvironmentPlainSeparation` proves that an actually plain type cannot
 convert under the current ACU theory to Buffer, Ref, Pi, Back or a boxed family.
@@ -447,3 +469,15 @@ The proof uses raw Boolean forward invariants and genuine Church–Rosser; it
 does not assume symmetric preservation of plainness or typing. Seven regressions
 include the explicit failure of reverse-beta plainness invariance. Authentic
 abstract kinds and typed-index representation interpretations remain work.
+
+
+`NativeEnvironmentDeltaCAPIExamples` exercises the installed same-judgment
+checker with global type aliases, global functions, aliases in binders,
+global/beta normalization, exact-original-alias-type preservation, and
+unknown/malformed-alias refusal. `NativeEnvironmentConversionBoundary`
+mechanically demonstrates why closed stored bodies matter: a raw table whose
+body is an open variable collapses delta/beta conversion between all terms.
+Such a table cannot satisfy the world invariant derived from checked history.
+The native delta adapter also checks original source bodies and observed normal
+outputs with this installed typing checker, in addition to exact graph/prefix
+and combined-conversion checks. Native parser/export/IO refinement remains open.

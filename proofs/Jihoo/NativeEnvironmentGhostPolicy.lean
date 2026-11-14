@@ -5,21 +5,20 @@ substitution. The declarative continuation policy makes this boundary explicit;
 the data-input checker applies the nonfunction gate only to executable code. -/
 namespace Jihoo.NativeKernel.Environment
 
-theorem nonFunction_neutral : nonFunction (.var 0) :=
+theorem nonFunction_neutral : nonFunction env (.var 0) :=
   Environment.nonFunctionHead_full rfl
 
-theorem function_not_nonFunction : ¬ nonFunction (.pi false .u64 .u64) := by
-  intro impossible
-  exact impossible false .u64 .u64 (.refl _)
+theorem function_not_nonFunction (admissible : EnvironmentDelta.Admissible env) : ¬ nonFunction env (.pi false .u64 .u64) :=
+  EnvironmentDelta.Basis.NonFunction.pi_rejected admissible
 
-theorem nonFunction_not_substitution_stable :
-    ∃ term substitution, nonFunction term ∧ ¬nonFunction (term.subst substitution) := by
+theorem nonFunction_not_substitution_stable (admissible : EnvironmentDelta.Admissible env) :
+    ∃ term substitution, nonFunction env term ∧ ¬nonFunction env (term.subst substitution) := by
   refine ⟨.var 0, (fun _ => .pi false .u64 .u64), nonFunction_neutral, ?_⟩
-  simpa only [Term.subst] using function_not_nonFunction
+  simpa only [Term.subst] using function_not_nonFunction admissible
 
-theorem ghost_continuation_allowed (result : Term) : continuationAllowed true result := Or.inl rfl
+theorem ghost_continuation_allowed (result : Term) : continuationAllowed env true result := Or.inl rfl
 
-theorem code_continuation_nonFunction (allowed : continuationAllowed false result) : nonFunction result := by
+theorem code_continuation_nonFunction (allowed : continuationAllowed env false result) : nonFunction env result := by
   rcases allowed with impossible | admitted
   · cases impossible
   · exact admitted

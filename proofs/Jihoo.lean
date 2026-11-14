@@ -559,3 +559,19 @@ import Jihoo.NativeEnvironmentDeltaChecked
 import Jihoo.NativeEnvironmentPlainExamples
 
 import Jihoo.NativeEnvironmentPlainSeparation
+
+import Jihoo.NativeEnvironmentPrefix
+
+import Jihoo.NativeACUInjectivityAPI
+
+import Jihoo.NativeEnvironmentConversionBasis
+
+import Jihoo.NativeEnvironmentConversionNormalizer
+
+import Jihoo.NativeEnvironmentConversionShapes
+
+import Jihoo.NativeEnvironmentConversionPolicies
+
+import Jihoo.NativeEnvironmentConversionBoundary
+
+import Jihoo.NativeEnvironmentDeltaCAPIExamples

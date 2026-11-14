@@ -13,8 +13,17 @@ structure EnvWellFormed (env : Environment) : Prop where
   globals : ∀ (g : Nat) declaration, env.globals[g]? = some declaration →
     declaration.type.Scoped 0 ∧ declaration.value.Scoped 0 ∧
     declaration.type.WellFormed ∧ declaration.value.WellFormed
+  transparent : ∀ (g : Nat) declaration, env.globals[g]? = some declaration →
+    GlobalEnvironment.GlobalFree declaration.type ∧ GlobalEnvironment.GlobalFree declaration.value
   signatures : ∀ (f : Nat) entry, env.families[f]? = some entry →
     ∀ signature ∈ entry.signatures, SignatureScoped signature
+
+theorem EnvWellFormed.admissible (checked : EnvWellFormed env) : EnvironmentDelta.Admissible env :=
+  ⟨fun index declaration found => (checked.globals index declaration found).2.1,
+    fun index declaration found => (checked.transparent index declaration found).2⟩
+
+theorem EnvWellFormed.closed (checked : EnvWellFormed env) : EnvironmentDelta.Basis.Closed env :=
+  checked.admissible.closed
 
 private theorem pi_scoped {depth : Nat} {domain body : Term}
     (domainScope : domain.Scoped depth) (bodyScope : body.Scoped (depth + 1)) :
